@@ -1,0 +1,35 @@
+name: TK Admin CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+defaults:
+  run:
+    shell: bash
+    working-directory: yudao-ui/yudao-ui-admin-vue3
+
+jobs:
+  type-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: pnpm
+          cache-dependency-path: yudao-ui/yudao-ui-admin-vue3/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: corepack pnpm ts:check

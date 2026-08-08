@@ -1,0 +1,4 @@
+ALTER TABLE `tk_material_video`
+  ADD COLUMN `usage_phase` varchar(32) NOT NULL DEFAULT 'GENERAL'
+  COMMENT '素材用途：ATTENTION/PRODUCT_SHOW/RESULT_EFFECT/GENERAL'
+  AFTER `tags`;

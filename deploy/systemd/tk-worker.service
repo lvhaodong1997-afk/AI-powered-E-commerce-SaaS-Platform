@@ -1,0 +1,15 @@
+[Unit]
+Description=TK Auto Mix Worker
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tk-auto-mix/worker
+ExecStart=/opt/tk-auto-mix/worker/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
+Restart=always
+RestartSec=5
+StandardOutput=append:/opt/tk-auto-mix/logs/tk-worker.out.log
+StandardError=append:/opt/tk-auto-mix/logs/tk-worker.err.log
+
+[Install]
+WantedBy=multi-user.target

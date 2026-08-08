@@ -1,0 +1,50 @@
+{
+  "host": "127.0.0.1",
+  "port": 49090,
+  "projectRoot": "../ruoyi-vue-pro-master/ruoyi-vue-pro-master/ruoyi-vue-pro-master",
+  "logDirs": [
+    "../logs",
+    "../.runtime",
+    "../ruoyi-vue-pro-master/ruoyi-vue-pro-master/ruoyi-vue-pro-master/logs"
+  ],
+  "managedLogDir": "../logs",
+  "database": {
+    "host": "127.0.0.1",
+    "port": 3307,
+    "user": "root",
+    "password": "123456",
+    "database": "tk_auto_mix",
+    "connectionLimit": 4
+  },
+  "dependencies": {
+    "mysql": {
+      "port": 3307
+    },
+    "redis": {
+      "port": 6380
+    }
+  },
+  "services": {
+    "backend": {
+      "name": "后端服务",
+      "port": 48080,
+      "cwd": "../ruoyi-vue-pro-master/ruoyi-vue-pro-master/ruoyi-vue-pro-master",
+      "command": "..\\..\\..\\.runtime\\apache-maven-3.9.10\\bin\\mvn.cmd -pl yudao-server -am spring-boot:run -Dspring-boot.run.profiles=local",
+      "healthUrl": "http://127.0.0.1:48080/admin-api/system/auth/get-permission-info"
+    },
+    "worker": {
+      "name": "AI Worker",
+      "port": 8090,
+      "cwd": "../ruoyi-vue-pro-master/ruoyi-vue-pro-master/ruoyi-vue-pro-master/worker",
+      "command": "py -m pip show uvicorn >NUL 2>NUL || py -m pip install -r requirements.txt && py -m uvicorn app.main:app --reload --port 8090",
+      "healthUrl": "http://127.0.0.1:8090/health"
+    },
+    "frontend": {
+      "name": "管理后台",
+      "port": 5173,
+      "cwd": "../ruoyi-vue-pro-master/ruoyi-vue-pro-master/ruoyi-vue-pro-master/yudao-ui/yudao-ui-admin-vue3",
+      "command": "corepack pnpm dev",
+      "healthUrl": "http://127.0.0.1:5173/"
+    }
+  }
+}

@@ -1,0 +1,1045 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TK Auto Mix 首页小红书风格效果图</title>
+    <style>
+      :root {
+        --bg: #fff7f8;
+        --ink: #1f1b24;
+        --muted: #7c6f78;
+        --line: #f1dde2;
+        --card: #fff;
+        --red: #ff2442;
+        --coral: #ff6b7a;
+        --pink: #ffe8ed;
+        --rose: #fff0f3;
+        --green: #18a058;
+        --amber: #f59e0b;
+        --shadow: 0 18px 44px rgba(191, 55, 78, 0.11);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family:
+          "PingFang SC",
+          "Microsoft YaHei",
+          Arial,
+          sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 12% 7%, rgba(255, 127, 148, 0.2), transparent 26%),
+          radial-gradient(circle at 86% 0%, rgba(255, 214, 223, 0.8), transparent 22%),
+          var(--bg);
+      }
+
+      button {
+        font-family: inherit;
+      }
+
+      .app {
+        display: grid;
+        min-height: 1060px;
+        grid-template-columns: 214px minmax(0, 1fr);
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        padding: 24px 16px;
+        color: #fff;
+        background:
+          linear-gradient(180deg, rgba(255, 36, 66, 0.95), rgba(32, 24, 34, 0.96)),
+          #201822;
+      }
+
+      .brand {
+        padding: 2px 10px 26px;
+      }
+
+      .brand strong {
+        display: block;
+        font-size: 22px;
+        letter-spacing: 0.01em;
+      }
+
+      .brand span {
+        display: block;
+        margin-top: 7px;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.74);
+        letter-spacing: 0.12em;
+      }
+
+      .nav {
+        display: grid;
+        gap: 8px;
+      }
+
+      .nav-item {
+        display: flex;
+        height: 44px;
+        padding: 0 12px;
+        font-size: 14px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.78);
+        border-radius: 14px;
+        align-items: center;
+        gap: 10px;
+        transition:
+          transform 0.22s ease,
+          background 0.22s ease,
+          color 0.22s ease;
+      }
+
+      .nav-item:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.12);
+        transform: translateX(3px);
+      }
+
+      .nav-item.active {
+        color: #ff2442;
+        background: #fff;
+        box-shadow: 0 12px 26px rgba(0, 0, 0, 0.16);
+      }
+
+      .nav-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 99px;
+        background: currentColor;
+      }
+
+      .shell {
+        min-width: 0;
+      }
+
+      .topbar {
+        display: flex;
+        height: 68px;
+        padding: 0 28px;
+        background: rgba(255, 255, 255, 0.72);
+        border-bottom: 1px solid rgba(241, 221, 226, 0.86);
+        backdrop-filter: blur(18px);
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .search {
+        display: flex;
+        width: min(540px, 54vw);
+        height: 40px;
+        padding: 0 14px;
+        font-size: 14px;
+        color: #9b818a;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        align-items: center;
+        gap: 9px;
+        box-shadow: 0 8px 24px rgba(203, 72, 91, 0.08);
+      }
+
+      .user {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .credit {
+        padding: 8px 12px;
+        font-size: 13px;
+        font-weight: 900;
+        color: var(--red);
+        background: var(--pink);
+        border: 1px solid #ffd0d9;
+        border-radius: 999px;
+      }
+
+      .avatar {
+        width: 36px;
+        height: 36px;
+        font-size: 13px;
+        font-weight: 900;
+        color: #fff;
+        background: linear-gradient(135deg, var(--red), #ff7b8a);
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+      }
+
+      main {
+        padding: 24px 28px 34px;
+      }
+
+      .hero {
+        position: relative;
+        display: grid;
+        min-height: 258px;
+        padding: 28px;
+        overflow: hidden;
+        background: linear-gradient(135deg, #fff, #fff1f4 52%, #ffe2e9);
+        border: 1px solid rgba(255, 194, 207, 0.88);
+        border-radius: 28px;
+        box-shadow: var(--shadow);
+        grid-template-columns: minmax(0, 1fr) 470px;
+        gap: 28px;
+      }
+
+      .hero::after {
+        position: absolute;
+        top: -88px;
+        right: -72px;
+        width: 240px;
+        height: 240px;
+        content: "";
+        background: rgba(255, 36, 66, 0.12);
+        border-radius: 50%;
+        animation: floaty 6s ease-in-out infinite;
+      }
+
+      .eyebrow {
+        width: fit-content;
+        padding: 7px 12px;
+        margin-bottom: 16px;
+        font-size: 12px;
+        font-weight: 900;
+        color: var(--red);
+        background: #fff;
+        border: 1px solid #ffd0d9;
+        border-radius: 999px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        max-width: 650px;
+        font-size: 39px;
+        line-height: 1.18;
+        letter-spacing: 0;
+      }
+
+      .hero p {
+        max-width: 650px;
+        margin-top: 13px;
+        font-size: 15px;
+        line-height: 1.75;
+        color: #735f67;
+      }
+
+      .hero-actions {
+        display: flex;
+        margin-top: 24px;
+        gap: 12px;
+      }
+
+      .btn {
+        height: 42px;
+        padding: 0 17px;
+        font-size: 14px;
+        font-weight: 900;
+        cursor: pointer;
+        border: 0;
+        border-radius: 999px;
+        transition:
+          transform 0.18s ease,
+          box-shadow 0.18s ease,
+          filter 0.18s ease;
+      }
+
+      .btn:hover {
+        filter: brightness(1.02);
+        transform: translateY(-2px);
+      }
+
+      .btn:active {
+        transform: translateY(1px) scale(0.98);
+      }
+
+      .btn-primary {
+        color: #fff;
+        background: var(--red);
+        box-shadow: 0 14px 26px rgba(255, 36, 66, 0.22);
+      }
+
+      .btn-secondary {
+        color: var(--red);
+        background: #fff;
+        border: 1px solid #ffc5cf;
+      }
+
+      .story-board {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: 160px 1fr;
+        gap: 14px;
+        align-items: stretch;
+      }
+
+      .phone-card {
+        position: relative;
+        min-height: 300px;
+        padding: 12px;
+        overflow: hidden;
+        color: #fff;
+        background:
+          linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.62)),
+          linear-gradient(145deg, #ff8aa0, #ffd8e0 50%, #fff);
+        border: 7px solid #1d1720;
+        border-radius: 30px;
+        animation: cardEnter 0.72s ease both;
+      }
+
+      .phone-card::before {
+        position: absolute;
+        inset: 52px 28px 90px;
+        content: "";
+        background: rgba(255, 255, 255, 0.68);
+        border-radius: 18px;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.66);
+      }
+
+      .phone-card strong {
+        position: absolute;
+        right: 14px;
+        bottom: 42px;
+        left: 14px;
+        font-size: 15px;
+        line-height: 1.35;
+      }
+
+      .phone-card span {
+        position: absolute;
+        bottom: 16px;
+        left: 14px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.82);
+      }
+
+      .live-stack {
+        display: grid;
+        gap: 10px;
+      }
+
+      .live-card {
+        padding: 13px;
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid rgba(255, 190, 204, 0.78);
+        border-radius: 18px;
+        animation: rise 0.7s ease both;
+      }
+
+      .live-card:nth-child(2) {
+        animation-delay: 0.08s;
+      }
+
+      .live-card:nth-child(3) {
+        animation-delay: 0.16s;
+      }
+
+      .live-card strong {
+        display: block;
+        font-size: 14px;
+      }
+
+      .live-card p {
+        margin-top: 6px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
+      .meter {
+        height: 7px;
+        margin-top: 10px;
+        overflow: hidden;
+        background: #f7dce3;
+        border-radius: 99px;
+      }
+
+      .meter i {
+        display: block;
+        height: 100%;
+        background: linear-gradient(90deg, var(--red), #ff8a9b);
+        border-radius: inherit;
+        animation: grow 1.1s ease both;
+      }
+
+      .stats-row {
+        display: grid;
+        margin-top: 18px;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+
+      .stat {
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(255, 201, 212, 0.74);
+        border-radius: 18px;
+      }
+
+      .stat small {
+        display: block;
+        color: var(--muted);
+      }
+
+      .stat strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 21px;
+      }
+
+      .layout {
+        display: grid;
+        margin-top: 20px;
+        grid-template-columns: minmax(0, 1.9fr) minmax(360px, 1fr);
+        gap: 18px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 18px;
+      }
+
+      .card {
+        padding: 18px;
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(241, 221, 226, 0.92);
+        border-radius: 24px;
+        box-shadow: 0 14px 34px rgba(191, 55, 78, 0.08);
+        animation: rise 0.62s ease both;
+      }
+
+      .card:hover {
+        transform: translateY(-2px);
+        transition: transform 0.2s ease;
+      }
+
+      .card-head {
+        display: flex;
+        margin-bottom: 14px;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .card-head h2 {
+        font-size: 19px;
+      }
+
+      .card-head p {
+        margin-top: 5px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .num {
+        display: inline-grid;
+        width: 25px;
+        height: 25px;
+        margin-right: 8px;
+        font-size: 12px;
+        color: #fff;
+        background: var(--red);
+        border-radius: 9px;
+        place-items: center;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 9px;
+      }
+
+      .chip {
+        padding: 9px 12px;
+        font-size: 13px;
+        font-weight: 800;
+        color: #6d4b55;
+        background: #fff;
+        border: 1px solid #f0d7de;
+        border-radius: 999px;
+      }
+
+      .url-row {
+        display: grid;
+        margin-top: 12px;
+        grid-template-columns: minmax(0, 1fr) 136px;
+        gap: 10px;
+      }
+
+      .input {
+        display: flex;
+        height: 42px;
+        padding: 0 14px;
+        font-size: 13px;
+        color: #9b818a;
+        background: #fff;
+        border: 1px solid #efd5dc;
+        border-radius: 999px;
+        align-items: center;
+      }
+
+      .analysis-grid {
+        display: grid;
+        margin-top: 16px;
+        grid-template-columns: 220px minmax(0, 1fr);
+        gap: 16px;
+      }
+
+      .cover-feed {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .cover {
+        min-height: 270px;
+        padding: 14px;
+        color: #fff;
+        background:
+          linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.58)),
+          linear-gradient(145deg, #ff8296, #ffe2e8);
+        border-radius: 22px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+      }
+
+      .cover strong {
+        font-size: 16px;
+        line-height: 1.38;
+      }
+
+      .cover span {
+        margin-top: 7px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.84);
+      }
+
+      .insight-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .note-card {
+        min-height: 118px;
+        padding: 14px;
+        background: #fff;
+        border: 1px solid #f1dde2;
+        border-radius: 18px;
+      }
+
+      .note-card strong {
+        display: block;
+        font-size: 15px;
+      }
+
+      .note-card p {
+        margin-top: 8px;
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--muted);
+      }
+
+      .note-card em {
+        display: inline-block;
+        margin-top: 12px;
+        padding: 5px 9px;
+        font-size: 12px;
+        font-style: normal;
+        font-weight: 900;
+        color: var(--red);
+        background: var(--rose);
+        border-radius: 999px;
+      }
+
+      .script-feed {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .script-card {
+        position: relative;
+        min-height: 170px;
+        padding: 15px;
+        overflow: hidden;
+        background: #fff;
+        border: 1px solid #f1dde2;
+        border-radius: 20px;
+      }
+
+      .script-card.selected {
+        border-color: #ff9cad;
+        box-shadow: 0 16px 34px rgba(255, 36, 66, 0.12);
+      }
+
+      .script-card::after {
+        position: absolute;
+        right: -26px;
+        bottom: -30px;
+        width: 86px;
+        height: 86px;
+        content: "";
+        background: var(--rose);
+        border-radius: 50%;
+      }
+
+      .script-card strong {
+        position: relative;
+        z-index: 1;
+        display: block;
+        font-size: 16px;
+        line-height: 1.42;
+      }
+
+      .script-card p {
+        position: relative;
+        z-index: 1;
+        margin-top: 10px;
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--muted);
+      }
+
+      .script-meta {
+        position: absolute;
+        right: 14px;
+        bottom: 13px;
+        left: 14px;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .pill {
+        padding: 6px 9px;
+        font-size: 12px;
+        font-weight: 900;
+        border-radius: 999px;
+      }
+
+      .pill.good {
+        color: var(--green);
+        background: #e9f8ef;
+      }
+
+      .pill.hot {
+        color: var(--red);
+        background: var(--rose);
+      }
+
+      .side-card h3 {
+        margin-bottom: 13px;
+        font-size: 18px;
+      }
+
+      .config-preview {
+        min-height: 128px;
+        padding: 16px;
+        color: #fff;
+        background:
+          linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.58)),
+          linear-gradient(135deg, #ff7288, #ffc7d1);
+        border-radius: 22px;
+      }
+
+      .config-preview strong {
+        display: block;
+        font-size: 18px;
+        line-height: 1.4;
+      }
+
+      .config-preview span {
+        display: block;
+        margin-top: 32px;
+        font-size: 12px;
+      }
+
+      .form-list {
+        display: grid;
+        margin-top: 13px;
+        gap: 10px;
+      }
+
+      .form-item {
+        display: flex;
+        min-height: 42px;
+        padding: 0 13px;
+        font-size: 13px;
+        background: #fff;
+        border: 1px solid #f0d7de;
+        border-radius: 15px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .form-item span {
+        color: var(--muted);
+      }
+
+      .wide-btn {
+        width: 100%;
+        height: 46px;
+        margin-top: 14px;
+      }
+
+      .segment-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+      }
+
+      .seg {
+        padding: 10px 6px;
+        text-align: center;
+        background: #fff;
+        border: 1px solid #f0d7de;
+        border-radius: 16px;
+      }
+
+      .seg.warning {
+        background: #fff8e6;
+        border-color: #ffd98a;
+      }
+
+      .seg strong {
+        display: block;
+        font-size: 12px;
+      }
+
+      .seg span {
+        display: block;
+        margin-top: 4px;
+        font-size: 14px;
+        font-weight: 900;
+      }
+
+      .task {
+        display: grid;
+        padding: 12px 0;
+        border-top: 1px solid #f2e0e5;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+      }
+
+      .task:first-of-type {
+        border-top: 0;
+      }
+
+      .task strong {
+        display: block;
+        font-size: 14px;
+      }
+
+      .task small {
+        display: block;
+        margin-top: 5px;
+        color: var(--muted);
+      }
+
+      .floating-like {
+        position: fixed;
+        right: 28px;
+        bottom: 24px;
+        display: grid;
+        width: 58px;
+        height: 58px;
+        color: #fff;
+        background: var(--red);
+        border-radius: 50%;
+        box-shadow: 0 18px 30px rgba(255, 36, 66, 0.3);
+        place-items: center;
+        animation: pulse 2.2s ease-in-out infinite;
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(14px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes cardEnter {
+        from {
+          opacity: 0;
+          transform: rotate(-2deg) translateY(18px);
+        }
+        to {
+          opacity: 1;
+          transform: rotate(-1deg) translateY(0);
+        }
+      }
+
+      @keyframes grow {
+        from {
+          width: 0;
+        }
+      }
+
+      @keyframes floaty {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(16px);
+        }
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.06);
+        }
+      }
+
+      @media (max-width: 1120px) {
+        .app {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          position: static;
+          height: auto;
+        }
+
+        .hero,
+        .layout,
+        .analysis-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .story-board,
+        .script-feed {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <strong>TK Auto Mix</strong>
+          <span>RED NOTE CREATOR OS</span>
+        </div>
+        <nav class="nav">
+          <div class="nav-item active"><span class="nav-dot"></span>首页灵感台</div>
+          <div class="nav-item"><span class="nav-dot"></span>爆款素材库</div>
+          <div class="nav-item"><span class="nav-dot"></span>智能生成</div>
+          <div class="nav-item"><span class="nav-dot"></span>创意工坊</div>
+          <div class="nav-item"><span class="nav-dot"></span>发布中心</div>
+          <div class="nav-item"><span class="nav-dot"></span>业务日志</div>
+        </nav>
+      </aside>
+
+      <div class="shell">
+        <header class="topbar">
+          <div class="search">⌕ 搜索参考视频、商品卖点、素材标签</div>
+          <div class="user">
+            <div class="credit">创作点数 1,280</div>
+            <div class="avatar">TK</div>
+          </div>
+        </header>
+
+        <main>
+          <section class="hero">
+            <div>
+              <div class="eyebrow">今日灵感 · TikTok 电商混剪</div>
+              <h1>把参考视频拆成一篇可种草、可成片的爆款创作笔记</h1>
+              <p>
+                像刷小红书一样管理灵感：先看封面和卖点，再确认脚本、素材健康度和成片配置。
+                操作更轻，状态更清楚，适合运营每天高频使用。
+              </p>
+              <div class="hero-actions">
+                <button class="btn btn-primary">开始拆解参考视频</button>
+                <button class="btn btn-secondary">上传今日素材</button>
+              </div>
+              <div class="stats-row">
+                <div class="stat"><small>今日生成</small><strong>36</strong></div>
+                <div class="stat"><small>素材片段</small><strong>428</strong></div>
+                <div class="stat"><small>平均耗时</small><strong>2m18s</strong></div>
+              </div>
+            </div>
+
+            <div class="story-board">
+              <div class="phone-card">
+                <strong>3 秒展示结果，价格利益点直接露出</strong>
+                <span>参考视频 · 美妆补光场景</span>
+              </div>
+              <div class="live-stack">
+                <div class="live-card">
+                  <strong>参考分析</strong>
+                  <p>已识别强钩子、价格锚点和 S1-S7 镜头结构。</p>
+                  <div class="meter"><i style="width: 85%"></i></div>
+                </div>
+                <div class="live-card">
+                  <strong>卖点提取</strong>
+                  <p>优先保留“痛点 + 结果 + 限时权益”的转化叙事。</p>
+                  <div class="meter"><i style="width: 100%"></i></div>
+                </div>
+                <div class="live-card">
+                  <strong>脚本生成</strong>
+                  <p>推荐方案已准备，等待确认配音和字幕样式。</p>
+                  <div class="meter"><i style="width: 54%"></i></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="layout">
+            <div class="stack">
+              <section class="card">
+                <div class="card-head">
+                  <div>
+                    <h2><span class="num">1</span>参考视频灵感拆解</h2>
+                    <p>把原来的表单入口改成“先选场景，再贴链接”的轻量流程。</p>
+                  </div>
+                </div>
+                <div class="chips">
+                  <span class="chip">美妆素材库</span>
+                  <span class="chip">中文脚本</span>
+                  <span class="chip">通义 / Gemini</span>
+                  <span class="chip">目标 45 秒</span>
+                </div>
+                <div class="url-row">
+                  <div class="input">粘贴 TikTok / Shop / 短视频链接</div>
+                  <button class="btn btn-primary">解析视频</button>
+                </div>
+                <div class="analysis-grid">
+                  <div class="cover-feed">
+                    <div class="cover">
+                      <strong>补光灯上脸前后对比，封面能直接讲结果</strong>
+                      <span>互动预测 92% · 适合 S1 开场</span>
+                    </div>
+                  </div>
+                  <div class="insight-grid">
+                    <article class="note-card">
+                      <strong>前 3 秒强钩子</strong>
+                      <p>开场直接展示痛点和改善结果，用户不需要读说明就能理解卖点。</p>
+                      <em>建议保留</em>
+                    </article>
+                    <article class="note-card">
+                      <strong>价格利益点明确</strong>
+                      <p>优惠、赠品和对比信息集中在中段，适合做字幕强调。</p>
+                      <em>高转化</em>
+                    </article>
+                    <article class="note-card">
+                      <strong>S1-S7 结构完整</strong>
+                      <p>素材结构足够清晰，可以直接进入脚本生成和镜头匹配。</p>
+                      <em>可生成</em>
+                    </article>
+                    <article class="note-card">
+                      <strong>情绪更生活化</strong>
+                      <p>语气从功能介绍改成使用场景笔记，更接近小红书种草表达。</p>
+                      <em>更人性化</em>
+                    </article>
+                  </div>
+                </div>
+              </section>
+
+              <section class="card">
+                <div class="card-head">
+                  <div>
+                    <h2><span class="num">2</span>脚本方案像笔记卡一样选择</h2>
+                    <p>从表格变成内容卡，方便运营快速判断哪条更像爆款。</p>
+                  </div>
+                </div>
+                <div class="script-feed">
+                  <article class="script-card selected">
+                    <strong>痛点切入 + 价格锚点</strong>
+                    <p>先展示“出门补光不自然”的问题，再用前后对比和限时权益收口。</p>
+                    <div class="script-meta"><span class="pill hot">推荐</span><span>92%</span></div>
+                  </article>
+                  <article class="script-card">
+                    <strong>场景演示 + 结果对比</strong>
+                    <p>围绕宿舍、直播、旅行三个场景做连续镜头，适合功能型商品。</p>
+                    <div class="script-meta"><span class="pill good">备选</span><span>86%</span></div>
+                  </article>
+                  <article class="script-card">
+                    <strong>用户证言 + 促销收口</strong>
+                    <p>用评论口吻做开场，适合已有买家反馈和达人素材的任务。</p>
+                    <div class="script-meta"><span class="pill good">备选</span><span>81%</span></div>
+                  </article>
+                </div>
+              </section>
+            </div>
+
+            <aside class="stack">
+              <section class="card side-card">
+                <h3>生成配置</h3>
+                <div class="config-preview">
+                  <strong>痛点切入 + 价格锚点</strong>
+                  <span>女声清晰带货 · TikTok 大字卡 · 45 秒</span>
+                </div>
+                <div class="form-list">
+                  <div class="form-item"><span>配音</span><strong>女声 · 清晰带货</strong></div>
+                  <div class="form-item"><span>字幕</span><strong>大字卡强调</strong></div>
+                  <div class="form-item"><span>开场</span><strong>自动匹配 S1</strong></div>
+                  <div class="form-item"><span>时长</span><strong>45 秒</strong></div>
+                </div>
+                <button class="btn btn-primary wide-btn">生成混剪视频</button>
+              </section>
+
+              <section class="card side-card">
+                <h3>素材健康度</h3>
+                <div class="segment-grid">
+                  <div class="seg"><strong>S1</strong><span>48</span></div>
+                  <div class="seg"><strong>S2</strong><span>73</span></div>
+                  <div class="seg warning"><strong>S3</strong><span>9</span></div>
+                  <div class="seg"><strong>S4</strong><span>62</span></div>
+                  <div class="seg"><strong>S5</strong><span>40</span></div>
+                  <div class="seg warning"><strong>S6</strong><span>6</span></div>
+                  <div class="seg"><strong>S7</strong><span>31</span></div>
+                  <div class="seg"><strong>总计</strong><span>428</span></div>
+                </div>
+              </section>
+
+              <section class="card side-card">
+                <h3>近期任务</h3>
+                <div class="task">
+                  <div><strong>美妆爆品参考分析</strong><small>刚刚 · 分析中</small></div>
+                  <span class="pill hot">85%</span>
+                </div>
+                <div class="task">
+                  <div><strong>无线补光灯成片</strong><small>12 分钟前 · 待发布</small></div>
+                  <span class="pill good">就绪</span>
+                </div>
+                <div class="task">
+                  <div><strong>厨房收纳套装</strong><small>43 分钟前 · 已完成</small></div>
+                  <span class="pill good">完成</span>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div class="floating-like">赞</div>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /tk/
+Disallow: /login
+Disallow: /sso
+Disallow: /social-login
+Disallow: /admin-api/
+Disallow: /infra/
+Disallow: /worker/
+Sitemap: https://clipforgestudio.fnn.net.cn/sitemap.xml

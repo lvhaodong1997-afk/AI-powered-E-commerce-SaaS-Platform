@@ -1,0 +1,448 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.ico?v=20260728-system-icon" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="192x192"
+      href="/clipforge-app-icon-192.png?v=20260728-system-icon"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="512x512"
+      href="/clipforge-app-icon-512.png?v=20260728-system-icon"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="/clipforge-app-icon-180.png?v=20260728-system-icon"
+    />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="keywords"
+      content="ClipForge Studio, AI video creation, short-form video workflow, TikTok publishing preparation"
+    />
+    <meta
+      name="description"
+      content="ClipForge Studio helps teams create, review, and prepare short-form videos with AI-assisted scripts, video assembly, and user-confirmed publishing workflows."
+    />
+    <link rel="canonical" href="https://clipforgestudio.fnn.net.cn/" />
+    <meta name="robots" content="index,follow" />
+    <meta name="theme-color" content="#111827" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ClipForge Studio" />
+    <meta property="og:title" content="ClipForge Studio | AI video creation workflows" />
+    <meta
+      property="og:description"
+      content="Create, review, and prepare short-form videos with AI-assisted scripts, video assembly, and user-confirmed publishing workflows."
+    />
+    <meta property="og:url" content="https://clipforgestudio.fnn.net.cn/" />
+    <meta
+      property="og:image"
+      content="https://clipforgestudio.fnn.net.cn/clipforge-app-icon-512.png?v=20260728-system-icon"
+    />
+    <meta property="og:image:alt" content="ClipForge Studio app icon" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ClipForge Studio | AI video creation workflows" />
+    <meta
+      name="twitter:description"
+      content="Create, review, and prepare short-form videos with AI-assisted scripts, video assembly, and user-confirmed publishing workflows."
+    />
+    <meta
+      name="twitter:image"
+      content="https://clipforgestudio.fnn.net.cn/clipforge-app-icon-512.png?v=20260728-system-icon"
+    />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "ClipForge Studio",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web",
+        "url": "https://clipforgestudio.fnn.net.cn/",
+        "description": "ClipForge Studio helps teams create, review, and prepare short-form videos with AI-assisted scripts, video assembly, and user-confirmed publishing workflows.",
+        "publisher": {
+          "@type": "Organization",
+          "name": "ClipForge Studio",
+          "url": "https://clipforgestudio.fnn.net.cn/"
+        }
+      }
+    </script>
+    <title>%VITE_APP_TITLE%</title>
+  </head>
+  <body>
+    <noscript>
+      ClipForge Studio works best with JavaScript enabled. The public website describes AI-assisted
+      video creation, privacy controls, terms of service, and support contact information.
+    </noscript>
+    <div id="app">
+      <style>
+        html,
+        body,
+        #app {
+          width: 100%;
+          height: 100%;
+          margin: 0;
+        }
+
+        .app-loading {
+          position: relative;
+          display: flex;
+          overflow: hidden;
+          width: 100%;
+          height: 100%;
+          justify-content: center;
+          align-items: center;
+          color: #f8fbff;
+          background:
+            radial-gradient(circle at 18% 18%, rgba(0, 184, 255, 0.22), transparent 30%),
+            radial-gradient(circle at 74% 32%, rgba(119, 83, 255, 0.2), transparent 28%),
+            linear-gradient(135deg, #020711 0%, #07142a 48%, #030711 100%);
+          font-family: Inter, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+        }
+
+        .app-loading::before {
+          position: absolute;
+          inset: 0;
+          background:
+            linear-gradient(rgba(64, 217, 255, 0.08) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(64, 217, 255, 0.08) 1px, transparent 1px);
+          background-size: 48px 48px;
+          mask-image: linear-gradient(
+            to bottom,
+            transparent 0%,
+            #000 18%,
+            #000 72%,
+            transparent 100%
+          );
+          content: '';
+        }
+
+        .app-loading::after {
+          position: absolute;
+          right: -12%;
+          bottom: -28%;
+          width: 78%;
+          height: 52%;
+          background:
+            linear-gradient(90deg, rgba(44, 214, 255, 0.2), transparent 24%),
+            repeating-linear-gradient(90deg, rgba(93, 226, 255, 0.18) 0 1px, transparent 1px 78px);
+          transform: perspective(700px) rotateX(62deg) rotateZ(-7deg);
+          transform-origin: center;
+          filter: blur(0.2px);
+          opacity: 0.78;
+          content: '';
+        }
+
+        .app-loading .app-loading-wrap {
+          position: relative;
+          z-index: 1;
+          display: flex;
+          width: min(520px, calc(100vw - 48px));
+          min-height: 420px;
+          padding: 46px 42px 38px;
+          justify-content: center;
+          align-items: center;
+          flex-direction: column;
+          border: 1px solid rgba(121, 221, 255, 0.22);
+          border-radius: 8px;
+          background:
+            linear-gradient(145deg, rgba(12, 30, 58, 0.84), rgba(4, 11, 26, 0.74)),
+            linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent);
+          box-shadow:
+            0 30px 80px rgba(0, 0, 0, 0.42),
+            0 0 60px rgba(0, 180, 255, 0.16),
+            inset 0 1px 0 rgba(255, 255, 255, 0.18);
+          backdrop-filter: blur(18px);
+        }
+
+        .app-loading .app-loading-wrap::before,
+        .app-loading .app-loading-wrap::after {
+          position: absolute;
+          width: 74px;
+          height: 74px;
+          border-color: rgba(91, 227, 255, 0.62);
+          content: '';
+        }
+
+        .app-loading .app-loading-wrap::before {
+          top: 16px;
+          left: 16px;
+          border-top: 1px solid;
+          border-left: 1px solid;
+        }
+
+        .app-loading .app-loading-wrap::after {
+          right: 16px;
+          bottom: 16px;
+          border-right: 1px solid;
+          border-bottom: 1px solid;
+        }
+
+        .app-loading .app-loading-panel-glow {
+          position: absolute;
+          inset: 18px;
+          border-radius: 8px;
+          background:
+            radial-gradient(circle at 50% 18%, rgba(63, 215, 255, 0.22), transparent 38%),
+            linear-gradient(90deg, transparent, rgba(97, 220, 255, 0.1), transparent);
+          pointer-events: none;
+        }
+
+        .app-loading .app-loading-title {
+          position: relative;
+          z-index: 1;
+          display: flex;
+          margin-bottom: 26px;
+          align-items: center;
+          flex-direction: column;
+          color: #f8fbff;
+          font-size: 24px;
+          font-weight: bold;
+          letter-spacing: 0;
+          text-align: center;
+        }
+
+        .app-loading .app-loading-name {
+          color: #f8fbff;
+          font-size: 24px;
+          font-weight: 700;
+          line-height: 1.25;
+        }
+
+        .app-loading .app-loading-logo {
+          width: 96px;
+          height: 96px;
+          margin: 0 auto 18px auto;
+          border-radius: 8px;
+          box-shadow:
+            0 0 0 1px rgba(118, 226, 255, 0.28),
+            0 0 36px rgba(64, 159, 255, 0.42);
+        }
+
+        .app-loading .app-loading-subtitle {
+          position: relative;
+          z-index: 1;
+          margin-top: -12px;
+          margin-bottom: 30px;
+          color: rgba(198, 232, 255, 0.76);
+          font-size: 14px;
+          font-weight: 500;
+        }
+
+        .app-loading .app-loading-item {
+          position: relative;
+          z-index: 1;
+          display: inline-block;
+          width: 82px;
+          height: 82px;
+          vertical-align: middle;
+          border-radius: 50%;
+          background: radial-gradient(circle, rgba(75, 213, 255, 0.2), transparent 63%);
+        }
+
+        .app-loading .app-loading-outter {
+          position: absolute;
+          width: 100%;
+          height: 100%;
+          border: 2px solid rgba(48, 212, 255, 0.92);
+          border-bottom: 0;
+          border-left-color: transparent;
+          border-radius: 50%;
+          box-shadow: 0 0 24px rgba(48, 212, 255, 0.34);
+          animation: loader-outter 1s cubic-bezier(0.42, 0.61, 0.58, 0.41) infinite;
+        }
+
+        .app-loading .app-loading-inner {
+          position: absolute;
+          top: calc(50% - 25px);
+          left: calc(50% - 25px);
+          width: 50px;
+          height: 50px;
+          border: 2px solid rgba(123, 96, 255, 0.86);
+          border-right: 0;
+          border-top-color: transparent;
+          border-radius: 50%;
+          box-shadow: inset 0 0 18px rgba(126, 94, 255, 0.24);
+          animation: loader-inner 1s cubic-bezier(0.42, 0.61, 0.58, 0.41) infinite;
+        }
+
+        .app-loading .app-loading-status {
+          position: relative;
+          z-index: 1;
+          display: flex;
+          margin-top: 28px;
+          gap: 10px;
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+
+        .app-loading .app-loading-chip {
+          padding: 7px 12px;
+          border: 1px solid rgba(110, 223, 255, 0.22);
+          border-radius: 999px;
+          color: rgba(220, 244, 255, 0.78);
+          background: rgba(9, 33, 61, 0.58);
+          font-size: 12px;
+        }
+
+        .app-loading .public-fallback {
+          position: relative;
+          z-index: 1;
+          max-width: 430px;
+          margin-top: 24px;
+          padding-top: 18px;
+          color: rgba(226, 243, 255, 0.88);
+          border-top: 1px solid rgba(110, 223, 255, 0.18);
+          text-align: center;
+        }
+
+        .app-loading .public-fallback h1 {
+          margin: 0 0 10px;
+          color: #fff;
+          font-size: 18px;
+          line-height: 1.35;
+        }
+
+        .app-loading .public-fallback p {
+          margin: 0;
+          font-size: 13px;
+          line-height: 1.65;
+        }
+
+        .app-loading .public-fallback a {
+          color: #9be8ff;
+          font-weight: 700;
+          text-decoration: none;
+        }
+
+        .app-loading .app-loading-scan {
+          position: absolute;
+          inset: 0;
+          border-radius: 8px;
+          background: linear-gradient(
+            180deg,
+            transparent 0%,
+            rgba(70, 215, 255, 0.08) 46%,
+            rgba(70, 215, 255, 0.22) 50%,
+            transparent 54%
+          );
+          animation: scan-line 3.4s ease-in-out infinite;
+          pointer-events: none;
+        }
+
+        @-webkit-keyframes loader-outter {
+          0% {
+            -webkit-transform: rotate(0deg);
+            transform: rotate(0deg);
+          }
+
+          100% {
+            -webkit-transform: rotate(360deg);
+            transform: rotate(360deg);
+          }
+        }
+
+        @keyframes loader-outter {
+          0% {
+            -webkit-transform: rotate(0deg);
+            transform: rotate(0deg);
+          }
+
+          100% {
+            -webkit-transform: rotate(360deg);
+            transform: rotate(360deg);
+          }
+        }
+
+        @-webkit-keyframes loader-inner {
+          0% {
+            -webkit-transform: rotate(0deg);
+            transform: rotate(0deg);
+          }
+
+          100% {
+            -webkit-transform: rotate(-360deg);
+            transform: rotate(-360deg);
+          }
+        }
+
+        @keyframes loader-inner {
+          0% {
+            -webkit-transform: rotate(0deg);
+            transform: rotate(0deg);
+          }
+
+          100% {
+            -webkit-transform: rotate(-360deg);
+            transform: rotate(-360deg);
+          }
+        }
+
+        @keyframes scan-line {
+          0%,
+          100% {
+            transform: translateY(-55%);
+            opacity: 0;
+          }
+
+          20%,
+          75% {
+            opacity: 1;
+          }
+
+          50% {
+            transform: translateY(55%);
+          }
+        }
+
+        @media (max-width: 640px) {
+          .app-loading .app-loading-wrap {
+            min-height: 390px;
+            padding: 38px 24px 32px;
+          }
+
+          .app-loading .app-loading-title {
+            font-size: 21px;
+          }
+
+          .app-loading .app-loading-name {
+            font-size: 21px;
+          }
+
+          .app-loading .app-loading-logo {
+            width: 82px;
+            height: 82px;
+          }
+        }
+      </style>
+      <div class="app-loading">
+        <div class="app-loading-wrap">
+          <div class="app-loading-panel-glow"></div>
+          <div class="app-loading-scan"></div>
+          <div class="app-loading-title">
+            <img src="/logo.png?v=20260728-system-icon" class="app-loading-logo" alt="Logo" />
+            <div class="app-loading-name">%VITE_APP_TITLE%</div>
+          </div>
+          <section class="public-fallback" aria-label="ClipForge Studio public website fallback">
+            <h1>Create, review, and prepare short-form videos</h1>
+            <p>
+              ClipForge Studio provides AI-assisted scripts, video assembly, data controls, and
+              user-confirmed publishing preparation. This public website is not a login page.
+              Contact
+              <!--email_off--><a href="mailto:shangan@zswo.net">shangan@zswo.net</a
+              ><!--/email_off-->, or see <a href="/privacy-policy">Privacy Policy</a>,
+              <a href="/terms-of-service">Terms of Service</a>, and
+              <a href="/data-deletion">Data Deletion</a>.
+            </p>
+          </section>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

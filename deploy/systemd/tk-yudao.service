@@ -1,0 +1,26 @@
+[Unit]
+Description=TK Auto Mix Yudao Backend
+After=network.target mysql.service redis.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tk-auto-mix/backend
+Environment="JAVA_OPTS=-Xms512m -Xmx1024m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai"
+Environment="GEMINI_API_KEY="
+Environment="DASHSCOPE_API_KEY="
+ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/tk-auto-mix/backend/yudao-server.jar \
+  --spring.profiles.active=dev \
+  --spring.datasource.dynamic.datasource.master.url=jdbc:mysql://127.0.0.1:3306/tk_auto_mix?useSSL=false\&serverTimezone=Asia/Shanghai\&allowPublicKeyRetrieval=true\&nullCatalogMeansCurrent=true\&rewriteBatchedStatements=true \
+  --spring.datasource.dynamic.datasource.master.username=root \
+  --spring.datasource.dynamic.datasource.master.password=CHANGE_ME \
+  --spring.redis.host=127.0.0.1 \
+  --spring.redis.port=6379 \
+  --tk.generation.ffmpeg.ffmpeg-path=/usr/bin/ffmpeg \
+  --tk.generation.ffmpeg.ffprobe-path=/usr/bin/ffprobe
+Restart=always
+RestartSec=5
+StandardOutput=append:/opt/tk-auto-mix/logs/yudao-server.out.log
+StandardError=append:/opt/tk-auto-mix/logs/yudao-server.err.log
+
+[Install]
+WantedBy=multi-user.target

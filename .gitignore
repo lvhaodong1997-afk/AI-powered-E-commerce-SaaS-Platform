@@ -1,0 +1,68 @@
+# Codex and local tool caches
+.agents/
+.codex/
+.codex-build/
+.codex-tmp/
+.codex-ytdlp-wheel/
+.playwright-cli/
+.runtime/
+.worktrees/
+
+# Dependencies and build output
+**/node_modules/
+**/target/
+**/dist/
+**/dist-*/
+**/build/
+**/.cache/
+
+# Runtime output
+logs/
+output/
+**/logs/
+*.log
+*.log.err
+*.pid
+**/.pids/
+
+# Generated deployment binaries and archives
+*.jar
+*.zip
+*.tar
+*.tar.gz
+deploy/**/*.jar
+deploy/**/*.tar
+deploy/**/*.tar.gz
+deploy/**/*.zip
+deploy/**/release/
+deploy/**/dist/
+
+# Local/prod secrets and environment overrides
+.env
+.env.*
+**/application-prod.yaml
+**/application-prod.yml
+**/application-dev.yaml
+**/application-dev.yml
+**/application-local.yaml
+**/application-local.yml
+**/tools/reference-video-download/**/config.yaml
+**/tools/reference-video-download/**/config.yml
+**/tools/reference-video-download/Douyin_TikTok_Download_API/
+*.http
+
+# Python cache
+**/__pycache__/
+*.pyc
+
+# Local databases and temporary artifacts
+dump.rdb
+*.tmp
+*.bak
+
+# IDE and OS metadata
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

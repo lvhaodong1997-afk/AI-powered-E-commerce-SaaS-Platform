@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TK 运维控制台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #fff;
+      --line: #d8dde6;
+      --text: #172033;
+      --muted: #667085;
+      --ok: #178a4c;
+      --warn: #b25e09;
+      --err: #c3312f;
+      --brand: #1d4ed8;
+      --ink: #0b1220;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 700;
+    }
+    main {
+      padding: 20px 24px 32px;
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+    .actions, .filters {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    button, select, input {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 12px;
+      font-size: 14px;
+    }
+    button {
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.primary {
+      border-color: var(--brand);
+      background: var(--brand);
+      color: #fff;
+    }
+    button.danger {
+      border-color: var(--err);
+      color: var(--err);
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: .55;
+    }
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .card, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .card {
+      padding: 14px;
+      min-height: 122px;
+    }
+    .card-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eef2f7;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .pill.ok { background: #e8f6ee; color: var(--ok); }
+    .pill.warn { background: #fff3df; color: var(--warn); }
+    .pill.err { background: #fdebea; color: var(--err); }
+    .meta {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .card-actions button {
+      height: 30px;
+      padding: 0 9px;
+      font-size: 12px;
+    }
+    .panel {
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .tab {
+      border-radius: 6px;
+      min-width: 96px;
+    }
+    .tab.active {
+      border-color: var(--brand);
+      color: var(--brand);
+      background: #eef4ff;
+    }
+    .log-box {
+      margin-top: 12px;
+      min-height: 420px;
+      max-height: 620px;
+      overflow: auto;
+      background: var(--ink);
+      color: #d6e4ff;
+      border-radius: 8px;
+      padding: 14px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      background: #fff;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      font-size: 13px;
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 700;
+      background: #f9fafb;
+    }
+    td.message {
+      max-width: 520px;
+      word-break: break-all;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .summary div {
+      background: #f9fafb;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .summary strong {
+      display: block;
+      font-size: 20px;
+      margin-top: 4px;
+    }
+    dialog {
+      width: min(860px, calc(100vw - 32px));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0;
+    }
+    dialog::backdrop { background: rgba(15, 23, 42, .35); }
+    .dialog-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .dialog-body {
+      padding: 16px;
+      max-height: 70vh;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+      background: #fbfcfe;
+    }
+    .hidden { display: none; }
+    @media (max-width: 980px) {
+      .status-grid, .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      header { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>TK 运维控制台</h1>
+      <div id="lastUpdated" class="meta">等待状态刷新</div>
+    </div>
+    <div class="actions">
+      <button id="startAll" class="primary">一键启动项目</button>
+      <button id="stopAll" class="danger">一键停止项目</button>
+      <button id="refresh">刷新状态</button>
+      <label><input id="autoRefresh" type="checkbox" style="height:auto"> 自动刷新</label>
+    </div>
+  </header>
+
+  <main>
+    <section id="cards" class="status-grid"></section>
+
+    <section class="panel">
+      <div class="tabs">
+        <button class="tab active" data-tab="runtime">运行日志</button>
+        <button class="tab" data-tab="business">业务日志</button>
+      </div>
+
+      <div id="runtimeTab">
+        <div class="filters">
+          <select id="logService">
+            <option value="all">全部服务</option>
+            <option value="backend">后端</option>
+            <option value="frontend">前端</option>
+            <option value="worker">Worker</option>
+          </select>
+          <select id="logFile"></select>
+          <input id="logKeyword" placeholder="关键词，例如 ERROR">
+          <input id="logLines" type="number" min="20" max="2000" value="300" style="width:110px">
+          <button id="loadLogs">查询运行日志</button>
+        </div>
+        <div id="logBox" class="log-box">选择条件后查询日志。</div>
+      </div>
+
+      <div id="businessTab" class="hidden">
+        <div id="businessSummary" class="summary"></div>
+        <div class="filters">
+          <select id="bizType">
+            <option value="all">全部业务</option>
+            <option value="business">统一日志</option>
+            <option value="generation">生成任务</option>
+            <option value="publish">发布任务</option>
+            <option value="credit">积分流水</option>
+            <option value="reference">对标分析</option>
+          </select>
+          <select id="bizLevel">
+            <option value="all">全部级别</option>
+            <option value="error">错误</option>
+            <option value="warn">警告</option>
+            <option value="info">信息</option>
+          </select>
+          <input id="bizKeyword" placeholder="关键词/失败原因/业务 ID">
+          <button id="loadBusiness">查询业务日志</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>类型</th>
+              <th>业务 ID</th>
+              <th>级别</th>
+              <th>状态</th>
+              <th>摘要</th>
+              <th>租户</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="businessRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="detailDialog">
+    <div class="dialog-head">
+      <strong>业务日志详情</strong>
+      <button id="closeDialog">关闭</button>
+    </div>
+    <div id="detailBody" class="dialog-body"></div>
+  </dialog>
+
+  <script>
+    const state = {
+      activeTab: 'runtime',
+      timer: null
+    }
+
+    const el = (id) => document.getElementById(id)
+    const api = async (url, options = {}) => {
+      const res = await fetch(url, options)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || '请求失败')
+      return data
+    }
+
+    function statusPill(status) {
+      const text = {
+        running: '运行中',
+        running_external: '外部运行',
+        starting: '启动中',
+        partial: '部分异常',
+        stopped: '已停止',
+        unhealthy: '异常'
+      }[status] || status || '-'
+      const cls = status === 'running' || status === 'running_external' ? 'ok'
+        : status === 'starting' || status === 'partial' ? 'warn' : 'err'
+      return `<span class="pill ${cls}">${text}</span>`
+    }
+
+    async function refreshStatus() {
+      const data = await api('/api/status')
+      const cards = []
+      for (const [key, item] of Object.entries(data.services)) {
+        cards.push(`
+          <article class="card">
+            <div class="card-title"><span>${item.name}</span>${statusPill(item.status)}</div>
+            <div class="meta">
+              <span>端口：${item.port}</span>
+              <span>PID：${item.pid || '-'}</span>
+              <span>启动：${item.startedAt ? formatTime(item.startedAt) : '-'}</span>
+            </div>
+            <div class="card-actions">
+              <button onclick="startService('${key}')">启动</button>
+              <button onclick="stopService('${key}')" class="danger">停止</button>
+            </div>
+          </article>
+        `)
+      }
+      for (const [key, item] of Object.entries(data.dependencies)) {
+        cards.push(`
+          <article class="card">
+            <div class="card-title"><span>${key.toUpperCase()}</span>${statusPill(item.status)}</div>
+            <div class="meta">
+              <span>端口：${item.port}</span>
+              <span>依赖服务只检测，不停止</span>
+            </div>
+          </article>
+        `)
+      }
+      el('cards').innerHTML = cards.join('')
+      el('lastUpdated').textContent = `项目状态：${data.projectStatus}，更新时间：${formatTime(data.time)}`
+      renderSummary(data.business)
+      await loadLogFiles()
+    }
+
+    function renderSummary(summary) {
+      if (!summary) return
+      el('businessSummary').innerHTML = `
+        <div>今日生成<strong>${summary.todayGenerationTotal || 0}</strong></div>
+        <div>生成失败<strong>${summary.todayGenerationFailed || 0}</strong></div>
+        <div>今日发布<strong>${summary.todayPublishTotal || 0}</strong></div>
+        <div>发布异常<strong>${summary.todayPublishFailed || 0}</strong></div>
+        <div>冻结积分<strong>${summary.todayFrozenCredits || 0}</strong></div>
+      `
+    }
+
+    async function startService(service) {
+      await api(`/api/start?service=${service}`, { method: 'POST' })
+      await refreshStatus()
+    }
+
+    async function stopService(service) {
+      if (!confirm(service === 'all' ? '确认停止前端、Worker、后端？' : `确认停止 ${service}？`)) return
+      await api(`/api/stop?service=${service}`, { method: 'POST' })
+      await refreshStatus()
+    }
+
+    async function loadLogFiles() {
+      const service = el('logService').value
+      const data = await api(`/api/log-files?service=${encodeURIComponent(service)}`)
+      const current = el('logFile').value
+      el('logFile').innerHTML = `<option value="">自动选择最新日志</option>` + data.files.slice(0, 80).map((file) =>
+        `<option value="${escapeHtml(file.path)}">${escapeHtml(file.service)} · ${escapeHtml(file.name)}</option>`
+      ).join('')
+      if ([...el('logFile').options].some((option) => option.value === current)) {
+        el('logFile').value = current
+      }
+    }
+
+    async function loadLogs() {
+      const params = new URLSearchParams({
+        service: el('logService').value,
+        lines: el('logLines').value || '300',
+        keyword: el('logKeyword').value || ''
+      })
+      if (el('logFile').value) params.set('file', el('logFile').value)
+      const data = await api(`/api/logs?${params}`)
+      el('logBox').textContent = data.files.map((file) =>
+        `===== ${file.service} / ${file.file} =====\n${file.content || '(无匹配内容)'}`
+      ).join('\n\n') || '没有找到日志。'
+    }
+
+    async function loadBusiness() {
+      const params = new URLSearchParams({
+        type: el('bizType').value,
+        level: el('bizLevel').value,
+        keyword: el('bizKeyword').value,
+        page: '1',
+        pageSize: '50'
+      })
+      const data = await api(`/api/business-logs?${params}`)
+      el('businessRows').innerHTML = data.list.map((row) => `
+        <tr>
+          <td>${formatTime(row.time)}</td>
+          <td>${escapeHtml(row.source)}</td>
+          <td>${escapeHtml(row.bizId || row.id || '-')}</td>
+          <td>${levelPill(row.level)}</td>
+          <td>${escapeHtml(row.status || '-')}</td>
+          <td class="message">${escapeHtml(row.message || '-')}</td>
+          <td>${escapeHtml(row.tenantId || '-')}</td>
+          <td><button onclick="openDetail('${row.source}', '${row.id}')">详情</button></td>
+        </tr>
+      `).join('')
+      if (!data.list.length) {
+        el('businessRows').innerHTML = '<tr><td colspan="8">没有查询到业务日志。</td></tr>'
+      }
+    }
+
+    async function openDetail(source, id) {
+      const data = await api(`/api/business-log-detail?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`)
+      el('detailBody').textContent = JSON.stringify(data, null, 2)
+      el('detailDialog').showModal()
+    }
+
+    function levelPill(level) {
+      const cls = level === 'error' ? 'err' : level === 'warn' ? 'warn' : 'ok'
+      return `<span class="pill ${cls}">${escapeHtml(level || 'info')}</span>`
+    }
+
+    function formatTime(value) {
+      if (!value) return '-'
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return String(value)
+      return date.toLocaleString('zh-CN', { hour12: false })
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char]))
+    }
+
+    document.querySelectorAll('.tab').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.activeTab = button.dataset.tab
+        document.querySelectorAll('.tab').forEach((item) => item.classList.toggle('active', item === button))
+        el('runtimeTab').classList.toggle('hidden', state.activeTab !== 'runtime')
+        el('businessTab').classList.toggle('hidden', state.activeTab !== 'business')
+        if (state.activeTab === 'business') loadBusiness()
+      })
+    })
+
+    el('startAll').addEventListener('click', () => startService('all'))
+    el('stopAll').addEventListener('click', () => stopService('all'))
+    el('refresh').addEventListener('click', refreshStatus)
+    el('loadLogs').addEventListener('click', loadLogs)
+    el('loadBusiness').addEventListener('click', loadBusiness)
+    el('logService').addEventListener('change', loadLogFiles)
+    el('closeDialog').addEventListener('click', () => el('detailDialog').close())
+    el('autoRefresh').addEventListener('change', (event) => {
+      if (state.timer) clearInterval(state.timer)
+      state.timer = event.target.checked ? setInterval(() => {
+        refreshStatus()
+        if (state.activeTab === 'runtime') loadLogs()
+      }, 5000) : null
+    })
+
+    refreshStatus().catch((error) => {
+      el('lastUpdated').textContent = error.message
+    })
+  </script>
+</body>
+</html>
