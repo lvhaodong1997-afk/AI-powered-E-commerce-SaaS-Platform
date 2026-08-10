@@ -13,6 +13,8 @@ import org.apache.ibatis.annotations.Mapper;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 
 @Mapper
@@ -100,6 +102,29 @@ public interface TkReferenceAnalysisMapper extends BaseMapperX<TkReferenceAnalys
                 .ltIfPresent(TkReferenceAnalysisDO::getUpdateTime, staleBefore)
                 .orderByAsc(TkReferenceAnalysisDO::getId)
                 .last("LIMIT " + limit));
+    }
+
+    default List<TkReferenceAnalysisDO> selectStatusBatch(Collection<Long> ids, TkUserScope scope) {
+        if (ids == null || ids.isEmpty()) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapperX<TkReferenceAnalysisDO> wrapper = new LambdaQueryWrapperX<>();
+        wrapper.select(TkReferenceAnalysisDO::getId,
+                TkReferenceAnalysisDO::getTenantId,
+                TkReferenceAnalysisDO::getCompanyId,
+                TkReferenceAnalysisDO::getCreator,
+                TkReferenceAnalysisDO::getStatus,
+                TkReferenceAnalysisDO::getFailReason,
+                TkReferenceAnalysisDO::getProductName,
+                TkReferenceAnalysisDO::getVideoDuration,
+                TkReferenceAnalysisDO::getCoreSellingPoints,
+                TkReferenceAnalysisDO::getSellingPoints,
+                TkReferenceAnalysisDO::getUpdateTime);
+        return selectList(wrapper
+                .in(TkReferenceAnalysisDO::getId, ids)
+                .eqIfPresent(TkReferenceAnalysisDO::getTenantId, scope.isGlobalPlatformView() ? null : scope.getTenantId())
+                .eqIfPresent(TkReferenceAnalysisDO::getCompanyId, scope.isPlatformAdmin() ? null : scope.getCompanyId())
+                .eqIfPresent(TkReferenceAnalysisDO::getCreator, scope.canReadAllTenantRecords() ? null : scope.getUserIdString()));
     }
 
 }

@@ -110,7 +110,7 @@ export const tkEn: Record<string, string> = {
   'dashboard.selectScriptOption': 'Select Script Option',
   'dashboard.configureVideoSettings': 'Configure Video Settings',
   'dashboard.targetVideoDuration': 'Target Video Duration',
-  'dashboard.targetDurationHint': 'Defaults to 15 seconds when blank, supports 8-60 seconds',
+  'dashboard.targetDurationHint': 'Defaults to 15 seconds when blank, supports 8-180 seconds',
   'dashboard.clipDurationStructure': 'Clip Duration Structure',
   'dashboard.autoAllocate': 'Auto Allocate',
   'dashboard.customSeconds': 'Custom Seconds',

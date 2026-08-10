@@ -286,6 +286,40 @@ class TkGenerationPrecheckServiceImplTest {
     }
 
     @Test
+    void precheckFullPoolRandomUsesRemainingDurationAfterUploadedOpening() {
+        TkGenerationPrecheckServiceImpl service = createService(Collections.singletonList(
+                material(1L, 7L, "GENERAL")
+        ));
+        TkGenerationTaskCreateReqVO reqVO = createRequest(10);
+        reqVO.setOpeningVideoName("golden-opening.mp4");
+        reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE);
+        reqVO.setClipPlanMode("FULL_POOL_RANDOM");
+
+        TkGenerationPrecheckRespVO result = service.precheck(reqVO);
+
+        assertTrue(result.getPassed());
+        assertTrue(result.getErrors().isEmpty());
+    }
+
+    @Test
+    void precheckFullPoolRandomRejectsClipLongerThanRemainingDurationAfterOpening() {
+        TkGenerationPrecheckServiceImpl service = createService(Collections.singletonList(
+                material(1L, 8L, "GENERAL")
+        ));
+        TkGenerationTaskCreateReqVO reqVO = createRequest(10);
+        reqVO.setOpeningVideoName("golden-opening.mp4");
+        reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE);
+        reqVO.setClipPlanMode("FULL_POOL_RANDOM");
+
+        TkGenerationPrecheckRespVO result = service.precheck(reqVO);
+
+        assertFalse(result.getPassed());
+        assertTrue(result.getErrors().stream()
+                .anyMatch(issue -> "MATERIAL_TOO_LONG_FOR_TARGET".equals(issue.getCode())
+                        && Integer.valueOf(7).equals(issue.getRequiredDuration())));
+    }
+
+    @Test
     void precheckLeadGenerationUsesSelectedFullPoolRandomModeWithoutSegmentChecks() {
         TkGenerationPrecheckServiceImpl service = createService(Arrays.asList(
                 material(1L, 4L, "GENERAL"),

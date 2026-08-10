@@ -72,6 +72,21 @@ export interface TkReferenceAnalysisVO {
   createTime?: string
 }
 
+export interface TkReferenceAnalysisStatusVO {
+  id?: number
+  status?: string
+  failReason?: string
+  productName?: string
+  videoDuration?: number
+  coreSellingPoints?: string
+  analysisStageStatus?: string
+  sellingPointStageStatus?: string
+  scriptStageStatus?: string
+  sellingPointCount?: number
+  scriptOptionCount?: number
+  updateTime?: string
+}
+
 export const TkReferenceApi = {
   analyze: async (data: TkReferenceAnalyzeReqVO) => {
     return await request.post<TkReferenceAnalysisVO>({ url: '/tk/reference/analyze', data })
@@ -96,5 +111,8 @@ export const TkReferenceApi = {
   },
   getAnalysisPage: async (params: any) => {
     return await request.get({ url: '/tk/reference/page', params })
+  },
+  getAnalysisStatusBatch: async (ids: number[]): Promise<TkReferenceAnalysisStatusVO[]> => {
+    return await request.get({ url: '/tk/reference/status-batch', params: { ids: ids.join(',') } })
   }
 }

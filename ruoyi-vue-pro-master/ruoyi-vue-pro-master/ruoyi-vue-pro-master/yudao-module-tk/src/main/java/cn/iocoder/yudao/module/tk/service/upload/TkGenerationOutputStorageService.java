@@ -11,4 +11,6 @@ public interface TkGenerationOutputStorageService {
     String uploadGeneratedAsset(TkGenerationTaskDO task, byte[] content, String fileName, String contentType);
 
     String refreshGeneratedAssetReadUrl(TkGenerationTaskDO task, String outputUrl);
+
+    String refreshGeneratedAssetReadUrl(TkGenerationTaskDO task, String outputUrl, String preferredDownloadFileName);
 }

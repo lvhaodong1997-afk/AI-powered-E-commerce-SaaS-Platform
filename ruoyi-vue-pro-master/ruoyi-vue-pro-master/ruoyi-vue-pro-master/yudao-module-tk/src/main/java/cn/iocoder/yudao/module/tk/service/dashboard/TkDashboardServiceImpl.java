@@ -62,12 +62,19 @@ public class TkDashboardServiceImpl implements TkDashboardService {
         TkUserScope scope = dataScopeService.getCurrentScope();
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
         LocalDateTime tomorrowStart = todayStart.plusDays(1);
+        List<TkMaterialLibraryRespVO> topLibraries = BeanUtils.toBean(
+                libraryMapper.selectTop5(scope), TkMaterialLibraryRespVO.class);
+        Map<Long, TkMaterialVideoDO> previewMap = videoMapper.selectFirstByLibraryIds(topLibraries.stream()
+                        .map(TkMaterialLibraryRespVO::getId).collect(java.util.stream.Collectors.toList())).stream()
+                .collect(java.util.stream.Collectors.toMap(TkMaterialVideoDO::getLibraryId, item -> item,
+                        (left, right) -> left));
+        topLibraries.forEach(library -> fillLibraryPreview(library, previewMap.get(library.getId())));
         return TenantUtils.executeIgnore(() -> new TkDashboardSummaryRespVO(
                         taskMapper.selectCount(scope, todayStart, tomorrowStart),
                         videoMapper.selectCount(scope),
                         videoMapper.selectCountByStatus(scope, TkMaterialVideoStatusEnum.PARSING),
                         creditLogMapper.selectSettledCredits(scope, todayStart, tomorrowStart),
-                        BeanUtils.toBean(libraryMapper.selectTop5(scope), TkMaterialLibraryRespVO.class, this::fillLibraryPreview),
+                        topLibraries,
                         BeanUtils.toBean(taskMapper.selectTop5(scope), TkGenerationTaskRespVO.class)
                 )
         );
@@ -229,12 +236,8 @@ public class TkDashboardServiceImpl implements TkDashboardService {
         ));
     }
 
-    private void fillLibraryPreview(TkMaterialLibraryRespVO library) {
-        if (library == null || library.getId() == null) {
-            return;
-        }
-        TkMaterialVideoDO firstVideo = videoMapper.selectFirstByLibraryId(library.getId());
-        if (firstVideo == null) {
+    private void fillLibraryPreview(TkMaterialLibraryRespVO library, TkMaterialVideoDO firstVideo) {
+        if (library == null || firstVideo == null) {
             return;
         }
         library.setCoverUrl(StrUtil.blankToDefault(firstVideo.getCoverUrl(), library.getCoverUrl()));

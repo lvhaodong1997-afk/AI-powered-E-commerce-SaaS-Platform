@@ -362,6 +362,7 @@ public class TkReferenceVideoContentServiceImpl implements TkReferenceVideoConte
     private String fetchDouyinRedirectLocation(String url) {
         HttpURLConnection connection = null;
         try {
+            validateRemoteUrl(url);
             URL target = new URL(url);
             Proxy proxy = buildProxy(referenceDownloadProxy());
             connection = (HttpURLConnection) (proxy == null ? target.openConnection() : target.openConnection(proxy));
@@ -375,7 +376,9 @@ public class TkReferenceVideoContentServiceImpl implements TkReferenceVideoConte
             if (status < 300 || status >= 400 || StrUtil.isBlank(location)) {
                 throw new IllegalStateException(StrUtil.format("抖音短链跳转失败，HTTP {}：{}", status, url));
             }
-            return URI.create(url).resolve(location).toString();
+            String resolved = URI.create(url).resolve(location).toString();
+            validateRemoteUrl(resolved);
+            return resolved;
         } catch (Exception ex) {
             throw new IllegalStateException(networkError("抖音短链跳转解析失败", url, ex), ex);
         } finally {
@@ -433,10 +436,8 @@ public class TkReferenceVideoContentServiceImpl implements TkReferenceVideoConte
     }
 
     private String fetchHtml(String url) {
-        try (HttpResponse response = withOptionalProxy(HttpRequest.get(url)
-                .header("User-Agent", "Mozilla/5.0")
-                .timeout(htmlTimeoutMillis()))
-                .execute()) {
+        validateRemoteUrl(url);
+        try (HttpResponse response = executeSafeGet(url, htmlTimeoutMillis())) {
             if (response.getStatus() < 200 || response.getStatus() >= 300) {
                 throw new IllegalStateException(StrUtil.format("页面下载失败，HTTP {}：{}", response.getStatus(), url));
             }
@@ -489,14 +490,17 @@ public class TkReferenceVideoContentServiceImpl implements TkReferenceVideoConte
         if (StrUtil.isBlank(url) || !(StrUtil.startWithIgnoreCase(url, "http://") || StrUtil.startWithIgnoreCase(url, "https://"))) {
             throw new IllegalStateException("视频 URL 不是可下载的 HTTP 地址：" + url);
         }
-        try (HttpResponse response = withOptionalProxy(HttpRequest.get(url)
-                .header("User-Agent", "Mozilla/5.0")
-                .timeout(HTTP_TIMEOUT_MILLIS))
-                .execute()) {
+        validateRemoteUrl(url);
+        try (HttpResponse response = executeSafeGet(url, HTTP_TIMEOUT_MILLIS)) {
             if (response.getStatus() < 200 || response.getStatus() >= 300) {
                 throw new IllegalStateException(StrUtil.format("视频下载失败，HTTP {}：{}", response.getStatus(), url));
             }
-            FileUtil.writeBytes(response.bodyBytes(), target);
+            byte[] content = response.bodyBytes();
+            Long maxBytes = generationProperties.getReferenceDownload().getMaxDownloadBytes();
+            if (maxBytes != null && maxBytes > 0 && content.length > maxBytes) {
+                throw new IllegalStateException("video download exceeds configured size limit");
+            }
+            FileUtil.writeBytes(content, target);
             if (!target.isFile() || target.length() <= 0) {
                 throw new IllegalStateException("视频下载文件为空：" + url);
             }
@@ -883,6 +887,40 @@ public class TkReferenceVideoContentServiceImpl implements TkReferenceVideoConte
     private HttpRequest withOptionalProxy(HttpRequest request) {
         Proxy proxy = buildProxy(referenceDownloadProxy());
         return proxy == null ? request : request.setProxy(proxy);
+    }
+
+    private void validateRemoteUrl(String url) {
+        TkGenerationProperties.ReferenceDownload config = generationProperties.getReferenceDownload();
+        if (config != null && Boolean.FALSE.equals(config.getRemoteUrlValidationEnabled())) {
+            return;
+        }
+        new TkSafeRemoteUrlValidator(config == null ? null : config.getAllowedHosts(),
+                config == null || !Boolean.FALSE.equals(config.getBlockPrivateAddress())).validate(url);
+    }
+
+    private HttpResponse executeSafeGet(String url, int timeoutMillis) {
+        TkGenerationProperties.ReferenceDownload config = generationProperties.getReferenceDownload();
+        int maxRedirects = config == null || config.getMaxRedirects() == null
+                ? 3 : Math.max(0, config.getMaxRedirects());
+        String current = url;
+        for (int redirect = 0; redirect <= maxRedirects; redirect++) {
+            validateRemoteUrl(current);
+            HttpResponse response = withOptionalProxy(HttpRequest.get(current)
+                    .header("User-Agent", "Mozilla/5.0")
+                    .setFollowRedirects(false)
+                    .timeout(timeoutMillis)).execute();
+            int status = response.getStatus();
+            if (status < 300 || status >= 400) {
+                return response;
+            }
+            String location = response.header("Location");
+            response.close();
+            if (StrUtil.isBlank(location) || redirect == maxRedirects) {
+                throw new IllegalStateException("remote video redirect is invalid or exceeds limit");
+            }
+            current = URI.create(current).resolve(location).toString();
+        }
+        throw new IllegalStateException("remote video redirect exceeds limit");
     }
 
     private Proxy buildProxy(String proxyUrl) {

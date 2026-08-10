@@ -22,6 +22,8 @@ import java.util.Map;
 @Service
 public class TkGenerationPrecheckServiceImpl implements TkGenerationPrecheckService {
 
+    private static final int OPENING_SECONDS = 3;
+
     @Resource
     private TkMaterialVideoMapper materialVideoMapper;
     @Resource
@@ -67,8 +69,11 @@ public class TkGenerationPrecheckServiceImpl implements TkGenerationPrecheckServ
                 issue.setMissingDuration(missingDuration);
             }
             if (TkGenerationRouteConfigSupport.isFullPoolRandom(routeConfig)) {
-                addFullPoolRandomWarnings(result, materials, targetDuration);
-                addFullPoolRandomErrors(result, materials, targetDuration);
+                int randomTargetDuration = resolveFullPoolRandomTargetDuration(createReqVO, targetDuration);
+                if (randomTargetDuration > 0) {
+                    addFullPoolRandomWarnings(result, materials, randomTargetDuration);
+                    addFullPoolRandomErrors(result, materials, randomTargetDuration);
+                }
             } else {
                 boolean leadGeneration = TkGeminiPromptConfig.isLeadGeneration(createReqVO.getMaterialPurpose());
                 fillSegmentSummary(result, materials, leadGeneration);
@@ -81,6 +86,13 @@ public class TkGenerationPrecheckServiceImpl implements TkGenerationPrecheckServ
         }
         result.setPassed(!result.hasErrors());
         return result;
+    }
+
+    private int resolveFullPoolRandomTargetDuration(TkGenerationTaskCreateReqVO createReqVO, int targetDuration) {
+        if (!hasOpeningVideo(createReqVO)) {
+            return targetDuration;
+        }
+        return Math.max(0, targetDuration - Math.min(OPENING_SECONDS, targetDuration));
     }
 
     private TkGenerationPrecheckRespVO.PrecheckIssue addError(TkGenerationPrecheckRespVO result, String code, String message) {

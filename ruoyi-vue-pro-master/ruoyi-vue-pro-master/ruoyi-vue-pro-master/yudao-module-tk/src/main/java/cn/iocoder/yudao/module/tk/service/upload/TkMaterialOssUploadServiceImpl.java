@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.tk.controller.admin.upload.vo.TkUploadSessionComp
 import cn.iocoder.yudao.module.tk.controller.admin.upload.vo.TkUploadSessionRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkMaterialLibraryDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkMaterialVideoDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkUploadSessionDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkMaterialLibraryMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkMaterialVideoMapper;
 import cn.iocoder.yudao.module.tk.enums.TkMaterialSegmentTypeEnum;
@@ -55,6 +56,8 @@ public class TkMaterialOssUploadServiceImpl implements TkMaterialOssUploadServic
     private TkMaterialVideoParseService materialVideoParseService;
     @Resource
     private TkGenerationProperties generationProperties;
+    @Resource
+    private TkUploadSessionService uploadSessionService;
 
     @Override
     public TkUploadSessionRespVO createMaterialVideoSession(Long libraryId, String fileName, Long fileSize, String contentType) {
@@ -68,6 +71,10 @@ public class TkMaterialOssUploadServiceImpl implements TkMaterialOssUploadServic
         Policy policy = TkOssPostPolicySigner.sign(getOss().getAccessKeyId(), getOss().getAccessKeySecret(),
                 keyPrefix, getMaxFileSize(), getOss().getPolicyExpireSeconds(), Clock.systemUTC());
 
+        if (uploadSessionService != null) {
+            uploadSessionService.create(uploadId, library, fileName, fileSize,
+                    StrUtil.blankToDefault(contentType, "video/" + extension(fileName)), "oss");
+        }
         TkUploadSessionRespVO respVO = new TkUploadSessionRespVO();
         respVO.setUploadId(uploadId);
         respVO.setUploadMode("oss");
@@ -90,6 +97,13 @@ public class TkMaterialOssUploadServiceImpl implements TkMaterialOssUploadServic
             throw exception(TK_UPLOAD_FILE_EMPTY);
         }
         TkMaterialLibraryDO library = validateLibraryWritable(reqVO.getLibraryId());
+        if (uploadSessionService != null) {
+            TkUploadSessionDO session = uploadSessionService.validateAccessible(reqVO.getUploadId());
+            if (!reqVO.getLibraryId().equals(session.getLibraryId())
+                    || !reqVO.getFileSize().equals(session.getFileSize())) {
+                throw new IllegalArgumentException("上传会话与文件信息不一致");
+            }
+        }
         validateFileBasics(reqVO.getFileName(), reqVO.getFileSize());
         validateOssConfig();
         validateObjectKey(library, reqVO.getUploadId(), reqVO.getObjectKey());
@@ -120,6 +134,9 @@ public class TkMaterialOssUploadServiceImpl implements TkMaterialOssUploadServic
                 .setVideoCount((library.getVideoCount() == null ? 0 : library.getVideoCount()) + 1)
                 .setTotalSize((library.getTotalSize() == null ? 0L : library.getTotalSize()) + reqVO.getFileSize()));
         materialVideoParseService.submit(library.getTenantId(), video.getId());
+        if (uploadSessionService != null) {
+            uploadSessionService.markCompleted(reqVO.getUploadId());
+        }
         return video.getId();
     }
 

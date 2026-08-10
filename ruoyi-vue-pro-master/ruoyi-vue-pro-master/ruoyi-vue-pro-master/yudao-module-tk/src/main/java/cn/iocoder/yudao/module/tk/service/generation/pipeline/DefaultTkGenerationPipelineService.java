@@ -19,6 +19,7 @@ import cn.iocoder.yudao.module.tk.enums.TkGenerationStatusEnum;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.framework.ffmpeg.TkFfmpegExecutableResolver;
 import cn.iocoder.yudao.module.tk.service.generation.TkGenerationRouteConfigSupport;
+import cn.iocoder.yudao.module.tk.service.generation.TkGenerationTaskLeaseService;
 import cn.iocoder.yudao.module.tk.service.credit.TkCreditService;
 import cn.iocoder.yudao.module.tk.service.generation.TkGenerationBatchProgressSupport;
 import cn.iocoder.yudao.module.tk.service.log.TkBusinessLogService;
@@ -41,9 +42,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -56,6 +59,7 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
     private ExecutorService executorService;
     private final Set<String> inFlightTasks = ConcurrentHashMap.newKeySet();
     private final String workerId = ManagementFactory.getRuntimeMXBean().getName();
+    private final ThreadLocal<String> activeLeaseToken = new ThreadLocal<>();
 
     @Resource
     private TkGenerationTaskMapper taskMapper;
@@ -80,13 +84,18 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
     @Resource
     private TkGenerationProperties generationProperties;
     @Resource
+    private TkGenerationTaskLeaseService taskLeaseService;
+    @Resource
     private TkVideoTailQualityService videoTailQualityService;
 
     @PostConstruct
     public void init() {
         int workerSize = generationProperties.getQueue().getWorkerSize() == null
                 ? 2 : Math.max(1, generationProperties.getQueue().getWorkerSize());
-        executorService = Executors.newFixedThreadPool(workerSize);
+        int queueCapacity = generationProperties.getQueue().getQueueCapacity() == null
+                ? 100 : Math.max(workerSize, generationProperties.getQueue().getQueueCapacity());
+        executorService = new ThreadPoolExecutor(workerSize, workerSize, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(queueCapacity), new ThreadPoolExecutor.CallerRunsPolicy());
         submitRecoverableTasks();
     }
 
@@ -96,13 +105,37 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
         if (!inFlightTasks.add(key)) {
             return;
         }
-        executorService.submit(() -> {
+        String leaseToken = UUID.randomUUID().toString().replace("-", "");
+        int staleSeconds = generationProperties.getQueue().getStaleSeconds() == null
+                ? 300 : Math.max(60, generationProperties.getQueue().getStaleSeconds());
+        LocalDateTime now = LocalDateTime.now();
+        boolean claimed = taskLeaseService == null || TenantUtils.execute(tenantId,
+                () -> taskLeaseService.claim(taskId, leaseToken, workerId,
+                        now.minusSeconds(staleSeconds), now.plusSeconds(staleSeconds)));
+        if (!claimed) {
+            inFlightTasks.remove(key);
+            return;
+        }
+        try {
+            executorService.submit(() -> {
             try {
-                TenantUtils.execute(tenantId, () -> run(taskId));
+                activeLeaseToken.set(leaseToken);
+                TenantUtils.execute(tenantId, () -> run(taskId, leaseToken));
             } finally {
+                activeLeaseToken.remove();
+                if (taskLeaseService != null) {
+                    TenantUtils.execute(tenantId, () -> taskLeaseService.release(taskId, leaseToken));
+                }
                 inFlightTasks.remove(key);
             }
-        });
+            });
+        } catch (RuntimeException ex) {
+            if (taskLeaseService != null) {
+                TenantUtils.execute(tenantId, () -> taskLeaseService.release(taskId, leaseToken));
+            }
+            inFlightTasks.remove(key);
+            throw ex;
+        }
     }
 
     @Scheduled(fixedDelayString = "${tk.generation.queue.scan-delay-ms:10000}", initialDelayString = "${tk.generation.queue.scan-delay-ms:10000}")
@@ -122,7 +155,7 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
         }
     }
 
-    private void run(Long taskId) {
+    private void run(Long taskId, String leaseToken) {
         String businessTraceId = null;
         try {
             TkGenerationTaskDO task = taskMapper.selectById(taskId);
@@ -136,7 +169,7 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
                     "生成流水线开始分析", task);
             TkGeneratedScript script = resolveScript(task, library);
             finishCurrentStep(task, "SUCCESS", null, null);
-            taskMapper.updateById(new TkGenerationTaskDO()
+            updateOwned(new TkGenerationTaskDO()
                     .setId(taskId)
                     .setTitle(script.getTitle())
                     .setReferenceDuration(script.getReferenceDuration())
@@ -154,7 +187,7 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
             task = taskMapper.selectById(taskId);
             TkAudioAsset audioAsset = resolveAudioAsset(task, script.getContent());
             finishCurrentStep(task, "SUCCESS", null, null);
-            taskMapper.updateById(new TkGenerationTaskDO()
+            updateOwned(new TkGenerationTaskDO()
                     .setId(taskId)
                     .setAudioUrl(audioAsset.getAudioUrl())
                     .setSubtitleUrl(audioAsset.getSubtitleUrl())
@@ -171,7 +204,7 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
             Integer effectiveTargetDuration = resolveEffectiveTargetDuration(task, audioAsset);
             List<TkClipPlanItem> clipPlan = resolveClipPlan(task, script.getContent(), effectiveTargetDuration);
             finishCurrentStep(task, "SUCCESS", null, null);
-            taskMapper.updateById(new TkGenerationTaskDO()
+            updateOwned(new TkGenerationTaskDO()
                     .setId(taskId)
                     .setClipPlan(JsonUtils.toJsonString(clipPlan))
                     .setStatus(TkGenerationStatusEnum.MATERIAL_MATCHED)
@@ -190,7 +223,7 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
             clipPlan = tailQualityRenderResult.clipPlan;
             renderResult = tailQualityRenderResult.renderResult;
             finishCurrentStep(task, "SUCCESS", null, null);
-            taskMapper.updateById(new TkGenerationTaskDO()
+            updateOwned(new TkGenerationTaskDO()
                     .setId(taskId)
                     .setOutputUrl(renderResult.getOutputUrl())
                     .setSubtitleUrl(renderResult.getSubtitleUrl())
@@ -239,7 +272,7 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
         if (sameClipPlanMaterialSequence(clipPlan, replannedClipPlan)) {
             return new TailQualityRenderResult(clipPlan, renderResult);
         }
-        taskMapper.updateById(new TkGenerationTaskDO()
+        updateOwned(new TkGenerationTaskDO()
                 .setId(task.getId())
                 .setClipPlan(JsonUtils.toJsonString(replannedClipPlan))
                 .setCurrentStep("尾部画面质量重排后重新渲染")
@@ -390,10 +423,11 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
     }
 
     private void update(Long taskId, String status, Integer progress, String currentStep, String failCode, String failReason) {
+        renewActiveLease(taskId);
         LocalDateTime now = LocalDateTime.now();
         TkGenerationTaskDO existing = taskMapper.selectById(taskId);
         finishCurrentStep(existing, TkGenerationStatusEnum.FAILED.equals(status) ? "FAILED" : "SUCCESS", failCode, failReason);
-        taskMapper.update(null, Wrappers.<TkGenerationTaskDO>update()
+        com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<TkGenerationTaskDO> wrapper = Wrappers.<TkGenerationTaskDO>update()
                 .eq("id", taskId)
                 .set("status", status)
                 .set("progress", progress)
@@ -405,7 +439,36 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
                 .set("step_started_at", now)
                 .set("step_finished_at",
                         TkGenerationStatusEnum.SUCCESS.equals(status) || TkGenerationStatusEnum.FAILED.equals(status)
-                                ? now : null));
+                                ? now : null);
+        if (StrUtil.isNotBlank(activeLeaseToken.get())) {
+            wrapper.eq("lease_token", activeLeaseToken.get());
+        }
+        taskMapper.update(null, wrapper);
+    }
+
+    private void updateOwned(TkGenerationTaskDO update) {
+        if (update == null || update.getId() == null) {
+            return;
+        }
+        if (StrUtil.isBlank(activeLeaseToken.get())) {
+            taskMapper.updateById(update);
+            return;
+        }
+        renewActiveLease(update.getId());
+        taskMapper.update(update, Wrappers.<TkGenerationTaskDO>update()
+                .eq("id", update.getId())
+                .eq("lease_token", activeLeaseToken.get()));
+    }
+
+    private void renewActiveLease(Long taskId) {
+        if (taskLeaseService == null || StrUtil.isBlank(activeLeaseToken.get())) {
+            return;
+        }
+        int staleSeconds = generationProperties.getQueue().getStaleSeconds() == null
+                ? 300 : Math.max(60, generationProperties.getQueue().getStaleSeconds());
+        if (!taskLeaseService.renew(taskId, activeLeaseToken.get(), LocalDateTime.now().plusSeconds(staleSeconds))) {
+            throw new IllegalStateException("generation task lease lost");
+        }
     }
 
     private void finishCurrentStep(TkGenerationTaskDO task, String status, String failCode, String failReason) {

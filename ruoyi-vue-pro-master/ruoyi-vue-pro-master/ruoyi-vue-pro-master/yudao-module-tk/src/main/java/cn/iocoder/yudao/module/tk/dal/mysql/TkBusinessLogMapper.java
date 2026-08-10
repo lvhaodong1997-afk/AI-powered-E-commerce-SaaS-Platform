@@ -8,8 +8,16 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.TkBusinessLogDO;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import org.apache.ibatis.annotations.Mapper;
 
+import java.time.LocalDateTime;
+
 @Mapper
 public interface TkBusinessLogMapper extends BaseMapperX<TkBusinessLogDO> {
+
+    default int deleteExpired(LocalDateTime deadline, int limit) {
+        return delete(new LambdaQueryWrapperX<TkBusinessLogDO>()
+                .lt(TkBusinessLogDO::getCreateTime, deadline)
+                .last("LIMIT " + Math.max(1, limit)));
+    }
 
     default PageResult<TkBusinessLogDO> selectPage(TkBusinessLogPageReqVO reqVO, TkUserScope scope) {
         return selectPage(reqVO, new LambdaQueryWrapperX<TkBusinessLogDO>()

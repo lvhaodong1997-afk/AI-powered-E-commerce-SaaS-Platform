@@ -1,10 +1,12 @@
 package cn.iocoder.yudao.module.tk.controller.admin.reference;
 
-import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
+import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalyzeReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalysisPageReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalysisRespVO;
+import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalysisStatusRespVO;
 import cn.iocoder.yudao.module.tk.service.reference.TkReferenceAnalysisService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -14,6 +16,9 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import javax.validation.Valid;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 
@@ -65,6 +70,21 @@ public class TkReferenceAnalysisController {
     @PreAuthorize("@ss.hasPermission('tk:reference:query')")
     public CommonResult<PageResult<TkReferenceAnalysisRespVO>> getAnalysisPage(@Valid TkReferenceAnalysisPageReqVO pageReqVO) {
         return success(referenceAnalysisService.getAnalysisPage(pageReqVO));
+    }
+
+    @GetMapping("/status-batch")
+    @Operation(summary = "批量获得对标分析状态")
+    @PreAuthorize("@ss.hasPermission('tk:reference:query')")
+    public CommonResult<List<TkReferenceAnalysisStatusRespVO>> getAnalysisStatusBatch(@RequestParam("ids") String ids) {
+        List<Long> parsedIds = Arrays.stream(ids.split(","))
+                .map(String::trim)
+                .filter(StrUtil::isNotBlank)
+                .filter(item -> item.matches("\\d+"))
+                .map(Long::valueOf)
+                .distinct()
+                .limit(50)
+                .collect(Collectors.toList());
+        return success(referenceAnalysisService.getAnalysisStatusBatch(parsedIds));
     }
 
 }

@@ -175,7 +175,8 @@ public class TkGenerationTaskController {
                 .filter(task -> task.getId() != null)
                 .collect(Collectors.toMap(TkGenerationTaskDO::getId, task -> task, (left, right) -> left));
         items.forEach(item -> item.setOutputUrl(generationOutputStorageService.refreshGeneratedAssetReadUrl(
-                taskMap.get(item.getId()), item.getOutputUrl())));
+                taskMap.get(item.getId()), item.getOutputUrl(), buildDownloadFileName(
+                        taskMap.get(item.getId()), item.getCreatorName(), item.getDailyUserVideoNo()))));
     }
 
     private void refreshSummaryOutputUrls(List<TkGenerationTaskDO> tasks, List<TkGenerationTaskSummaryRespVO> items) {
@@ -183,7 +184,8 @@ public class TkGenerationTaskController {
                 .filter(task -> task.getId() != null)
                 .collect(Collectors.toMap(TkGenerationTaskDO::getId, task -> task, (left, right) -> left));
         items.forEach(item -> item.setOutputUrl(generationOutputStorageService.refreshGeneratedAssetReadUrl(
-                taskMap.get(item.getId()), item.getOutputUrl())));
+                taskMap.get(item.getId()), item.getOutputUrl(), buildDownloadFileName(
+                        taskMap.get(item.getId()), item.getCreatorName(), item.getDailyUserVideoNo()))));
     }
 
     private void refreshStatusOutputUrls(List<TkGenerationTaskDO> tasks, List<TkGenerationTaskStatusRespVO> items) {
@@ -191,7 +193,15 @@ public class TkGenerationTaskController {
                 .filter(task -> task.getId() != null)
                 .collect(Collectors.toMap(TkGenerationTaskDO::getId, task -> task, (left, right) -> left));
         items.forEach(item -> item.setOutputUrl(generationOutputStorageService.refreshGeneratedAssetReadUrl(
-                taskMap.get(item.getId()), item.getOutputUrl())));
+                taskMap.get(item.getId()), item.getOutputUrl(), "")));
+    }
+
+    private String buildDownloadFileName(TkGenerationTaskDO task, String creatorName, Integer dailyNo) {
+        if (task == null || task.getCreateTime() == null || StrUtil.isBlank(creatorName) || dailyNo == null) {
+            return "";
+        }
+        return task.getCreateTime().toLocalDate().format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                + "-" + creatorName + "-" + StrUtil.padPre(String.valueOf(dailyNo), 3, '0') + ".mp4";
     }
 
     private void enrichTaskDisplayFields(List<TkGenerationTaskDO> tasks, List<TkGenerationTaskRespVO> items) {

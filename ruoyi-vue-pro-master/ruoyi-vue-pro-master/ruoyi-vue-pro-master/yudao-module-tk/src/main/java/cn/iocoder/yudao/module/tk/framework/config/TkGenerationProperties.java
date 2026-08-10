@@ -95,6 +95,14 @@ public class TkGenerationProperties {
         private String proxy;
         private Boolean htmlFallbackEnabled = true;
         private Integer htmlTimeoutSeconds = 20;
+        private Boolean remoteUrlValidationEnabled = true;
+        private Boolean blockPrivateAddress = true;
+        private Integer maxRedirects = 3;
+        private Long maxDownloadBytes = 500L * 1024 * 1024;
+        private List<String> allowedHosts = Arrays.asList(
+                "douyin.com", "iesdouyin.com", "douyinvod.com",
+                "tiktok.com", "tiktokcdn.com", "byteoversea.com", "ibytedtos.com",
+                "bilibili.com", "b23.tv", "bilivideo.com", "tkassetplant.fnn.net.cn");
 
     }
 
@@ -142,6 +150,8 @@ public class TkGenerationProperties {
         private String cron = "0 5 * * * ?";
         private Integer generatedVideoRetentionHours = 24;
         private Integer referenceVideoRetentionHours = 24;
+        private Integer renderWorkDirRetentionHours = 24;
+        private Integer businessLogRetentionDays = 30;
         private Integer batchSize = 200;
         private Boolean dryRun = false;
 
@@ -151,6 +161,7 @@ public class TkGenerationProperties {
     public static class Queue {
 
         private Integer workerSize = 2;
+        private Integer queueCapacity = 100;
         private Integer scanDelayMs = 10000;
         private Integer staleSeconds = 300;
         private Integer batchSize = 10;
@@ -165,6 +176,7 @@ public class TkGenerationProperties {
         private String publicBaseUrl = "/uploads";
         private Integer chunkSizeBytes = 8 * 1024 * 1024;
         private Long maxFileSizeBytes = 100L * 1024 * 1024;
+        private Integer sessionExpireHours = 24;
         private Oss oss = new Oss();
 
     }

@@ -55,29 +55,41 @@ public class TkDashScopeVideoAnalysisClient implements TkReferenceAiAnalysisClie
                 booleanConfig("video-enable-thinking", false), doubleConfig("video-temperature", 0.2D));
         String url = StrUtil.format("https://{}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
                 workspaceId.trim());
-        int timeout = intConfig("video-timeout-seconds", 300) * 1000;
-        try (HttpResponse response = HttpRequest.post(url)
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .timeout(timeout)
-                .body(JsonUtils.toJsonString(body))
-                .execute()) {
-            String responseBody = response.body();
-            if (response.getStatus() < 200 || response.getStatus() >= 300) {
-                throw exception(TK_DASHSCOPE_VIDEO_CALL_FAILED,
-                        StrUtil.format("HTTP {}, request-id {}, {}", response.getStatus(),
-                                response.header("x-request-id"), StrUtil.maxLength(responseBody, 512)));
+        int timeout = Math.max(5, intConfig("video-timeout-seconds", 300)) * 1000;
+        int maxAttempts = Math.max(1, Math.min(3, intConfig("video-max-attempts", 3)));
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try (HttpResponse response = HttpRequest.post(url)
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .timeout(timeout)
+                    .body(JsonUtils.toJsonString(body))
+                    .execute()) {
+                String responseBody = response.body();
+                if (response.getStatus() < 200 || response.getStatus() >= 300) {
+                    if (isRetryableStatus(response.getStatus()) && attempt < maxAttempts) {
+                        sleepBeforeRetry(attempt);
+                        continue;
+                    }
+                    throw exception(TK_DASHSCOPE_VIDEO_CALL_FAILED,
+                            StrUtil.format("HTTP {}, request-id {}, {}", response.getStatus(),
+                                    response.header("x-request-id"), StrUtil.maxLength(responseBody, 512)));
+                }
+                String content = extractContent(JsonUtils.parseTree(responseBody));
+                if (StrUtil.isBlank(content)) {
+                    throw exception(TK_DASHSCOPE_VIDEO_CALL_FAILED, "empty assistant content");
+                }
+                return new TkReferenceAiAnalysisResult(provider(), model, content);
+            } catch (cn.iocoder.yudao.framework.common.exception.ServiceException ex) {
+                throw ex;
+            } catch (Exception ex) {
+                if (attempt < maxAttempts) {
+                    sleepBeforeRetry(attempt);
+                    continue;
+                }
+                throw exception(TK_DASHSCOPE_VIDEO_CALL_FAILED, StrUtil.maxLength(ex.getMessage(), 512));
             }
-            String content = extractContent(JsonUtils.parseTree(responseBody));
-            if (StrUtil.isBlank(content)) {
-                throw exception(TK_DASHSCOPE_VIDEO_CALL_FAILED, "empty assistant content");
-            }
-            return new TkReferenceAiAnalysisResult(provider(), model, content);
-        } catch (cn.iocoder.yudao.framework.common.exception.ServiceException ex) {
-            throw ex;
-        } catch (Exception ex) {
-            throw exception(TK_DASHSCOPE_VIDEO_CALL_FAILED, StrUtil.maxLength(ex.getMessage(), 512));
         }
+        throw exception(TK_DASHSCOPE_VIDEO_CALL_FAILED, "video analysis exhausted retries");
     }
 
     static Map<String, Object> buildRequestBody(String model, String videoUrl, String prompt, double fps,
@@ -104,6 +116,19 @@ public class TkDashScopeVideoAnalysisClient implements TkReferenceAiAnalysisClie
 
     static String extractContent(JsonNode response) {
         return response.path("choices").path(0).path("message").path("content").asText();
+    }
+
+    static boolean isRetryableStatus(int status) {
+        return status == 408 || status == 409 || status == 425 || status == 429 || status >= 500;
+    }
+
+    private void sleepBeforeRetry(int attempt) {
+        try {
+            Thread.sleep(Math.min(2000L, 300L * (1L << Math.min(3, attempt - 1))));
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw exception(TK_DASHSCOPE_VIDEO_CALL_FAILED, "video analysis retry interrupted");
+        }
     }
 
     private String config(String key, String fallback) {

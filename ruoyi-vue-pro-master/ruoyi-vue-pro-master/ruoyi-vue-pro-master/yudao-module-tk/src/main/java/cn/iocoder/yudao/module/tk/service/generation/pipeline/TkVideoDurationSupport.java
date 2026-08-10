@@ -4,7 +4,7 @@ public final class TkVideoDurationSupport {
 
     public static final int DEFAULT_TARGET_DURATION = 15;
     public static final int MIN_TARGET_DURATION = 8;
-    public static final int MAX_TARGET_DURATION = 60;
+    public static final int MAX_TARGET_DURATION = 180;
 
     public static int normalize(Integer duration) {
         if (duration == null || duration <= 0) {

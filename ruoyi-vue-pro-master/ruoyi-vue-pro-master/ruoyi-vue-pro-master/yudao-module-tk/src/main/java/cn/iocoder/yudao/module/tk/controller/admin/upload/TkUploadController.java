@@ -7,6 +7,7 @@ import cn.iocoder.yudao.module.tk.controller.admin.upload.vo.TkUploadSessionResp
 import cn.iocoder.yudao.module.tk.controller.admin.upload.vo.TkUploadSessionStatusRespVO;
 import cn.iocoder.yudao.module.tk.service.upload.TkMaterialChunkUploadService;
 import cn.iocoder.yudao.module.tk.service.upload.TkMaterialOssUploadService;
+import cn.iocoder.yudao.module.tk.service.upload.TkUploadSessionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -29,6 +30,8 @@ public class TkUploadController {
     private TkMaterialChunkUploadService materialChunkUploadService;
     @Resource
     private TkMaterialOssUploadService materialOssUploadService;
+    @Resource
+    private TkUploadSessionService uploadSessionService;
 
     @PostMapping("/material-video/session/create")
     @Operation(summary = "创建素材视频分片上传会话")
@@ -46,6 +49,9 @@ public class TkUploadController {
     @Operation(summary = "查询素材视频分片上传会话")
     @PreAuthorize("@ss.hasPermission('tk:material-video:upload')")
     public CommonResult<TkUploadSessionStatusRespVO> getMaterialVideoSession(@PathVariable("uploadId") String uploadId) {
+        if (materialOssUploadService.isEnabled()) {
+            return success(uploadSessionService.getStatus(uploadId));
+        }
         return success(materialChunkUploadService.getSessionStatus(uploadId));
     }
 
@@ -74,6 +80,10 @@ public class TkUploadController {
     @Operation(summary = "取消素材视频分片上传")
     @PreAuthorize("@ss.hasPermission('tk:material-video:upload')")
     public CommonResult<Boolean> cancelMaterialVideoUpload(@PathVariable("uploadId") String uploadId) {
+        if (materialOssUploadService.isEnabled()) {
+            uploadSessionService.cancel(uploadId);
+            return success(true);
+        }
         materialChunkUploadService.cancel(uploadId);
         return success(true);
     }

@@ -9,6 +9,7 @@ import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalyzeReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalysisPageReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalysisRespVO;
+import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalysisStatusRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceScriptOptionRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkMaterialLibraryDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkReferenceAnalysisDO;
@@ -245,6 +246,18 @@ public class TkReferenceAnalysisServiceImpl implements TkReferenceAnalysisServic
         }
         enrichCreatorNames(list);
         return new PageResult<>(list, pageResult.getTotal());
+    }
+
+    @Override
+    public List<TkReferenceAnalysisStatusRespVO> getAnalysisStatusBatch(Collection<Long> ids) {
+        List<TkReferenceAnalysisDO> analyses = analysisMapper.selectStatusBatch(ids, dataScopeService.getCurrentScope());
+        List<TkReferenceAnalysisStatusRespVO> result = new ArrayList<>();
+        for (TkReferenceAnalysisDO analysis : analyses) {
+            TkReferenceAnalysisStatusRespVO item = BeanUtils.toBean(buildResp(analysis), TkReferenceAnalysisStatusRespVO.class);
+            item.setUpdateTime(analysis.getUpdateTime());
+            result.add(item);
+        }
+        return result;
     }
 
     private void enrichCreatorNames(List<TkReferenceAnalysisRespVO> items) {

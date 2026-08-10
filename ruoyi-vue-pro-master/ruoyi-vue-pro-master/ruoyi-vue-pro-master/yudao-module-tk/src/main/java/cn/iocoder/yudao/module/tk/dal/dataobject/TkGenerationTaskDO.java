@@ -159,6 +159,10 @@ public class TkGenerationTaskDO extends TenantBaseDO {
 
     private LocalDateTime heartbeatTime;
 
+    private String leaseToken;
+
+    private LocalDateTime leaseExpireTime;
+
     private LocalDateTime stepStartedAt;
 
     private LocalDateTime stepFinishedAt;

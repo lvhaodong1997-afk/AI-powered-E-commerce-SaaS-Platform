@@ -945,8 +945,10 @@
                       <Icon icon="ep:link" />
                     </template>
                   </el-input>
-                  <div v-if="createForm.openingVideoUrl" class="opening-clip-range">
-                    <small class="field-hint">{{ copy.openingFullVideoHint }}</small>
+                  <div v-if="createForm.openingVideoUrl || openingVideoFile" class="opening-clip-range">
+                    <small class="field-hint">
+                      {{ isFullPoolRandomMode ? copy.openingFullPoolRandomHint : copy.openingFullVideoHint }}
+                    </small>
                   </div>
                 </div>
               </div>
@@ -1400,7 +1402,7 @@ const DISPLAY_SCRIPT_COUNT = 6
 const TK_GENERATION_REPLAY_KEY = 'tk:generation:replay'
 const DEFAULT_TARGET_DURATION = 15
 const MIN_TARGET_DURATION = 8
-const MAX_TARGET_DURATION = 60
+const MAX_TARGET_DURATION = 180
 const ANALYSIS_RECOVERY_TIME_TOLERANCE_MS = 60_000
 const ANALYSIS_POLL_INTERVAL_MS = 3000
 const ANALYSIS_POLL_TIMEOUT_MS = 10 * 60 * 1000
@@ -1714,7 +1716,7 @@ const copy = computed(() =>
         languagePlaceholder: 'Select script and voiceover language',
         targetDurationLabel: 'Target video duration',
         targetDurationPlaceholder: '15',
-        targetDurationHint: 'Leave empty to use 15 seconds. Supported range: 8-60 seconds.',
+        targetDurationHint: 'Leave empty to use 15 seconds. Supported range: 8-180 seconds.',
         clipPlanModeLabel: 'Video generation mode',
         clipPlanModeSegmented: 'Default structure',
         clipPlanModeFullPoolRandom: 'Random pool',
@@ -1791,6 +1793,8 @@ const copy = computed(() =>
         videoLinkPlaceholder: 'Enter video link',
         openingFullVideoHint:
           'This video is used as a whole source. If it exceeds the hook duration, the hook section is compressed.',
+        openingFullPoolRandomHint:
+          'In Random pool mode, this video is fixed as the first 3 seconds; later clips are selected randomly from the full material pool.',
         generateVideo: 'Generate mixed video',
         estimateTime: 'Estimated time: 3-5 minutes',
         todayData: 'Today',
@@ -1979,7 +1983,7 @@ const copy = computed(() =>
         languagePlaceholder: '请选择文案和配音语言',
         targetDurationLabel: '目标视频时长',
         targetDurationPlaceholder: '15',
-        targetDurationHint: '不填默认 15 秒，支持 8-60 秒',
+        targetDurationHint: '不填默认 15 秒，支持 8-180 秒',
         clipPlanModeLabel: '视频生成方式',
         clipPlanModeSegmented: '默认结构拼接',
         clipPlanModeFullPoolRandom: '全素材随机拼接',
@@ -2051,6 +2055,7 @@ const copy = computed(() =>
         inputVideoLink: '输入开头视频链接',
         videoLinkPlaceholder: '请输入视频链接',
         openingFullVideoHint: '该视频会作为完整素材使用，超过黄金3秒环节目标时长时按环节压缩。',
+        openingFullPoolRandomHint: '全素材随机拼接时，该视频固定作为前3秒片头，后续从全部素材中随机拼接。',
         generateVideo: '生成混剪视频',
         estimateTime: '预计生成时间：3-5分钟',
         todayData: '今日数据',
@@ -3301,7 +3306,9 @@ const createGenerationPayload = (script: DashboardScriptOption): TkGenerationTas
   if (script.id) {
     payload.scriptOptionId = script.id
   }
-  if (createForm.openingVideoUrl) {
+  if (openingVideoFile.value) {
+    payload.openingVideoName = openingVideoFile.value.name
+  } else if (createForm.openingVideoUrl) {
     payload.openingVideoUrl = createForm.openingVideoUrl
     payload.openingVideoName = copy.value.remoteHookVideo
   }
@@ -3521,6 +3528,9 @@ const isLeadGenerationFlow = computed(
 )
 const isEcommerceFlow = computed(() => createForm.materialPurpose === MATERIAL_PURPOSE_ECOMMERCE)
 const supportsClipPlanMode = computed(() => isEcommerceFlow.value || isLeadGenerationFlow.value)
+const isFullPoolRandomMode = computed(
+  () => createForm.clipPlanMode === CLIP_PLAN_MODE_FULL_POOL_RANDOM
+)
 const isLeadGenerationManualMode = computed(
   () => isLeadGenerationFlow.value && !referenceAnalysis.value?.id
 )

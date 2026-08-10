@@ -59,6 +59,7 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
     @Override
     public TkRenderResult render(TkGenerationTaskDO task, List<TkClipPlanItem> clipPlan) {
         File taskDir = FileUtil.mkdir(resolveWorkDir(task));
+        boolean completed = false;
         try {
             Map<String, File> sourceCache = new java.util.concurrent.ConcurrentHashMap<>();
             runRenderStep(task, "RENDER_DOWNLOAD", "Render download material",
@@ -96,11 +97,17 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                     () -> uploadAssets(task, clipPlan, finalVideo, renderMedia.subtitleAssets));
             SubtitleAssets subtitleAssets = uploadResult.subtitleAssets;
             String outputUrl = uploadResult.outputUrl;
-            return new TkRenderResult(outputUrl, subtitleAssets.assUrl, subtitleAssets.timelineUrl,
+            TkRenderResult result = new TkRenderResult(outputUrl, subtitleAssets.assUrl, subtitleAssets.timelineUrl,
                     subtitleAssets.visualAnalysisUrl, subtitleAssets.layoutUrl, subtitleAssets.assUrl,
                     subtitleAssets.asrRawUrl, subtitleAssets.qualityUrl);
+            completed = true;
+            return result;
         } catch (Exception ex) {
             throw new IllegalStateException("视频渲染失败：" + ex.getMessage(), ex);
+        } finally {
+            if (completed) {
+                FileUtil.del(taskDir);
+            }
         }
     }
 

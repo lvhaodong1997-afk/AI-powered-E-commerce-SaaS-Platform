@@ -7,6 +7,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TkDashScopeVideoAnalysisClientTest {
 
@@ -28,5 +29,12 @@ class TkDashScopeVideoAnalysisClientTest {
         assertFalse(JsonUtils.parseTree(json).path("enable_thinking").asBoolean());
         assertEquals("ok", TkDashScopeVideoAnalysisClient.extractContent(JsonUtils.parseTree(
                 "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}")));
+    }
+
+    @Test
+    void retriesOnlyTransientProviderStatuses() {
+        assertTrue(TkDashScopeVideoAnalysisClient.isRetryableStatus(429));
+        assertTrue(TkDashScopeVideoAnalysisClient.isRetryableStatus(503));
+        assertFalse(TkDashScopeVideoAnalysisClient.isRetryableStatus(400));
     }
 }

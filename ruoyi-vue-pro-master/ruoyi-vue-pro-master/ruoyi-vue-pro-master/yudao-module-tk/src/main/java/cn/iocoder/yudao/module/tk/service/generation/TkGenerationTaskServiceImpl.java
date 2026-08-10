@@ -617,18 +617,19 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         List<TkGenerationTaskDO> validTasks = tasks.stream()
                 .filter(task -> task.getId() != null && task.getCreateTime() != null && StrUtil.isNotBlank(task.getCreator()))
                 .collect(Collectors.toList());
-        Map<String, List<TkGenerationTaskDO>> groupMap = validTasks.stream()
+        LocalDate minDate = validTasks.stream().map(task -> task.getCreateTime().toLocalDate())
+                .min(LocalDate::compareTo).orElse(LocalDate.now());
+        LocalDate maxDate = validTasks.stream().map(task -> task.getCreateTime().toLocalDate())
+                .max(LocalDate::compareTo).orElse(minDate);
+        Set<Long> tenantIds = validTasks.stream().map(TkGenerationTaskDO::getTenantId).collect(Collectors.toSet());
+        Set<String> creators = validTasks.stream().map(TkGenerationTaskDO::getCreator).collect(Collectors.toSet());
+        Set<Long> pageTaskIds = validTasks.stream().map(TkGenerationTaskDO::getId).collect(Collectors.toSet());
+        Map<String, List<TkGenerationTaskDO>> groupMap = taskMapper.selectDailySequenceCandidates(
+                        tenantIds, creators, minDate.atStartOfDay(), maxDate.plusDays(1).atStartOfDay()).stream()
                 .collect(Collectors.groupingBy(this::buildDailySequenceGroupKey));
         groupMap.values().forEach(groupTasks -> {
-            TkGenerationTaskDO first = groupTasks.get(0);
-            LocalDate date = first.getCreateTime().toLocalDate();
-            LocalDateTime startTime = date.atStartOfDay();
-            LocalDateTime endTime = date.plusDays(1).atStartOfDay();
-            Set<Long> pageTaskIds = groupTasks.stream().map(TkGenerationTaskDO::getId).collect(Collectors.toSet());
-            List<Long> dailyTaskIds = taskMapper.selectDailyTaskIds(
-                    first.getTenantId(), first.getCreator(), startTime, endTime);
-            for (int i = 0; i < dailyTaskIds.size(); i++) {
-                Long taskId = dailyTaskIds.get(i);
+            for (int i = 0; i < groupTasks.size(); i++) {
+                Long taskId = groupTasks.get(i).getId();
                 if (pageTaskIds.contains(taskId)) {
                     result.put(taskId, i + 1);
                 }

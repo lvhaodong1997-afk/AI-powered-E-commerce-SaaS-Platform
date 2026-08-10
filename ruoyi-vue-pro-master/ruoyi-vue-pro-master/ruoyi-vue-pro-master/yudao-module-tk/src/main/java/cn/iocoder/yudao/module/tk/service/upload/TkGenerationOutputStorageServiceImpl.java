@@ -67,6 +67,12 @@ public class TkGenerationOutputStorageServiceImpl implements TkGenerationOutputS
 
     @Override
     public String refreshGeneratedAssetReadUrl(TkGenerationTaskDO task, String outputUrl) {
+        return refreshGeneratedAssetReadUrl(task, outputUrl, null);
+    }
+
+    @Override
+    public String refreshGeneratedAssetReadUrl(TkGenerationTaskDO task, String outputUrl,
+                                               String preferredDownloadFileName) {
         if (StrUtil.isBlank(outputUrl)) {
             return outputUrl;
         }
@@ -78,7 +84,10 @@ public class TkGenerationOutputStorageServiceImpl implements TkGenerationOutputS
         if (StrUtil.isBlank(objectKey)) {
             return outputUrl;
         }
-        return toReadUrl(oss, objectKey, buildDownloadFileNameWithDailyNo(task, FileUtil.getName(objectKey)));
+        String downloadFileName = preferredDownloadFileName == null
+                ? buildDownloadFileNameWithDailyNo(task, FileUtil.getName(objectKey))
+                : StrUtil.blankToDefault(preferredDownloadFileName, FileUtil.getName(objectKey));
+        return toReadUrl(oss, objectKey, downloadFileName);
     }
 
     static String buildGeneratedAssetObjectKey(String uploadPathPrefix, TkGenerationTaskDO task,

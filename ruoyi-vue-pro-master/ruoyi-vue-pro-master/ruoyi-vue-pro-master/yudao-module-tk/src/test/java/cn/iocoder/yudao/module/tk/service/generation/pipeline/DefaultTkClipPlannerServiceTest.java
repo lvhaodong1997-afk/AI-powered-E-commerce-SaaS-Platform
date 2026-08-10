@@ -331,6 +331,41 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
+    void planFullPoolRandomKeepsUploadedOpeningFirstAndRandomizesRemainingDuration() {
+        DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
+        ReflectionTestUtils.setField(service, "random", new FixedRandom(0, 0, 0));
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        TkMaterialVideoMapper materialVideoMapper = mock(TkMaterialVideoMapper.class);
+        ReflectionTestUtils.setField(service, "materialVideoMapper", materialVideoMapper);
+        when(materialVideoMapper.selectListByLibraryId(10L)).thenReturn(Arrays.asList(
+                material(1L, 3L, "GENERAL"),
+                material(2L, 4L, "GENERAL"),
+                material(3L, 7L, "GENERAL")
+        ));
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .id(186L)
+                .libraryId(10L)
+                .targetDuration(10)
+                .openingVideoUrl("https://example.com/golden-opening.mp4")
+                .openingVideoName("golden-opening.mp4")
+                .generationRouteConfig("{\"clipPlanMode\":\"FULL_POOL_RANDOM\"}")
+                .build();
+
+        List<TkClipPlanItem> plan = service.plan(task, "full pool random with opening");
+
+        assertEquals(10, plan.stream().mapToInt(TkClipPlanItem::getDurationSecond).sum());
+        assertEquals(2, plan.size());
+        assertEquals("OPENING", plan.get(0).getSourceType());
+        assertEquals("golden-opening.mp4", plan.get(0).getFileName());
+        assertEquals(3, plan.get(0).getDurationSecond());
+        assertEquals(1, plan.get(0).getOrderNo());
+        assertEquals("MATERIAL", plan.get(1).getSourceType());
+        assertEquals(3L, plan.get(1).getMaterialVideoId());
+        assertEquals(2, plan.get(1).getOrderNo());
+        assertEquals(7, plan.get(1).getDurationSecond());
+    }
+
+    @Test
     void planUsesEffectiveTargetDurationWhenAudioIsLongerThanRequestedDuration() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         ReflectionTestUtils.setField(service, "random", new FixedRandom(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));

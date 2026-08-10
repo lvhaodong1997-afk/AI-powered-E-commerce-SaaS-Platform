@@ -50,6 +50,8 @@ public class TkMaterialChunkUploadServiceImpl implements TkMaterialChunkUploadSe
     private TkLocalUploadStorageService storageService;
     @Resource
     private TkGenerationProperties generationProperties;
+    @Resource
+    private TkUploadSessionService uploadSessionService;
 
     @Override
     public TkUploadSessionRespVO createMaterialVideoSession(Long libraryId, String fileName, Long fileSize, String contentType) {
@@ -78,11 +80,18 @@ public class TkMaterialChunkUploadServiceImpl implements TkMaterialChunkUploadSe
         } catch (IOException ex) {
             throw new IllegalStateException("创建上传会话失败：" + ex.getMessage(), ex);
         }
+        if (uploadSessionService != null) {
+            uploadSessionService.create(uploadId, library, fileName, fileSize,
+                    StrUtil.blankToDefault(contentType, "video/" + extension(fileName)), "local");
+        }
         return toSessionResp(uploadId, chunkSize, totalChunks, 0L, Collections.emptySet());
     }
 
     @Override
     public TkUploadSessionStatusRespVO getSessionStatus(String uploadId) {
+        if (uploadSessionService != null) {
+            uploadSessionService.validateAccessible(uploadId);
+        }
         Properties manifest = readManifest(uploadId);
         Set<Integer> chunks = uploadedChunks(uploadId, Integer.parseInt(manifest.getProperty("totalChunks")));
         TkUploadSessionStatusRespVO respVO = new TkUploadSessionStatusRespVO();
@@ -101,6 +110,9 @@ public class TkMaterialChunkUploadServiceImpl implements TkMaterialChunkUploadSe
         if (chunk == null || chunk.isEmpty()) {
             throw exception(TK_UPLOAD_FILE_EMPTY);
         }
+        if (uploadSessionService != null) {
+            uploadSessionService.validateAccessible(uploadId);
+        }
         Properties manifest = readManifest(uploadId);
         int totalChunks = Integer.parseInt(manifest.getProperty("totalChunks"));
         if (chunkIndex == null || chunkIndex < 0 || chunkIndex >= totalChunks) {
@@ -117,6 +129,9 @@ public class TkMaterialChunkUploadServiceImpl implements TkMaterialChunkUploadSe
 
     @Override
     public Long completeMaterialVideoUpload(String uploadId, String tags, String usagePhase, String segmentType) {
+        if (uploadSessionService != null) {
+            uploadSessionService.validateAccessible(uploadId);
+        }
         Properties manifest = readManifest(uploadId);
         Long libraryId = Long.valueOf(manifest.getProperty("libraryId"));
         TkMaterialLibraryDO library = validateLibraryWritable(libraryId);
@@ -168,11 +183,18 @@ public class TkMaterialChunkUploadServiceImpl implements TkMaterialChunkUploadSe
                 .setTotalSize((library.getTotalSize() == null ? 0L : library.getTotalSize()) + fileSize));
         materialVideoParseService.submit(library.getTenantId(), video.getId());
         FileUtil.del(tmpDir.toFile());
+        if (uploadSessionService != null) {
+            uploadSessionService.markCompleted(uploadId);
+        }
         return video.getId();
     }
 
     @Override
     public void cancel(String uploadId) {
+        if (uploadSessionService != null) {
+            uploadSessionService.cancel(uploadId);
+            return;
+        }
         FileUtil.del(storageService.getTmpDir(uploadId).toFile());
     }
 

@@ -177,6 +177,7 @@ class TkReferenceVideoContentServiceImplTest {
         TkReferenceVideoContentServiceImpl service = new TkReferenceVideoContentServiceImpl();
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getFfmpeg().setWorkDir(workDir.toString());
+        properties.getReferenceDownload().setRemoteUrlValidationEnabled(false);
         ReflectionTestUtils.setField(service, "generationProperties", properties);
         return service;
     }

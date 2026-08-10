@@ -33,6 +33,13 @@
         <strong>{{ item.value }}</strong>
       </div>
     </div>
+    <div class="record-sync-line">
+      <span v-if="activePollingActive">
+        <Icon icon="ep:loading" class="is-loading mr-5px" />
+        自动同步中
+      </span>
+      <span v-if="activeLastSyncedAt">最后同步：{{ formatSyncTime(activeLastSyncedAt) }}</span>
+    </div>
 
     <el-form
       v-if="activeTab === 'analysis'"
@@ -530,6 +537,7 @@ import {
 } from '@/api/tk/generation'
 import {
   TkReferenceApi,
+  TkReferenceAnalysisStatusVO,
   TkReferenceAnalysisVO,
   TkReferenceScriptOptionVO
 } from '@/api/tk/reference'
@@ -595,6 +603,7 @@ const publishUrlRules = {
 }
 
 const analysisStatuses = ['WAITING', 'RUNNING', 'SUCCESS', 'FAILED']
+const runningAnalysisStatuses = new Set(['WAITING', 'RUNNING'])
 const generationStatuses = [
   'PENDING',
   'ANALYZING',
@@ -629,9 +638,16 @@ type RecordStatItem = {
   value: number
   tone: RecordStatTone
 }
+let analysisPollingTimer: number | undefined
+let analysisPollingRequesting = false
+const analysisPollingStartedAt = ref<number>()
+const analysisPollingActive = ref(false)
+const analysisLastSyncedAt = ref<Date>()
 let generationPollingTimer: number | undefined
 let generationPollingRequesting = false
 const generationPollingStartedAt = ref<number>()
+const generationPollingActive = ref(false)
+const generationLastSyncedAt = ref<Date>()
 
 const materialPurposeLabel = (value?: string) =>
   value === 'LEAD_GENERATION' ? '引流素材' : '电商素材'
@@ -680,6 +696,15 @@ const generationStats = computed<RecordStatItem[]>(() => [
 const activeRecordStats = computed(() =>
   activeTab.value === 'analysis' ? analysisStats.value : generationStats.value
 )
+const activePollingActive = computed(() =>
+  activeTab.value === 'analysis' ? analysisPollingActive.value : generationPollingActive.value
+)
+const activeLastSyncedAt = computed(() =>
+  activeTab.value === 'analysis' ? analysisLastSyncedAt.value : generationLastSyncedAt.value
+)
+
+const formatSyncTime = (value: Date) =>
+  value.toLocaleTimeString('zh-CN', { hour12: false })
 
 const statusLabel = (status?: string) => {
   const labels: Record<string, string> = {
@@ -831,14 +856,95 @@ const submitPublishUrl = async () => {
   }
 }
 
+const isRecordPageVisible = () => typeof document === 'undefined' || !document.hidden
+
+const hasRunningAnalysisTasks = () =>
+  analysisList.value.some((item) => runningAnalysisStatuses.has(item.status || ''))
+
+const clearAnalysisPolling = () => {
+  if (analysisPollingTimer) {
+    window.clearTimeout(analysisPollingTimer)
+  }
+  analysisPollingTimer = undefined
+  analysisPollingStartedAt.value = undefined
+  analysisPollingActive.value = false
+}
+
+const nextAnalysisPollingInterval = () => {
+  const startedAt = analysisPollingStartedAt.value || Date.now()
+  const elapsed = Date.now() - startedAt
+  if (elapsed < 60_000) return 3000
+  if (elapsed < 300_000) return 8000
+  return 15000
+}
+
+const mergeAnalysisStatus = (items: TkReferenceAnalysisStatusVO[]) => {
+  const statusMap = new Map(items.map((item) => [item.id, item]))
+  analysisList.value = analysisList.value.map((item) => {
+    if (!item.id) return item
+    const status = statusMap.get(item.id)
+    return status ? { ...item, ...status } : item
+  })
+}
+
+const refreshAnalysisStatuses = async () => {
+  if (analysisPollingRequesting) return
+  const runningIds = new Set(
+    analysisList.value
+      .filter((item) => item.id && runningAnalysisStatuses.has(item.status || ''))
+      .map((item) => item.id as number)
+  )
+  if (!runningIds.size) {
+    clearAnalysisPolling()
+    return
+  }
+  if (!isRecordPageVisible()) {
+    syncAnalysisPolling()
+    return
+  }
+  analysisPollingRequesting = true
+  try {
+    const statuses = await TkReferenceApi.getAnalysisStatusBatch([...runningIds])
+    const hasTerminalUpdate = statuses.some(
+      (item) => item.id && runningIds.has(item.id) && !runningAnalysisStatuses.has(item.status || '')
+    )
+    mergeAnalysisStatus(statuses)
+    analysisLastSyncedAt.value = new Date()
+    if (hasTerminalUpdate) {
+      await getAnalysisList()
+      return
+    }
+  } finally {
+    analysisPollingRequesting = false
+    syncAnalysisPolling()
+  }
+}
+
+const syncAnalysisPolling = () => {
+  if (activeTab.value !== 'analysis' || !hasRunningAnalysisTasks() || !isRecordPageVisible()) {
+    clearAnalysisPolling()
+    return
+  }
+  analysisPollingActive.value = true
+  if (analysisPollingTimer) return
+  analysisPollingStartedAt.value ||= Date.now()
+  analysisPollingTimer = window.setTimeout(() => {
+    analysisPollingTimer = undefined
+    refreshAnalysisStatuses()
+  }, nextAnalysisPollingInterval())
+}
+
 const getAnalysisList = async () => {
+  clearAnalysisPolling()
   analysisLoading.value = true
   try {
     const data = await TkReferenceApi.getAnalysisPage(analysisQuery)
     analysisList.value = data.list
     analysisTotal.value = data.total
+    analysisLastSyncedAt.value = new Date()
   } finally {
     analysisLoading.value = false
+    syncAnalysisPolling()
   }
 }
 
@@ -851,6 +957,7 @@ const clearGenerationPolling = () => {
   }
   generationPollingTimer = undefined
   generationPollingStartedAt.value = undefined
+  generationPollingActive.value = false
 }
 
 const nextGenerationPollingInterval = () => {
@@ -872,17 +979,31 @@ const mergeGenerationStatus = (items: TkGenerationTaskStatusVO[]) => {
 
 const refreshGenerationStatuses = async () => {
   if (generationPollingRequesting) return
-  const ids = generationList.value
-    .filter((item) => item.id && runningGenerationStatuses.has(item.status || ''))
-    .map((item) => item.id as number)
-  if (!ids.length) {
+  const runningIds = new Set(
+    generationList.value
+      .filter((item) => item.id && runningGenerationStatuses.has(item.status || ''))
+      .map((item) => item.id as number)
+  )
+  if (!runningIds.size) {
     clearGenerationPolling()
+    return
+  }
+  if (!isRecordPageVisible()) {
+    syncGenerationPolling()
     return
   }
   generationPollingRequesting = true
   try {
-    const statuses = await TkGenerationApi.getGenerationStatusBatch(ids)
+    const statuses = await TkGenerationApi.getGenerationStatusBatch([...runningIds])
+    const hasTerminalUpdate = statuses.some(
+      (item) => item.id && runningIds.has(item.id) && !runningGenerationStatuses.has(item.status || '')
+    )
     mergeGenerationStatus(statuses)
+    generationLastSyncedAt.value = new Date()
+    if (hasTerminalUpdate) {
+      await getGenerationList()
+      return
+    }
   } finally {
     generationPollingRequesting = false
     syncGenerationPolling()
@@ -890,10 +1011,11 @@ const refreshGenerationStatuses = async () => {
 }
 
 const syncGenerationPolling = () => {
-  if (activeTab.value !== 'generation' || !hasRunningGenerationTasks()) {
+  if (activeTab.value !== 'generation' || !hasRunningGenerationTasks() || !isRecordPageVisible()) {
     clearGenerationPolling()
     return
   }
+  generationPollingActive.value = true
   if (generationPollingTimer) return
   generationPollingStartedAt.value ||= Date.now()
   generationPollingTimer = window.setTimeout(() => {
@@ -909,6 +1031,7 @@ const getGenerationList = async () => {
     const data = await TkGenerationApi.getGenerationSummaryPage(generationQuery)
     generationList.value = data.list
     generationTotal.value = data.total
+    generationLastSyncedAt.value = new Date()
   } finally {
     generationLoading.value = false
     syncGenerationPolling()
@@ -920,9 +1043,12 @@ const handleTabChange = () => {
     clearGenerationPolling()
     if (!analysisList.value.length) {
       getAnalysisList()
+    } else {
+      syncAnalysisPolling()
     }
   }
   if (activeTab.value === 'generation') {
+    clearAnalysisPolling()
     getGenerationList()
   }
 }
@@ -998,8 +1124,29 @@ const applyRouteGenerationFilters = () => {
   getGenerationList()
 }
 
-onMounted(applyRouteGenerationFilters)
-onBeforeUnmount(clearGenerationPolling)
+const handleRecordVisibilityChange = () => {
+  if (!isRecordPageVisible()) {
+    clearAnalysisPolling()
+    clearGenerationPolling()
+    return
+  }
+  if (activeTab.value === 'analysis' && hasRunningAnalysisTasks()) {
+    refreshAnalysisStatuses()
+  }
+  if (activeTab.value === 'generation' && hasRunningGenerationTasks()) {
+    refreshGenerationStatuses()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('visibilitychange', handleRecordVisibilityChange)
+  applyRouteGenerationFilters()
+})
+onBeforeUnmount(() => {
+  clearAnalysisPolling()
+  clearGenerationPolling()
+  document.removeEventListener('visibilitychange', handleRecordVisibilityChange)
+})
 </script>
 
 <style scoped>
@@ -1061,6 +1208,21 @@ onBeforeUnmount(clearGenerationPolling)
   color: #111827;
   font-size: 24px;
   line-height: 28px;
+}
+
+.record-sync-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 20px;
+  margin: -4px 0 12px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.record-sync-line span {
+  display: inline-flex;
+  align-items: center;
 }
 
 .record-stat.success {

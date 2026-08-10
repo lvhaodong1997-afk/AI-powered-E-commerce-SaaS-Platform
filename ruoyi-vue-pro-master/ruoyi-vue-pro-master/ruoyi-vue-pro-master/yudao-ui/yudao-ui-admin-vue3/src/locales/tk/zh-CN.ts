@@ -110,7 +110,7 @@ export const tkZhCN: Record<string, string> = {
   'dashboard.selectScriptOption': '选择文案方案',
   'dashboard.configureVideoSettings': '配置视频设置',
   'dashboard.targetVideoDuration': '目标视频时长',
-  'dashboard.targetDurationHint': '不填默认 15 秒，支持 8-60 秒',
+  'dashboard.targetDurationHint': '不填默认 15 秒，支持 8-180 秒',
   'dashboard.clipDurationStructure': '剪辑结构秒数',
   'dashboard.autoAllocate': '智能分配',
   'dashboard.customSeconds': '自定义秒数',

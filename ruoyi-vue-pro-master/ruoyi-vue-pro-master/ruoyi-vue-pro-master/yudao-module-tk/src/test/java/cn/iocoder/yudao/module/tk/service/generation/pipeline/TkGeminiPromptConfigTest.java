@@ -41,6 +41,13 @@ class TkGeminiPromptConfigTest {
     }
 
     @Test
+    void promptsShouldDescribeLongFormDurationBudgetsThroughOneHundredEightySeconds() {
+        assertLongFormDurationBudgets(TkGeminiPromptConfig.DEFAULT_ANALYSIS_PROMPT);
+        assertLongFormDurationBudgets(TkGeminiPromptConfig.DEFAULT_SCRIPT_REGENERATION_PROMPT);
+        assertLongFormDurationBudgets(TkGeminiPromptConfig.DEFAULT_GENERATION_SCRIPT_PROMPT);
+    }
+
+    @Test
     void promptKeysShouldRouteByMaterialPurpose() {
         assertEquals(TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE,
                 TkGeminiPromptConfig.normalizeMaterialPurpose(null));
@@ -83,6 +90,12 @@ class TkGeminiPromptConfigTest {
         assertTrue(prompt.contains("S1_HOOK"));
         assertTrue(prompt.contains("S7_LIFESTYLE"));
         assertTrue(prompt.contains("S8_CTA"));
+    }
+
+    private static void assertLongFormDurationBudgets(String prompt) {
+        assertTrue(prompt.contains("90秒"));
+        assertTrue(prompt.contains("120秒"));
+        assertTrue(prompt.contains("180秒"));
     }
 
     private static int countPlaceholders(String prompt) {

@@ -14,6 +14,7 @@ import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -24,6 +25,26 @@ import java.util.stream.Collectors;
 
 @Mapper
 public interface TkGenerationTaskMapper extends BaseMapperX<TkGenerationTaskDO> {
+
+    @Update("<script>UPDATE tk_generation_task SET lease_token = #{leaseToken}, worker_id = #{workerId}, "
+            + "heartbeat_time = NOW(), lease_expire_time = #{leaseExpireTime}, update_time = NOW() "
+            + "WHERE id = #{id} AND deleted = 0 AND ((status = 'PENDING' "
+            + "AND (lease_token IS NULL OR lease_expire_time IS NULL OR lease_expire_time &lt; NOW())) "
+            + "OR (status IN ('PRECHECKED','ANALYZING','SCRIPT_READY','VOICE_READY','MATERIAL_MATCHING',"
+            + "'MATERIAL_MATCHED','SUBTITLE_TIMELINE_READY','VISUAL_ANALYZED','CLIP_PLANNED','RENDERING','EXPORTING') "
+            + "AND (heartbeat_time IS NULL OR heartbeat_time &lt; #{staleBefore})))</script>")
+    int claimTask(@Param("id") Long id, @Param("leaseToken") String leaseToken,
+                  @Param("workerId") String workerId, @Param("staleBefore") LocalDateTime staleBefore,
+                  @Param("leaseExpireTime") LocalDateTime leaseExpireTime);
+
+    @Update("UPDATE tk_generation_task SET heartbeat_time = NOW(), lease_expire_time = #{leaseExpireTime}, update_time = NOW() "
+            + "WHERE id = #{id} AND deleted = 0 AND lease_token = #{leaseToken}")
+    int renewTaskLease(@Param("id") Long id, @Param("leaseToken") String leaseToken,
+                       @Param("leaseExpireTime") LocalDateTime leaseExpireTime);
+
+    @Update("UPDATE tk_generation_task SET lease_token = NULL, lease_expire_time = NULL, update_time = NOW() "
+            + "WHERE id = #{id} AND deleted = 0 AND lease_token = #{leaseToken}")
+    int releaseTaskLease(@Param("id") Long id, @Param("leaseToken") String leaseToken);
 
     default List<TkGenerationTaskDO> selectExpiredTasksWithGenerationUrls(LocalDateTime deadline, int limit) {
         LambdaQueryWrapperX<TkGenerationTaskDO> wrapper = new LambdaQueryWrapperX<>();
@@ -125,6 +146,22 @@ public interface TkGenerationTaskMapper extends BaseMapperX<TkGenerationTaskDO> 
                 .stream()
                 .map(TkGenerationTaskDO::getId)
                 .collect(Collectors.toList());
+    }
+
+    default List<TkGenerationTaskDO> selectDailySequenceCandidates(Collection<Long> tenantIds,
+                                                                    Collection<String> creators,
+                                                                    LocalDateTime startTime,
+                                                                    LocalDateTime endTime) {
+        LambdaQueryWrapperX<TkGenerationTaskDO> wrapper = new LambdaQueryWrapperX<>();
+        wrapper.select(TkGenerationTaskDO::getId, TkGenerationTaskDO::getTenantId,
+                TkGenerationTaskDO::getCreator, TkGenerationTaskDO::getCreateTime);
+        return selectList(wrapper
+                .inIfPresent(TkGenerationTaskDO::getTenantId, tenantIds)
+                .inIfPresent(TkGenerationTaskDO::getCreator, creators)
+                .ge(TkGenerationTaskDO::getCreateTime, startTime)
+                .lt(TkGenerationTaskDO::getCreateTime, endTime)
+                .orderByAsc(TkGenerationTaskDO::getCreateTime)
+                .orderByAsc(TkGenerationTaskDO::getId));
     }
 
     default List<TkGenerationTaskDO> selectStatusBatch(Collection<Long> ids, TkUserScope scope) {

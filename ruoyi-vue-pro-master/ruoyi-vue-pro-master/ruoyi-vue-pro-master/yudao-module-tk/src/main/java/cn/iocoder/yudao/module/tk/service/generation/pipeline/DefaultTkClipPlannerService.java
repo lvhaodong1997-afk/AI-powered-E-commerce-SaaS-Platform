@@ -134,6 +134,21 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
     }
 
     private List<TkClipPlanItem> planFullPoolRandom(TkGenerationTaskDO task, int targetDuration) {
+        List<TkClipPlanItem> plan = new ArrayList<>();
+        int orderNo = 1;
+        int randomTargetDuration = targetDuration;
+        if (StrUtil.isNotBlank(task.getOpeningVideoUrl())) {
+            int fixedOpeningDuration = openingDuration(task, 0, targetDuration);
+            TkMaterialSegmentTypeEnum openingSegment = TkMaterialSegmentTypeEnum.S1_HOOK;
+            plan.add(new TkClipPlanItem(orderNo++, "OPENING", null, task.getOpeningVideoName(),
+                    task.getOpeningVideoUrl(), 0, fixedOpeningDuration,
+                    "固定黄金3秒片头，后续从全素材池随机拼接",
+                    openingSegment.getCode(), openingSegment.getName(), 1, null));
+            randomTargetDuration = Math.max(0, targetDuration - fixedOpeningDuration);
+        }
+        if (randomTargetDuration <= 0) {
+            return plan;
+        }
         List<TkMaterialVideoDO> materials = materialVideoMapper.selectListByLibraryId(task.getLibraryId());
         if (CollUtil.isEmpty(materials)) {
             throw new IllegalStateException("素材库没有可用于随机混剪的可用视频");
@@ -144,12 +159,10 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         if (candidates.isEmpty()) {
             throw new IllegalStateException("素材库没有可用于随机混剪的可用视频");
         }
-        List<TkMaterialVideoDO> selected = selectBestFitRandomClips(candidates, targetDuration);
+        List<TkMaterialVideoDO> selected = selectBestFitRandomClips(candidates, randomTargetDuration);
         if (selected.isEmpty()) {
             throw new IllegalStateException("目标时长过短，素材库中没有任何可完整使用的视频片段");
         }
-        List<TkClipPlanItem> plan = new ArrayList<>();
-        int orderNo = 1;
         for (TkMaterialVideoDO material : selected) {
             int duration = materialDuration(material);
             plan.add(new TkClipPlanItem(orderNo++, "MATERIAL", material.getId(), material.getFileName(),
