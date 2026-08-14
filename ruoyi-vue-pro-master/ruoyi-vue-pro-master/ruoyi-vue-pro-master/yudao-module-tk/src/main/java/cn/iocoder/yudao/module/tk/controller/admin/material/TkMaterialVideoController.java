@@ -5,6 +5,7 @@ import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.module.tk.controller.admin.material.vo.TkMaterialVideoPageReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.material.vo.TkMaterialVideoRespVO;
+import cn.iocoder.yudao.module.tk.controller.admin.material.vo.TkMaterialVideoBatchDeleteReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.material.vo.TkMaterialVideoSegmentTypeUpdateReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.material.vo.TkMaterialVideoSegmentSummaryRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.material.vo.TkMaterialVideoUsagePhaseUpdateReqVO;
@@ -67,6 +68,14 @@ public class TkMaterialVideoController {
     @PreAuthorize("@ss.hasPermission('tk:material-video:delete')")
     public CommonResult<Boolean> deleteMaterialVideo(@RequestParam("id") Long id) {
         materialVideoService.deleteMaterialVideo(id);
+        return success(true);
+    }
+
+    @DeleteMapping("/delete-batch")
+    @Operation(summary = "批量删除素材视频")
+    @PreAuthorize("@ss.hasPermission('tk:material-video:delete')")
+    public CommonResult<Boolean> batchDeleteMaterialVideo(@Valid @RequestBody TkMaterialVideoBatchDeleteReqVO reqVO) {
+        materialVideoService.deleteMaterialVideos(reqVO.getIds());
         return success(true);
     }
 

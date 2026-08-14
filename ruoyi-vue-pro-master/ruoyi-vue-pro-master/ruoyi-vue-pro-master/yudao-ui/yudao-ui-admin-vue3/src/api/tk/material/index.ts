@@ -143,6 +143,9 @@ export const TkMaterialApi = {
   updateVideoSegmentType: async (data: { ids: number[]; segmentType: string }) => {
     return await request.put({ url: '/tk/material-video/segment-type/update', data })
   },
+  deleteVideos: async (ids: number[]) => {
+    return await request.delete({ url: '/tk/material-video/delete-batch', data: { ids } })
+  },
   deleteVideo: async (id: number) => {
     return await request.delete({ url: '/tk/material-video/delete', params: { id } })
   }

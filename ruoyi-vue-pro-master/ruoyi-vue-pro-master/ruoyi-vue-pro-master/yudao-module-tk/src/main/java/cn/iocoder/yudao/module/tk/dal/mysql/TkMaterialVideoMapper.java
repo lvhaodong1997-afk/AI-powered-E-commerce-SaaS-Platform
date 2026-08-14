@@ -8,6 +8,8 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.TkMaterialVideoDO;
 import cn.iocoder.yudao.module.tk.enums.TkMaterialVideoStatusEnum;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 import java.util.Collection;
@@ -40,6 +42,18 @@ public interface TkMaterialVideoMapper extends BaseMapperX<TkMaterialVideoDO> {
                 .eqIfPresent(TkMaterialVideoDO::getTenantId, scope.isGlobalPlatformView() ? null : scope.getTenantId())
                 .eqIfPresent(TkMaterialVideoDO::getLibraryId, libraryId));
     }
+
+    default Long selectCountByLibraryId(Long libraryId) {
+        return selectCount(new LambdaQueryWrapperX<TkMaterialVideoDO>()
+                .eq(TkMaterialVideoDO::getLibraryId, libraryId));
+    }
+
+    @Select("<script>"
+            + "SELECT COALESCE(SUM(size), 0) "
+            + "FROM tk_material_video "
+            + "WHERE deleted = 0 AND library_id = #{libraryId}"
+            + "</script>")
+    Long selectTotalSizeByLibraryId(@Param("libraryId") Long libraryId);
 
     default Long selectCountByStatus(TkUserScope scope, String status) {
         return selectCount(new LambdaQueryWrapperX<TkMaterialVideoDO>()

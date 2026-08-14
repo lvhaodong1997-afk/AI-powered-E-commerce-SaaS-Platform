@@ -17,6 +17,7 @@ public interface ErrorCodeConstants {
     ErrorCode TK_UPLOAD_FILE_TOO_LARGE = new ErrorCode(1_060_000_011, "视频文件超过 100MB 限制");
     ErrorCode TK_UPLOAD_FILE_EXTENSION_INVALID = new ErrorCode(1_060_000_012, "仅支持 mp4、mov、webm 视频");
     ErrorCode TK_UPLOAD_FILE_INVALID = new ErrorCode(1_060_000_031, "视频文件不完整或无法识别，请重新导出或转码后再上传");
+    ErrorCode TK_UPLOAD_SESSION_INVALID = new ErrorCode(1_060_000_049, "上传会话已失效，请重新选择文件上传");
     ErrorCode TK_REFERENCE_SCRIPT_OPTION_NOT_EXISTS = new ErrorCode(1_060_000_013, "文案方案不存在");
     ErrorCode TK_REFERENCE_ANALYSIS_NOT_EXISTS = new ErrorCode(1_060_000_014, "对标分析不存在");
     ErrorCode TK_REFERENCE_BINDING_MISMATCH = new ErrorCode(1_060_000_015, "对标分析或文案方案不属于当前素材库");

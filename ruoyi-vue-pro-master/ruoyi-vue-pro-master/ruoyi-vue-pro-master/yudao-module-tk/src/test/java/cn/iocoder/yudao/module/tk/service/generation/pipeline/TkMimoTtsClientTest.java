@@ -48,9 +48,34 @@ class TkMimoTtsClientTest {
 
         assertEquals("mimo-v2.5-tts-voicedesign", payload.get("model"));
         Map<String, Object> audio = cast(payload.get("audio"));
-        assertEquals(Boolean.TRUE, audio.get("optimize_text_preview"));
+        assertEquals(Boolean.FALSE, audio.get("optimize_text_preview"));
         List<?> messages = castList(payload.get("messages"));
         assertTrue(messages.toString().contains("Natural, warm, confident seller voice"));
+        assertTrue(messages.toString().contains("Read the provided narration text exactly"));
+        assertTrue(messages.toString().contains("Make it catchy"));
+    }
+
+    @Test
+    void buildRequestKeepsVoiceDesignModelForFinalSynthesisWhenVoiceDesignSelected() {
+        TkMimoTtsClient client = newClient();
+        TkVoiceSynthesisRequest request = TkVoiceSynthesisRequest.builder()
+                .text("Make it catchy")
+                .targetLanguage("en")
+                .mimoVoiceMode("VOICE_DESIGN")
+                .mimoVoicePrompt("Natural, warm, confident seller voice")
+                .finalSynthesis(true)
+                .build();
+
+        Map<String, Object> payload = client.buildRequest(request);
+
+        assertEquals("mimo-v2.5-tts-voicedesign", payload.get("model"));
+        Map<String, Object> audio = cast(payload.get("audio"));
+        assertEquals(Boolean.FALSE, audio.get("optimize_text_preview"));
+        assertTrue(!audio.containsKey("voice"));
+        List<?> messages = castList(payload.get("messages"));
+        assertTrue(messages.toString().contains("Natural, warm, confident seller voice"));
+        assertTrue(messages.toString().contains("Read the provided narration text exactly"));
+        assertTrue(messages.toString().contains("Make it catchy"));
     }
 
     @Test

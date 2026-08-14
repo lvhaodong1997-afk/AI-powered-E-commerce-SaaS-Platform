@@ -854,7 +854,7 @@
                         <el-option
                           v-for="item in systemBgmOptions"
                           :key="item.id"
-                          :label="item.name"
+                          :label="getBgmDisplayName(item)"
                           :value="item.id"
                         />
                       </el-option-group>
@@ -862,7 +862,7 @@
                         <el-option
                           v-for="item in userBgmOptions"
                           :key="item.id"
-                          :label="item.name"
+                          :label="getBgmDisplayName(item)"
                           :value="item.id"
                         />
                       </el-option-group>
@@ -1778,6 +1778,7 @@ const copy = computed(() =>
         bgmUploadSuccess: 'BGM uploaded',
         bgmUploadError: 'BGM upload failed',
         bgmPlayError: 'Failed to play BGM',
+        bgmRequiredWarning: 'Select or upload a BGM track before generating.',
         openingRequired: 'Opening hook material (optional)',
         openingDrawerHint: 'Expand only when you need a fixed opening hook.',
         openingNotConfigured: 'Not configured',
@@ -2042,6 +2043,7 @@ const copy = computed(() =>
         bgmUploadSuccess: 'BGM 上传成功',
         bgmUploadError: 'BGM 上传失败',
         bgmPlayError: 'BGM 播放失败',
+        bgmRequiredWarning: '已开启 BGM，请先选择或上传一首背景音乐',
         openingRequired: '开头黄金3秒素材（可选）',
         openingDrawerHint: '需要固定开头素材时再展开配置。',
         openingNotConfigured: '未配置',
@@ -2306,6 +2308,20 @@ const userBgmOptions = computed(() => bgmAssets.value.filter((item) => item.sour
 const selectedBgmAsset = computed(() =>
   bgmAssets.value.find((item) => item.id === createForm.bgmAssetId)
 )
+const getBgmDisplayName = (item?: TkBgmAssetVO) => {
+  if (!item) {
+    return copy.value.bgmNoAssets
+  }
+  if (item.sourceType === 'USER' && item.fileUrl) {
+    const rawName = item.fileUrl.split('?')[0].split('/').pop() || ''
+    try {
+      return decodeURIComponent(rawName) || item.name || copy.value.bgmNoAssets
+    } catch {
+      return rawName || item.name || copy.value.bgmNoAssets
+    }
+  }
+  return item.name || copy.value.bgmNoAssets
+}
 const bgmConfigSummary = computed(() => {
   if (!isLeadGenerationFlow.value) {
     return copy.value.bgmDrawerHint
@@ -2313,7 +2329,7 @@ const bgmConfigSummary = computed(() => {
   if (!createForm.bgmEnabled) {
     return copy.value.bgmDisabledSummary
   }
-  return selectedBgmAsset.value?.name || copy.value.bgmNoAssets
+  return getBgmDisplayName(selectedBgmAsset.value)
 })
 const loadCustomVoices = async () => {
   customVoiceProfiles.value = await TkVoiceProfileApi.getList()
@@ -3827,6 +3843,23 @@ function appendBgmConfig(formData: FormData) {
   })
 }
 
+async function ensureBgmReadyForGeneration() {
+  if (!isLeadGenerationFlow.value || !createForm.bgmEnabled) {
+    return true
+  }
+  if (!bgmAssets.value.length) {
+    await loadBgmAssets()
+  } else {
+    ensureDefaultBgmSelection()
+  }
+  if (createForm.bgmAssetId) {
+    return true
+  }
+  bgmConfigExpanded.value = true
+  message.warning(copy.value.bgmRequiredWarning)
+  return false
+}
+
 function mapScriptOption(item: TkReferenceScriptOptionVO): DashboardScriptOption {
   const level = item.conversionLevel || copy.value.mediumLevel
   const rateValue = Number(item.estimatedConversionRate)
@@ -4419,7 +4452,7 @@ const handleBgmUploadChange = async (file: any) => {
   }
   bgmUploading.value = true
   try {
-    const id = Number(await TkBgmAssetApi.upload(rawFile.name.replace(/\.[^.]+$/, ''), undefined, rawFile))
+    const id = Number(await TkBgmAssetApi.upload(rawFile.name, undefined, rawFile))
     await loadBgmAssets()
     createForm.bgmAssetId = id
     createForm.bgmEnabled = true
@@ -4586,6 +4619,10 @@ const handleCreateGeneration = async () => {
     }
     if (plannedGenerationCount.value > 30) {
       message.warning(copy.value.batchLimitWarning)
+      finishFreshGenerationProgress()
+      return
+    }
+    if (!(await ensureBgmReadyForGeneration())) {
       finishFreshGenerationProgress()
       return
     }

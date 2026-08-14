@@ -15,6 +15,9 @@ import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 
+import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
+import static cn.iocoder.yudao.module.tk.enums.ErrorCodeConstants.TK_UPLOAD_SESSION_INVALID;
+
 @Service
 public class TkUploadSessionService {
 
@@ -48,13 +51,18 @@ public class TkUploadSessionService {
     }
 
     public TkUploadSessionDO validateAccessible(String uploadId) {
-        TkUploadSessionDO session = sessionMapper.selectByUploadId(uploadId);
-        TkUserScope scope = dataScopeService.getCurrentScope();
-        if (!TkUploadSessionAccessPolicy.canAccess(session, scope.getTenantId(), scope.getCompanyId(),
-                scope.getUserIdString(), LocalDateTime.now())) {
-            throw new IllegalArgumentException("上传会话不存在、已过期或无权访问");
+        TkUploadSessionDO session = findAccessible(uploadId);
+        if (session == null) {
+            throw exception(TK_UPLOAD_SESSION_INVALID);
         }
-        dataScopeService.validateWritable(session.getTenantId(), session.getCompanyId());
+        return session;
+    }
+
+    private TkUploadSessionDO findAccessible(String uploadId) {
+        TkUploadSessionDO session = sessionMapper.selectByUploadId(uploadId);
+        if (!TkUploadSessionAccessPolicy.canAccess(session, LocalDateTime.now())) {
+            return null;
+        }
         return session;
     }
 
@@ -76,7 +84,10 @@ public class TkUploadSessionService {
     }
 
     public void cancel(String uploadId) {
-        TkUploadSessionDO session = validateAccessible(uploadId);
+        TkUploadSessionDO session = findAccessible(uploadId);
+        if (session == null) {
+            return;
+        }
         sessionMapper.updateById(new TkUploadSessionDO().setId(session.getId())
                 .setStatus("CANCELLED").setCancelledTime(LocalDateTime.now()));
         if ("local".equalsIgnoreCase(session.getStorageMode())) {

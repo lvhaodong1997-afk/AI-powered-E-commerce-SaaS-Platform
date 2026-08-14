@@ -23,4 +23,6 @@ public interface TkMaterialVideoService {
 
     void deleteMaterialVideo(Long id);
 
+    void deleteMaterialVideos(java.util.List<Long> ids);
+
 }

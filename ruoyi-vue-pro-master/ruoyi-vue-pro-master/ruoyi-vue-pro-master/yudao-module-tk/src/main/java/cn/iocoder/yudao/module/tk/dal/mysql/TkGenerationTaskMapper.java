@@ -46,6 +46,17 @@ public interface TkGenerationTaskMapper extends BaseMapperX<TkGenerationTaskDO> 
             + "WHERE id = #{id} AND deleted = 0 AND lease_token = #{leaseToken}")
     int releaseTaskLease(@Param("id") Long id, @Param("leaseToken") String leaseToken);
 
+    @Update("<script>UPDATE tk_generation_task SET status = 'PENDING', progress = 0, fail_reason = NULL, "
+            + "fail_code = NULL, current_step = 'RETRY_PENDING', retry_count = #{retryCount}, "
+            + "last_retry_time = #{lastRetryTime}, worker_id = NULL, heartbeat_time = NULL, "
+            + "lease_token = NULL, lease_expire_time = NULL, step_started_at = NULL, step_finished_at = NULL, "
+            + "output_url = NULL, subtitle_url = NULL, subtitle_timeline_url = NULL, "
+            + "subtitle_visual_analysis_url = NULL, subtitle_layout_url = NULL, subtitle_ass_url = NULL "
+            + "<if test='clearAudio'>, audio_url = NULL, clip_plan = NULL</if>, update_time = NOW() "
+            + "WHERE id = #{id} AND deleted = 0</script>")
+    int resetForRetry(@Param("id") Long id, @Param("retryCount") Integer retryCount,
+                      @Param("lastRetryTime") LocalDateTime lastRetryTime, @Param("clearAudio") boolean clearAudio);
+
     default List<TkGenerationTaskDO> selectExpiredTasksWithGenerationUrls(LocalDateTime deadline, int limit) {
         LambdaQueryWrapperX<TkGenerationTaskDO> wrapper = new LambdaQueryWrapperX<>();
         wrapper.select(TkGenerationTaskDO::getId,

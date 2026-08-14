@@ -207,6 +207,9 @@ public class TkGenerationProperties {
         private String python = "py";
         private String scriptPath = "tools/subtitle/asr_faster_whisper.py";
         private String model = "small";
+        private Boolean retryEnabled = true;
+        private String retryModel = "medium";
+        private Boolean estimatedFallbackOnMismatch = true;
         private Integer timeoutSeconds = 300;
         /**
          * ASR 文本和原始文案的最低相似度，低于该值时回退文案估算时间线。

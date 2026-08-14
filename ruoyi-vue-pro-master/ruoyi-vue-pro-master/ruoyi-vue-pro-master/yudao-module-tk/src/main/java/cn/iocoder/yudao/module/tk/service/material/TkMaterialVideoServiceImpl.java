@@ -23,11 +23,15 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.yudao.module.tk.enums.ErrorCodeConstants.*;
@@ -235,20 +239,57 @@ public class TkMaterialVideoServiceImpl implements TkMaterialVideoService {
 
     @Override
     public void deleteMaterialVideo(Long id) {
-        TkMaterialVideoDO video = videoMapper.selectById(id);
-        if (video == null) {
+        if (id == null) {
             throw exception(TK_MATERIAL_VIDEO_NOT_EXISTS);
         }
-        dataScopeService.validateWritable(video.getTenantId(), video.getCompanyId());
-        deleteFileIfPresent(video.getFileUrl());
-        deleteFileIfPresent(video.getCoverUrl());
-        videoMapper.deleteById(id);
-        TkMaterialLibraryDO library = libraryMapper.selectById(video.getLibraryId());
-        if (library != null) {
+        deleteMaterialVideos(java.util.Collections.singletonList(id));
+    }
+
+    @Override
+    public void deleteMaterialVideos(List<Long> ids) {
+        List<Long> normalizedIds = ids == null ? java.util.Collections.emptyList() : ids.stream()
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        if (normalizedIds.isEmpty()) {
+            return;
+        }
+        List<TkMaterialVideoDO> videos = normalizedIds.stream().map(id -> {
+            TkMaterialVideoDO video = videoMapper.selectById(id);
+            if (video == null) {
+                throw exception(TK_MATERIAL_VIDEO_NOT_EXISTS);
+            }
+            dataScopeService.validateWritable(video.getTenantId(), video.getCompanyId());
+            return video;
+        }).collect(Collectors.toList());
+
+        for (TkMaterialVideoDO video : videos) {
+            deleteFileIfPresent(video.getFileUrl());
+            deleteFileIfPresent(video.getCoverUrl());
+        }
+        videoMapper.deleteBatchIds(normalizedIds);
+
+        Set<Long> libraryIds = new LinkedHashSet<>();
+        for (TkMaterialVideoDO video : videos) {
+            if (video.getLibraryId() != null) {
+                libraryIds.add(video.getLibraryId());
+            }
+        }
+        refreshLibraryStats(libraryIds);
+    }
+
+    private void refreshLibraryStats(Collection<Long> libraryIds) {
+        for (Long libraryId : libraryIds) {
+            TkMaterialLibraryDO library = libraryMapper.selectById(libraryId);
+            if (library == null) {
+                continue;
+            }
+            Long videoCount = videoMapper.selectCountByLibraryId(libraryId);
+            Long totalSize = videoMapper.selectTotalSizeByLibraryId(libraryId);
             libraryMapper.updateById(new TkMaterialLibraryDO()
-                    .setId(video.getLibraryId())
-                    .setVideoCount(Math.max((library.getVideoCount() == null ? 0 : library.getVideoCount()) - 1, 0))
-                    .setTotalSize(Math.max((library.getTotalSize() == null ? 0L : library.getTotalSize()) - (video.getSize() == null ? 0L : video.getSize()), 0L)));
+                    .setId(libraryId)
+                    .setVideoCount(videoCount == null ? 0 : Math.toIntExact(videoCount))
+                    .setTotalSize(totalSize == null ? 0L : totalSize));
         }
     }
 

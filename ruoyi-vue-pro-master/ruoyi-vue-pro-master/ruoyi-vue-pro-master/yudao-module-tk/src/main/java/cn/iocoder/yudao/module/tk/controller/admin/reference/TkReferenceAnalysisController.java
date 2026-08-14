@@ -7,7 +7,11 @@ import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnaly
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalysisPageReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalysisRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalysisStatusRespVO;
+import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceVideoDownloadReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceVideoDownloadRespVO;
 import cn.iocoder.yudao.module.tk.service.reference.TkReferenceAnalysisService;
+import cn.iocoder.yudao.module.tk.service.reference.TkReferenceVideoContent;
+import cn.iocoder.yudao.module.tk.service.reference.TkReferenceVideoContentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -30,12 +34,30 @@ public class TkReferenceAnalysisController {
 
     @Resource
     private TkReferenceAnalysisService referenceAnalysisService;
+    @Resource
+    private TkReferenceVideoContentService referenceVideoContentService;
 
     @PostMapping("/analyze")
     @Operation(summary = "分析 TikTok 对标链接并生成文案方案")
     @PreAuthorize("@ss.hasPermission('tk:reference:analyze')")
     public CommonResult<TkReferenceAnalysisRespVO> analyze(@Valid @RequestBody TkReferenceAnalyzeReqVO reqVO) {
         return success(referenceAnalysisService.analyze(reqVO));
+    }
+
+    @PostMapping("/video/download")
+    @Operation(summary = "下载对标视频并返回视频链接")
+    @PreAuthorize("@ss.hasPermission('tk:reference:analyze')")
+    public CommonResult<TkReferenceVideoDownloadRespVO> downloadVideo(@Valid @RequestBody TkReferenceVideoDownloadReqVO reqVO) {
+        TkReferenceVideoContent videoContent = reqVO.getLibraryId() == null
+                ? referenceVideoContentService.analyze(reqVO.getSourceUrl())
+                : referenceVideoContentService.analyze(reqVO.getSourceUrl(), reqVO.getLibraryId());
+        return success(TkReferenceVideoDownloadRespVO.builder()
+                .sourceUrl(videoContent.getSourceUrl())
+                .resolvedVideoUrl(videoContent.getResolvedVideoUrl())
+                .coverUrl(videoContent.getCoverUrl())
+                .videoDuration(videoContent.getDurationSeconds())
+                .resolution(videoContent.getResolution())
+                .build());
     }
 
     @PostMapping("/{id}/script-options/regenerate")

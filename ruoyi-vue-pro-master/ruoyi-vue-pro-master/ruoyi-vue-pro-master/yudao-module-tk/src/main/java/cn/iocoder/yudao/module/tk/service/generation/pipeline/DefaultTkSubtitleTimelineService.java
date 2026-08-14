@@ -34,6 +34,10 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
     private static final int SOCIAL_ENGLISH_SEGMENT_WORDS = 5;
     private static final int SOCIAL_CJK_SEGMENT_WEIGHT = 20;
     private static final double MIN_DYNAMIC_SEGMENT_SECONDS = 0.35D;
+    private static final double MIN_STABLE_SEGMENT_SECONDS = 0.9D;
+    private static final double MAX_STABLE_SEGMENT_CHARS_PER_SECOND = 12D;
+    private static final double MAX_MERGED_STABLE_SEGMENT_SECONDS = 3.2D;
+    private static final int MAX_MERGED_STABLE_SEGMENT_WEIGHT = 48;
     private static final double MAX_REASONABLE_FIRST_SUBTITLE_START_SECONDS = 1.0D;
     private static final double MAX_SUBTITLE_TAIL_GAP_SECONDS = 2.0D;
     private static final double MAX_SUBTITLE_TAIL_GAP_RATIO = 0.08D;
@@ -67,14 +71,53 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
             writeSubtitleQualityReport(audioFile, "ESTIMATED_FALLBACK", fallbackQuality, exactQuality.reason);
             return fallbackTimeline;
         }
+        if (asrTimeline != null) {
+            TkSubtitleTimeline retryTimeline = buildTimelineByAsrRetry(task, scriptText, audioFile, keywords);
+            if (isAsrTimelineTextAcceptable(retryTimeline, scriptText, minAsrTextSimilarity())) {
+                TkSubtitleTimeline exactTimeline = rebuildExactTimelineWithScriptText(task, scriptText, retryTimeline, keywords);
+                SubtitleQuality exactQuality = inspectSubtitleQuality(exactTimeline, audioFile);
+                if (exactQuality.acceptable) {
+                    writeSubtitleQualityReport(audioFile, "ASR_RETRY_EXACT", exactQuality,
+                            "Primary ASR text does not match original script");
+                    return exactTimeline;
+                }
+            }
+            if (!estimatedFallbackOnMismatch()) {
+                writeSubtitleQualityReport(audioFile, "ASR_TEXT_MISMATCH", inspectSubtitleQuality(asrTimeline, audioFile),
+                        "ASR text does not match original script");
+                throw new IllegalStateException("ASR_TEXT_MISMATCH: audio narration text does not match the original script");
+            }
+            TkSubtitleTimeline fallbackTimeline = buildEstimatedTimeline(task, scriptText, audioFile, keywords,
+                    resolveTimelineDuration(asrTimeline));
+            writeSubtitleQualityReport(audioFile, "ESTIMATED_AFTER_ASR_MISMATCH",
+                    inspectSubtitleQuality(fallbackTimeline, audioFile),
+                    "ASR text does not match original script");
+            return fallbackTimeline;
+        }
         TkSubtitleTimeline timeline = buildEstimatedTimeline(task, scriptText, audioFile, keywords, 0D);
-        String fallbackMode = asrTimeline == null ? "ESTIMATED_ASR_UNAVAILABLE" : "ESTIMATED_ASR_MISMATCH";
-        writeSubtitleQualityReport(audioFile, fallbackMode, inspectSubtitleQuality(timeline, audioFile),
+        writeSubtitleQualityReport(audioFile, "ESTIMATED_ASR_UNAVAILABLE", inspectSubtitleQuality(timeline, audioFile),
                 "ASR 时间轴不可用或与 AI 文案不匹配，已降级为估算字幕");
         return timeline;
     }
 
     private TkSubtitleTimeline buildTimelineByAsr(TkGenerationTaskDO task, String scriptText, File audioFile, List<String> keywords) {
+        TkGenerationProperties.Asr asr = generationProperties.getSubtitle().getAsr();
+        return buildTimelineByAsr(task, scriptText, audioFile, keywords,
+                asr == null ? "small" : StrUtil.blankToDefault(asr.getModel(), "small"), "asr-raw.json");
+    }
+
+    private TkSubtitleTimeline buildTimelineByAsrRetry(TkGenerationTaskDO task, String scriptText, File audioFile,
+                                                       List<String> keywords) {
+        TkGenerationProperties.Asr asr = generationProperties.getSubtitle().getAsr();
+        if (asr == null || !Boolean.TRUE.equals(asr.getRetryEnabled()) || StrUtil.isBlank(asr.getRetryModel())
+                || StrUtil.equals(asr.getModel(), asr.getRetryModel())) {
+            return null;
+        }
+        return buildTimelineByAsr(task, scriptText, audioFile, keywords, asr.getRetryModel(), "asr-retry-raw.json");
+    }
+
+    private TkSubtitleTimeline buildTimelineByAsr(TkGenerationTaskDO task, String scriptText, File audioFile,
+                                                  List<String> keywords, String model, String diagnosticFileName) {
         TkGenerationProperties.Asr asr = generationProperties.getSubtitle().getAsr();
         if (asr == null || !Boolean.TRUE.equals(asr.getEnabled()) || StrUtil.isBlank(asr.getScriptPath())) {
             return null;
@@ -91,10 +134,10 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
                     "--language", StrUtil.blankToDefault(task.getTargetLanguage(), ""),
                     "--text", StrUtil.blankToDefault(scriptText, ""),
                     "--keywords", JsonUtils.toJsonString(keywords),
-                    "--model", StrUtil.blankToDefault(asr.getModel(), "small")
+                    "--model", StrUtil.blankToDefault(model, "small")
             ));
             String output = runCommand(command, asr.getTimeoutSeconds());
-            writeDiagnostic(audioFile, "asr-raw.json", output);
+            writeDiagnostic(audioFile, diagnosticFileName, output);
             return JsonUtils.parseObject(output, TkSubtitleTimeline.class);
         } catch (Exception ignored) {
             return null;
@@ -111,9 +154,14 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         TkSubtitleTimeline timeline = new TkSubtitleTimeline();
         timeline.setLanguage(task.getTargetLanguage());
         timeline.setAudioDuration(duration);
-        timeline.setSegments(buildSegments(sentences, duration, keywords));
+        timeline.setSegments(smoothRapidSegments(buildSegments(sentences, duration, keywords)));
         applySubtitleLead(timeline, resolveSubtitleLead(audioFile));
         return timeline;
+    }
+
+    private boolean estimatedFallbackOnMismatch() {
+        TkGenerationProperties.Asr asr = generationProperties.getSubtitle().getAsr();
+        return asr == null || !Boolean.FALSE.equals(asr.getEstimatedFallbackOnMismatch());
     }
 
     private TkSubtitleTimeline rebuildExactTimelineWithScriptText(TkGenerationTaskDO task, String scriptText,
@@ -135,7 +183,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
             throw new IllegalStateException("字幕精准对齐失败：ASR 未返回可用逐字时间轴");
         }
         List<TkSubtitleSegment> segments = buildExactSegments(sentences, exactWords);
-        timeline.setSegments(segments);
+        timeline.setSegments(smoothRapidSegments(segments));
         return timeline;
     }
 
@@ -424,6 +472,80 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
             segments.add(segment);
         }
         return segments;
+    }
+
+    private List<TkSubtitleSegment> smoothRapidSegments(List<TkSubtitleSegment> segments) {
+        if (segments == null || segments.size() <= 1) {
+            return segments;
+        }
+        List<TkSubtitleSegment> smoothed = new ArrayList<>();
+        int index = 0;
+        while (index < segments.size()) {
+            TkSubtitleSegment current = copySegment(segments.get(index));
+            index++;
+            while (index < segments.size() && shouldMergeRapidSegment(current)
+                    && canMergeStableSegment(current, segments.get(index))) {
+                current = mergeSegments(current, segments.get(index));
+                index++;
+            }
+            smoothed.add(current);
+        }
+        return smoothed;
+    }
+
+    private boolean shouldMergeRapidSegment(TkSubtitleSegment segment) {
+        double duration = segmentDuration(segment);
+        return duration < MIN_STABLE_SEGMENT_SECONDS
+                || charsPerSecond(segment) > MAX_STABLE_SEGMENT_CHARS_PER_SECOND;
+    }
+
+    private boolean canMergeStableSegment(TkSubtitleSegment current, TkSubtitleSegment next) {
+        if (current == null || next == null) {
+            return false;
+        }
+        double start = Math.min(current.getStart(), next.getStart());
+        double end = Math.max(current.getEnd(), next.getEnd());
+        if (end - start > MAX_MERGED_STABLE_SEGMENT_SECONDS) {
+            return false;
+        }
+        String mergedText = StrUtil.blankToDefault(current.getText(), "") + StrUtil.blankToDefault(next.getText(), "");
+        return displayWeight(mergedText) <= MAX_MERGED_STABLE_SEGMENT_WEIGHT;
+    }
+
+    private TkSubtitleSegment mergeSegments(TkSubtitleSegment current, TkSubtitleSegment next) {
+        TkSubtitleSegment merged = copySegment(current);
+        merged.setText(StrUtil.blankToDefault(current.getText(), "") + StrUtil.blankToDefault(next.getText(), ""));
+        merged.setStart(Math.min(current.getStart(), next.getStart()));
+        merged.setEnd(Math.max(current.getEnd(), next.getEnd()));
+        List<TkSubtitleWord> words = new ArrayList<>();
+        if (current.getWords() != null) {
+            words.addAll(current.getWords());
+        }
+        if (next.getWords() != null) {
+            words.addAll(next.getWords());
+        }
+        merged.setWords(words);
+        return merged;
+    }
+
+    private TkSubtitleSegment copySegment(TkSubtitleSegment source) {
+        TkSubtitleSegment copy = new TkSubtitleSegment();
+        copy.setText(source.getText());
+        copy.setStart(source.getStart());
+        copy.setEnd(source.getEnd());
+        copy.setPosition(source.getPosition());
+        copy.setX(source.getX());
+        copy.setY(source.getY());
+        copy.setWords(source.getWords() == null ? new ArrayList<>() : new ArrayList<>(source.getWords()));
+        return copy;
+    }
+
+    private double charsPerSecond(TkSubtitleSegment segment) {
+        return StrUtil.length(StrUtil.blankToDefault(segment.getText(), "")) / Math.max(0.001D, segmentDuration(segment));
+    }
+
+    private double segmentDuration(TkSubtitleSegment segment) {
+        return Math.max(0D, segment == null ? 0D : segment.getEnd() - segment.getStart());
     }
 
     private String joinWords(List<TkSubtitleWord> words) {

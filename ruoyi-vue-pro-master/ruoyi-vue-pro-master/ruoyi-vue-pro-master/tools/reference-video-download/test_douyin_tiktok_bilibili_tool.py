@@ -120,14 +120,19 @@ class CandidateVideoDownloadTest(unittest.TestCase):
             fallback_path.write_bytes(b"\x00\x00\x00\x18ftypisom")
             original_parse_one_url = tool.parse_one_url
             original_download_with_ytdlp = getattr(tool, "download_with_ytdlp", None)
+            calls = []
 
             async def fake_parse_one_url(url):
                 raise tool.ToolError("获取数据失败")
 
             def fake_download_with_ytdlp(url, out_dir, with_watermark=False, prefix="", parse_error=None):
+                calls.append(parse_error)
+                if parse_error is None:
+                    raise tool.ToolError("优先下载失败")
                 self.assertEqual(source_url, url)
                 self.assertEqual(Path(temp_dir), out_dir)
-                self.assertEqual("获取数据失败", str(parse_error))
+                self.assertIn("获取数据失败", str(parse_error))
+                self.assertIn("优先下载失败", str(parse_error))
                 return {
                     "path": str(fallback_path),
                     "cached": False,
@@ -153,6 +158,46 @@ class CandidateVideoDownloadTest(unittest.TestCase):
 
             self.assertEqual(str(fallback_path), result["path"])
             self.assertEqual("yt-dlp", result["engine"])
+            self.assertEqual(2, len(calls))
+
+    def test_douyin_download_uses_ytdlp_before_platform_parse(self):
+        source_url = "https://www.douyin.com/video/123"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fallback_path = Path(temp_dir) / "douyin_video" / "reference_ytdlp_douyin.mp4"
+            fallback_path.parent.mkdir(parents=True, exist_ok=True)
+            fallback_path.write_bytes(b"\x00\x00\x00\x18ftypisom")
+            original_parse_one_url = tool.parse_one_url
+            original_download_with_ytdlp = tool.download_with_ytdlp
+            calls = []
+
+            async def fail_parse_one_url(url):
+                raise AssertionError("Douyin video download should try yt-dlp before app08 parsing")
+
+            def fake_download_with_ytdlp(url, out_dir, with_watermark=False, prefix="", parse_error=None):
+                calls.append(("ytdlp", url, prefix, parse_error))
+                return {
+                    "path": str(fallback_path),
+                    "cached": False,
+                    "engine": "yt-dlp",
+                    "data": {
+                        "platform": "douyin",
+                        "type": "video",
+                        "video_id": "ytdlp_douyin",
+                    },
+                }
+
+            try:
+                tool.parse_one_url = fail_parse_one_url
+                tool.download_with_ytdlp = fake_download_with_ytdlp
+
+                result = asyncio.run(tool.download_media(source_url, Path(temp_dir), prefix="reference"))
+            finally:
+                tool.parse_one_url = original_parse_one_url
+                tool.download_with_ytdlp = original_download_with_ytdlp
+
+            self.assertEqual(str(fallback_path), result["path"])
+            self.assertEqual("yt-dlp", result["engine"])
+            self.assertEqual([("ytdlp", source_url, "reference", None)], calls)
 
     def test_douyin_parse_retries_after_refreshing_runtime_cookie(self):
         source_url = "https://www.douyin.com/video/123"

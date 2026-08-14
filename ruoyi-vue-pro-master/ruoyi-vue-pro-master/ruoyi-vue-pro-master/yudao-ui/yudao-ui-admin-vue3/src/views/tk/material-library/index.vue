@@ -258,6 +258,15 @@
           >
             修改已选用途
           </el-button>
+          <el-button
+            type="danger"
+            plain
+            :loading="batchDeleting"
+            @click="handleBatchDeleteVideos"
+            v-hasPermi="['tk:material-video:delete']"
+          >
+            批量删除
+          </el-button>
         </div>
 
         <el-table v-loading="videoLoading" :data="videoList" stripe empty-text="当前素材库暂无视频" @selection-change="handleVideoSelectionChange">
@@ -751,6 +760,7 @@ const videoSelection = ref<TkMaterialVideoVO[]>([])
 const selectedVideoIds = computed(() => videoSelection.value.map((item) => item.id).filter(Boolean))
 const batchSegmentType = ref<SegmentTypeValue>('S4_DEMO')
 const batchSegmentUpdating = ref(false)
+const batchDeleting = ref(false)
 const rowSegmentUpdatingIds = ref<number[]>([])
 const segmentSummaryCounts = ref<Record<string, number>>({})
 const isLeadGenerationLibrary = computed(
@@ -781,8 +791,10 @@ const missingKeySegmentLabels = computed(() =>
 )
 const missingKeySegmentsTitle = computed(() =>
   isEnglishLocale.value
-    ? `Missing key uses: ${missingKeySegmentLabels.value}. Generation will be blocked by missing uses. Complete or relabel materials before generation.`
-    : `关键用途缺少：${missingKeySegmentLabels.value}。生成会按缺失用途阻断，请补齐或重新标记素材用途。`
+    ? `${isLeadGenerationLibrary.value ? 'Missing S1-S8 segments' : 'Missing key uses'}: ${missingKeySegmentLabels.value}. Generation will be blocked by missing uses. Complete or relabel materials before generation.`
+    : isLeadGenerationLibrary.value
+      ? `S1-S8 缺少：${missingKeySegmentLabels.value}。生成会按缺失分段阻断，请补齐或重新标记素材用途。`
+      : `关键用途缺少：${missingKeySegmentLabels.value}。生成会按缺失用途阻断，请补齐或重新标记素材用途。`
 )
 const keySegmentRuleDescription = computed(() =>
   isEnglishLocale.value
@@ -806,8 +818,12 @@ const getLibraryHealthText = (library: TkMaterialLibraryVO) => {
     return isEnglishLocale.value ? 'Select to inspect completeness' : '选择后查看完整度'
   }
   return isEnglishLocale.value
-    ? `${completedKeySegmentCount.value}/${keySegmentTotal.value} key uses ready`
-    : `关键用途 ${completedKeySegmentCount.value}/${keySegmentTotal.value}`
+    ? isLeadGenerationLibrary.value
+      ? `S1-S8 completeness ${completedKeySegmentCount.value}/${keySegmentTotal.value}`
+      : `Key completeness ${completedKeySegmentCount.value}/${keySegmentTotal.value}`
+    : isLeadGenerationLibrary.value
+      ? `S1-S8 完整度 ${completedKeySegmentCount.value}/${keySegmentTotal.value}`
+      : `关键用途 ${completedKeySegmentCount.value}/${keySegmentTotal.value}`
 }
 
 const placeholderPattern = /^\?+$/
@@ -1000,6 +1016,25 @@ const handleBatchSegmentType = async () => {
     message.error(`用途修改失败：${getRequestErrorText(error)}；素材ID：${selectedVideoIds.value.join(', ')}`)
   } finally {
     batchSegmentUpdating.value = false
+  }
+}
+
+const handleBatchDeleteVideos = async () => {
+  if (!selectedVideoIds.value.length) {
+    message.warning('请先选择素材视频')
+    return
+  }
+  await message.delConfirm(`确认删除选中的 ${selectedVideoIds.value.length} 条素材吗？`)
+  batchDeleting.value = true
+  try {
+    await TkMaterialApi.deleteVideos(selectedVideoIds.value)
+    message.success(`已删除 ${selectedVideoIds.value.length} 条素材`)
+    videoSelection.value = []
+    await Promise.all([getList(), getVideoList(), getSegmentSummary()])
+  } catch (error) {
+    message.error(`批量删除失败：${getRequestErrorText(error)}；素材ID：${selectedVideoIds.value.join(', ')}`)
+  } finally {
+    batchDeleting.value = false
   }
 }
 

@@ -884,10 +884,26 @@ async def download_media(
     prefix: str = "",
 ) -> dict[str, Any]:
     url = normalize_source_url(url)
+    if is_douyin_url(url):
+        try:
+            return download_with_ytdlp(
+                url,
+                out_dir=out_dir,
+                with_watermark=with_watermark,
+                prefix=prefix,
+            )
+        except Exception as ytdlp_error:
+            first_download_error = ytdlp_error
+        else:
+            first_download_error = None
+    else:
+        first_download_error = None
     try:
         structured = await parse_one_url(url)
     except Exception as parse_error:
         if should_try_ytdlp_fallback(url):
+            if first_download_error is not None:
+                parse_error = ToolError(f"{parse_error}；yt-dlp 优先下载失败：{first_download_error}")
             return download_with_ytdlp(
                 url,
                 out_dir=out_dir,

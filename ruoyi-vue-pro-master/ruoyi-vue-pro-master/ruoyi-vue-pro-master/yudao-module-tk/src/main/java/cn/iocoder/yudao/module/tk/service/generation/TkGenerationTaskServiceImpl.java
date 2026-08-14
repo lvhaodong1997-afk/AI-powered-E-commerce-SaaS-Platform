@@ -71,6 +71,8 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     private static final String DEFAULT_SUBTITLE_ACTIVE_COLOR = "#35F27A";
     private static final String DEFAULT_SUBTITLE_KEYWORD_COLOR = "#FFD84D";
     private static final String DEFAULT_SUBTITLE_FONT_SIZE = "medium";
+    private static final String FAIL_CODE_SUBTITLE_FAILED = "SUBTITLE_FAILED";
+    private static final String FAIL_REASON_ASR_TEXT_MISMATCH = "ASR_TEXT_MISMATCH";
     private static final String MANUAL_LEAD_GENERATION_SOURCE_PREFIX = "manual-lead-generation://";
     private static final int MAX_VIDEOS_PER_SCRIPT = 5;
     private static final int MAX_BATCH_TASK_COUNT = 30;
@@ -585,17 +587,17 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         if (!TkGenerationStatusEnum.FAILED.equals(task.getStatus())) {
             throw exception(TK_GENERATION_RETRY_STATUS_INVALID);
         }
-        taskMapper.updateById(new TkGenerationTaskDO()
-                .setId(id)
-                .setStatus(TkGenerationStatusEnum.PENDING)
-                .setProgress(0)
-                .setFailReason(null)
-                .setFailCode(null)
-                .setCurrentStep("RETRY_PENDING")
-                .setRetryCount((task.getRetryCount() == null ? 0 : task.getRetryCount()) + 1)
-                .setLastRetryTime(java.time.LocalDateTime.now()));
+        boolean clearAudio = shouldRegenerateAudioOnRetry(task);
+        taskMapper.resetForRetry(id, (task.getRetryCount() == null ? 0 : task.getRetryCount()) + 1,
+                java.time.LocalDateTime.now(), clearAudio);
         generationPipelineService.submit(task.getTenantId(), task.getId());
         refreshBatchProgress(task.getBatchId());
+    }
+
+    private boolean shouldRegenerateAudioOnRetry(TkGenerationTaskDO task) {
+        return task != null
+                && FAIL_CODE_SUBTITLE_FAILED.equals(task.getFailCode())
+                && StrUtil.containsIgnoreCase(task.getFailReason(), FAIL_REASON_ASR_TEXT_MISMATCH);
     }
 
     @Override

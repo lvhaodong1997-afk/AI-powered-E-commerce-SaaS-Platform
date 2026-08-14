@@ -29,6 +29,7 @@ public class DefaultTkVoiceSynthesisService implements TkVoiceSynthesisService {
                 .mimoVoiceCode(task.getMimoVoiceCode())
                 .mimoVoicePrompt(task.getMimoVoicePrompt())
                 .mimoVoiceSampleUrl(task.getMimoVoiceSampleUrl())
+                .finalSynthesis(true)
                 .build());
         String audioUrl = fileApi.createFile(audioBytes,
                 StrUtil.format("voice-{}.{}", task.getId(), format), directory, "audio/" + format);

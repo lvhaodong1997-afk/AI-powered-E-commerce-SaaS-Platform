@@ -72,25 +72,31 @@ public class TkMaterialLibraryController {
     @PreAuthorize("@ss.hasPermission('tk:material-library:query')")
     public CommonResult<PageResult<TkMaterialLibraryRespVO>> getMaterialLibraryPage(@Valid TkMaterialLibraryPageReqVO pageReqVO) {
         PageResult<TkMaterialLibraryDO> pageResult = materialLibraryService.getMaterialLibraryPage(pageReqVO);
-        return success(BeanUtils.toBean(pageResult, TkMaterialLibraryRespVO.class, this::fillLibraryPreview));
+        return success(BeanUtils.toBean(pageResult, TkMaterialLibraryRespVO.class, this::fillLibraryView));
     }
 
     private TkMaterialLibraryRespVO convertLibrary(TkMaterialLibraryDO library) {
         TkMaterialLibraryRespVO respVO = BeanUtils.toBean(library, TkMaterialLibraryRespVO.class);
-        fillLibraryPreview(respVO);
+        fillLibraryView(respVO);
         return respVO;
     }
 
-    private void fillLibraryPreview(TkMaterialLibraryRespVO library) {
+    private void fillLibraryView(TkMaterialLibraryRespVO library) {
         if (library == null || library.getId() == null) {
             return;
         }
         TkMaterialVideoDO firstVideo = materialVideoMapper.selectFirstByLibraryId(library.getId());
         if (firstVideo == null) {
+            library.setVideoCount(0);
+            library.setTotalSize(0L);
             return;
         }
         library.setCoverUrl(StrUtil.blankToDefault(firstVideo.getCoverUrl(), library.getCoverUrl()));
         library.setPreviewVideoUrl(firstVideo.getFileUrl());
+        Long videoCount = materialVideoMapper.selectCountByLibraryId(library.getId());
+        Long totalSize = materialVideoMapper.selectTotalSizeByLibraryId(library.getId());
+        library.setVideoCount(videoCount == null ? 0 : videoCount.intValue());
+        library.setTotalSize(totalSize == null ? 0L : totalSize);
     }
 
 }

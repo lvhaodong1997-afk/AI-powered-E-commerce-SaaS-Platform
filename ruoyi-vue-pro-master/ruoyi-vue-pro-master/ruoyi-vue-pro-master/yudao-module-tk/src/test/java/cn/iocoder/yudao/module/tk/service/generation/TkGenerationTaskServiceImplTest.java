@@ -23,6 +23,7 @@ import cn.iocoder.yudao.module.tk.service.material.TkMaterialLibraryService;
 import cn.iocoder.yudao.module.tk.service.reference.TkReferenceAnalysisService;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
+import cn.iocoder.yudao.module.tk.service.voice.TkMimoVoiceSelection;
 import cn.iocoder.yudao.module.tk.service.voice.TkVoiceProfileService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -35,6 +36,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -66,13 +68,39 @@ class TkGenerationTaskServiceImplTest {
 
         service.retryGenerationTask(100L);
 
-        ArgumentCaptor<TkGenerationTaskDO> captor = ArgumentCaptor.forClass(TkGenerationTaskDO.class);
-        verify(taskMapper).updateById(captor.capture());
-        assertEquals(100L, captor.getValue().getId());
-        assertEquals(TkGenerationStatusEnum.PENDING, captor.getValue().getStatus());
-        assertEquals(0, captor.getValue().getProgress());
-        assertNull(captor.getValue().getFailReason());
+        verify(taskMapper).resetForRetry(eq(100L), eq(1), any(), eq(false));
         verify(pipelineService).submit(10L, 100L);
+    }
+
+    @Test
+    void retryGenerationTaskClearsAudioWhenSubtitleMismatchFailed() {
+        TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
+        TkGenerationTaskMapper taskMapper = mock(TkGenerationTaskMapper.class);
+        TkGenerationPipelineService pipelineService = mock(TkGenerationPipelineService.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        ReflectionTestUtils.setField(service, "taskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "generationPipelineService", pipelineService);
+        ReflectionTestUtils.setField(service, "dataScopeService", dataScopeService);
+
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .id(101L)
+                .companyId(20L)
+                .status(TkGenerationStatusEnum.FAILED)
+                .progress(100)
+                .failCode("SUBTITLE_FAILED")
+                .failReason("视频渲染失败：ASR_TEXT_MISMATCH: audio narration text does not match the original script")
+                .audioUrl("https://example.com/old.wav")
+                .clipPlan("[]")
+                .retryCount(2)
+                .build();
+        task.setTenantId(10L);
+        task.setCreator("1");
+        when(taskMapper.selectById(101L)).thenReturn(task);
+
+        service.retryGenerationTask(101L);
+
+        verify(taskMapper).resetForRetry(eq(101L), eq(3), any(), eq(true));
+        verify(pipelineService).submit(10L, 101L);
     }
 
     @Test
@@ -494,6 +522,8 @@ class TkGenerationTaskServiceImplTest {
         when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(7L, 8L, "COMPANY_USER", 20L));
         when(precheckService.precheck(reqVO)).thenReturn(precheck);
         when(creditService.freezeForGenerationTask(8L)).thenReturn(900L);
+        when(voiceProfileService.resolveMimoVoiceSelection(any(), any(), any(), any(), any()))
+                .thenReturn(new TkMimoVoiceSelection("PRESET", "Mia", "", ""));
 
         service.createGenerationTask(reqVO);
 
@@ -610,6 +640,8 @@ class TkGenerationTaskServiceImplTest {
         when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(7L, 8L, "COMPANY_USER", 20L));
         when(precheckService.precheck(reqVO)).thenReturn(precheck);
         when(creditService.freezeForGenerationTask(8L)).thenReturn(900L);
+        when(voiceProfileService.resolveMimoVoiceSelection(any(), any(), any(), any(), any()))
+                .thenReturn(new TkMimoVoiceSelection("PRESET", "Mia", "", ""));
 
         service.createGenerationTask(reqVO);
 
@@ -769,6 +801,8 @@ class TkGenerationTaskServiceImplTest {
         when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(7L, 8L, "COMPANY_USER", 20L));
         when(precheckService.precheck(reqVO)).thenReturn(precheck);
         when(creditService.freezeForGenerationTask(8L)).thenReturn(900L);
+        when(voiceProfileService.resolveMimoVoiceSelection(any(), any(), any(), any(), any()))
+                .thenReturn(new TkMimoVoiceSelection("PRESET", "Mia", "", ""));
 
         service.createGenerationTask(reqVO);
 

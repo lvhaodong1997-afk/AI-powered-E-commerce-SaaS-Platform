@@ -14,5 +14,6 @@ public class TkVoiceSynthesisRequest {
     private String mimoVoiceCode;
     private String mimoVoicePrompt;
     private String mimoVoiceSampleUrl;
+    private boolean finalSynthesis;
 
 }

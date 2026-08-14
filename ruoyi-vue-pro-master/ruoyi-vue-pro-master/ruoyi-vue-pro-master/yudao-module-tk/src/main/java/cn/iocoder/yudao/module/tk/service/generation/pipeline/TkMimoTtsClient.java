@@ -27,9 +27,11 @@ public class TkMimoTtsClient implements TkVoiceTtsClient {
     private static final String KEY_VOICE_DESIGN_MODEL = "voice-design-model";
     private static final String KEY_VOICE_CLONE_MODEL = "voice-clone-model";
     private static final String KEY_FORMAT = "format";
-    private static final String KEY_OPTIMIZE_TEXT_PREVIEW = "optimize-text-preview";
     private static final String KEY_TIMEOUT_SECONDS = "timeout-seconds";
     private static final String KEY_DEFAULT_VOICE = "default-voice";
+    private static final String EXACT_NARRATION_INSTRUCTION =
+            "Read the provided narration text exactly. Do not rewrite, summarize, expand, omit, translate, "
+                    + "or replace any words. The generated audio must match the narration text word for word.";
 
     @Resource
     private TkGenerationProperties generationProperties;
@@ -81,14 +83,14 @@ public class TkMimoTtsClient implements TkVoiceTtsClient {
     }
 
     private Map<String, Object> buildRequest(TkVoiceSynthesisRequest request, String model, TkGenerationProperties.Mimo mimo) {
-        String mode = TkMimoVoiceModeEnum.normalize(request == null ? null : request.getMimoVoiceMode());
+        String mode = resolveEffectiveMode(request);
         Map<String, Object> audio = new LinkedHashMap<>();
         audio.put("format", audioFormat());
         if (TkMimoVoiceModeEnum.PRESET.equals(mode)) {
             audio.put("voice", StrUtil.blankToDefault(request == null ? null : request.getMimoVoiceCode(),
                     getConfig(KEY_DEFAULT_VOICE, mimo.getDefaultVoice())));
         } else if (TkMimoVoiceModeEnum.VOICE_DESIGN.equals(mode)) {
-            audio.put("optimize_text_preview", resolveOptimizeTextPreview(mimo));
+            audio.put("optimize_text_preview", false);
         } else if (TkMimoVoiceModeEnum.VOICE_CLONE.equals(mode)) {
             audio.put("voice", resolveVoiceCloneDataUrl(request));
         }
@@ -116,17 +118,19 @@ public class TkMimoTtsClient implements TkVoiceTtsClient {
 
     private String resolveUserInstruction(TkVoiceSynthesisRequest request, String mode) {
         if (TkMimoVoiceModeEnum.VOICE_DESIGN.equals(mode)) {
-            return StrUtil.blankToDefault(request == null ? null : request.getMimoVoicePrompt(), defaultVoiceDesignPrompt());
+            return StrUtil.blankToDefault(request == null ? null : request.getMimoVoicePrompt(), defaultVoiceDesignPrompt())
+                    + "\n" + EXACT_NARRATION_INSTRUCTION;
         }
         String prompt = request == null ? null : request.getMimoVoicePrompt();
         if (StrUtil.isNotBlank(prompt)) {
-            return prompt;
+            return prompt + "\n" + EXACT_NARRATION_INSTRUCTION;
         }
-        return defaultVoiceStylePrompt(request == null ? null : request.getTargetLanguage());
+        return defaultVoiceStylePrompt(request == null ? null : request.getTargetLanguage())
+                + "\n" + EXACT_NARRATION_INSTRUCTION;
     }
 
     private String resolveModel(TkVoiceSynthesisRequest request, TkGenerationProperties.Mimo mimo) {
-        String mode = TkMimoVoiceModeEnum.normalize(request == null ? null : request.getMimoVoiceMode());
+        String mode = resolveEffectiveMode(request);
         if (TkMimoVoiceModeEnum.VOICE_DESIGN.equals(mode)) {
             return getConfig(KEY_VOICE_DESIGN_MODEL, mimo.getVoiceDesignModel());
         }
@@ -134,6 +138,10 @@ public class TkMimoTtsClient implements TkVoiceTtsClient {
             return getConfig(KEY_VOICE_CLONE_MODEL, mimo.getVoiceCloneModel());
         }
         return getConfig(KEY_PRESET_MODEL, mimo.getPresetModel());
+    }
+
+    private String resolveEffectiveMode(TkVoiceSynthesisRequest request) {
+        return TkMimoVoiceModeEnum.normalize(request == null ? null : request.getMimoVoiceMode());
     }
 
     private String resolveVoiceCloneDataUrl(TkVoiceSynthesisRequest request) {
@@ -152,11 +160,6 @@ public class TkMimoTtsClient implements TkVoiceTtsClient {
             String contentType = StrUtil.blankToDefault(response.header("Content-Type"), detectMimeType(sampleUrl));
             return "data:" + contentType + ";base64," + Base64.getEncoder().encodeToString(bytes);
         }
-    }
-
-    private boolean resolveOptimizeTextPreview(TkGenerationProperties.Mimo mimo) {
-        String value = getConfig(KEY_OPTIMIZE_TEXT_PREVIEW, String.valueOf(mimo.getOptimizeTextPreview()));
-        return Boolean.parseBoolean(value);
     }
 
     private String defaultVoiceDesignPrompt() {

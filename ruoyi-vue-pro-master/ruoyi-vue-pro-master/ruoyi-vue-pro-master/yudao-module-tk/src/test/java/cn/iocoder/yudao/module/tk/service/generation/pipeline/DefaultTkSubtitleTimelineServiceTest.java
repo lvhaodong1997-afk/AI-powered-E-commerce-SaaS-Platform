@@ -112,6 +112,85 @@ class DefaultTkSubtitleTimelineServiceTest {
     }
 
     @Test
+    void buildTimelineFallsBackToEstimatedTimelineWhenAsrTextDoesNotMatchOriginalScript() throws Exception {
+        Path asrScript = tempDir.resolve("mismatch-asr.py");
+        Files.write(asrScript, Collections.singletonList(
+                "import json\n"
+                        + "print(json.dumps({\"language\":\"en-US\",\"audioDuration\":4.0,"
+                        + "\"segments\":[{\"text\":\"The voice provider rewrote the entire narration.\","
+                        + "\"start\":0.0,\"end\":4.0,"
+                        + "\"words\":[{\"text\":\"The\",\"start\":0.0,\"end\":0.4,\"keyword\":False},"
+                        + "{\"text\":\"voice\",\"start\":0.4,\"end\":0.8,\"keyword\":False},"
+                        + "{\"text\":\"provider\",\"start\":0.8,\"end\":1.4,\"keyword\":False},"
+                        + "{\"text\":\"rewrote\",\"start\":1.4,\"end\":2.1,\"keyword\":False},"
+                        + "{\"text\":\"everything\",\"start\":2.1,\"end\":4.0,\"keyword\":False}]}]}))"),
+                StandardCharsets.UTF_8);
+        Path audioFile = tempDir.resolve("voice.mp3");
+        Files.write(audioFile, new byte[]{0});
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getSubtitle().setDetectLeadingSilenceEnabled(false);
+        properties.getSubtitle().getAsr().setEnabled(true);
+        properties.getSubtitle().getAsr().setPython("py");
+        properties.getSubtitle().getAsr().setScriptPath(asrScript.toString());
+        properties.getSubtitle().getAsr().setMinTextSimilarity(0.55D);
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .targetLanguage("en-US")
+                .targetDuration(4)
+                .build();
+
+        TkSubtitleTimeline timeline = service.buildTimeline(task, "Buy this whitening serum today.", audioFile.toFile(),
+                Collections.emptyList());
+
+        assertEquals("Buy this whitening serum today.", timeline.getSegments().get(0).getText());
+        assertEquals(4.0D, timeline.getAudioDuration(), 0.001D);
+        String quality = Files.readString(tempDir.resolve("subtitle-quality.json"));
+        assertTrue(quality.contains("\"mode\":\"ESTIMATED_AFTER_ASR_MISMATCH\""));
+        assertTrue(quality.contains("ASR text does not match original script"));
+    }
+
+    @Test
+    void buildTimelineRetriesAsrWithConfiguredRetryModelBeforeEstimatedFallback() throws Exception {
+        Path asrScript = tempDir.resolve("retry-asr.py");
+        Files.write(asrScript, Collections.singletonList(
+                "import json, sys\n"
+                        + "model = sys.argv[sys.argv.index('--model') + 1]\n"
+                        + "text = 'Buy this whitening serum today.' if model == 'medium' else 'The voice provider rewrote the narration.'\n"
+                        + "print(json.dumps({\"language\":\"en-US\",\"audioDuration\":4.0,"
+                        + "\"segments\":[{\"text\":text,\"start\":0.0,\"end\":4.0,"
+                        + "\"words\":[{\"text\":\"Buy\",\"start\":0.0,\"end\":0.5,\"keyword\":False},"
+                        + "{\"text\":\"this\",\"start\":0.5,\"end\":1.0,\"keyword\":False},"
+                        + "{\"text\":\"whitening\",\"start\":1.0,\"end\":2.0,\"keyword\":False},"
+                        + "{\"text\":\"serum\",\"start\":2.0,\"end\":3.0,\"keyword\":False},"
+                        + "{\"text\":\"today.\",\"start\":3.0,\"end\":4.0,\"keyword\":False}]}]}))"),
+                StandardCharsets.UTF_8);
+        Path audioFile = tempDir.resolve("voice.mp3");
+        Files.write(audioFile, new byte[]{0});
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getSubtitle().setDetectLeadingSilenceEnabled(false);
+        properties.getSubtitle().getAsr().setEnabled(true);
+        properties.getSubtitle().getAsr().setPython("py");
+        properties.getSubtitle().getAsr().setScriptPath(asrScript.toString());
+        properties.getSubtitle().getAsr().setModel("small");
+        properties.getSubtitle().getAsr().setRetryEnabled(true);
+        properties.getSubtitle().getAsr().setRetryModel("medium");
+        properties.getSubtitle().getAsr().setMinTextSimilarity(0.55D);
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .targetLanguage("en-US")
+                .targetDuration(4)
+                .build();
+
+        TkSubtitleTimeline timeline = service.buildTimeline(task, "Buy this whitening serum today.", audioFile.toFile(),
+                Collections.emptyList());
+
+        assertEquals("Buy this whitening serum today.", timeline.getSegments().get(0).getText());
+        assertTrue(Files.exists(tempDir.resolve("asr-retry-raw.json")));
+        String quality = Files.readString(tempDir.resolve("subtitle-quality.json"));
+        assertTrue(quality.contains("\"mode\":\"ASR_RETRY_EXACT\""));
+    }
+
+    @Test
     void buildTimelineMapsAsrWordTimingToOriginalScriptWords() throws Exception {
         Path asrScript = tempDir.resolve("timed-asr.py");
         Files.write(asrScript, Collections.singletonList(
@@ -368,6 +447,26 @@ class DefaultTkSubtitleTimelineServiceTest {
     }
 
     @Test
+    void smoothRapidSegmentsMergesFlickerCaptionsButKeepsWordTiming() {
+        List<TkSubtitleSegment> segments = Arrays.asList(
+                segment("A", 0.0D, 0.3D),
+                segment("B", 0.3D, 0.6D),
+                segment("C", 0.6D, 1.0D),
+                segment("stable caption", 1.0D, 2.5D)
+        );
+
+        List<TkSubtitleSegment> smoothed = ReflectionTestUtils.invokeMethod(service, "smoothRapidSegments", segments);
+
+        assertEquals(2, smoothed.size());
+        assertEquals("ABC", smoothed.get(0).getText());
+        assertEquals(0.0D, smoothed.get(0).getStart(), 0.001D);
+        assertEquals(1.0D, smoothed.get(0).getEnd(), 0.001D);
+        assertEquals(3, smoothed.get(0).getWords().size());
+        assertEquals(0.3D, smoothed.get(0).getWords().get(1).getStart(), 0.001D);
+        assertEquals("stable caption", smoothed.get(1).getText());
+    }
+
+    @Test
     void applySubtitleLeadMovesSegmentsAndWordsEarlierWithoutNegativeTime() {
         TkSubtitleTimeline timeline = new TkSubtitleTimeline();
         timeline.setAudioDuration(6D);
@@ -423,6 +522,15 @@ class DefaultTkSubtitleTimelineServiceTest {
 
         assertFalse(DefaultTkSubtitleTimelineService.isAsrTimelineTextAcceptable(
                 tooShort, "你还在靠招人来堆内容产量吗？", 0.55D));
+    }
+
+    private TkSubtitleSegment segment(String text, double start, double end) {
+        TkSubtitleSegment segment = new TkSubtitleSegment();
+        segment.setText(text);
+        segment.setStart(start);
+        segment.setEnd(end);
+        segment.setWords(Collections.singletonList(new TkSubtitleWord(text, start, end, false)));
+        return segment;
     }
 
 }
