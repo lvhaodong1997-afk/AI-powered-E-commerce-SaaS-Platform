@@ -65,7 +65,7 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
-    void planLeadGenerationBackfillsWholeMaterialsUntilTargetDuration() {
+    void planLeadGenerationKeepsEveryMaterialUniqueWhenTargetDurationIsLongerThanLibrary() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         ReflectionTestUtils.setField(service, "random", new FixedRandom(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
         ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
@@ -92,10 +92,10 @@ class DefaultTkClipPlannerServiceTest {
 
         List<TkClipPlanItem> plan = service.plan(task, "lead generation script");
 
-        assertTrue(plan.stream().mapToInt(TkClipPlanItem::getDurationSecond).sum() >= 50);
-        assertTrue(plan.size() > 8);
-        assertEquals("GENERAL", plan.get(8).getSection());
-        assertTrue(plan.stream().skip(8).allMatch(item -> item.getReason().contains("补足")));
+        assertEquals(8, plan.size());
+        assertEquals(33, plan.stream().mapToInt(TkClipPlanItem::getDurationSecond).sum());
+        assertEquals(8, plan.stream().map(TkClipPlanItem::getMaterialVideoId).distinct().count());
+        assertEquals("GENERAL", plan.get(7).getSection());
     }
 
     @Test
@@ -178,7 +178,7 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
-    void planLeadGenerationFailsWhenAnyRequiredSegmentIsMissing() {
+    void planLeadGenerationUsesAvailableUniqueMaterialsWhenSegmentIsMissing() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
         TkMaterialVideoMapper materialVideoMapper = mock(TkMaterialVideoMapper.class);
@@ -199,10 +199,10 @@ class DefaultTkClipPlannerServiceTest {
                 .targetDuration(15)
                 .build();
 
-        IllegalStateException exception = assertThrows(IllegalStateException.class,
-                () -> service.plan(task, "lead generation script"));
+        List<TkClipPlanItem> plan = service.plan(task, "lead generation script");
 
-        assertTrue(exception.getMessage().contains("通用素材"));
+        assertEquals(7, plan.size());
+        assertEquals(7, plan.stream().map(TkClipPlanItem::getMaterialVideoId).distinct().count());
     }
 
     @Test
@@ -425,7 +425,7 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
-    void planUsesFullPoolRandomModeAndFailsWhenNoClipCanFitTargetDuration() {
+    void planUsesClosestUniqueMaterialWhenNoClipFitsTargetDuration() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
         TkMaterialVideoMapper materialVideoMapper = mock(TkMaterialVideoMapper.class);
@@ -441,10 +441,37 @@ class DefaultTkClipPlannerServiceTest {
                 .generationRouteConfig("{\"clipPlanMode\":\"FULL_POOL_RANDOM\"}")
                 .build();
 
-        IllegalStateException exception = assertThrows(IllegalStateException.class,
-                () -> service.plan(task, "full pool random demo"));
+        List<TkClipPlanItem> plan = service.plan(task, "full pool random demo");
 
-        assertTrue(exception.getMessage().contains("目标"));
+        assertEquals(1, plan.size());
+        assertEquals(1L, plan.get(0).getMaterialVideoId());
+        assertEquals(12, plan.get(0).getDurationSecond());
+        assertEquals(10, plan.get(0).getSectionTargetSecond());
+    }
+
+    @Test
+    void planFullPoolRandomKeepsMaterialsUniqueWhenLibraryDurationIsShort() {
+        DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
+        ReflectionTestUtils.setField(service, "random", new FixedRandom(0, 0, 0, 0));
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        TkMaterialVideoMapper materialVideoMapper = mock(TkMaterialVideoMapper.class);
+        ReflectionTestUtils.setField(service, "materialVideoMapper", materialVideoMapper);
+        when(materialVideoMapper.selectListByLibraryId(10L)).thenReturn(Arrays.asList(
+                material(1L, 4L, "GENERAL"),
+                material(2L, 6L, "GENERAL")
+        ));
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .id(114L)
+                .libraryId(10L)
+                .targetDuration(15)
+                .generationRouteConfig("{\"clipPlanMode\":\"FULL_POOL_RANDOM\"}")
+                .build();
+
+        List<TkClipPlanItem> plan = service.plan(task, "full pool random short library");
+
+        assertEquals(2, plan.size());
+        assertEquals(2, plan.stream().map(TkClipPlanItem::getMaterialVideoId).distinct().count());
+        assertEquals(10, plan.stream().mapToInt(TkClipPlanItem::getDurationSecond).sum());
     }
 
     @Test
@@ -674,7 +701,7 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
-    void planRequiresExplicitSegmentTypesAndDoesNotMapUsagePhaseToStorySegment() {
+    void planUsesUnassignedUniqueMaterialsWhenSegmentTypesAreMissing() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getFfmpeg().setClipDurationPool(Arrays.asList(2, 3, 4));
@@ -693,14 +720,14 @@ class DefaultTkClipPlannerServiceTest {
                 .clipSeconds(3)
                 .build();
 
-        IllegalStateException exception = assertThrows(IllegalStateException.class,
-                () -> service.plan(task, "portable blender demo result"));
+        List<TkClipPlanItem> plan = service.plan(task, "portable blender demo result");
 
-        assertTrue(exception.getMessage().contains("黄金3秒用途素材不足"));
+        assertEquals(3, plan.size());
+        assertEquals(3, plan.stream().map(TkClipPlanItem::getMaterialVideoId).distinct().count());
     }
 
     @Test
-    void planDoesNotUseAdjacentOrGeneralMaterialsWhenStrictSegmentIsShort() {
+    void planUsesUnusedCrossSegmentMaterialsWhenStrictSegmentIsShort() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getFfmpeg().setClipDurationPool(Arrays.asList(2, 3, 4));
@@ -722,10 +749,40 @@ class DefaultTkClipPlannerServiceTest {
                 .clipSeconds(3)
                 .build();
 
-        IllegalStateException exception = assertThrows(IllegalStateException.class,
-                () -> service.plan(task, "demo proof"));
+        List<TkClipPlanItem> plan = service.plan(task, "demo proof");
 
-        assertTrue(exception.getMessage().contains("使用演示用途素材不足"));
+        assertEquals(plan.size(), plan.stream().map(TkClipPlanItem::getMaterialVideoId).distinct().count());
+        assertTrue(plan.stream().anyMatch(item -> Long.valueOf(4L).equals(item.getMaterialVideoId())
+                && "S4_DEMO".equals(item.getSection())));
+    }
+
+    @Test
+    void planChoosesClosestUnusedCrossSegmentMaterialForDurationGap() {
+        DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        TkMaterialVideoMapper materialVideoMapper = mock(TkMaterialVideoMapper.class);
+        ReflectionTestUtils.setField(service, "materialVideoMapper", materialVideoMapper);
+        when(materialVideoMapper.selectListByLibraryId(10L)).thenReturn(Arrays.asList(
+                material(1L, 3L, "ATTENTION", "S1_HOOK"),
+                material(2L, 2L, "PRODUCT_SHOW", "S4_DEMO"),
+                material(3L, 10L, "GENERAL", "GENERAL"),
+                material(4L, 6L, "GENERAL", "GENERAL")
+        ));
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .id(115L)
+                .libraryId(10L)
+                .targetDuration(10)
+                .segmentDurationConfig("["
+                        + "{\"segmentType\":\"S1_HOOK\",\"duration\":3},"
+                        + "{\"segmentType\":\"S4_DEMO\",\"duration\":7}"
+                        + "]")
+                .build();
+
+        List<TkClipPlanItem> plan = service.plan(task, "demo");
+
+        assertTrue(plan.stream().anyMatch(item -> Long.valueOf(4L).equals(item.getMaterialVideoId())
+                && "S4_DEMO".equals(item.getSection())));
+        assertTrue(plan.stream().noneMatch(item -> Long.valueOf(3L).equals(item.getMaterialVideoId())));
     }
 
     private TkMaterialVideoDO material(Long id, Long duration) {

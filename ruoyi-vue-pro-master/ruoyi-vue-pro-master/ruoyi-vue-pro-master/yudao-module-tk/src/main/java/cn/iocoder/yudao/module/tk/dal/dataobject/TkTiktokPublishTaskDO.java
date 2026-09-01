@@ -23,9 +23,13 @@ public class TkTiktokPublishTaskDO extends TenantBaseDO {
 
     private Long companyId;
     private Long generationTaskId;
+    private Long uploadedVideoId;
+    private String sourceType;
     private String title;
     private String caption;
     private String videoUrl;
+    private String coverUrl;
+    private Long coverTimestampMs;
     private String postMode;
     private String privacyLevel;
     private Integer accountCount;

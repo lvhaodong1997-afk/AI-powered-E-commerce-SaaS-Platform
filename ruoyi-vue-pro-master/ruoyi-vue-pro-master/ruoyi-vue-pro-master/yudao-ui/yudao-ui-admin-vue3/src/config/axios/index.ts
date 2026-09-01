@@ -6,12 +6,18 @@ const { default_headers } = config
 
 const request = (option: any) => {
   const { headersType, headers, ...otherOption } = option
+  const isFormData =
+    typeof FormData !== 'undefined' && otherOption.data instanceof FormData
+  const requestHeaders = { ...headers }
+  if (isFormData) {
+    delete requestHeaders['Content-Type']
+    delete requestHeaders['content-type']
+  } else {
+    requestHeaders['Content-Type'] = headersType || default_headers
+  }
   return service({
     ...otherOption,
-    headers: {
-      'Content-Type': headersType || default_headers,
-      ...headers
-    }
+    headers: requestHeaders
   })
 }
 export default {

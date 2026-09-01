@@ -58,23 +58,38 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
 
     @Override
     public TkRenderResult render(TkGenerationTaskDO task, List<TkClipPlanItem> clipPlan) {
+        return render(task, clipPlan, TkRenderProgressReporter.NOOP);
+    }
+
+    @Override
+    public TkRenderResult render(TkGenerationTaskDO task, List<TkClipPlanItem> clipPlan,
+                                 TkRenderProgressReporter progressReporter) {
         File taskDir = FileUtil.mkdir(resolveWorkDir(task));
         boolean completed = false;
         try {
+            TkRenderProgressReporter reporter = progressReporter == null ? TkRenderProgressReporter.NOOP : progressReporter;
             Map<String, File> sourceCache = new java.util.concurrent.ConcurrentHashMap<>();
+            int materialCount = (int) clipPlan.stream()
+                    .filter(item -> item != null && StrUtil.isNotBlank(item.getFileUrl()))
+                    .map(TkClipPlanItem::getFileUrl)
+                    .distinct()
+                    .count();
+            reporter.report("RENDER_DOWNLOAD", "正在下载素材", 66, 0, materialCount);
             runRenderStep(task, "RENDER_DOWNLOAD", "Render download material",
-                    () -> prefetchSourceFiles(taskDir, clipPlan, sourceCache));
+                    () -> prefetchSourceFiles(taskDir, clipPlan, sourceCache, reporter));
 
+            reporter.report("RENDER_TRANSCODE_SEGMENTS", "正在转码拼接素材", 72, 0, 0);
             File mergedVideo = runRenderStep(task, "RENDER_TRANSCODE_SEGMENTS", "Render transcode segments",
                     () -> {
-                        List<File> segments = buildSegments(taskDir, clipPlan, sourceCache);
+                        List<File> segments = buildSegments(task, taskDir, clipPlan, sourceCache, reporter);
                         File concatList = writeConcatList(taskDir, segments);
                         File output = new File(taskDir, "merged-video.mp4");
                         runCommand(Arrays.asList(ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", concatList.getAbsolutePath(),
                                 "-c", "copy", output.getAbsolutePath()));
-                        return output;
+                        return ensureTargetDuration(task, taskDir, output);
                     });
 
+            reporter.report("RENDER_SUBTITLE", "正在生成字幕", 88, 0, 1);
             RenderMedia renderMedia = runRenderStep(task, "RENDER_SUBTITLE", "Render subtitle assets",
                     () -> {
                         File audioFile = StrUtil.isBlank(task.getAudioUrl()) ? null : prepareVoiceAudio(taskDir, task.getAudioUrl());
@@ -82,19 +97,21 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                         return new RenderMedia(audioFile, subtitleAssets);
                     });
 
+            reporter.report("RENDER_FINAL_MERGE", "正在合成视频、配音和背景音乐", 92, 0, 1);
             File finalVideo = runRenderStep(task, "RENDER_FINAL_MERGE", "Render final merge",
                     () -> {
                         File output = new File(taskDir, "final-video.mp4");
                         File bgmFile = resolveBgmFile(taskDir, task);
                         List<String> renderCommand = buildFinalRenderCommand(ffmpeg(), mergedVideo, renderMedia.audioFile, bgmFile,
-                                normalizeBgmVolume(task.getBgmVolume()), probeDuration(mergedVideo),
+                                normalizeBgmVolume(task.getBgmVolume()), TkVideoDurationSupport.normalize(task.getTargetDuration()),
                                 renderMedia.subtitleAssets.assFile, output, ffmpegPreset());
                         runCommand(renderCommand);
                         return output;
                     });
 
+            reporter.report("RENDER_UPLOAD_OSS", "正在上传生成结果", 96, 0, 1);
             UploadResult uploadResult = runRenderStep(task, "RENDER_UPLOAD_OSS", "Render upload assets",
-                    () -> uploadAssets(task, clipPlan, finalVideo, renderMedia.subtitleAssets));
+                    () -> uploadAssets(task, clipPlan, finalVideo, renderMedia.subtitleAssets, reporter));
             SubtitleAssets subtitleAssets = uploadResult.subtitleAssets;
             String outputUrl = uploadResult.outputUrl;
             TkRenderResult result = new TkRenderResult(outputUrl, subtitleAssets.assUrl, subtitleAssets.timelineUrl,
@@ -143,6 +160,25 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                 "-r", "30", "-an", "-c:v", "libx264", "-preset", normalizePreset(preset), segment.getAbsolutePath());
     }
 
+    static List<String> buildNormalizeClipCommand(String ffmpeg, File source, File segment,
+                                                   double startSeconds, double durationSeconds,
+                                                   String preset, boolean useVariant) {
+        return buildAdaptClipCommand(ffmpeg, source, segment, startSeconds, durationSeconds, durationSeconds, preset);
+    }
+
+    static List<String> buildAdaptClipCommand(String ffmpeg, File source, File segment,
+                                               double startSeconds, double sourceDuration,
+                                               double targetDuration, String preset) {
+        String videoFilter = NORMALIZE_VIDEO_FILTER;
+        if (Math.abs(sourceDuration - targetDuration) > SECTION_COMPRESS_EPSILON_SECONDS) {
+            videoFilter += "," + TkRenderMediaSupport.buildVideoSpeedFilter(sourceDuration, targetDuration);
+        }
+        return Arrays.asList(ffmpeg, "-y", "-ss", formatDecimal(Math.max(0D, startSeconds)),
+                "-t", formatDecimal(Math.max(0.001D, sourceDuration)), "-i", source.getAbsolutePath(),
+                "-vf", videoFilter,
+                "-r", "30", "-an", "-c:v", "libx264", "-preset", normalizePreset(preset), segment.getAbsolutePath());
+    }
+
     static List<String> buildCompressSectionCommand(String ffmpeg, File source, File segment,
                                                     double sourceDuration, double targetDuration) {
         return buildCompressSectionCommand(ffmpeg, source, segment, sourceDuration, targetDuration, "veryfast");
@@ -155,6 +191,14 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                 "-r", "30", "-an", "-c:v", "libx264", "-preset", normalizePreset(preset), segment.getAbsolutePath());
     }
 
+    static List<String> buildDurationCorrectionCommand(String ffmpeg, File source, File output,
+                                                        double sourceDuration, double targetDuration, String preset) {
+        return Arrays.asList(ffmpeg, "-y", "-i", source.getAbsolutePath(),
+                "-vf", NORMALIZE_VIDEO_FILTER + "," + TkRenderMediaSupport.buildVideoSpeedFilter(sourceDuration, targetDuration),
+                "-r", "30", "-an", "-c:v", "libx264", "-preset", normalizePreset(preset),
+                "-t", formatDecimal(targetDuration), output.getAbsolutePath());
+    }
+
     static List<String> buildPadSectionCommand(String ffmpeg, File source, File segment,
                                                double sourceDuration, double targetDuration) {
         return buildPadSectionCommand(ffmpeg, source, segment, sourceDuration, targetDuration, "veryfast");
@@ -162,10 +206,7 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
 
     static List<String> buildPadSectionCommand(String ffmpeg, File source, File segment,
                                                double sourceDuration, double targetDuration, String preset) {
-        double paddingDuration = Math.max(0D, targetDuration - sourceDuration);
-        return Arrays.asList(ffmpeg, "-y", "-i", source.getAbsolutePath(),
-                "-vf", NORMALIZE_VIDEO_FILTER + ",tpad=stop_mode=clone:stop_duration=" + formatDecimal(paddingDuration),
-                "-r", "30", "-an", "-c:v", "libx264", "-preset", normalizePreset(preset), segment.getAbsolutePath());
+        return buildCompressSectionCommand(ffmpeg, source, segment, sourceDuration, targetDuration, preset);
     }
 
     static List<String> buildFinalRenderCommand(String ffmpeg, File mergedVideo, File finalAudioFile,
@@ -216,8 +257,22 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         }
         renderCommand.addAll(Arrays.asList("-map", "0:v:0",
                 "-c:v", "libx264", "-preset", normalizePreset(preset),
-                "-an", finalVideo.getAbsolutePath()));
+                "-an", "-t", formatDecimal(videoDuration), finalVideo.getAbsolutePath()));
         return renderCommand;
+    }
+
+    private File ensureTargetDuration(TkGenerationTaskDO task, File taskDir, File mergedVideo) throws Exception {
+        double targetDuration = TkVideoDurationSupport.normalize(task.getTargetDuration());
+        double mergedDuration = probeDuration(mergedVideo);
+        if (mergedDuration <= 0D || mergedDuration + SECTION_COMPRESS_EPSILON_SECONDS >= targetDuration) {
+            return mergedVideo;
+        }
+        File adjustedVideo = new File(taskDir, "merged-video-duration-adjusted.mp4");
+        log.info("[ensureTargetDuration][taskId({}) targetDuration({}) mergedDuration({})]",
+                task.getId(), targetDuration, mergedDuration);
+        runCommand(buildDurationCorrectionCommand(ffmpeg(), mergedVideo, adjustedVideo,
+                mergedDuration, targetDuration, ffmpegPreset()));
+        return adjustedVideo;
     }
 
     private static String buildBgmMixFilter(Double bgmVolume, double videoDuration) {
@@ -281,13 +336,96 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         stepLogMapper.insert(log);
     }
 
-    private List<File> buildSegments(File taskDir, List<TkClipPlanItem> clipPlan, Map<String, File> sourceCache) throws Exception {
-        List<File> segments = new ArrayList<>();
-        int sectionIndex = 1;
+    private List<File> buildSegments(TkGenerationTaskDO task, File taskDir, List<TkClipPlanItem> clipPlan, Map<String, File> sourceCache,
+                                     TkRenderProgressReporter reporter) throws Exception {
+        List<ClipSpec> clipSpecs = new ArrayList<>();
+        Map<String, Double> durationCache = new LinkedHashMap<>();
         for (StageGroup group : groupSections(clipPlan)) {
-            segments.add(buildSectionSegment(taskDir, group, sectionIndex++, sourceCache));
+            List<ClipSpec> groupSpecs = new ArrayList<>();
+            double groupTargetDuration = group.targetDuration();
+            double groupDuration = 0D;
+            for (TkClipPlanItem item : group.items) {
+                ClipSpec spec = resolveClipSpec(taskDir, item, sourceCache, durationCache);
+                if (spec == null) {
+                    continue;
+                }
+                if (groupTargetDuration > 0D) {
+                    double remaining = groupTargetDuration - groupDuration;
+                    if (remaining <= 0.001D) {
+                        break;
+                    }
+                    spec = spec.withDuration(Math.min(spec.durationSeconds, remaining));
+                }
+                groupSpecs.add(spec);
+                groupDuration += spec.durationSeconds;
+            }
+            adaptClipSpecs(groupSpecs, groupTargetDuration);
+            clipSpecs.addAll(groupSpecs);
+        }
+        if (clipSpecs.isEmpty()) {
+            throw new IllegalStateException("没有可用于生成视频的有效素材");
+        }
+        adaptClipSpecs(clipSpecs, TkVideoDurationSupport.normalize(task.getTargetDuration()));
+        List<File> segments = new ArrayList<>();
+        int index = 1;
+        int total = clipSpecs.size();
+        for (ClipSpec spec : clipSpecs) {
+            File segment = new File(taskDir, StrUtil.format("clip-{}.mp4", index++));
+            runCommand(buildAdaptClipCommand(ffmpeg(), spec.source, segment, spec.startSeconds,
+                    spec.sourceDurationSeconds, spec.durationSeconds, ffmpegPreset()));
+            segments.add(segment);
+            reporter.report("RENDER_TRANSCODE_SEGMENTS", "正在转码拼接素材",
+                    TkGenerationProgressSupport.stageProgress(72, 88, segments.size(), total), segments.size(), total);
         }
         return segments;
+    }
+
+    private ClipSpec resolveClipSpec(File taskDir, TkClipPlanItem item, Map<String, File> sourceCache,
+                                     Map<String, Double> durationCache) throws Exception {
+        if (item == null || StrUtil.isBlank(item.getFileUrl())) {
+            return null;
+        }
+        File source = downloadCached(item.getFileUrl(), taskDir, item.getFileName(), sourceCache);
+        Double sourceDurationValue = durationCache.get(source.getAbsolutePath());
+        if (sourceDurationValue == null) {
+            sourceDurationValue = probeDuration(source);
+            durationCache.put(source.getAbsolutePath(), sourceDurationValue);
+        }
+        double sourceDuration = sourceDurationValue;
+        double startSeconds = resolveStartSeconds(item);
+        double plannedDuration = resolvePlannedDurationSeconds(item);
+        double usableDuration = Math.max(0D, sourceDuration - startSeconds);
+        double durationSeconds = Math.min(plannedDuration, usableDuration);
+        if (durationSeconds <= 0.001D) {
+            return null;
+        }
+        return new ClipSpec(source, startSeconds, durationSeconds, durationSeconds);
+    }
+
+    private void adaptClipSpecs(List<ClipSpec> clipSpecs, double targetDuration) {
+        double renderedDuration = clipSpecs.stream().mapToDouble(spec -> spec.durationSeconds).sum();
+        if (renderedDuration + SECTION_COMPRESS_EPSILON_SECONDS >= targetDuration || clipSpecs.isEmpty()) {
+            return;
+        }
+        double scale = targetDuration / renderedDuration;
+        for (int index = 0; index < clipSpecs.size(); index++) {
+            ClipSpec spec = clipSpecs.get(index);
+            clipSpecs.set(index, spec.withDuration(spec.durationSeconds * scale));
+        }
+    }
+
+    private double resolveStartSeconds(TkClipPlanItem item) {
+        if (item.getStartMillis() != null && item.getStartMillis() >= 0L) {
+            return item.getStartMillis() / 1000D;
+        }
+        return item.getStartSecond() == null ? 0D : Math.max(0D, item.getStartSecond());
+    }
+
+    private double resolvePlannedDurationSeconds(TkClipPlanItem item) {
+        if (item.getDurationMillis() != null && item.getDurationMillis() > 0L) {
+            return item.getDurationMillis() / 1000D;
+        }
+        return item.getDurationSecond() == null ? 0D : Math.max(0D, item.getDurationSecond());
     }
 
     private File buildSectionSegment(File taskDir, StageGroup group, int sectionIndex,
@@ -330,7 +468,8 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         return rawSection;
     }
 
-    private Void prefetchSourceFiles(File taskDir, List<TkClipPlanItem> clipPlan, Map<String, File> sourceCache) throws Exception {
+    private Void prefetchSourceFiles(File taskDir, List<TkClipPlanItem> clipPlan, Map<String, File> sourceCache,
+                                     TkRenderProgressReporter reporter) throws Exception {
         Map<String, TkClipPlanItem> uniqueItems = new LinkedHashMap<>();
         for (TkClipPlanItem item : clipPlan) {
             if (item != null && StrUtil.isNotBlank(item.getFileUrl())) {
@@ -342,9 +481,14 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         }
         int parallelism = Math.min(uniqueItems.size(), Math.max(1,
                 defaultInt(generationProperties.getRenderDownload().getMaxParallelDownloads(), 3)));
+        int completed = 0;
+        int total = uniqueItems.size();
         if (parallelism <= 1) {
             for (TkClipPlanItem item : uniqueItems.values()) {
                 downloadCached(item.getFileUrl(), taskDir, item.getFileName(), sourceCache);
+                completed++;
+                reporter.report("RENDER_DOWNLOAD", "正在下载素材",
+                        TkGenerationProgressSupport.stageProgress(66, 72, completed, total), completed, total);
             }
             return null;
         }
@@ -357,6 +501,9 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
             }
             for (Future<?> future : futures) {
                 future.get();
+                completed++;
+                reporter.report("RENDER_DOWNLOAD", "正在下载素材",
+                        TkGenerationProgressSupport.stageProgress(66, 72, completed, total), completed, total);
             }
             return null;
         } finally {
@@ -365,7 +512,8 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
     }
 
     private UploadResult uploadAssets(TkGenerationTaskDO task, List<TkClipPlanItem> clipPlan,
-                                      File finalVideo, SubtitleAssets subtitleAssets) {
+                                      File finalVideo, SubtitleAssets subtitleAssets,
+                                      TkRenderProgressReporter reporter) {
         String outputUrl = generationOutputStorageService.uploadGeneratedAsset(task, finalVideo,
                 StrUtil.format("generated-{}.mp4", task.getId()), "video/mp4");
         generationOutputStorageService.uploadGeneratedAsset(task,
@@ -400,6 +548,7 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
             subtitleAssets.qualityUrl = generationOutputStorageService.uploadGeneratedAsset(task, subtitleQualityFile,
                     StrUtil.format("subtitle-quality-{}.json", task.getId()), "application/json");
         }
+        reporter.report("RENDER_UPLOAD_OSS", "正在上传生成结果", 99, 1, 1);
         return new UploadResult(outputUrl, subtitleAssets);
     }
 
@@ -640,6 +789,27 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         private UploadResult(String outputUrl, SubtitleAssets subtitleAssets) {
             this.outputUrl = outputUrl;
             this.subtitleAssets = subtitleAssets;
+        }
+
+    }
+
+    private static class ClipSpec {
+
+        private final File source;
+        private final double startSeconds;
+        private final double sourceDurationSeconds;
+        private final double durationSeconds;
+
+        private ClipSpec(File source, double startSeconds, double sourceDurationSeconds,
+                         double durationSeconds) {
+            this.source = source;
+            this.startSeconds = startSeconds;
+            this.sourceDurationSeconds = sourceDurationSeconds;
+            this.durationSeconds = durationSeconds;
+        }
+
+        private ClipSpec withDuration(double durationSeconds) {
+            return new ClipSpec(source, startSeconds, sourceDurationSeconds, durationSeconds);
         }
 
     }

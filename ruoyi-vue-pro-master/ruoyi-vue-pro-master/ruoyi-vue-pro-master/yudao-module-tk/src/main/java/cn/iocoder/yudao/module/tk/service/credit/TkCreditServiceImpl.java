@@ -29,6 +29,7 @@ import javax.servlet.http.HttpServletRequest;
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.yudao.module.tk.enums.ErrorCodeConstants.TK_CREDIT_NOT_ENOUGH;
 import static cn.iocoder.yudao.module.tk.enums.TkCreditBizTypeEnum.GENERATION_TASK;
+import static cn.iocoder.yudao.module.tk.enums.TkCreditBizTypeEnum.AUDIO_EXPORT;
 import static cn.iocoder.yudao.module.tk.enums.TkCreditBizTypeEnum.REFERENCE_ANALYSIS;
 import static cn.iocoder.yudao.module.tk.enums.TkCreditBizTypeEnum.TENANT_RECHARGE;
 import static cn.iocoder.yudao.module.tk.enums.TkCreditLogStatusEnum.*;
@@ -147,6 +148,12 @@ public class TkCreditServiceImpl implements TkCreditService {
     @Transactional(rollbackFor = Exception.class)
     public Long freezeForGenerationTask(Long tenantId) {
         return freeze(tenantId, GENERATION_TASK, configuredCost(KEY_GENERATION_TASK_COST, COST_GENERATION_TASK));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long freezeForAudioExport(Long tenantId) {
+        return freeze(tenantId, AUDIO_EXPORT, COST_AUDIO_EXPORT);
     }
 
     @Override

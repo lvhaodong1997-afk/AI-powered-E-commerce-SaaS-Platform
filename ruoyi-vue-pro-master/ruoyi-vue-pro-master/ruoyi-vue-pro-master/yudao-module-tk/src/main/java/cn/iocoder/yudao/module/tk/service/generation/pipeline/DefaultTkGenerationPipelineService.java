@@ -26,7 +26,11 @@ import cn.iocoder.yudao.module.tk.service.log.TkBusinessLogService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -117,24 +121,41 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
             return;
         }
         try {
-            executorService.submit(() -> {
-            try {
-                activeLeaseToken.set(leaseToken);
-                TenantUtils.execute(tenantId, () -> run(taskId, leaseToken));
-            } finally {
-                activeLeaseToken.remove();
-                if (taskLeaseService != null) {
-                    TenantUtils.execute(tenantId, () -> taskLeaseService.release(taskId, leaseToken));
+            executorService.submit(() -> runWithIsolatedContext(() -> {
+                try {
+                    activeLeaseToken.set(leaseToken);
+                    TenantUtils.execute(tenantId, () -> run(taskId, leaseToken));
+                } finally {
+                    activeLeaseToken.remove();
+                    if (taskLeaseService != null) {
+                        TenantUtils.execute(tenantId, () -> taskLeaseService.release(taskId, leaseToken));
+                    }
+                    inFlightTasks.remove(key);
                 }
-                inFlightTasks.remove(key);
-            }
-            });
+            }));
         } catch (RuntimeException ex) {
             if (taskLeaseService != null) {
                 TenantUtils.execute(tenantId, () -> taskLeaseService.release(taskId, leaseToken));
             }
             inFlightTasks.remove(key);
             throw ex;
+        }
+    }
+
+    void runWithIsolatedContext(Runnable action) {
+        SecurityContext previousSecurityContext = SecurityContextHolder.getContext();
+        RequestAttributes previousRequestAttributes = RequestContextHolder.getRequestAttributes();
+        try {
+            SecurityContextHolder.clearContext();
+            RequestContextHolder.resetRequestAttributes();
+            action.run();
+        } finally {
+            SecurityContextHolder.clearContext();
+            RequestContextHolder.resetRequestAttributes();
+            SecurityContextHolder.setContext(previousSecurityContext);
+            if (previousRequestAttributes != null) {
+                RequestContextHolder.setRequestAttributes(previousRequestAttributes);
+            }
         }
     }
 
@@ -215,9 +236,12 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
             businessLogService.info(businessTraceId, "GENERATION_TASK", taskId, "MATERIAL_MATCHED", TkGenerationStatusEnum.MATERIAL_MATCHED,
                     "素材随机抽取完成", clipPlan);
 
-            update(taskId, TkGenerationStatusEnum.RENDERING, 80, "正在渲染最终视频", null, null);
+            update(taskId, TkGenerationStatusEnum.RENDERING, 66, "正在准备渲染素材", null, null);
             task = taskMapper.selectById(taskId);
-            TkRenderResult renderResult = videoRenderService.render(task, clipPlan);
+            task.setTargetDuration(effectiveTargetDuration);
+            TkRenderResult renderResult = videoRenderService.render(task, clipPlan,
+                    (stepCode, stepName, progress, completed, total) -> updateRenderProgress(taskId, stepCode, stepName,
+                            progress, completed, total));
             TailQualityRenderResult tailQualityRenderResult = rerenderLeadGenerationIfTailQualityFailed(
                     task, script.getContent(), clipPlan, effectiveTargetDuration, renderResult);
             clipPlan = tailQualityRenderResult.clipPlan;
@@ -232,8 +256,11 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
                     .setSubtitleLayoutUrl(renderResult.getSubtitleLayoutUrl())
                     .setSubtitleAssUrl(renderResult.getSubtitleAssUrl())
                     .setStatus(TkGenerationStatusEnum.EXPORTING)
-                    .setProgress(95)
-                    .setCurrentStep("正在上传生成结果")
+                    .setProgress(99)
+                    .setCurrentStep("正在写入生成记录")
+                    .setCurrentStepCode("EXPORTING")
+                    .setCurrentStepCompleted(1)
+                    .setCurrentStepTotal(1)
                     .setHeartbeatTime(LocalDateTime.now())
                     .setWorkerId(workerId));
 
@@ -432,6 +459,9 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
                 .set("status", status)
                 .set("progress", progress)
                 .set("current_step", currentStep)
+                .set("current_step_code", status)
+                .set("current_step_completed", null)
+                .set("current_step_total", null)
                 .set("fail_code", failCode)
                 .set("fail_reason", failReason)
                 .set("worker_id", workerId)
@@ -440,6 +470,25 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
                 .set("step_finished_at",
                         TkGenerationStatusEnum.SUCCESS.equals(status) || TkGenerationStatusEnum.FAILED.equals(status)
                                 ? now : null);
+        if (StrUtil.isNotBlank(activeLeaseToken.get())) {
+            wrapper.eq("lease_token", activeLeaseToken.get());
+        }
+        taskMapper.update(null, wrapper);
+    }
+
+    private void updateRenderProgress(Long taskId, String stepCode, String stepName, int progress,
+                                      int completed, int total) {
+        renewActiveLease(taskId);
+        com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<TkGenerationTaskDO> wrapper = Wrappers.<TkGenerationTaskDO>update()
+                .eq("id", taskId)
+                .set("status", TkGenerationStatusEnum.RENDERING)
+                .set("progress", Math.max(66, Math.min(progress, 99)))
+                .set("current_step", stepName)
+                .set("current_step_code", stepCode)
+                .set("current_step_completed", Math.max(0, completed))
+                .set("current_step_total", Math.max(0, total))
+                .set("worker_id", workerId)
+                .set("heartbeat_time", LocalDateTime.now());
         if (StrUtil.isNotBlank(activeLeaseToken.get())) {
             wrapper.eq("lease_token", activeLeaseToken.get());
         }

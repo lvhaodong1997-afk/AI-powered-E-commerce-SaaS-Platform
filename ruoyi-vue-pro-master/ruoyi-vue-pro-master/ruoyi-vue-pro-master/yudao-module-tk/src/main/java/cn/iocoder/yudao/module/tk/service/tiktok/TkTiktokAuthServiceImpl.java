@@ -228,7 +228,8 @@ public class TkTiktokAuthServiceImpl implements TkTiktokAuthService {
     }
 
     private void exchangeCodeAndSaveAccount(TkTiktokAuthSessionDO session, String code) {
-        String redirectUri = resolveSessionRedirectUri(session);
+        String redirectUri = "QR_CODE".equalsIgnoreCase(session.getAuthType())
+                ? null : resolveSessionRedirectUri(session);
         JsonNode root = apiClient.exchangeCode(code, redirectUri, session.getCodeVerifier());
         JsonNode error = root.path("error");
         if (isTiktokError(error)) {
@@ -347,10 +348,10 @@ public class TkTiktokAuthServiceImpl implements TkTiktokAuthService {
         return qrcodeUrl.substring(0, valueStart) + encodedTicket + qrcodeUrl.substring(valueEnd);
     }
 
-    private String extractQrAuthCode(JsonNode root) {
+    static String extractQrAuthCode(JsonNode root) {
         String code = root.path("code").asText(null);
         if (StrUtil.isNotBlank(code)) {
-            return code;
+            return java.net.URLDecoder.decode(code, StandardCharsets.UTF_8);
         }
         String redirectUri = root.path("redirect_uri").asText(null);
         if (StrUtil.isBlank(redirectUri)) {
@@ -363,7 +364,8 @@ public class TkTiktokAuthServiceImpl implements TkTiktokAuthService {
         }
         int start = index + marker.length();
         int end = redirectUri.indexOf('&', start);
-        return end < 0 ? redirectUri.substring(start) : redirectUri.substring(start, end);
+        String encodedCode = end < 0 ? redirectUri.substring(start) : redirectUri.substring(start, end);
+        return java.net.URLDecoder.decode(encodedCode, StandardCharsets.UTF_8);
     }
 
     private String resolveSessionRedirectUri(TkTiktokAuthSessionDO session) {

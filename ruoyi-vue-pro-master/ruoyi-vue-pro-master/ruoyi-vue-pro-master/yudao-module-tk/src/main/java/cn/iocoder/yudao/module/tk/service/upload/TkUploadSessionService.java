@@ -9,6 +9,7 @@ import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import org.springframework.stereotype.Service;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
@@ -19,6 +20,7 @@ import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionU
 import static cn.iocoder.yudao.module.tk.enums.ErrorCodeConstants.TK_UPLOAD_SESSION_INVALID;
 
 @Service
+@Slf4j
 public class TkUploadSessionService {
 
     @Resource
@@ -29,6 +31,8 @@ public class TkUploadSessionService {
     private TkGenerationProperties generationProperties;
     @Resource
     private TkLocalUploadStorageService localUploadStorageService;
+    @Resource
+    private TkOssObjectStorageService ossObjectStorageService;
 
     public void create(String uploadId, TkMaterialLibraryDO library, String fileName, Long fileSize,
                        String contentType, String storageMode) {
@@ -50,6 +54,33 @@ public class TkUploadSessionService {
         sessionMapper.insert(session);
     }
 
+    /**
+     * Creates a session for a publish-media upload, which is not attached to a material library.
+     */
+    public void createTiktok(String uploadId, Long companyId, String fileName, Long fileSize, String contentType) {
+        createTiktok(uploadId, companyId, fileName, fileSize, contentType, "local");
+    }
+
+    public void createTiktok(String uploadId, Long companyId, String fileName, Long fileSize,
+                             String contentType, String storageMode) {
+        TkUserScope scope = dataScopeService.getCurrentScope();
+        int expireHours = generationProperties.getUpload().getSessionExpireHours() == null
+                ? 24 : Math.max(1, generationProperties.getUpload().getSessionExpireHours());
+        TkUploadSessionDO session = new TkUploadSessionDO()
+                .setUploadId(uploadId)
+                .setCompanyId(companyId)
+                .setLibraryId(null)
+                .setFileName(fileName)
+                .setFileSize(fileSize)
+                .setContentType(contentType)
+                .setStorageMode(storageMode)
+                .setStatus("UPLOADING")
+                .setExpiresAt(LocalDateTime.now().plusHours(expireHours));
+        session.setTenantId(scope.getTenantId());
+        session.setCreator(scope.getUserIdString());
+        sessionMapper.insert(session);
+    }
+
     public TkUploadSessionDO validateAccessible(String uploadId) {
         TkUploadSessionDO session = findAccessible(uploadId);
         if (session == null) {
@@ -59,7 +90,11 @@ public class TkUploadSessionService {
     }
 
     private TkUploadSessionDO findAccessible(String uploadId) {
-        TkUploadSessionDO session = sessionMapper.selectByUploadId(uploadId);
+        TkUploadSessionDO session = TenantUtils.executeIgnore(() -> sessionMapper.selectByUploadId(uploadId));
+        if (session == null) {
+            return null;
+        }
+        dataScopeService.validateReadable(session.getTenantId(), session.getCompanyId(), session.getCreator());
         if (!TkUploadSessionAccessPolicy.canAccess(session, LocalDateTime.now())) {
             return null;
         }
@@ -105,6 +140,14 @@ public class TkUploadSessionService {
             sessionMapper.updateById(new TkUploadSessionDO().setId(session.getId()).setStatus("EXPIRED"));
             if ("local".equalsIgnoreCase(session.getStorageMode())) {
                 cn.hutool.core.io.FileUtil.del(localUploadStorageService.getTmpDir(session.getUploadId()).toFile());
+            } else if ("oss".equalsIgnoreCase(session.getStorageMode()) && session.getLibraryId() == null
+                    && ossObjectStorageService != null && ossObjectStorageService.isConfigured()) {
+                try {
+                    ossObjectStorageService.deleteObject(ossObjectStorageService.buildTiktokObjectKey(session));
+                } catch (Exception ex) {
+                    log.warn("[expireSessions][failed to delete expired TikTok OSS object, uploadId({})]",
+                            session.getUploadId(), ex);
+                }
             }
         }
         return expired.size();

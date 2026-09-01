@@ -60,10 +60,10 @@ public class TkGenerationPrecheckServiceImpl implements TkGenerationPrecheckServ
             String routeConfig = resolveRouteConfig(createReqVO);
             if (!TkGenerationRouteConfigSupport.isFullPoolRandom(routeConfig) && totalDuration > 0 && totalDuration < targetDuration) {
                 int missingDuration = targetDuration - totalDuration;
-                TkGenerationPrecheckRespVO.PrecheckIssue issue = addError(result, "MATERIAL_DURATION_NOT_ENOUGH",
+                TkGenerationPrecheckRespVO.PrecheckIssue issue = addWarning(result, "MATERIAL_DURATION_NOT_ENOUGH",
                         StrUtil.format("素材库可用时长不足，当前 {} 秒，目标 {} 秒。", totalDuration, targetDuration),
                         StrUtil.format("素材总时长不足，还差 {} 秒", missingDuration),
-                        "请继续上传可用于混剪的视频素材，或降低目标成片时长后重新预检。");
+                        "可继续生成，系统会对已选唯一素材进行时长适配；补充素材可提升画面丰富度。");
                 issue.setRequiredDuration(targetDuration);
                 issue.setActualDuration(totalDuration);
                 issue.setMissingDuration(missingDuration);
@@ -105,6 +105,15 @@ public class TkGenerationPrecheckServiceImpl implements TkGenerationPrecheckServ
         issue.setTitle(title);
         issue.setActionHint(actionHint);
         result.getErrors().add(issue);
+        return issue;
+    }
+
+    private TkGenerationPrecheckRespVO.PrecheckIssue addWarning(TkGenerationPrecheckRespVO result, String code,
+                                                                String message, String title, String actionHint) {
+        TkGenerationPrecheckRespVO.PrecheckIssue issue = new TkGenerationPrecheckRespVO.PrecheckIssue(code, message);
+        issue.setTitle(title);
+        issue.setActionHint(actionHint);
+        result.getWarnings().add(issue);
         return issue;
     }
 
@@ -167,7 +176,7 @@ public class TkGenerationPrecheckServiceImpl implements TkGenerationPrecheckServ
             }
             item.setRequiredDuration(0);
             item.setMissingDuration(0);
-            TkGenerationPrecheckRespVO.PrecheckIssue issue = addError(result,
+            TkGenerationPrecheckRespVO.PrecheckIssue issue = addWarning(result,
                     "SEGMENT_" + item.getSegmentType() + "_MISSING",
                     StrUtil.format("{}至少需要 1 个可用视频。", item.getSegmentName()),
                     StrUtil.format("缺少{}视频", item.getSegmentName()),
@@ -190,9 +199,9 @@ public class TkGenerationPrecheckServiceImpl implements TkGenerationPrecheckServ
         if (totalDuration > 0 && totalDuration < targetDuration) {
             TkGenerationPrecheckRespVO.PrecheckIssue warning = new TkGenerationPrecheckRespVO.PrecheckIssue(
                     "MATERIAL_DURATION_SHORTER_THAN_TARGET",
-                    StrUtil.format("全素材池随机混剪下，素材总时长 {} 秒短于目标 {} 秒，最终成片可能短于目标。", totalDuration, targetDuration));
-            warning.setTitle("素材可完整使用，但总时长短于目标");
-            warning.setActionHint("继续生成即可，系统会自动使用所有能完整拼接的素材。");
+                    StrUtil.format("全素材池随机混剪下，素材总时长 {} 秒短于目标 {} 秒，系统将适配唯一素材的播放速度。", totalDuration, targetDuration));
+            warning.setTitle("素材总时长短于目标");
+            warning.setActionHint("可继续生成；补充素材可提升成片的画面丰富度。");
             warning.setRequiredDuration(targetDuration);
             warning.setActualDuration(totalDuration);
             warning.setMissingDuration(targetDuration - totalDuration);
@@ -214,10 +223,10 @@ public class TkGenerationPrecheckServiceImpl implements TkGenerationPrecheckServ
         boolean hasFitClip = usableMaterials.stream()
                 .anyMatch(item -> item.getDuration().intValue() <= targetDuration);
         if (!hasFitClip) {
-            TkGenerationPrecheckRespVO.PrecheckIssue issue = addError(result, "MATERIAL_TOO_LONG_FOR_TARGET",
-                    StrUtil.format("素材库里所有可用视频都长于目标 {} 秒，无法在不裁切的前提下生成成片。", targetDuration),
+            TkGenerationPrecheckRespVO.PrecheckIssue issue = addWarning(result, "MATERIAL_TOO_LONG_FOR_TARGET",
+                    StrUtil.format("素材库里所有可用视频都长于目标 {} 秒，将选择最接近时长的唯一素材进行适配。", targetDuration),
                     "所有可用素材都过长",
-                    "请提高目标时长，或者补充更短的视频素材。");
+                    "可继续生成；补充更贴近目标时长的素材可减少画面裁剪。");
             issue.setRequiredDuration(targetDuration);
             issue.setActualDuration(usableMaterials.stream()
                     .map(TkMaterialVideoDO::getDuration)
@@ -254,11 +263,11 @@ public class TkGenerationPrecheckServiceImpl implements TkGenerationPrecheckServ
                                  int requiredDuration,
                                  int actualDuration,
                                  int missingDuration) {
-        TkGenerationPrecheckRespVO.PrecheckIssue issue = addError(result, "SEGMENT_" + item.getSegmentType() + "_INSUFFICIENT",
+        TkGenerationPrecheckRespVO.PrecheckIssue issue = addWarning(result, "SEGMENT_" + item.getSegmentType() + "_INSUFFICIENT",
                 StrUtil.format("{} 用途素材不足，还缺 {} 秒，请上传或重新标记该素材用途。",
                         item.getSegmentName(), missingDuration),
                 StrUtil.format("{}素材不足，还差 {} 秒", item.getSegmentName(), missingDuration),
-                buildSegmentActionHint(item.getSegmentName()));
+                "可继续生成，系统会优先使用同用途素材，再从未使用素材中补足。" + buildSegmentActionHint(item.getSegmentName()));
         issue.setSegmentType(item.getSegmentType());
         issue.setSegmentName(item.getSegmentName());
         issue.setRequiredDuration(requiredDuration);

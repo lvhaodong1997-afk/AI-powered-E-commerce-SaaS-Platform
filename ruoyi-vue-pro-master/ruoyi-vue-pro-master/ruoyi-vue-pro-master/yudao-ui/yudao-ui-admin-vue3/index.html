@@ -426,7 +426,9 @@
           <div class="app-loading-scan"></div>
           <div class="app-loading-title">
             <img src="/logo.png?v=20260728-system-icon" class="app-loading-logo" alt="Logo" />
-            <div class="app-loading-name">%VITE_APP_TITLE%</div>
+            <div class="app-loading-name" data-app-title-fallback="ClipForge Studio">
+              %VITE_APP_TITLE%
+            </div>
           </div>
           <section class="public-fallback" aria-label="ClipForge Studio public website fallback">
             <h1>Create, review, and prepare short-form videos</h1>
@@ -443,6 +445,16 @@
         </div>
       </div>
     </div>
+    <script>
+      const loadingTitle = document.querySelector('.app-loading-name')
+      const fallbackTitle = loadingTitle?.dataset.appTitleFallback || 'ClipForge Studio'
+      const configuredTitle = document.title.trim()
+      const resolvedTitle = !configuredTitle || /^%[^%]+%$/.test(configuredTitle)
+        ? fallbackTitle
+        : configuredTitle
+      document.title = resolvedTitle
+      if (loadingTitle) loadingTitle.textContent = resolvedTitle
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

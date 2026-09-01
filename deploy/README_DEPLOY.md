@@ -43,6 +43,20 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now tk-yudao
 ```
 
+### 当前生产路径的后端开机自启
+
+当前服务器生产目录为 `/data/Tk/current`，使用 `systemd/tk-yudao-prod.service`，不要直接套用上面的 `/opt/tk-auto-mix` 开发模板：
+
+```bash
+sudo cp systemd/tk-yudao-prod.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now tk-yudao-prod
+sudo systemctl status tk-yudao-prod --no-pager
+sudo journalctl -u tk-yudao-prod -n 100 --no-pager
+```
+
+如果后端当前由 `nohup` 手动运行，切换前先停止旧进程并确认 `127.0.0.1:48080` 已释放，再执行上述命令，避免端口冲突。切换后用 `systemctl is-enabled tk-yudao-prod`、`systemctl is-active tk-yudao-prod`、后端 HTTP 和 Nginx HTTP 检查服务状态。
+
 生产环境需要在 service 中覆盖这些参数：
 
 - MySQL 地址、用户名、密码、数据库名

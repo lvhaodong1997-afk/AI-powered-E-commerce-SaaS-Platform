@@ -119,14 +119,14 @@ const currentLocale = computed(() => localeStore.getCurrentLocale.lang)
 const loginCopy = computed(() => {
   if (currentLocale.value === 'en') {
     return {
-      heroTitle: 'AI Remix Material Production Platform',
+      heroTitle: 'ClipForge Studio',
       heroCopy:
         'Bring material capture, intelligent analysis, batch generation, and publishing review into one controllable workflow.',
       chips: ['Material sync', 'Script analysis', 'Generation queue'],
       metrics: [
-        { label: 'Materials processed', value: '24K+' },
-        { label: 'Remix pipeline', value: '8ms' },
-        { label: 'Engine status', value: 'Online' }
+        { label: 'Workflow', value: 'End-to-end' },
+        { label: 'Access', value: 'Permission controlled' },
+        { label: 'Publishing', value: 'User confirmed' }
       ],
       panelKicker: 'SECURE ACCESS',
       panelTitle: 'Workspace Login',
@@ -136,13 +136,13 @@ const loginCopy = computed(() => {
   }
 
   return {
-    heroTitle: 'AI 混剪素材生产平台',
+    heroTitle: 'ClipForge Studio',
     heroCopy: '让素材抓取、智能分析、批量生成和投放复盘进入同一条可控流水线。',
     chips: ['素材库同步', '脚本分析', '生成队列'],
     metrics: [
-      { label: '素材处理', value: '24K+' },
-      { label: '混剪链路', value: '8ms' },
-      { label: '引擎状态', value: 'Online' }
+      { label: '工作流', value: '端到端协作' },
+      { label: '访问控制', value: '权限校验' },
+      { label: '发布确认', value: '用户确认' }
     ],
     panelKicker: 'SECURE ACCESS',
     panelTitle: '工作台登录',
@@ -522,7 +522,9 @@ $prefix-cls: #{$namespace}-login;
       display: block;
       margin-top: 8px;
       color: #f8fbff;
-      font-size: 24px;
+      font-size: 18px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
     }
   }
 

@@ -104,10 +104,14 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_task` (
   `tenant_id` bigint NOT NULL DEFAULT 0 COMMENT '绉熸埛缂栧彿',
   `business_trace_id` varchar(64) DEFAULT NULL COMMENT '涓氬姟娴佹按鍙?,
   `company_id` bigint NOT NULL COMMENT '鍏徃缂栧彿',
-  `generation_task_id` bigint NOT NULL COMMENT '鐢熸垚浠诲姟缂栧彿',
+  `generation_task_id` bigint DEFAULT NULL COMMENT '鐢熸垚浠诲姟缂栧彿',
+  `uploaded_video_id` bigint DEFAULT NULL COMMENT '用户上传素材视频编号',
+  `source_type` varchar(32) NOT NULL DEFAULT 'GENERATED' COMMENT '视频来源',
   `title` varchar(255) NOT NULL COMMENT '鍙戝竷鏍囬',
   `caption` varchar(2200) DEFAULT NULL COMMENT '鍙戝竷鏂囨',
   `video_url` varchar(512) NOT NULL COMMENT '瑙嗛鍦板潃',
+  `cover_url` varchar(512) DEFAULT NULL COMMENT '封面地址',
+  `cover_timestamp_ms` bigint DEFAULT NULL COMMENT '视频封面时间点（毫秒）',
   `post_mode` varchar(32) NOT NULL COMMENT '鍙戝竷妯″紡锛欴IRECT_POST/UPLOAD_TO_INBOX',
   `privacy_level` varchar(64) DEFAULT NULL COMMENT '闅愮绾у埆',
   `account_count` int NOT NULL DEFAULT 0 COMMENT '璐﹀彿鏁伴噺',
@@ -125,6 +129,7 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_task` (
   KEY `idx_tk_tiktok_publish_task_trace` (`tenant_id`, `business_trace_id`),
   KEY `idx_tk_tiktok_publish_task_company` (`tenant_id`, `company_id`),
   KEY `idx_tk_tiktok_publish_task_generation` (`generation_task_id`)
+  ,KEY `idx_tk_tiktok_publish_task_uploaded_video` (`tenant_id`, `uploaded_video_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='TK TikTok鍙戝竷浠诲姟';
 
 CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_detail` (
@@ -133,7 +138,9 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_detail` (
   `business_trace_id` varchar(64) DEFAULT NULL COMMENT '涓氬姟娴佹按鍙?,
   `company_id` bigint NOT NULL COMMENT '鍏徃缂栧彿',
   `publish_task_id` bigint NOT NULL COMMENT '鍙戝竷浠诲姟缂栧彿',
-  `generation_task_id` bigint NOT NULL COMMENT '鐢熸垚浠诲姟缂栧彿',
+  `generation_task_id` bigint DEFAULT NULL COMMENT '鐢熸垚浠诲姟缂栧彿',
+  `uploaded_video_id` bigint DEFAULT NULL COMMENT '用户上传素材视频编号',
+  `source_type` varchar(32) NOT NULL DEFAULT 'GENERATED' COMMENT '视频来源',
   `account_id` bigint NOT NULL COMMENT '璐﹀彿缂栧彿',
   `account_display_name` varchar(128) DEFAULT NULL COMMENT '璐﹀彿鍚嶇О',
   `publish_id` varchar(128) DEFAULT NULL COMMENT 'TikTok Publish ID',
@@ -141,6 +148,8 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_detail` (
   `status` varchar(32) NOT NULL COMMENT '鏈湴鐘舵€?,
   `post_mode` varchar(32) NOT NULL COMMENT '鍙戝竷妯″紡',
   `privacy_level` varchar(64) DEFAULT NULL COMMENT '闅愮绾у埆',
+  `cover_url` varchar(512) DEFAULT NULL COMMENT '封面地址',
+  `cover_timestamp_ms` bigint DEFAULT NULL COMMENT '视频封面时间点（毫秒）',
   `allow_comment` bit(1) NOT NULL DEFAULT b'1' COMMENT '鍏佽璇勮',
   `allow_duet` bit(1) NOT NULL DEFAULT b'0' COMMENT '鍏佽鍚堟媿',
   `allow_stitch` bit(1) NOT NULL DEFAULT b'0' COMMENT '鍏佽鎷兼帴',
@@ -160,6 +169,7 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_detail` (
   KEY `idx_tk_tiktok_publish_detail_task` (`publish_task_id`),
   KEY `idx_tk_tiktok_publish_detail_account` (`tenant_id`, `account_id`),
   KEY `idx_tk_tiktok_publish_detail_status` (`tenant_id`, `status`)
+  ,KEY `idx_tk_tiktok_publish_detail_uploaded_video` (`tenant_id`, `uploaded_video_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='TK TikTok鍙戝竷鏄庣粏';
 
 INSERT INTO `tk_api_key_config` (`tenant_id`, `provider`, `config_key`, `config_value`, `remark`, `status`)

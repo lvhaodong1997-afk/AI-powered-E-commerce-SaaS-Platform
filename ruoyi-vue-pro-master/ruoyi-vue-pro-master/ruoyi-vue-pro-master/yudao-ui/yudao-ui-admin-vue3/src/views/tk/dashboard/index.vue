@@ -1079,7 +1079,7 @@
                       precheckFailure?.message ||
                       (generationProgress.failed
                         ? friendlyGenerationFailureReason(currentGenerationTask)
-                        : currentGenerationPhase.desc)
+                        : currentGenerationStepDescription)
                     }}</p>
                   </div>
                   <span>{{ generationProgress.failed ? taskProgressCopy.failedBadge : `${generationProgress.percent}%` }}</span>
@@ -1103,8 +1103,11 @@
                 </div>
                 <div v-if="currentGenerationTask" class="generation-task-detail">
                   <span>{{ copy.taskId }}：{{ currentGenerationTask.id }}</span>
-                  <span v-if="currentGenerationTask.currentStep">
-                    {{ copy.currentStep }}：{{ currentGenerationTask.currentStep }}
+                  <span v-if="currentGenerationTaskStepName">
+                    {{ copy.currentStep }}：{{ currentGenerationTaskStepName }}
+                    <template v-if="currentGenerationTask.currentStepTotal">
+                      {{ ` (${currentGenerationTask.currentStepCompleted || 0}/${currentGenerationTask.currentStepTotal})` }}
+                    </template>
                   </span>
                 </div>
                 <div v-if="batchGenerationTasks.length > 1" class="generation-batch-list">
@@ -1210,6 +1213,16 @@
                 </div>
                 <div class="generation-repeat-actions">
                   <el-button
+                    plain
+                    :loading="audioExporting"
+                    :disabled="audioExporting"
+                    @click="handleCreateAudioExport"
+                    v-hasPermi="['tk:generation:create']"
+                  >
+                    <Icon icon="ep:headset" />
+                    {{ audioExporting ? copy.audioExporting : copy.generateAudio }} · {{ copy.audioExportCost }}
+                  </el-button>
+                  <el-button
                     type="primary"
                     @click="handleCreateGeneration"
                     v-hasPermi="['tk:generation:create']"
@@ -1221,15 +1234,40 @@
               </div>
             </div>
             <div v-else class="generate-submit">
-              <el-button
-                type="primary"
-                class="generate-button"
-                @click="handleCreateGeneration"
-                v-hasPermi="['tk:generation:create']"
-              >
-                <Icon icon="ep:video-camera" />
-                {{ copy.generateVideo }}
-              </el-button>
+              <div class="generate-action-row">
+                <el-button
+                  class="generate-audio-button"
+                  :loading="audioExporting"
+                  :disabled="audioExporting"
+                  @click="handleCreateAudioExport"
+                  v-hasPermi="['tk:generation:create']"
+                >
+                  <Icon icon="ep:headset" />
+                  {{ audioExporting ? copy.audioExporting : copy.generateAudio }} · {{ copy.audioExportCost }}
+                </el-button>
+                <el-button
+                  type="primary"
+                  class="generate-button"
+                  @click="handleCreateGeneration"
+                  v-hasPermi="['tk:generation:create']"
+                >
+                  <Icon icon="ep:video-camera" />
+                  {{ copy.generateVideo }}
+                </el-button>
+              </div>
+              <div v-if="audioExportResult?.audioUrl" class="audio-export-result">
+                <audio controls :src="audioExportResult.audioUrl" />
+                <el-button
+                  plain
+                  tag="a"
+                  :href="audioExportResult.audioUrl"
+                  :download="audioExportDownloadName"
+                  target="_blank"
+                >
+                  <Icon icon="ep:download" />
+                  {{ copy.downloadAudio }}
+                </el-button>
+              </div>
               <p>{{ copy.estimateTime }}</p>
             </div>
           </section>
@@ -1309,6 +1347,7 @@ import { TkDashboardApi } from '@/api/tk/dashboard'
 import { TkBgmAssetApi, type TkBgmAssetVO } from '@/api/tk/bgm'
 import { TkGenerationApi } from '@/api/tk/generation'
 import type {
+  TkAudioExportTaskVO,
   TkGenerationPrecheckIssueVO,
   TkGenerationPrecheckRespVO,
   TkGenerationTaskStatusVO,
@@ -1402,7 +1441,7 @@ const DISPLAY_SCRIPT_COUNT = 6
 const TK_GENERATION_REPLAY_KEY = 'tk:generation:replay'
 const DEFAULT_TARGET_DURATION = 15
 const MIN_TARGET_DURATION = 8
-const MAX_TARGET_DURATION = 180
+const MAX_TARGET_DURATION = 500
 const ANALYSIS_RECOVERY_TIME_TOLERANCE_MS = 60_000
 const ANALYSIS_POLL_INTERVAL_MS = 3000
 const ANALYSIS_POLL_TIMEOUT_MS = 10 * 60 * 1000
@@ -1716,7 +1755,7 @@ const copy = computed(() =>
         languagePlaceholder: 'Select script and voiceover language',
         targetDurationLabel: 'Target video duration',
         targetDurationPlaceholder: '15',
-        targetDurationHint: 'Leave empty to use 15 seconds. Supported range: 8-180 seconds.',
+        targetDurationHint: 'Leave empty to use 15 seconds. Supported range: 8-500 seconds.',
         clipPlanModeLabel: 'Video generation mode',
         clipPlanModeSegmented: 'Default structure',
         clipPlanModeFullPoolRandom: 'Random pool',
@@ -1797,6 +1836,13 @@ const copy = computed(() =>
         openingFullPoolRandomHint:
           'In Random pool mode, this video is fixed as the first 3 seconds; later clips are selected randomly from the full material pool.',
         generateVideo: 'Generate mixed video',
+        generateAudio: 'Generate audio',
+        audioExportCost: '1 credit / generation',
+        audioExporting: 'Generating audio',
+        audioExportSuccess: 'Audio generated. 1 credit used.',
+        audioExportMissingScript: 'Enter or select a script before generating audio.',
+        audioExportFailed: 'Audio generation failed. No credit was used.',
+        downloadAudio: 'Download audio',
         estimateTime: 'Estimated time: 3-5 minutes',
         todayData: 'Today',
         realtime: 'Live',
@@ -1984,7 +2030,7 @@ const copy = computed(() =>
         languagePlaceholder: '请选择文案和配音语言',
         targetDurationLabel: '目标视频时长',
         targetDurationPlaceholder: '15',
-        targetDurationHint: '不填默认 15 秒，支持 8-180 秒',
+        targetDurationHint: '不填默认 15 秒，支持 8-500 秒',
         clipPlanModeLabel: '视频生成方式',
         clipPlanModeSegmented: '默认结构拼接',
         clipPlanModeFullPoolRandom: '全素材随机拼接',
@@ -2059,6 +2105,13 @@ const copy = computed(() =>
         openingFullVideoHint: '该视频会作为完整素材使用，超过黄金3秒环节目标时长时按环节压缩。',
         openingFullPoolRandomHint: '全素材随机拼接时，该视频固定作为前3秒片头，后续从全部素材中随机拼接。',
         generateVideo: '生成混剪视频',
+        generateAudio: '生成音频',
+        audioExportCost: '1 积分 / 次',
+        audioExporting: '正在生成音频',
+        audioExportSuccess: '音频生成成功，已扣除 1 积分。',
+        audioExportMissingScript: '请先输入或选择文案后再生成音频。',
+        audioExportFailed: '音频生成失败，积分未扣除。',
+        downloadAudio: '下载音频',
         estimateTime: '预计生成时间：3-5分钟',
         todayData: '今日数据',
         realtime: '实时更新',
@@ -2225,6 +2278,13 @@ const analyzing = ref(false)
 const regeneratingScripts = ref(false)
 const voicePreviewing = ref(false)
 const savingMimoVoice = ref(false)
+const audioExporting = ref(false)
+const audioExportResult = ref<TkAudioExportTaskVO>()
+const audioExportDownloadName = computed(() => {
+  const audioUrl = audioExportResult.value?.audioUrl
+  const extension = audioUrl?.match(/\.([a-z0-9]+)(?:[?#]|$)/i)?.[1] || 'mp3'
+  return `tk-audio-${audioExportResult.value?.id || 'export'}.${extension}`
+})
 const precheckingGenerationCount = ref(0)
 const precheckingGeneration = computed(() => precheckingGenerationCount.value > 0)
 const selectedScriptIndex = ref(0)
@@ -2962,32 +3022,35 @@ const generationPhases = computed<TaskPhase[]>(() =>
         {
           label: 'Validate',
           desc: 'Checking materials, script, voice, and hook fallback',
-          percent: 5,
+          percent: 10,
           icon: 'ep:select'
         },
         {
-          label: 'Random materials',
-          desc: 'Randomly selecting whole materials for each section',
-          percent: 20,
-          icon: 'ep:film'
+          label: 'Scripts',
+          desc: 'Preparing the narration script',
+          percent: 30,
+          icon: 'ep:document'
         },
         {
           label: 'Voiceover',
           desc: 'Preparing AI voiceover audio',
-          percent: 35,
+          percent: 50,
           icon: 'ep:microphone'
         },
         {
-          label: 'Subtitles',
-          desc: 'Composing subtitles and video timeline',
-          percent: 55,
-          icon: 'ep:document'
+          label: 'Materials',
+          desc: 'Selecting source materials for the video',
+          percent: 65,
+          icon: 'ep:film'
         },
-        { label: 'Render', desc: 'Rendering the final mixed video', percent: 75, icon: 'ep:cpu' },
-        { label: 'Upload', desc: 'Uploading the generated result', percent: 90, icon: 'ep:upload' },
+        { label: 'Download', desc: 'Downloading selected source materials', percent: 66, icon: 'ep:download' },
+        { label: 'Transcode', desc: 'Transcoding and stitching video segments', percent: 72, icon: 'ep:cpu' },
+        { label: 'Subtitles', desc: 'Generating subtitle assets', percent: 88, icon: 'ep:document' },
+        { label: 'Merge', desc: 'Merging video, voiceover, and background music', percent: 92, icon: 'ep:video-camera' },
+        { label: 'Upload', desc: 'Uploading the generated result', percent: 96, icon: 'ep:upload' },
         {
           label: 'Done',
-          desc: 'Generation task has been created',
+          desc: 'Generated video is ready',
           percent: 100,
           icon: 'ep:circle-check-filled'
         }
@@ -2996,15 +3059,18 @@ const generationPhases = computed<TaskPhase[]>(() =>
         {
           label: '校验配置',
           desc: '检查素材、文案、音色与开头兜底',
-          percent: 5,
+          percent: 10,
           icon: 'ep:select'
         },
-        { label: '随机抽素材', desc: '按环节随机选择完整素材', percent: 20, icon: 'ep:film' },
-        { label: '准备配音', desc: '准备 AI 配音音频', percent: 35, icon: 'ep:microphone' },
-        { label: '合成字幕', desc: '合成字幕与视频时间线', percent: 55, icon: 'ep:document' },
-        { label: '渲染视频', desc: '渲染最终混剪视频', percent: 75, icon: 'ep:cpu' },
-        { label: '上传结果', desc: '上传生成结果并创建任务', percent: 90, icon: 'ep:upload' },
-        { label: '完成', desc: '生成任务已创建', percent: 100, icon: 'ep:circle-check-filled' }
+        { label: '生成文案', desc: '准备视频口播文案', percent: 30, icon: 'ep:document' },
+        { label: '准备配音', desc: '准备 AI 配音音频', percent: 50, icon: 'ep:microphone' },
+        { label: '抽取素材', desc: '为视频选择拼接素材', percent: 65, icon: 'ep:film' },
+        { label: '下载素材', desc: '下载已选择的视频素材', percent: 66, icon: 'ep:download' },
+        { label: '转码拼接', desc: '转码并拼接视频片段', percent: 72, icon: 'ep:cpu' },
+        { label: '生成字幕', desc: '生成字幕资源', percent: 88, icon: 'ep:document' },
+        { label: '最终合成', desc: '合成视频、配音和背景音乐', percent: 92, icon: 'ep:video-camera' },
+        { label: '上传结果', desc: '上传生成结果', percent: 96, icon: 'ep:upload' },
+        { label: '完成', desc: '生成视频已完成', percent: 100, icon: 'ep:circle-check-filled' }
       ]
 )
 
@@ -3014,9 +3080,20 @@ const currentAnalysisPhase = computed(
 const currentGenerationPhase = computed(
   () => generationPhases.value[generationProgress.phaseIndex] || generationPhases.value[0]
 )
+const currentGenerationStepDescription = computed(() => currentGenerationPhase.value.desc)
+const currentGenerationTaskStepName = computed(() =>
+  isEn.value
+    ? currentGenerationPhase.value.label
+    : currentGenerationTask.value?.currentStep || currentGenerationPhase.value.label
+)
 const generationDisplayPercent = computed(() =>
   generationProgress.failed
-    ? Math.min(generationProgress.percent || generationPhases.value[4]?.percent || 75, 95)
+    ? Math.min(
+        generationProgress.percent ||
+          generationPhases.value[generationProgress.phaseIndex]?.percent ||
+          66,
+        95
+      )
     : generationProgress.percent
 )
 const precheckSegmentRows = computed(() =>
@@ -3121,6 +3198,14 @@ const startTaskProgress = (
   }
 }
 
+const startGenerationSubmissionProgress = () => {
+  clearTaskTimer('generation')
+  Object.assign(generationProgress, createTaskProgress(), {
+    running: true,
+    startedAt: Date.now()
+  })
+}
+
 const finishTaskProgress = (
   progress: TaskProgressState,
   phases: TaskPhase[],
@@ -3153,24 +3238,41 @@ const clearGenerationPolling = () => {
   }
 }
 
-const generationPhaseIndexByStatus = (status?: string) => {
+const generationPhaseIndexByTask = (
+  task?: Pick<TkGenerationTaskVO, 'status' | 'currentStepCode'>
+) => {
+  const detailedMapping: Record<string, number> = {
+    RENDER_DOWNLOAD: 4,
+    RENDER_TRANSCODE_SEGMENTS: 5,
+    RENDER_SUBTITLE: 6,
+    RENDER_FINAL_MERGE: 7,
+    RENDER_UPLOAD_OSS: 8,
+    EXPORTING: 8
+  }
+  const detailedIndex = detailedMapping[task?.currentStepCode || '']
+  if (detailedIndex !== undefined) {
+    return detailedIndex
+  }
   const mapping: Record<string, number> = {
     PENDING: 0,
     PRECHECKED: 0,
     ANALYZING: 0,
     SCRIPT_READY: 1,
-    MATERIAL_MATCHING: 1,
-    MATERIAL_MATCHED: 1,
+    SCRIPTING: 1,
     VOICE_READY: 2,
+    VOICING: 2,
+    MATERIAL_MATCHING: 3,
+    MATERIAL_MATCHED: 3,
     SUBTITLE_TIMELINE_READY: 3,
     VISUAL_ANALYZED: 3,
     CLIP_PLANNED: 3,
+    PLANNING: 3,
     RENDERING: 4,
-    EXPORTING: 5,
-    SUCCESS: 6,
-    FAILED: 4
+    EXPORTING: 8,
+    SUCCESS: 9,
+    FAILED: 0
   }
-  return mapping[status || ''] ?? 0
+  return mapping[task?.status || ''] ?? 0
 }
 
 const syncGenerationTaskProgress = (task: TkGenerationTaskVO) => {
@@ -3180,7 +3282,7 @@ const syncGenerationTaskProgress = (task: TkGenerationTaskVO) => {
   }
   generationProgress.running = task.status !== 'SUCCESS' && task.status !== 'FAILED'
   generationProgress.failed = task.status === 'FAILED'
-  generationProgress.phaseIndex = generationPhaseIndexByStatus(task.status)
+  generationProgress.phaseIndex = generationPhaseIndexByTask(task)
   const rawPercent = Math.max(0, Math.min(Number(task.progress || 0), 100))
   generationProgress.percent =
     task.status === 'FAILED'
@@ -3262,7 +3364,7 @@ const syncGenerationBatchProgress = (tasks: TkGenerationTaskStatusVO[]) => {
     : 0
   generationProgress.running = tasks.some((task) => !isTerminalGenerationStatus(task.status))
   generationProgress.failed = tasks.some((task) => task.status === 'FAILED')
-  generationProgress.phaseIndex = generationPhaseIndexByStatus(activeTask?.status)
+  generationProgress.phaseIndex = generationPhaseIndexByTask(activeTask)
   generationProgress.percent = generationProgress.failed ? Math.min(batchPercent || 75, 95) : batchPercent
   generationProgress.elapsedText = formatElapsed(generationProgress.startedAt)
 }
@@ -3285,7 +3387,7 @@ const startGenerationPolling = (taskId: number) => {
   clearGenerationPolling()
   generationPollingTimer = window.setInterval(() => {
     pollGenerationTask(taskId).catch(() => undefined)
-  }, 2500)
+  }, 1000)
   pollGenerationTask(taskId).catch(() => undefined)
 }
 
@@ -3293,7 +3395,7 @@ const startGenerationBatchPolling = (taskIds: number[]) => {
   clearGenerationPolling()
   generationPollingTimer = window.setInterval(() => {
     pollGenerationTaskBatch(taskIds).catch(() => undefined)
-  }, 2500)
+  }, 1000)
   pollGenerationTaskBatch(taskIds).catch(() => undefined)
 }
 
@@ -3329,6 +3431,44 @@ const createGenerationPayload = (script: DashboardScriptOption): TkGenerationTas
     payload.openingVideoName = copy.value.remoteHookVideo
   }
   return payload
+}
+
+const createAudioExportRequestId = () =>
+  typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `audio-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+
+const handleCreateAudioExport = async () => {
+  const script = selectedScriptsForGeneration.value[0]
+  const scriptText = script ? resolvePromptTextForGeneration(script).trim() : ''
+  if (!scriptText) {
+    message.warning(copy.value.audioExportMissingScript)
+    return
+  }
+  if (!isVoiceoverEnabled.value || !voiceConfigReady.value) {
+    message.warning(copy.value.voiceConfigIncompleteWarning)
+    return
+  }
+  audioExporting.value = true
+  audioExportResult.value = undefined
+  try {
+    audioExportResult.value = await TkGenerationApi.createAudioExport({
+      companyId: selectedLibrary.value?.companyId,
+      requestId: createAudioExportRequestId(),
+      scriptText,
+      ...selectedVoicePayload(),
+      targetLanguage: createForm.targetLanguage
+    })
+    if (audioExportResult.value.status !== 'SUCCESS' || !audioExportResult.value.audioUrl) {
+      throw new Error(audioExportResult.value.failReason || copy.value.audioExportFailed)
+    }
+    await refreshCreditBalance()
+    message.success(copy.value.audioExportSuccess)
+  } catch (error) {
+    message.error(error instanceof Error && error.message ? error.message : copy.value.audioExportFailed)
+  } finally {
+    audioExporting.value = false
+  }
 }
 
 const buildPrecheckFailureState = (result: TkGenerationPrecheckRespVO): PrecheckFailureState => {
@@ -4601,7 +4741,7 @@ const handleCreateGeneration = async () => {
     currentGenerationTask.value = undefined
     batchGenerationTasks.value = []
     resetTaskProgress(analysisProgress, 'analysis')
-    startTaskProgress(generationProgress, generationPhases.value, 'generation', 92)
+    startGenerationSubmissionProgress()
   }
   try {
     if (!isLeadGenerationManualMode.value && (!referenceAnalysis.value?.id || !selectedScript.value?.id)) {
@@ -4661,7 +4801,7 @@ const handleRetryGeneration = async () => {
   }
   precheckFailure.value = undefined
   resetTaskProgress(generationProgress, 'generation')
-  startTaskProgress(generationProgress, generationPhases.value, 'generation', 92)
+  startGenerationSubmissionProgress()
   await TkGenerationApi.retryGeneration(taskId)
   message.success(copy.value.generationRetrying)
   startGenerationPolling(taskId)
@@ -7197,6 +7337,29 @@ onUnmounted(() => {
   grid-column: 1 / -1;
 }
 
+.generate-action-row {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.generate-audio-button {
+  min-width: 190px;
+}
+
+.audio-export-result {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.audio-export-result audio {
+  max-width: min(360px, 100%);
+  height: 36px;
+}
+
 .generate-submit.progressing {
   min-height: 176px;
 }
@@ -7257,6 +7420,19 @@ onUnmounted(() => {
   font-size: 20px;
   line-height: 1.1;
   color: #0f172a;
+}
+
+@media (max-width: 640px) {
+  .generate-action-row,
+  .audio-export-result {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .generate-audio-button,
+  .generate-button {
+    width: 100%;
+  }
 }
 
 .stats-dashboard-link {

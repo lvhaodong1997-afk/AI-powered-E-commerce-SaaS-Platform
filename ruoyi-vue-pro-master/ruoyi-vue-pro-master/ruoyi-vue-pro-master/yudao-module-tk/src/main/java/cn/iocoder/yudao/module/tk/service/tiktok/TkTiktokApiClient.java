@@ -12,7 +12,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URLEncoder;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,6 +39,8 @@ public class TkTiktokApiClient {
     private static final String DIRECT_POST_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
     private static final String INBOX_POST_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/";
     private static final String STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
+    private static final int UPLOAD_MAX_ATTEMPTS = 3;
+    private static final int UPLOAD_TIMEOUT_MILLIS = 10 * 60 * 1000;
 
     @Resource
     private TkApiKeyConfigService configService;
@@ -72,13 +79,48 @@ public class TkTiktokApiClient {
         form.put("client_secret", getClientSecret());
         form.put("code", code);
         form.put("grant_type", "authorization_code");
-        form.put("redirect_uri", redirectUri);
+        if (StrUtil.isNotBlank(redirectUri)) {
+            form.put("redirect_uri", redirectUri);
+        }
         if (StrUtil.isNotBlank(codeVerifier)) {
             form.put("code_verifier", codeVerifier);
         }
         log.info("[exchangeCode][redirectUri({}) codeLength({}) codeVerifier({})]", redirectUri,
                 StrUtil.length(code), StrUtil.isNotBlank(codeVerifier));
         return postForm(TOKEN_URL, form);
+    }
+
+    public TokenRefreshResult refreshAccessToken(String refreshToken) {
+        if (StrUtil.isBlank(refreshToken)) {
+            return TokenRefreshResult.failure("refresh_token_missing", "账号缺少 Refresh Token");
+        }
+        Map<String, Object> form = new HashMap<>();
+        form.put("client_key", getClientKey());
+        form.put("client_secret", getClientSecret());
+        form.put("grant_type", "refresh_token");
+        form.put("refresh_token", refreshToken);
+        return parseTokenRefresh(postForm(TOKEN_URL, form));
+    }
+
+    static TokenRefreshResult parseTokenRefresh(JsonNode root) {
+        String errorCode = root.path("error").isTextual()
+                ? root.path("error").asText(null) : getErrorNode(root).path("code").asText(null);
+        if (StrUtil.isNotBlank(errorCode) && !"ok".equals(errorCode)) {
+            String message = StrUtil.blankToDefault(root.path("error_description").asText(null),
+                    getErrorNode(root).path("message").asText(null));
+            String logId = StrUtil.blankToDefault(root.path("log_id").asText(null),
+                    getErrorNode(root).path("log_id").asText(null));
+            return TokenRefreshResult.failure(errorCode, formatApiError(errorCode, message,
+                    "TikTok Token 刷新失败", logId));
+        }
+        JsonNode data = root.hasNonNull("access_token") ? root : root.path("data");
+        String accessToken = data.path("access_token").asText(null);
+        if (StrUtil.isBlank(accessToken)) {
+            return TokenRefreshResult.failure("invalid_response", "TikTok Token 刷新响应缺少 Access Token");
+        }
+        return new TokenRefreshResult(true, accessToken, data.path("refresh_token").asText(null),
+                data.path("expires_in").asLong(0L), data.path("refresh_expires_in").asLong(0L),
+                data.path("scope").asText(null), data.path("open_id").asText(null), null, null);
     }
 
     public JsonNode createQrCode(String state) {
@@ -99,13 +141,17 @@ public class TkTiktokApiClient {
 
     public CreatorInfo queryCreatorInfo(String accessToken) {
         if (StrUtil.isBlank(accessToken)) {
-            return new CreatorInfo(false, "账号缺少 Access Token", new ArrayList<>(), false, false, false, null);
+            return new CreatorInfo(false, "账号缺少 Access Token", new ArrayList<>(),
+                    false, false, false, null, null);
         }
-        JsonNode root = postJson(CREATOR_INFO_URL, accessToken, new HashMap<>());
+        return parseCreatorInfo(postJson(CREATOR_INFO_URL, accessToken, new HashMap<>()));
+    }
+
+    static CreatorInfo parseCreatorInfo(JsonNode root) {
         JsonNode error = getErrorNode(root);
         if (!"ok".equals(error.path("code").asText())) {
             return new CreatorInfo(false, formatApiError(error, "TikTok creator_info 查询失败"),
-                    new ArrayList<>(), false, false, false, null);
+                    new ArrayList<>(), false, false, false, null, error.path("code").asText(null));
         }
         JsonNode data = root.path("data");
         List<String> privacyLevelOptions = new ArrayList<>();
@@ -120,7 +166,7 @@ public class TkTiktokApiClient {
                 data.path("comment_disabled").asBoolean(false),
                 data.path("duet_disabled").asBoolean(false),
                 data.path("stitch_disabled").asBoolean(false),
-                maxDuration);
+                maxDuration, null);
     }
 
     public UserInfo queryUserInfo(String accessToken) {
@@ -154,16 +200,21 @@ public class TkTiktokApiClient {
 
     public PublishResult initVideoPost(String accessToken, String postMode, Map<String, Object> payload) {
         if (StrUtil.isBlank(accessToken)) {
-            return new PublishResult(false, null, null, "账号缺少 Access Token");
+            return new PublishResult(false, null, null, "账号缺少 Access Token", null);
         }
-        JsonNode root = postJson("UPLOAD_TO_INBOX".equals(postMode) ? INBOX_POST_URL : DIRECT_POST_URL, accessToken, payload);
+        return parsePublishResult(postJson("UPLOAD_TO_INBOX".equals(postMode) ? INBOX_POST_URL : DIRECT_POST_URL,
+                accessToken, payload));
+    }
+
+    static PublishResult parsePublishResult(JsonNode root) {
         JsonNode error = getErrorNode(root);
         if (!"ok".equals(error.path("code").asText())) {
-            return new PublishResult(false, null, null, formatApiError(error, "TikTok 初始化发布失败"));
+            return new PublishResult(false, null, null, formatApiError(error, "TikTok 初始化发布失败"),
+                    error.path("code").asText(null));
         }
         JsonNode data = root.path("data");
         return new PublishResult(true, data.path("publish_id").asText(null),
-                data.path("upload_url").asText(null), null);
+                data.path("upload_url").asText(null), null, null);
     }
 
     public void uploadVideoChunks(String uploadUrl, byte[] videoBytes, int chunkSize, int totalChunkCount) {
@@ -172,35 +223,147 @@ public class TkTiktokApiClient {
         for (int chunkIndex = 0; chunkIndex < totalChunkCount; chunkIndex++) {
             int end = chunkIndex == totalChunkCount - 1 ? total - 1 : offset + chunkSize - 1;
             byte[] chunk = java.util.Arrays.copyOfRange(videoBytes, offset, end + 1);
+            uploadChunkWithRetry(uploadUrl, chunk, "video/mp4", offset, total, chunkIndex, totalChunkCount);
+            offset = end + 1;
+        }
+    }
+
+    public void uploadVideoChunks(String uploadUrl, Path videoFile, String contentType) {
+        if (videoFile == null || !Files.isRegularFile(videoFile)) {
+            throw new IllegalArgumentException("TikTok 上传文件不存在");
+        }
+        String mimeType = normalizeVideoMimeType(contentType);
+        try {
+            long total = Files.size(videoFile);
+            TkTiktokUploadPlanner.UploadPlan plan = TkTiktokUploadPlanner.plan(total);
+            try (InputStream inputStream = Files.newInputStream(videoFile)) {
+                for (int chunkIndex = 0; chunkIndex < plan.getTotalChunkCount(); chunkIndex++) {
+                    int length = Math.toIntExact(plan.chunkLength(chunkIndex));
+                    byte[] chunk = readChunk(inputStream, length);
+                    uploadChunkWithRetry(uploadUrl, chunk, mimeType, plan.chunkOffset(chunkIndex), total,
+                            chunkIndex, plan.getTotalChunkCount());
+                }
+            }
+        } catch (IOException ex) {
+            throw new IllegalStateException("读取 TikTok 上传文件失败：" + ex.getMessage(), ex);
+        }
+    }
+
+    private byte[] readChunk(InputStream inputStream, int length) throws IOException {
+        byte[] chunk = new byte[length];
+        int offset = 0;
+        while (offset < length) {
+            int read = inputStream.read(chunk, offset, length - offset);
+            if (read < 0) {
+                throw new EOFException("上传文件在分片读取过程中提前结束");
+            }
+            offset += read;
+        }
+        return chunk;
+    }
+
+    private void uploadChunkWithRetry(String uploadUrl, byte[] chunk, String contentType,
+                                      long offset, long total, int chunkIndex, int totalChunkCount) {
+        Throwable lastFailure = null;
+        long end = offset + chunk.length - 1;
+        for (int attempt = 0; attempt < UPLOAD_MAX_ATTEMPTS; attempt++) {
             try (HttpResponse response = HttpRequest.put(uploadUrl)
-                    .header("Content-Type", "video/mp4")
+                    .header("Content-Type", normalizeVideoMimeType(contentType))
                     .header("Content-Length", String.valueOf(chunk.length))
                     .header("Content-Range", "bytes " + offset + "-" + end + "/" + total)
                     .body(chunk)
-                    .timeout(120_000)
+                    .timeout(UPLOAD_TIMEOUT_MILLIS)
                     .execute()) {
-                if (!isSuccessfulUploadStatus(response.getStatus())) {
-                    throw new IllegalStateException("TikTok 分片上传失败，HTTP " + response.getStatus());
+                int status = response.getStatus();
+                if (isSuccessfulUploadStatus(status)) {
+                    return;
                 }
+                UploadException error = new UploadException(status);
+                if (!isRetryableUploadStatus(status)) {
+                    throw error;
+                }
+                lastFailure = error;
+            } catch (UploadException ex) {
+                throw ex;
+            } catch (Exception ex) {
+                lastFailure = ex;
             }
-            offset = end + 1;
+            if (attempt + 1 < UPLOAD_MAX_ATTEMPTS) {
+                sleepBeforeUploadRetry(attempt);
+            }
+        }
+        throw new IllegalStateException(StrUtil.format(
+                "TikTok 分片上传重试失败，分片 {}/{}，范围 bytes {}-{}",
+                chunkIndex + 1, totalChunkCount, offset, end), lastFailure);
+    }
+
+    private void sleepBeforeUploadRetry(int attempt) {
+        try {
+            Thread.sleep(100L << attempt);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("TikTok 分片上传重试被中断", ex);
+        }
+    }
+
+    private boolean isRetryableUploadStatus(int status) {
+        return status >= 500 && status <= 599;
+    }
+
+    private String normalizeVideoMimeType(String contentType) {
+        String mimeType = StrUtil.blankToDefault(contentType, "video/mp4").toLowerCase();
+        if (!"video/mp4".equals(mimeType)
+                && !"video/quicktime".equals(mimeType)
+                && !"video/webm".equals(mimeType)) {
+            throw new IllegalArgumentException("TikTok 不支持的视频 MIME 类型：" + contentType);
+        }
+        return mimeType;
+    }
+
+    public static class UploadException extends IllegalStateException {
+
+        private final int status;
+
+        public UploadException(int status) {
+            super("TikTok 分片上传失败，HTTP " + status);
+            this.status = status;
+        }
+
+        public int getStatus() {
+            return status;
+        }
+
+        public boolean isUploadUrlExpired() {
+            return status == 403;
+        }
+
+        public boolean isRecoverable() {
+            return status == 403 || status == 404 || status == 416 || isRetryableStatus(status);
+        }
+
+        private boolean isRetryableStatus(int status) {
+            return status >= 500 && status <= 599;
         }
     }
 
     public PostStatusResult fetchPostStatus(String accessToken, String publishId) {
         if (StrUtil.isBlank(accessToken) || StrUtil.isBlank(publishId)) {
-            return new PostStatusResult(false, "FAILED", "账号缺少 Access Token 或发布编号");
+            return new PostStatusResult(false, "FAILED", "账号缺少 Access Token 或发布编号", null);
         }
         Map<String, Object> payload = new HashMap<>();
         payload.put("publish_id", publishId);
-        JsonNode root = postJson(STATUS_URL, accessToken, payload);
+        return parsePostStatusResult(postJson(STATUS_URL, accessToken, payload));
+    }
+
+    static PostStatusResult parsePostStatusResult(JsonNode root) {
         JsonNode error = getErrorNode(root);
         if (!"ok".equals(error.path("code").asText())) {
-            return new PostStatusResult(false, "FAILED", formatApiError(error, "TikTok 状态查询失败"));
+            return new PostStatusResult(false, "FAILED", formatApiError(error, "TikTok 状态查询失败"),
+                    error.path("code").asText(null));
         }
         JsonNode data = root.path("data");
         return new PostStatusResult(true, data.path("status").asText("PROCESSING"),
-                data.path("fail_reason").asText(null));
+                data.path("fail_reason").asText(null), null);
     }
 
     private JsonNode postForm(String url, Map<String, Object> form) {
@@ -259,8 +422,17 @@ public class TkTiktokApiClient {
         String code = error.path("code").asText("");
         String message = StrUtil.blankToDefault(error.path("message").asText(), fallback);
         String logId = StrUtil.blankToDefault(error.path("log_id").asText(), error.path("logid").asText());
+        return formatApiError(code, message, fallback, logId);
+    }
+
+    private static String formatApiError(String code, String message, String fallback, String logId) {
+        message = StrUtil.blankToDefault(message, fallback);
         String reason = StrUtil.isBlank(code) || "ok".equals(code) ? message : code + "：" + message;
         return StrUtil.isBlank(logId) ? reason : reason + "，log_id=" + logId;
+    }
+
+    private static boolean isAccessTokenInvalid(String errorCode) {
+        return "access_token_invalid".equals(errorCode);
     }
 
     @Data
@@ -273,6 +445,11 @@ public class TkTiktokApiClient {
         private boolean duetDisabled;
         private boolean stitchDisabled;
         private Integer maxVideoPostDurationSec;
+        private String errorCode;
+
+        public boolean isAccessTokenInvalid() {
+            return TkTiktokApiClient.isAccessTokenInvalid(errorCode);
+        }
     }
 
     @Data
@@ -294,6 +471,11 @@ public class TkTiktokApiClient {
         private String publishId;
         private String uploadUrl;
         private String failReason;
+        private String errorCode;
+
+        public boolean isAccessTokenInvalid() {
+            return TkTiktokApiClient.isAccessTokenInvalid(errorCode);
+        }
     }
 
     @Data
@@ -302,6 +484,29 @@ public class TkTiktokApiClient {
         private boolean success;
         private String status;
         private String failReason;
+        private String errorCode;
+
+        public boolean isAccessTokenInvalid() {
+            return TkTiktokApiClient.isAccessTokenInvalid(errorCode);
+        }
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class TokenRefreshResult {
+        private boolean success;
+        private String accessToken;
+        private String refreshToken;
+        private Long accessTokenExpiresIn;
+        private Long refreshTokenExpiresIn;
+        private String scopes;
+        private String openId;
+        private String errorCode;
+        private String failReason;
+
+        static TokenRefreshResult failure(String errorCode, String failReason) {
+            return new TokenRefreshResult(false, null, null, null, null, null, null, errorCode, failReason);
+        }
     }
 
 }

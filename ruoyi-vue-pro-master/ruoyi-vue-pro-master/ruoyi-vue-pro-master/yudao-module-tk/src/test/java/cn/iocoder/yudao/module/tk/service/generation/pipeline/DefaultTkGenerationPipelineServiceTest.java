@@ -9,7 +9,12 @@ import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import java.io.ByteArrayOutputStream;
@@ -22,6 +27,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
@@ -35,9 +41,29 @@ class DefaultTkGenerationPipelineServiceTest {
 
     @AfterEach
     void tearDown() {
+        SecurityContextHolder.clearContext();
+        RequestContextHolder.resetRequestAttributes();
         if (server != null) {
             server.stop(0);
         }
+    }
+
+    @Test
+    void runWithIsolatedContextHidesThenRestoresCallerUserAndRequest() {
+        DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken("stale-user", null);
+        ServletRequestAttributes requestAttributes = new ServletRequestAttributes(new MockHttpServletRequest());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        RequestContextHolder.setRequestAttributes(requestAttributes);
+
+        service.runWithIsolatedContext(() -> {
+            assertNull(SecurityContextHolder.getContext().getAuthentication());
+            assertNull(RequestContextHolder.getRequestAttributes());
+        });
+
+        assertEquals(authentication, SecurityContextHolder.getContext().getAuthentication());
+        assertEquals(requestAttributes, RequestContextHolder.getRequestAttributes());
     }
 
     @Test

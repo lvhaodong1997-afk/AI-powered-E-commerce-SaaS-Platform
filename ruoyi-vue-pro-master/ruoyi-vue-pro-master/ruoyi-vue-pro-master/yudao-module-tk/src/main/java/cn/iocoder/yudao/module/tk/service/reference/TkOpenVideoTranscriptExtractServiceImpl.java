@@ -6,14 +6,18 @@ import cn.hutool.crypto.digest.DigestUtil;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import cn.iocoder.yudao.module.infra.api.file.FileApi;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkOpenVideoTranscriptExtractCreateReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkOpenVideoTranscriptExtractCreateRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkOpenVideoTranscriptExtractRespVO;
+import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkOpenVideoTranscriptExtractSyncRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkOpenVideoTranscriptTaskDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkOpenVideoTranscriptTaskMapper;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.framework.ffmpeg.TkFfmpegExecutableResolver;
+import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
+import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -35,6 +39,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.Locale;
 
 @Service
 @Slf4j
@@ -48,6 +53,8 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
     private static final int MAX_VIDEO_DURATION_SECONDS = 600;
 
     private final ExecutorService executorService = Executors.newFixedThreadPool(1);
+    private long syncWaitTimeoutMillis = TimeUnit.MINUTES.toMillis(5);
+    private long syncPollIntervalMillis = 1000L;
 
     @Resource
     private TkOpenVideoTranscriptTaskMapper transcriptTaskMapper;
@@ -57,18 +64,24 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
     private TkGenerationProperties generationProperties;
     @Resource
     private FileApi fileApi;
+    @Resource
+    private TkDataScopeService dataScopeService;
 
     @Override
     public TkOpenVideoTranscriptExtractCreateRespVO createExtractTask(TkOpenVideoTranscriptExtractCreateReqVO reqVO) {
+        TkUserScope scope = dataScopeService.getCurrentScope();
+        Long tenantId = scope.getTenantId();
         TkOpenVideoTranscriptTaskDO task = TkOpenVideoTranscriptTaskDO.builder()
                 .sourceUrl(StrUtil.trim(reqVO.getSourceUrl()))
                 .sourceUrlHash(DigestUtil.sha256Hex(StrUtil.trim(reqVO.getSourceUrl())))
-                .targetLanguage(StrUtil.trimToNull(reqVO.getTargetLanguage()))
+                .targetLanguage(normalizeTargetLanguage(reqVO.getTargetLanguage()))
                 .status(STATUS_PENDING)
                 .asrProvider(ASR_PROVIDER)
                 .build();
+        task.setTenantId(tenantId);
+        task.setCompanyId(scope.getCompanyId());
         transcriptTaskMapper.insert(task);
-        executorService.execute(() -> runExtractTask(task.getId()));
+        executorService.execute(() -> TenantUtils.execute(tenantId, () -> runExtractTask(task.getId())));
         return TkOpenVideoTranscriptExtractCreateRespVO.builder()
                 .taskId(task.getId())
                 .status(STATUS_PENDING)
@@ -81,6 +94,11 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
         if (task == null) {
             return null;
         }
+        dataScopeService.validateReadable(task.getTenantId(), task.getCompanyId(), task.getCreator());
+        String normalizedSegmentsJson = TkOpenVideoTranscriptTextNormalizer
+                .normalizeJsonArray(task.getSegmentsJson());
+        String normalizedWordsJson = TkOpenVideoTranscriptTextNormalizer
+                .normalizeJsonArray(task.getWordsJson());
         return TkOpenVideoTranscriptExtractRespVO.builder()
                 .taskId(task.getId())
                 .status(task.getStatus())
@@ -93,9 +111,9 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
                 .resolution(task.getResolution())
                 .audioUrl(task.getAudioUrl())
                 .audioDuration(task.getAudioDuration())
-                .transcriptText(task.getTranscriptText())
-                .segments(parseJsonArray(task.getSegmentsJson()))
-                .words(parseJsonArray(task.getWordsJson()))
+                .transcriptText(TkOpenVideoTranscriptTextNormalizer.normalizeText(task.getTranscriptText()))
+                .segments(parseJsonArray(normalizedSegmentsJson))
+                .words(parseJsonArray(normalizedWordsJson))
                 .asrProvider(task.getAsrProvider())
                 .asrModel(task.getAsrModel())
                 .createTime(task.getCreateTime())
@@ -103,9 +121,66 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
                 .build();
     }
 
+    @Override
+    public TkOpenVideoTranscriptExtractSyncRespVO extractAndWait(TkOpenVideoTranscriptExtractCreateReqVO reqVO) {
+        TkOpenVideoTranscriptExtractCreateRespVO created = createExtractTask(reqVO);
+        long deadline = System.currentTimeMillis() + syncWaitTimeoutMillis;
+        while (true) {
+            TkOpenVideoTranscriptExtractRespVO result = getExtractTask(created.getTaskId());
+            if (result == null) {
+                return failed("视频文案提取任务不存在");
+            }
+            if (STATUS_SUCCESS.equals(result.getStatus()) || STATUS_FAILED.equals(result.getStatus())) {
+                return toSyncResp(result);
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                return failed("视频文案提取超时，请稍后重试");
+            }
+            sleepBeforeNextPoll(deadline);
+        }
+    }
+
     @PreDestroy
     public void destroy() {
         executorService.shutdown();
+    }
+
+    private void sleepBeforeNextPoll(long deadline) {
+        long sleepMillis = Math.min(syncPollIntervalMillis, Math.max(1L, deadline - System.currentTimeMillis()));
+        try {
+            Thread.sleep(sleepMillis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private TkOpenVideoTranscriptExtractSyncRespVO failed(String failReason) {
+        return TkOpenVideoTranscriptExtractSyncRespVO.builder()
+                .status(STATUS_FAILED)
+                .failReason(failReason)
+                .build();
+    }
+
+    private TkOpenVideoTranscriptExtractSyncRespVO toSyncResp(TkOpenVideoTranscriptExtractRespVO result) {
+        return TkOpenVideoTranscriptExtractSyncRespVO.builder()
+                .status(result.getStatus())
+                .failReason(StrUtil.blankToDefault(result.getFailReason(), null))
+                .sourceUrl(result.getSourceUrl())
+                .targetLanguage(result.getTargetLanguage())
+                .resolvedVideoUrl(result.getResolvedVideoUrl())
+                .coverUrl(result.getCoverUrl())
+                .videoDuration(result.getVideoDuration())
+                .resolution(result.getResolution())
+                .audioUrl(result.getAudioUrl())
+                .audioDuration(result.getAudioDuration())
+                .transcriptText(result.getTranscriptText())
+                .segments(result.getSegments())
+                .words(result.getWords())
+                .asrProvider(result.getAsrProvider())
+                .asrModel(result.getAsrModel())
+                .createTime(result.getCreateTime())
+                .updateTime(result.getUpdateTime())
+                .build();
     }
 
     private void runExtractTask(Long taskId) {
@@ -134,7 +209,7 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
             File videoFile = download(videoContent.getResolvedVideoUrl(), new File(taskDir, "source-video.mp4"));
             File audioFile = extractAudio(videoFile, new File(taskDir, "audio.wav"));
             String audioUrl = uploadAudio(taskId, audioFile);
-            AsrResult asrResult = runAsr(task, audioFile);
+            AsrResult asrResult = runAsrWithRetry(task, audioFile);
             transcriptTaskMapper.updateById(TkOpenVideoTranscriptTaskDO.builder()
                     .id(taskId)
                     .audioUrl(audioUrl)
@@ -158,6 +233,17 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
         } finally {
             FileUtil.del(taskDir);
         }
+    }
+
+    private String normalizeTargetLanguage(String targetLanguage) {
+        String normalized = StrUtil.trimToNull(targetLanguage);
+        if (StrUtil.isBlank(normalized)) {
+            return "zh-CN";
+        }
+        if (normalized.toLowerCase(Locale.ROOT).startsWith("zh")) {
+            return "zh-CN";
+        }
+        return normalized;
     }
 
     private void updateStatus(Long taskId, String status, String failReason) {
@@ -185,7 +271,52 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
                 "audio/wav");
     }
 
-    private AsrResult runAsr(TkOpenVideoTranscriptTaskDO task, File audioFile) throws Exception {
+    private AsrResult runAsrWithRetry(TkOpenVideoTranscriptTaskDO task, File audioFile) throws Exception {
+        TkGenerationProperties.Asr asr = generationProperties.getSubtitle().getAsr();
+        if (asr == null || !Boolean.TRUE.equals(asr.getEnabled())) {
+            throw new IllegalStateException("ASR 未启用，无法提取视频口播文案和时间轴");
+        }
+        String primaryModel = StrUtil.blankToDefault(asr.getModel(), "small");
+        AsrResult primaryResult = null;
+        Exception primaryFailure = null;
+        try {
+            primaryResult = runAsr(task, audioFile, primaryModel);
+            if (TkOpenVideoTranscriptQuality.isUsable(primaryResult.transcriptText, primaryResult.segmentsJson)
+                    || !Boolean.TRUE.equals(asr.getRetryEnabled())
+                    || StrUtil.isBlank(asr.getRetryModel())
+                    || StrUtil.equals(primaryModel, asr.getRetryModel())) {
+                return primaryResult;
+            }
+        } catch (Exception ex) {
+            primaryFailure = ex;
+        }
+
+        if (!Boolean.TRUE.equals(asr.getRetryEnabled())
+                || StrUtil.isBlank(asr.getRetryModel())
+                || StrUtil.equals(primaryModel, asr.getRetryModel())) {
+            if (primaryResult != null) {
+                return primaryResult;
+            }
+            throw primaryFailure == null ? new IllegalStateException("ASR 未返回有效结果") : primaryFailure;
+        }
+
+        File enhancedAudio = new File(audioFile.getParentFile(), "audio-enhanced.wav");
+        try {
+            enhanceAudio(audioFile, enhancedAudio);
+            AsrResult retryResult = runAsr(task, enhancedAudio, asr.getRetryModel());
+            if (TkOpenVideoTranscriptQuality.isUsable(retryResult.transcriptText, retryResult.segmentsJson)) {
+                return retryResult;
+            }
+        } catch (Exception retryFailure) {
+            log.warn("[runAsrWithRetry][taskId({}) ASR retry failed]", task.getId(), retryFailure);
+        }
+        if (primaryResult != null) {
+            return primaryResult;
+        }
+        throw primaryFailure == null ? new IllegalStateException("ASR 未返回有效结果") : primaryFailure;
+    }
+
+    private AsrResult runAsr(TkOpenVideoTranscriptTaskDO task, File audioFile, String model) throws Exception {
         TkGenerationProperties.Asr asr = generationProperties.getSubtitle().getAsr();
         if (asr == null || !Boolean.TRUE.equals(asr.getEnabled())) {
             throw new IllegalStateException("ASR 未启用，无法提取视频口播文案和时间轴");
@@ -194,7 +325,6 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
         if (!scriptFile.isFile()) {
             throw new IllegalStateException("ASR 脚本不存在：" + scriptFile.getAbsolutePath());
         }
-        String model = StrUtil.blankToDefault(asr.getModel(), "small");
         List<String> command = new ArrayList<>(Arrays.asList(
                 StrUtil.blankToDefault(asr.getPython(), "py"),
                 scriptFile.getAbsolutePath(),
@@ -202,7 +332,7 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
                 "--language", StrUtil.blankToDefault(task.getTargetLanguage(), ""),
                 "--text", "",
                 "--keywords", "[]",
-                "--model", model
+                "--model", resolveAsrModel(asr, model)
         ));
         String output = runCommand(command, asr.getTimeoutSeconds());
         JsonNode root = JsonUtils.parseTree(output);
@@ -210,9 +340,12 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
         if (!segments.isArray() || segments.size() <= 0) {
             throw new IllegalStateException("ASR 未返回有效分段时间轴");
         }
+        String normalizedSegmentsJson = TkOpenVideoTranscriptTextNormalizer
+                .normalizeJsonArray(segments.toString());
+        JsonNode normalizedSegments = JsonUtils.parseTree(normalizedSegmentsJson);
         List<Map<String, Object>> words = new ArrayList<>();
         List<String> transcriptParts = new ArrayList<>();
-        for (JsonNode segment : segments) {
+        for (JsonNode segment : normalizedSegments) {
             String text = segment.path("text").asText("");
             if (StrUtil.isNotBlank(text)) {
                 transcriptParts.add(text.trim());
@@ -227,10 +360,41 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
         return new AsrResult(
                 root.path("audioDuration").asDouble(0D),
                 String.join("\n", transcriptParts),
-                segments.toString(),
+                normalizedSegmentsJson,
                 JsonUtils.toJsonString(words),
                 model,
                 output);
+    }
+
+    /**
+     * Resolve a model name against the TK project's private model directory when configured.
+     * Without the directory setting the existing remote-model behavior is preserved for compatibility.
+     */
+    String resolveAsrModel(TkGenerationProperties.Asr asr, String model) {
+        String configuredModel = StrUtil.blankToDefault(model, "small");
+        String modelCacheDir = StrUtil.trimToNull(asr == null ? null : asr.getModelCacheDir());
+        if (modelCacheDir == null) {
+            return configuredModel;
+        }
+        File modelFile = new File(configuredModel);
+        if (!modelFile.isAbsolute()) {
+            modelFile = new File(resolvePath(modelCacheDir), configuredModel);
+        }
+        if (!modelFile.isDirectory()) {
+            throw new IllegalStateException("ASR 模型目录不存在：" + modelFile.getAbsolutePath());
+        }
+        return modelFile.getAbsolutePath();
+    }
+
+    private File enhanceAudio(File sourceAudio, File targetAudio) throws Exception {
+        runCommand(Arrays.asList(ffmpeg(), "-y", "-i", sourceAudio.getAbsolutePath(),
+                "-af", "highpass=f=80,lowpass=f=8000,loudnorm=I=-16:TP=-1.5:LRA=11",
+                "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", targetAudio.getAbsolutePath()),
+                180);
+        if (!targetAudio.isFile() || targetAudio.length() <= 0) {
+            throw new IllegalStateException("FFmpeg 未生成有效增强音频文件");
+        }
+        return targetAudio;
     }
 
     private File download(String url, File target) {

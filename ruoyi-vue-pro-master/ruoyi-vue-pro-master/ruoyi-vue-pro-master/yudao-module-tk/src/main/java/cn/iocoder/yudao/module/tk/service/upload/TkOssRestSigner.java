@@ -5,15 +5,15 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
-class TkOssRestSigner {
+public final class TkOssRestSigner {
 
     private static final String HMAC_SHA1 = "HmacSHA1";
 
     private TkOssRestSigner() {
     }
 
-    static String sign(String method, String contentMd5, String contentType, String date,
-                       String canonicalizedResource, String accessKeySecret) {
+    public static String sign(String method, String contentMd5, String contentType, String date,
+                              String canonicalizedResource, String accessKeySecret) {
         String canonical = method + "\n"
                 + blankToEmpty(contentMd5) + "\n"
                 + blankToEmpty(contentType) + "\n"

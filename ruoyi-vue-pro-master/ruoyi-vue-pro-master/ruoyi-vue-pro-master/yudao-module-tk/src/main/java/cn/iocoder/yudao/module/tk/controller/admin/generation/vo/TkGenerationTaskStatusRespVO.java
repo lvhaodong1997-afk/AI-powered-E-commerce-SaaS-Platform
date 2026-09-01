@@ -21,6 +21,9 @@ public class TkGenerationTaskStatusRespVO {
     private String failReason;
     private String failCode;
     private String currentStep;
+    private String currentStepCode;
+    private Integer currentStepCompleted;
+    private Integer currentStepTotal;
     private LocalDateTime heartbeatTime;
     private LocalDateTime stepStartedAt;
     private LocalDateTime stepFinishedAt;

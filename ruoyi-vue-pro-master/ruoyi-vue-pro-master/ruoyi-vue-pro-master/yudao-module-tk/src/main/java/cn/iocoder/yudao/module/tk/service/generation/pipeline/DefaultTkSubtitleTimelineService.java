@@ -41,6 +41,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
     private static final double MAX_REASONABLE_FIRST_SUBTITLE_START_SECONDS = 1.0D;
     private static final double MAX_SUBTITLE_TAIL_GAP_SECONDS = 2.0D;
     private static final double MAX_SUBTITLE_TAIL_GAP_RATIO = 0.08D;
+    private static final double MAX_SUBTITLE_SEGMENT_OVERLAP_SECONDS = 0.05D;
     private static final String CJK_SOFT_PUNCTUATION = "，,、：:";
     private static final String CJK_LEADING_PUNCTUATION = "，,、。！？!?；;：:";
     private static final Pattern SILENCE_START_PATTERN = Pattern.compile("silence_start:\\s*([0-9.]+)");
@@ -155,6 +156,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         timeline.setLanguage(task.getTargetLanguage());
         timeline.setAudioDuration(duration);
         timeline.setSegments(smoothRapidSegments(buildSegments(sentences, duration, keywords)));
+        markWordTimingReliability(timeline.getSegments(), false);
         applySubtitleLead(timeline, resolveSubtitleLead(audioFile));
         return timeline;
     }
@@ -184,6 +186,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         }
         List<TkSubtitleSegment> segments = buildExactSegments(sentences, exactWords);
         timeline.setSegments(smoothRapidSegments(segments));
+        markWordTimingReliability(timeline.getSegments(), hasExactWordTiming(scriptText, timingTimeline));
         return timeline;
     }
 
@@ -219,6 +222,15 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         }
         if (firstStart == Double.MAX_VALUE) {
             firstStart = 0D;
+        }
+        double previousEnd = -1D;
+        for (TkSubtitleSegment segment : timeline.getSegments()) {
+            if (previousEnd >= 0D
+                    && segment.getStart() < previousEnd - MAX_SUBTITLE_SEGMENT_OVERLAP_SECONDS) {
+                return new SubtitleQuality(false, audioDuration, firstStart, lastEnd,
+                        "SUBTITLE_SEGMENT_OVERLAP");
+            }
+            previousEnd = Math.max(previousEnd, segment.getEnd());
         }
         if (audioDuration > 3D && firstStart > MAX_REASONABLE_FIRST_SUBTITLE_START_SECONDS) {
             return new SubtitleQuality(false, audioDuration, firstStart, lastEnd, "FIRST_SUBTITLE_TOO_LATE");
@@ -277,6 +289,24 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         words.addAll(buildAlignedWords(scriptUnits, timingUnits, timingIndexes, keywords));
         markKeywordPhrases(words, keywords);
         return words;
+    }
+
+    private boolean hasExactWordTiming(String scriptText, TkSubtitleTimeline timingTimeline) {
+        List<String> scriptUnits = buildSubtitleUnits(scriptText);
+        List<TimingUnit> timingUnits = collectTimingUnits(timingTimeline);
+        if (scriptUnits.isEmpty() || timingUnits.isEmpty()) {
+            return false;
+        }
+        return countMatched(alignScriptUnitsToTimingUnits(scriptUnits, timingUnits)) == scriptUnits.size();
+    }
+
+    private void markWordTimingReliability(List<TkSubtitleSegment> segments, boolean reliable) {
+        if (segments == null) {
+            return;
+        }
+        for (TkSubtitleSegment segment : segments) {
+            segment.setWordTimingReliable(reliable);
+        }
     }
 
     private List<TkSubtitleWord> buildAlignedWords(List<String> scriptUnits, List<TimingUnit> timingUnits,

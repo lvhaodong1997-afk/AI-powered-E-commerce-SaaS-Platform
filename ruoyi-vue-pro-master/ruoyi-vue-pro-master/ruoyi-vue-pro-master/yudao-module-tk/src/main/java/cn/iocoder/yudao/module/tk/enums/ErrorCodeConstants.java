@@ -14,10 +14,11 @@ public interface ErrorCodeConstants {
     ErrorCode TK_MATERIAL_LIBRARY_COMPANY_MISMATCH = new ErrorCode(1_060_000_008, "生成任务不能使用其他公司的素材库");
     ErrorCode TK_USER_SCOPE_NOT_CONFIGURED = new ErrorCode(1_060_000_009, "当前用户未配置 TK 用户级别或所属公司");
     ErrorCode TK_UPLOAD_FILE_EMPTY = new ErrorCode(1_060_000_010, "上传文件不能为空");
-    ErrorCode TK_UPLOAD_FILE_TOO_LARGE = new ErrorCode(1_060_000_011, "视频文件超过 100MB 限制");
+    ErrorCode TK_UPLOAD_FILE_TOO_LARGE = new ErrorCode(1_060_000_011, "视频文件超过当前上传大小限制");
     ErrorCode TK_UPLOAD_FILE_EXTENSION_INVALID = new ErrorCode(1_060_000_012, "仅支持 mp4、mov、webm 视频");
     ErrorCode TK_UPLOAD_FILE_INVALID = new ErrorCode(1_060_000_031, "视频文件不完整或无法识别，请重新导出或转码后再上传");
     ErrorCode TK_UPLOAD_SESSION_INVALID = new ErrorCode(1_060_000_049, "上传会话已失效，请重新选择文件上传");
+    ErrorCode TK_TIKTOK_PUBLISH_MEDIA_TOO_LARGE = new ErrorCode(1_060_000_050, "TikTok 发布视频不能超过 1GB");
     ErrorCode TK_REFERENCE_SCRIPT_OPTION_NOT_EXISTS = new ErrorCode(1_060_000_013, "文案方案不存在");
     ErrorCode TK_REFERENCE_ANALYSIS_NOT_EXISTS = new ErrorCode(1_060_000_014, "对标分析不存在");
     ErrorCode TK_REFERENCE_BINDING_MISMATCH = new ErrorCode(1_060_000_015, "对标分析或文案方案不属于当前素材库");
@@ -29,7 +30,7 @@ public interface ErrorCodeConstants {
     ErrorCode TK_TIKTOK_AUTH_STATE_INVALID = new ErrorCode(1_060_000_021, "TikTok 授权 state 校验失败");
     ErrorCode TK_TIKTOK_PUBLISH_TASK_NOT_EXISTS = new ErrorCode(1_060_000_022, "TikTok 发布任务不存在");
     ErrorCode TK_TIKTOK_PUBLISH_DETAIL_NOT_EXISTS = new ErrorCode(1_060_000_023, "TikTok 发布明细不存在");
-    ErrorCode TK_TIKTOK_PUBLISH_VIDEO_REQUIRED = new ErrorCode(1_060_000_024, "请选择已生成的视频");
+    ErrorCode TK_TIKTOK_PUBLISH_VIDEO_REQUIRED = new ErrorCode(1_060_000_024, "请选择可发布的视频");
     ErrorCode TK_TIKTOK_PUBLISH_ACCOUNT_REQUIRED = new ErrorCode(1_060_000_025, "请选择至少一个 TikTok 账号或账号组");
     ErrorCode TK_TIKTOK_CONFIG_MISSING = new ErrorCode(1_060_000_026, "TikTok 配置缺失：{}");
     ErrorCode TK_COMPANY_NOT_EXISTS = new ErrorCode(1_060_000_027, "公司不存在");

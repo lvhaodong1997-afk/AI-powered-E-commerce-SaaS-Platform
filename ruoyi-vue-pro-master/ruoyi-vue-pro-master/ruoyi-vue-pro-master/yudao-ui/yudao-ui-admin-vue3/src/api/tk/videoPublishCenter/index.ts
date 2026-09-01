@@ -34,7 +34,7 @@ export interface TkTiktokAccountVO {
   scopes?: string
   accessTokenExpireTime?: string
   refreshTokenExpireTime?: string
-  tokenStatus: string
+  tokenStatus: 'VALID' | 'AUTO_REFRESH' | 'EXPIRED' | string
   authStatus: string
   defaultPrivacyLevel?: string
   allowComment?: boolean
@@ -71,10 +71,14 @@ export interface TkTiktokPublishTaskVO {
   tenantId?: number
   businessTraceId?: string
   companyId: number
-  generationTaskId: number
+  generationTaskId?: number
+  uploadedVideoId?: number
+  sourceType?: string
   title: string
   caption?: string
   videoUrl: string
+  coverUrl?: string
+  coverTimestampMs?: number
   postMode: string
   privacyLevel?: string
   accountCount: number
@@ -92,8 +96,10 @@ export interface TkTiktokPublishDetailVO {
   tenantId?: number
   companyId: number
   publishTaskId: number
-  generationTaskId: number
-  accountId: number
+  generationTaskId?: number
+  uploadedVideoId?: number
+  sourceType?: string
+  accountId?: number
   accountDisplayName?: string
   publishId?: string
   publishUrl?: string
@@ -101,6 +107,8 @@ export interface TkTiktokPublishDetailVO {
   status: string
   postMode: string
   privacyLevel?: string
+  coverUrl?: string
+  coverTimestampMs?: number
   allowComment?: boolean
   allowDuet?: boolean
   allowStitch?: boolean
@@ -192,7 +200,32 @@ export const TkTiktokAccountGroupApi = {
 }
 
 export const TkTiktokPublishApi = {
-  create: async (data: any) => {
+  uploadMedia: async (data: FormData, option: any = {}) => {
+    const res = await request.upload<{ data: TkTiktokPublishMediaVO }>({
+      url: '/tk/tiktok-publish/media/upload',
+      data,
+      timeout: 15 * 60 * 1000,
+      ...option
+    })
+    return res.data as TkTiktokPublishMediaVO
+  },
+  create: async (data: {
+    generationTaskId?: number
+    uploadedVideoId?: number
+    coverTimestampMs?: number
+    accountIds?: number[]
+    groupIds?: number[]
+    title?: string
+    caption?: string
+    postMode?: string
+    privacyLevel?: string
+    allowComment?: boolean
+    allowDuet?: boolean
+    allowStitch?: boolean
+    commercialContent?: boolean
+    brandContent?: boolean
+    aigcContent?: boolean
+  }) => {
     return await request.post({ url: '/tk/tiktok-publish/create', data })
   },
   getTaskPage: async (params: any) => {
@@ -213,5 +246,79 @@ export const TkTiktokPublishApi = {
     publishUrl: string
   }): Promise<TkTiktokPublishUrlVO> => {
     return await request.post({ url: '/tk/tiktok-publish/publish-url/register', data })
+  }
+}
+
+export interface TkTiktokPublishMediaVO {
+  id: number
+  fileName: string
+  fileUrl: string
+  coverUrl?: string
+  fileSize: number
+  mimeType?: string
+  status: string
+}
+
+export interface TkTiktokMediaUploadSessionVO {
+  uploadId: string
+  uploadMode?: 'local' | 'oss'
+  chunkSize?: number
+  totalChunks?: number
+  uploadedSize?: number
+  uploadedChunks?: number[]
+  uploadUrl?: string
+  publicUrl?: string
+  objectKey?: string
+  accessKeyId?: string
+  policy?: string
+  signature?: string
+  successActionStatus?: string
+  expiration?: string
+}
+
+export interface TkTiktokMediaUploadCompleteVO {
+  uploadedVideoId: number
+}
+
+export const TkTiktokMediaUploadApi = {
+  createMediaUploadSession: async (data: {
+    fileName: string
+    fileSize: number
+    contentType?: string
+  }) => {
+    return await request.post<TkTiktokMediaUploadSessionVO>({
+      url: '/tk/tiktok-publish/media/session/create',
+      data
+    })
+  },
+  getMediaUploadSession: async (uploadId: string) => {
+    return await request.get<TkTiktokMediaUploadSessionVO>({
+      url: `/tk/tiktok-publish/media/session/${uploadId}`
+    })
+  },
+  uploadMediaChunk: async (data: FormData, uploadId: string, chunkIndex: number, option: any = {}) => {
+    return await request.upload({
+      url: '/tk/tiktok-publish/media/chunk',
+      data,
+      params: { uploadId, chunkIndex },
+      timeout: 15 * 60 * 1000,
+      ...option
+    })
+  },
+  completeMediaUpload: async (data: {
+    uploadId: string
+    fileName?: string
+    fileSize?: number
+    contentType?: string
+  }) => {
+    return await request.post<TkTiktokMediaUploadCompleteVO>({
+      url: '/tk/tiktok-publish/media/session/complete',
+      data
+    })
+  },
+  cancelMediaUpload: async (uploadId: string) => {
+    return await request.delete({
+      url: `/tk/tiktok-publish/media/session/${uploadId}`
+    })
   }
 }

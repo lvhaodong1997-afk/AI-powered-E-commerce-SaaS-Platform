@@ -1,11 +1,20 @@
 package cn.iocoder.yudao.module.tk.service.tiktok;
 
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokAccountDO;
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class TkTiktokAuthServiceImplTest {
+
+    @Test
+    void extractQrAuthCodeDecodesRedirectCode() {
+        String code = TkTiktokAuthServiceImpl.extractQrAuthCode(JsonUtils.parseTree(
+                "{\"redirect_uri\":\"https://callback.example/?state=s1&code=abc%2B123%26x\"}"));
+
+        assertEquals("abc+123&x", code);
+    }
 
     @Test
     void applyUserInfoReplacesGeneratedNameButKeepsManualRemark() {

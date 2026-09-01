@@ -149,6 +149,12 @@ public class TkGenerationTaskDO extends TenantBaseDO {
 
     private String currentStep;
 
+    private String currentStepCode;
+
+    private Integer currentStepCompleted;
+
+    private Integer currentStepTotal;
+
     private String precheckResult;
 
     private Integer retryCount;

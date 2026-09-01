@@ -28,6 +28,9 @@
           <el-button type="success" plain @click="startQrAuth" v-hasPermi="['tk:tiktok-account:authorize']">
             <Icon icon="ep:full-screen" class="mr-5px" /> 二维码授权
           </el-button>
+          <el-button type="primary" @click="openUploadPublishDrawer" v-hasPermi="['tk:tiktok-publish:create']">
+            <Icon icon="ep:upload" class="mr-5px" /> 上传视频发布
+          </el-button>
         </div>
       </div>
     </ContentWrap>
@@ -59,14 +62,16 @@
                 复制
               </el-button>
             </div>
-            <div class="sub-text">{{ scope.row.outputUrl }}</div>
+            <div class="sub-text">{{ displayVideoFileName(scope.row.outputUrl) }}</div>
           </template>
         </el-table-column>
         <el-table-column label="素材库ID" prop="libraryId" width="100" />
         <el-table-column label="目标时长" width="100">
           <template #default="scope">{{ scope.row.targetDuration || scope.row.referenceDuration || '-' }}s</template>
         </el-table-column>
-        <el-table-column label="创建时间" prop="createTime" width="170" />
+        <el-table-column label="创建时间" width="170">
+          <template #default="scope">{{ formatTimestamp(scope.row.createTime) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="120" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="openPublishDrawer(scope.row)" v-hasPermi="['tk:tiktok-publish:create']">发布</el-button>
@@ -85,8 +90,8 @@
         <el-form-item label="Token" prop="tokenStatus">
           <el-select v-model="accountQuery.tokenStatus" clearable placeholder="Token状态" class="!w-160px">
             <el-option label="有效" value="VALID" />
-            <el-option label="异常" value="INVALID" />
-            <el-option label="视频已过期" value="EXPIRED" />
+            <el-option label="自动刷新中" value="AUTO_REFRESH" />
+            <el-option label="需重新授权" value="EXPIRED" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -119,8 +124,11 @@
         </el-table-column>
         <el-table-column label="Token" width="110">
           <template #default="scope">
-            <el-tag :type="scope.row.tokenStatus === 'VALID' ? 'success' : 'danger'">{{ tokenStatusLabel(scope.row.tokenStatus) }}</el-tag>
+            <el-tag :type="tokenStatusType(scope.row.tokenStatus)">{{ tokenStatusLabel(scope.row.tokenStatus) }}</el-tag>
           </template>
+        </el-table-column>
+        <el-table-column label="Access Token 到期" width="170">
+          <template #default="scope">{{ formatTimestamp(scope.row.accessTokenExpireTime) }}</template>
         </el-table-column>
         <el-table-column label="默认隐私" prop="defaultPrivacyLevel" width="130" />
         <el-table-column label="默认开关" min-width="170">
@@ -226,7 +234,7 @@
                 复制
               </el-button>
             </div>
-            <div class="sub-text">{{ scope.row.videoUrl }}</div>
+            <div class="sub-text">{{ displayVideoFileName(scope.row.videoUrl) }}</div>
           </template>
         </el-table-column>
         <el-table-column label="模式" width="140">
@@ -245,7 +253,9 @@
         <el-table-column label="失败原因" min-width="200" show-overflow-tooltip>
           <template #default="scope">{{ failReasonLabel(scope.row) }}</template>
         </el-table-column>
-        <el-table-column label="创建时间" prop="createTime" width="170" />
+        <el-table-column label="创建时间" width="170">
+          <template #default="scope">{{ formatTimestamp(scope.row.createTime) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="openTaskDetails(scope.row)">明细</el-button>
@@ -295,7 +305,9 @@
         <el-table-column label="模式" width="130">
           <template #default="scope">{{ postModeLabel(scope.row.postMode) }}</template>
         </el-table-column>
-        <el-table-column label="TikTok状态" prop="tiktokStatus" width="150" />
+        <el-table-column label="TikTok状态" prop="tiktokStatus" width="150">
+          <template #default="scope">{{ tiktokStatusLabel(scope.row.tiktokStatus) }}</template>
+        </el-table-column>
         <el-table-column label="本地状态" width="120">
           <template #default="scope">
             <el-tag :type="publishStatusType(scope.row.status)">{{ publishStatusLabel(scope.row.status) }}</el-tag>
@@ -319,7 +331,9 @@
           <template #default="scope">{{ failReasonLabel(scope.row) }}</template>
         </el-table-column>
         <el-table-column label="重试" prop="retryCount" width="80" />
-        <el-table-column label="同步时间" prop="lastSyncTime" width="170" />
+        <el-table-column label="同步时间" width="170">
+          <template #default="scope">{{ formatTimestamp(scope.row.lastSyncTime) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="100" fixed="right">
           <template #default="scope">
             <el-button
@@ -356,9 +370,21 @@
       </template>
     </el-dialog>
 
-    <el-drawer v-model="publishDrawerVisible" title="发布到 TikTok" size="520px">
+    <el-drawer v-model="publishDrawerVisible" title="发布到 TikTok" size="520px" @closed="resetPublishSource">
       <el-form ref="publishFormRef" :model="publishForm" :rules="publishRules" label-width="110px">
-        <el-form-item label="成片任务">
+        <el-form-item label="视频来源">
+          <el-segmented v-model="publishForm.sourceType" :options="[{ label: '系统成片', value: 'GENERATED' }, { label: '用户上传', value: 'UPLOADED' }]" />
+        </el-form-item>
+        <el-form-item v-if="publishForm.sourceType === 'UPLOADED'" label="上传视频">
+          <input ref="publishFileInput" type="file" accept="video/mp4,video/quicktime,video/webm" class="hidden" @change="handlePublishFileChange" />
+          <el-button type="primary" plain :loading="publishUploadLoading" @click="publishFileInput?.click()">
+            <Icon icon="ep:upload" class="mr-5px" /> 选择视频
+          </el-button>
+          <span v-if="uploadedPublishMedia" class="sub-text">{{ uploadedPublishMedia.fileName }}</span>
+          <el-progress v-if="publishUploadLoading || publishUploadPercent > 0" :percentage="publishUploadPercent" />
+          <span v-if="publishUploadError" class="upload-error">{{ publishUploadError }}</span>
+        </el-form-item>
+        <el-form-item v-if="publishForm.sourceType === 'GENERATED'" label="成片任务">
           <div>
             <div class="main-title">{{ selectedVideo?.title || '-' }}</div>
             <div class="trace-line">
@@ -372,7 +398,7 @@
                 复制
               </el-button>
             </div>
-            <div class="sub-text">{{ selectedVideo?.outputUrl }}</div>
+            <div class="sub-text">{{ displayVideoFileName(selectedVideo?.outputUrl) }}</div>
           </div>
         </el-form-item>
         <el-form-item label="发布标题" prop="title">
@@ -419,7 +445,7 @@
       </el-form>
       <template #footer>
         <el-button @click="publishDrawerVisible = false">取消</el-button>
-        <el-button type="primary" :loading="publishLoading" @click="submitPublish">开始发布</el-button>
+        <el-button type="primary" :loading="publishLoading" :disabled="publishUploadLoading" @click="submitPublish">开始发布</el-button>
       </template>
     </el-drawer>
 
@@ -523,6 +549,9 @@ import {
   TkTiktokPublishApi,
   TkVideoPublishCenterApi
 } from '@/api/tk/videoPublishCenter'
+import { uploadTikTokMediaInChunks } from '@/utils/tiktokMediaUpload'
+import { getTkUploadErrorMessage } from '@/utils/tkChunkUpload'
+import { formatDate } from '@/utils/formatTime'
 import type {
   TkTiktokAccountGroupVO,
   TkTiktokAccountVO,
@@ -536,6 +565,7 @@ const message = useMessage()
 const { tt, tText } = useTkI18n()
 const { currentRoute } = useRouter()
 const TIKTOK_AUTH_MESSAGE_TYPE = 'TK_TIKTOK_AUTH_RESULT'
+const MAX_TIKTOK_VIDEO_SIZE = 1_000_000_000
 
 type TkTiktokAuthMessage = {
   source?: string
@@ -553,10 +583,10 @@ const overview = reactive({
 })
 
 const overviewCards = computed(() => [
-  { label: 'Authorized accounts', value: overview.authorizedAccountCount, icon: 'ep:user-filled' },
-  { label: 'Pending publishes', value: overview.pendingPublishCount, icon: 'ep:video-play' },
-  { label: 'Failed tasks', value: overview.failedPublishCount, icon: 'ep:warning-filled' },
-  { label: 'Token abnormal', value: overview.tokenAbnormalCount, icon: 'ep:circle-close-filled' }
+  { label: tt('publish.overview.authorizedAccounts'), value: overview.authorizedAccountCount, icon: 'ep:user-filled' },
+  { label: tt('publish.overview.pendingPublishes'), value: overview.pendingPublishCount, icon: 'ep:video-play' },
+  { label: tt('publish.overview.failedTasks'), value: overview.failedPublishCount, icon: 'ep:warning-filled' },
+  { label: tt('publish.overview.tokenIssues'), value: overview.tokenAbnormalCount, icon: 'ep:circle-close-filled' }
 ])
 
 const videoLoading = ref(false)
@@ -590,6 +620,7 @@ const detailTotal = ref(0)
 const detailQueryFormRef = ref()
 const detailQuery = reactive({ pageNo: 1, pageSize: 10, publishTaskId: undefined, keyword: undefined, businessTraceId: undefined, status: undefined })
 const retryingDetailIds = ref(new Set<number>())
+let publishStatusTimer: number | undefined
 
 const publishUrlDialogVisible = ref(false)
 const publishUrlSubmitting = ref(false)
@@ -607,8 +638,16 @@ const publishDrawerVisible = ref(false)
 const publishLoading = ref(false)
 const publishFormRef = ref()
 const selectedVideo = ref<TkGenerationTaskVO>()
+const publishFileInput = ref<HTMLInputElement>()
+const publishUploadLoading = ref(false)
+const publishUploadPercent = ref(0)
+const publishUploadError = ref('')
+const uploadedPublishMedia = ref<{ id: number; fileName: string; fileUrl: string }>()
 const publishForm = reactive({
   generationTaskId: undefined as number | undefined,
+  uploadedVideoId: undefined as number | undefined,
+  sourceType: 'GENERATED' as 'GENERATED' | 'UPLOADED',
+  coverTimestampMs: 1000,
   accountIds: [] as number[],
   groupIds: [] as number[],
   title: '',
@@ -725,6 +764,27 @@ const getDetailList = async () => {
   }
 }
 
+const pollPublishStatus = async () => {
+  await getOverview()
+  if (activeTab.value === 'details') {
+    await getDetailList()
+  } else if (activeTab.value === 'tasks') {
+    await getTaskList()
+  }
+}
+
+const startPublishStatusPolling = () => {
+  stopPublishStatusPolling()
+  publishStatusTimer = window.setInterval(() => {
+    pollPublishStatus().catch(() => undefined)
+  }, 30_000)
+}
+
+const stopPublishStatusPolling = () => {
+  if (publishStatusTimer) window.clearInterval(publishStatusTimer)
+  publishStatusTimer = undefined
+}
+
 const handleTabChange = () => {
   if (activeTab.value === 'videos') getVideoList()
   if (activeTab.value === 'accounts') {
@@ -796,6 +856,8 @@ const resetDetailQuery = () => {
 
 const openPublishDrawer = (row: TkGenerationTaskVO) => {
   selectedVideo.value = row
+  publishForm.sourceType = 'GENERATED'
+  publishForm.uploadedVideoId = undefined
   publishForm.generationTaskId = row.id
   publishForm.title = row.title || `TikTok 成片任务 #${row.id}`
   publishForm.caption = row.scriptText || row.title || ''
@@ -804,10 +866,69 @@ const openPublishDrawer = (row: TkGenerationTaskVO) => {
   publishDrawerVisible.value = true
 }
 
+const openUploadPublishDrawer = () => {
+  selectedVideo.value = undefined
+  publishForm.sourceType = 'UPLOADED'
+  publishForm.generationTaskId = undefined
+  publishForm.uploadedVideoId = undefined
+  publishForm.title = ''
+  publishForm.caption = ''
+  uploadedPublishMedia.value = undefined
+  publishDrawerVisible.value = true
+}
+
+const handlePublishFileChange = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  input.value = ''
+  if (file.size > MAX_TIKTOK_VIDEO_SIZE) {
+    message.warning('视频文件不能超过 1GB')
+    return
+  }
+  uploadedPublishMedia.value = undefined
+  publishForm.uploadedVideoId = undefined
+  publishUploadError.value = ''
+  publishUploadLoading.value = true
+  publishUploadPercent.value = 0
+  try {
+    const result = await uploadTikTokMediaInChunks(file, {
+      onProgress: ({ percent }) => {
+        publishUploadPercent.value = percent
+      }
+    })
+    uploadedPublishMedia.value = {
+      id: result.uploadedVideoId,
+      fileName: file.name,
+      fileUrl: ''
+    }
+    publishForm.uploadedVideoId = result.uploadedVideoId
+    publishForm.title = file.name.replace(/\.[^.]+$/, '')
+    message.success('视频上传完成')
+  } catch (error: any) {
+    uploadedPublishMedia.value = undefined
+    publishForm.uploadedVideoId = undefined
+    publishUploadError.value = getTkUploadErrorMessage(error)
+    message.error(publishUploadError.value)
+  } finally {
+    publishUploadLoading.value = false
+  }
+}
+
+const resetPublishSource = () => {
+  publishUploadPercent.value = 0
+  publishUploadError.value = ''
+  if (publishFileInput.value) publishFileInput.value.value = ''
+}
+
 const submitPublish = async () => {
   await publishFormRef.value?.validate()
   if (!publishForm.accountIds.length && !publishForm.groupIds.length) {
     message.warning('请选择至少一个账号或账号分组')
+    return
+  }
+  if (publishForm.sourceType === 'UPLOADED' && !publishForm.uploadedVideoId) {
+    message.warning('请先上传视频')
     return
   }
   publishLoading.value = true
@@ -844,6 +965,7 @@ const startQrAuth = async () => {
   qrInfo.status = data.status
   qrInfo.failReason = data.failReason
   qrDialogVisible.value = true
+  startQrPolling()
 }
 
 const pollQrStatus = async () => {
@@ -854,7 +976,24 @@ const pollQrStatus = async () => {
   if (data.status === 'SUCCESS') {
     message.success('TikTok 授权完成')
     await getAccountList()
+    stopQrPolling()
   }
+}
+
+let qrPollingTimer: number | undefined
+const startQrPolling = () => {
+  stopQrPolling()
+  qrPollingTimer = window.setInterval(() => {
+    if (qrInfo.status === 'SUCCESS' || qrInfo.status === 'FAILED' || qrInfo.status === 'CONFIG_REQUIRED') {
+      stopQrPolling()
+      return
+    }
+    pollQrStatus()
+  }, 2500)
+}
+const stopQrPolling = () => {
+  if (qrPollingTimer) window.clearInterval(qrPollingTimer)
+  qrPollingTimer = undefined
 }
 
 const openAccountConfig = (row: TkTiktokAccountVO) => {
@@ -980,7 +1119,7 @@ const applyRetryPendingState = (row: TkTiktokPublishDetailVO) => {
   row.publishId = undefined
   row.failReason = undefined
   row.retryCount = (row.retryCount || 0) + 1
-  row.lastSyncTime = new Date().toLocaleString()
+  row.lastSyncTime = formatDate(new Date())
 }
 
 const retryDetail = async (row: TkTiktokPublishDetailVO) => {
@@ -1000,14 +1139,41 @@ const retryDetail = async (row: TkTiktokPublishDetailVO) => {
   }
 }
 
+const displayVideoFileName = (url?: string) => {
+  if (!url) return '-'
+  const pathWithoutQuery = url.split(/[?#]/, 1)[0]
+  const fileName = pathWithoutQuery.split('/').filter(Boolean).pop()
+  if (!fileName) return '-'
+  try {
+    return decodeURIComponent(fileName)
+  } catch {
+    return fileName
+  }
+}
+const formatTimestamp = (value?: string | number) => {
+  if (value === undefined || value === null || value === '') return '-'
+  const parsedValue = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value
+  const normalizedValue = typeof parsedValue === 'number' && parsedValue < 1_000_000_000_000
+    ? parsedValue * 1000
+    : parsedValue
+  return formatDate(normalizedValue) || '-'
+}
 const accountDisplayName = (account: Partial<TkTiktokAccountVO>) => account.displayName || account.username || account.openId || ('Account #' + account.id)
 const accountInitial = (row: TkTiktokAccountVO) => accountDisplayName(row).slice(0, 1).toUpperCase()
 const accountOptionLabel = (account: TkTiktokAccountVO) => accountDisplayName(account)
 const groupOptionLabel = (group: TkTiktokAccountGroupVO) => group.name || ('Group #' + group.id)
 const authStatusLabel = (status?: string) => ({ AUTHORIZED: 'Authorized', UNAUTHORIZED: 'Unauthorized' })[status || ''] || status || '-'
-const tokenStatusLabel = (status?: string) => ({ VALID: 'Valid', INVALID: 'Invalid', EXPIRED: 'Expired' })[status || ''] || status || '-'
+const tokenStatusLabel = (status?: string) => ({ VALID: '有效', AUTO_REFRESH: '自动刷新中', EXPIRED: '需重新授权' })[status || ''] || status || '-'
+const tokenStatusType = (status?: string) => ({ VALID: 'success', AUTO_REFRESH: 'warning', EXPIRED: 'danger' }[status || ''] || 'info') as 'success' | 'warning' | 'danger' | 'info'
 const postModeLabel = (mode?: string) => ({ DIRECT_POST: 'Direct post', UPLOAD_TO_INBOX: 'Upload to inbox', MANUAL_REGISTER: 'Manual register' })[mode || ''] || mode || '-'
 const publishStatusLabel = (status?: string) => ({ PENDING: 'Pending', PROCESSING: 'Processing', SUCCESS: 'Success', PARTIAL_SUCCESS: 'Partial success', FAILED: 'Failed' })[status || ''] || status || '-'
+const tiktokStatusLabel = (status?: string) => ({
+  UPLOAD_PENDING: '上传待确认',
+  PROCESSING: '平台处理中',
+  PUBLISH_COMPLETE: '已发布',
+  SEND_TO_USER_INBOX: '已提交草稿箱',
+  FAILED: '失败'
+})[status || ''] || status || '-'
 const publishStatusType = (status?: string) => {
   if (status === 'SUCCESS') return 'success'
   if (status === 'FAILED') return 'danger'
@@ -1037,11 +1203,14 @@ const loadRouteGeneration = async () => {
 onMounted(async () => {
   window.addEventListener('message', handleRedirectAuthResult)
   await Promise.all([getOverview(), getVideoList(), getAccountList(), getGroupList()])
+  startPublishStatusPolling()
   await loadRouteGeneration()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', handleRedirectAuthResult)
+  stopQrPolling()
+  stopPublishStatusPolling()
 })
 </script>
 
@@ -1161,6 +1330,14 @@ onBeforeUnmount(() => {
   margin: 0;
   color: var(--el-color-danger);
   font-size: 13px;
+}
+
+.upload-error {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  color: var(--el-color-danger);
+  font-size: 12px;
 }
 
 @media (max-width: 960px) {

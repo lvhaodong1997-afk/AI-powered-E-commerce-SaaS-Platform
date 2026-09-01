@@ -70,6 +70,9 @@ export interface TkGenerationTaskVO {
   failReason?: string
   failCode?: string
   currentStep?: string
+  currentStepCode?: string
+  currentStepCompleted?: number
+  currentStepTotal?: number
   precheckResult?: string
   retryCount?: number
   lastRetryTime?: string
@@ -115,6 +118,9 @@ export interface TkGenerationTaskSummaryVO {
   failReason?: string
   failCode?: string
   currentStep?: string
+  currentStepCode?: string
+  currentStepCompleted?: number
+  currentStepTotal?: number
   retryCount?: number
   batchId?: number
   scriptIndex?: number
@@ -137,6 +143,9 @@ export interface TkGenerationTaskStatusVO {
   failReason?: string
   failCode?: string
   currentStep?: string
+  currentStepCode?: string
+  currentStepCompleted?: number
+  currentStepTotal?: number
   batchId?: number
   scriptIndex?: number
   videoIndex?: number
@@ -145,6 +154,27 @@ export interface TkGenerationTaskStatusVO {
   heartbeatTime?: string
   stepStartedAt?: string
   stepFinishedAt?: string
+}
+
+export interface TkAudioExportTaskVO {
+  id?: number
+  status?: 'PROCESSING' | 'SUCCESS' | 'FAILED'
+  audioUrl?: string
+  failReason?: string
+}
+
+export interface TkAudioExportTaskCreateVO {
+  companyId?: number
+  requestId: string
+  scriptText: string
+  ttsProvider?: string
+  voiceCode?: string
+  voiceProfileId?: number
+  mimoVoiceMode?: string
+  mimoVoiceCode?: string
+  mimoVoicePrompt?: string
+  mimoVoiceSampleUrl?: string
+  targetLanguage?: string
 }
 
 export interface TkGenerationPrecheckIssueVO {
@@ -201,6 +231,9 @@ export const TkGenerationApi = {
   },
   createGenerationWithOpening: async (data: FormData) => {
     return await request.upload({ url: '/tk/generation/create-with-opening', data })
+  },
+  createAudioExport: async (data: TkAudioExportTaskCreateVO): Promise<TkAudioExportTaskVO> => {
+    return await request.post({ url: '/tk/generation/audio-export', data })
   },
   previewVoice: async (
     data: Pick<

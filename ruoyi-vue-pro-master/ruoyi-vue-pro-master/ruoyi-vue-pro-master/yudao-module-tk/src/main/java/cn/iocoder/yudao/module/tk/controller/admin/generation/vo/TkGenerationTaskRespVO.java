@@ -78,6 +78,9 @@ public class TkGenerationTaskRespVO {
     private String failReason;
     private String failCode;
     private String currentStep;
+    private String currentStepCode;
+    private Integer currentStepCompleted;
+    private Integer currentStepTotal;
     private String precheckResult;
     private Integer retryCount;
     private LocalDateTime lastRetryTime;

@@ -30,4 +30,7 @@ public interface TkReferenceAnalysisService {
 
     TkReferenceScriptOptionDO validateScriptOptionReadable(Long id);
 
+    TkReferenceScriptOptionDO validateScriptOptionForGeneration(Long id, Long tenantId, Long companyId,
+                                                                 Long libraryId, Long analysisId);
+
 }

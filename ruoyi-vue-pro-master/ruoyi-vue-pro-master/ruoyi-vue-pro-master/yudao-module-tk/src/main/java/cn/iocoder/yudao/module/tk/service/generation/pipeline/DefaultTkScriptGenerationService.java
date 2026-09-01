@@ -30,7 +30,9 @@ public class DefaultTkScriptGenerationService implements TkScriptGenerationServi
         int targetDuration = TkVideoDurationSupport.normalize(task.getReferenceDuration(),
                 generationProperties.getFfmpeg().getMaxTargetDuration());
         if (task.getScriptOptionId() != null) {
-            TkReferenceScriptOptionDO option = referenceAnalysisService.validateScriptOptionReadable(task.getScriptOptionId());
+            TkReferenceScriptOptionDO option = referenceAnalysisService.validateScriptOptionForGeneration(
+                    task.getScriptOptionId(), task.getTenantId(), task.getCompanyId(), task.getLibraryId(),
+                    task.getReferenceAnalysisId());
             String scriptText = StrUtil.blankToDefault(option.getScriptText(), option.getTitle());
             return new TkGeneratedScript(option.getTitle(), scriptText, option.getSegmentTimeline(), targetDuration, targetDuration);
         }

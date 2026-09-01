@@ -22,6 +22,9 @@ public class TkClipPlanItem {
     private String scriptLine;
     private String visualDirection;
     private Integer sectionTargetSecond;
+    private Long startMillis;
+    private Long durationMillis;
+    private String reuseMode;
 
     public TkClipPlanItem(Integer orderNo, String sourceType, Long materialVideoId, String fileName, String fileUrl,
                           Integer startSecond, Integer durationSecond, String reason) {

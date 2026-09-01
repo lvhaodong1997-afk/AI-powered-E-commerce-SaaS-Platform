@@ -351,6 +351,24 @@ class DefaultTkSubtitleTimelineServiceTest {
     }
 
     @Test
+    void inspectSubtitleQualityRejectsTask421OverlappingSegments() {
+        TkSubtitleTimeline timeline = new TkSubtitleTimeline();
+        timeline.setAudioDuration(61.06D);
+        timeline.setSegments(Arrays.asList(
+                segment("越有本事的员工，", 0D, 1.30D),
+                segment("越别急着换！他越不听话，", 0D, 0.31D),
+                segment("越可能是你公司最值钱的人。", 0.31D, 0.88D),
+                segment("质疑你的规则，甚至当面说这样做不行。", 0.88D, 1.39D),
+                segment("后续字幕", 1.39D, 61.0D)
+        ));
+
+        Object quality = ReflectionTestUtils.invokeMethod(service, "inspectSubtitleQuality", timeline, null);
+
+        assertFalse((Boolean) ReflectionTestUtils.getField(quality, "acceptable"));
+        assertEquals("SUBTITLE_SEGMENT_OVERLAP", ReflectionTestUtils.getField(quality, "reason"));
+    }
+
+    @Test
     void buildTimelineFallsBackWhenExactAsrAlignmentIsEnabledButUnavailable() throws Exception {
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getSubtitle().getAsr().setEnabled(true);
@@ -368,6 +386,24 @@ class DefaultTkSubtitleTimelineServiceTest {
 
         assertFalse(timeline.getSegments().isEmpty());
         assertEquals("请立即下单", timeline.getSegments().get(0).getText());
+    }
+
+    @Test
+    void buildEstimatedTimelineMarksWordTimingAsUnreliable() {
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getSubtitle().setLeadSeconds(0D);
+        properties.getSubtitle().setDetectLeadingSilenceEnabled(false);
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .targetLanguage("en-US")
+                .targetDuration(3)
+                .build();
+
+        TkSubtitleTimeline timeline = ReflectionTestUtils.invokeMethod(service, "buildEstimatedTimeline",
+                task, "Limited offer today", null, Collections.emptyList(), 3D);
+
+        assertFalse(timeline.getSegments().get(0).getWordTimingReliable(),
+                "Estimated timeline words must not be used for karaoke animation");
     }
 
     @Test

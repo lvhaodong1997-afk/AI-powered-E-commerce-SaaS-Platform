@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import javax.validation.Valid;
+import java.time.LocalDateTime;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 
@@ -32,8 +33,30 @@ public class TkTiktokAccountController {
     public CommonResult<PageResult<TkTiktokAccountRespVO>> getAccountPage(@Valid TkTiktokAccountPageReqVO reqVO) {
         PageResult<TkTiktokAccountDO> pageResult = accountService.getAccountPage(reqVO);
         PageResult<TkTiktokAccountRespVO> respVOPageResult = BeanUtils.toBean(pageResult, TkTiktokAccountRespVO.class);
-        respVOPageResult.getList().forEach(this::fillFailReasonCode);
+        respVOPageResult.getList().forEach(account -> {
+            deriveTokenStatus(account, LocalDateTime.now());
+            fillFailReasonCode(account);
+        });
         return success(respVOPageResult);
+    }
+
+    static void deriveTokenStatus(TkTiktokAccountRespVO account, LocalDateTime now) {
+        if (account == null) {
+            return;
+        }
+        if (!"AUTHORIZED".equals(account.getAuthStatus())
+                || account.getRefreshTokenExpireTime() == null
+                || !account.getRefreshTokenExpireTime().isAfter(now)) {
+            account.setTokenStatus("EXPIRED");
+            return;
+        }
+        if (account.getAccessTokenExpireTime() == null
+                || !account.getAccessTokenExpireTime().isAfter(now.plusMinutes(5))
+                || !"VALID".equals(account.getTokenStatus())) {
+            account.setTokenStatus("AUTO_REFRESH");
+            return;
+        }
+        account.setTokenStatus("VALID");
     }
 
     @PostMapping("/default-config")

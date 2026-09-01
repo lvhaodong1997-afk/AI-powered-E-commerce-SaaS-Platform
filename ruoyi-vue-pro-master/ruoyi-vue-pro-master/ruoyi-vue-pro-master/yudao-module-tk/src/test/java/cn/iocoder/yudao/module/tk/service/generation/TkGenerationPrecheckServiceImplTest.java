@@ -21,7 +21,7 @@ import static org.mockito.Mockito.when;
 class TkGenerationPrecheckServiceImplTest {
 
     @Test
-    void precheckLeadGenerationRequiresEveryStorySegmentAndGeneral() {
+    void precheckLeadGenerationWarnsWhenGeneralIsMissing() {
         TkGenerationPrecheckServiceImpl service = createService(Arrays.asList(
                 material(1L, 2L, "ATTENTION", "S1_HOOK"),
                 material(2L, 2L, "ATTENTION", "S2_PAIN"),
@@ -36,10 +36,24 @@ class TkGenerationPrecheckServiceImplTest {
 
         TkGenerationPrecheckRespVO result = service.precheck(reqVO);
 
-        assertFalse(result.getPassed());
+        assertTrue(result.getPassed());
         assertEquals(8, result.getSegmentSummary().size());
-        assertTrue(result.getErrors().stream()
-                .anyMatch(issue -> "SEGMENT_GENERAL_MISSING".equals(issue.getCode())));
+        TkGenerationPrecheckRespVO.PrecheckIssue durationWarning = result.getWarnings().stream()
+                .filter(issue -> "MATERIAL_DURATION_NOT_ENOUGH".equals(issue.getCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(15, durationWarning.getRequiredDuration());
+        assertEquals(14, durationWarning.getActualDuration());
+        assertEquals(1, durationWarning.getMissingDuration());
+        assertTrue(durationWarning.getActionHint().contains("补充素材"));
+
+        TkGenerationPrecheckRespVO.PrecheckIssue generalWarning = result.getWarnings().stream()
+                .filter(issue -> "SEGMENT_GENERAL_MISSING".equals(issue.getCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("GENERAL", generalWarning.getSegmentType());
+        assertEquals("通用素材", generalWarning.getSegmentName());
+        assertTrue(generalWarning.getActionHint().contains("通用素材"));
     }
 
     @Test
@@ -154,7 +168,7 @@ class TkGenerationPrecheckServiceImplTest {
     }
 
     @Test
-    void precheckReturnsSegmentSummaryAndFailsWhenRequiredSegmentMissing() {
+    void precheckReturnsSegmentSummaryAndWarnsWhenRequiredSegmentMissing() {
         TkGenerationPrecheckServiceImpl service = createService(Arrays.asList(
                 material(1L, 8L, "ATTENTION", "S1_HOOK"),
                 material(2L, 12L, "PRODUCT_SHOW", "S4_DEMO"),
@@ -164,16 +178,16 @@ class TkGenerationPrecheckServiceImplTest {
 
         TkGenerationPrecheckRespVO result = service.precheck(reqVO);
 
-        assertFalse(result.getPassed());
+        assertTrue(result.getPassed());
         assertEquals(7, result.getSegmentSummary().size());
         assertEquals(0, result.getSegmentSummary().get(2).getDuration());
         assertEquals("S3_REVEAL", result.getSegmentSummary().get(2).getSegmentType());
-        assertTrue(result.getErrors().stream()
+        assertTrue(result.getWarnings().stream()
                 .anyMatch(issue -> "SEGMENT_S3_REVEAL_INSUFFICIENT".equals(issue.getCode())));
     }
 
     @Test
-    void precheckFailsWhenOnlyUsagePhaseMaterialsExistWithoutExplicitSegments() {
+    void precheckWarnsWhenOnlyUsagePhaseMaterialsExistWithoutExplicitSegments() {
         TkGenerationPrecheckServiceImpl service = createService(Arrays.asList(
                 material(1L, 20L, "ATTENTION"),
                 material(2L, 20L, "PRODUCT_SHOW"),
@@ -183,14 +197,14 @@ class TkGenerationPrecheckServiceImplTest {
 
         TkGenerationPrecheckRespVO result = service.precheck(reqVO);
 
-        assertFalse(result.getPassed());
+        assertTrue(result.getPassed());
         assertEquals(0, result.getSegmentSummary().get(2).getDuration());
-        assertTrue(result.getErrors().stream()
+        assertTrue(result.getWarnings().stream()
                 .anyMatch(issue -> "SEGMENT_S3_REVEAL_INSUFFICIENT".equals(issue.getCode())));
     }
 
     @Test
-    void precheckUsesErrorsInsteadOfFallbackWarningsForMissingKeySegments() {
+    void precheckUsesFallbackWarningsForMissingKeySegments() {
         TkGenerationPrecheckServiceImpl service = createService(Arrays.asList(
                 material(1L, 8L, "PRODUCT_SHOW", "S3_REVEAL"),
                 material(2L, 12L, "PRODUCT_SHOW", "S4_DEMO"),
@@ -200,10 +214,10 @@ class TkGenerationPrecheckServiceImplTest {
 
         TkGenerationPrecheckRespVO result = service.precheck(reqVO);
 
-        assertFalse(result.getPassed());
-        assertTrue(result.getErrors().stream()
-                .anyMatch(issue -> "SEGMENT_S2_PAIN_INSUFFICIENT".equals(issue.getCode())));
+        assertTrue(result.getPassed());
         assertTrue(result.getWarnings().stream()
+                .anyMatch(issue -> "SEGMENT_S2_PAIN_INSUFFICIENT".equals(issue.getCode())));
+        assertTrue(result.getErrors().stream()
                 .noneMatch(issue -> "SEGMENT_S2_PAIN_INSUFFICIENT".equals(issue.getCode())));
     }
 
@@ -224,11 +238,11 @@ class TkGenerationPrecheckServiceImplTest {
 
         TkGenerationPrecheckRespVO result = service.precheck(reqVO);
 
-        assertFalse(result.getPassed());
-        assertTrue(result.getErrors().stream()
+        assertTrue(result.getPassed());
+        assertTrue(result.getWarnings().stream()
                 .anyMatch(issue -> "SEGMENT_S4_DEMO_INSUFFICIENT".equals(issue.getCode())
                         && issue.getMessage().contains("还缺 2 秒")));
-        assertTrue(result.getErrors().stream()
+        assertTrue(result.getWarnings().stream()
                 .noneMatch(issue -> "SEGMENT_S2_PAIN_INSUFFICIENT".equals(issue.getCode())));
     }
 
@@ -243,8 +257,8 @@ class TkGenerationPrecheckServiceImplTest {
 
         TkGenerationPrecheckRespVO result = service.precheck(reqVO);
 
-        assertFalse(result.getPassed());
-        TkGenerationPrecheckRespVO.PrecheckIssue issue = result.getErrors().stream()
+        assertTrue(result.getPassed());
+        TkGenerationPrecheckRespVO.PrecheckIssue issue = result.getWarnings().stream()
                 .filter(item -> "SEGMENT_S5_PROOF_INSUFFICIENT".equals(item.getCode()))
                 .findFirst()
                 .orElseThrow();
@@ -265,7 +279,7 @@ class TkGenerationPrecheckServiceImplTest {
     }
 
     @Test
-    void precheckFullPoolRandomModePassesWithoutSegmentShortageChecks() {
+    void precheckFullPoolRandomModeWarnsWhenMaterialDurationIsShorterThanTarget() {
         TkGenerationPrecheckServiceImpl service = createService(Arrays.asList(
                 material(1L, 4L, "GENERAL"),
                 material(2L, 6L, "GENERAL"),
@@ -283,6 +297,14 @@ class TkGenerationPrecheckServiceImplTest {
 
         assertTrue(result.getPassed());
         assertTrue(result.getErrors().isEmpty());
+        TkGenerationPrecheckRespVO.PrecheckIssue warning = result.getWarnings().stream()
+                .filter(issue -> "MATERIAL_DURATION_SHORTER_THAN_TARGET".equals(issue.getCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(20, warning.getRequiredDuration());
+        assertEquals(17, warning.getActualDuration());
+        assertEquals(3, warning.getMissingDuration());
+        assertTrue(warning.getActionHint().contains("补充素材"));
     }
 
     @Test
@@ -302,7 +324,7 @@ class TkGenerationPrecheckServiceImplTest {
     }
 
     @Test
-    void precheckFullPoolRandomRejectsClipLongerThanRemainingDurationAfterOpening() {
+    void precheckFullPoolRandomWarnsWhenClipIsLongerThanRemainingDurationAfterOpening() {
         TkGenerationPrecheckServiceImpl service = createService(Collections.singletonList(
                 material(1L, 8L, "GENERAL")
         ));
@@ -313,10 +335,14 @@ class TkGenerationPrecheckServiceImplTest {
 
         TkGenerationPrecheckRespVO result = service.precheck(reqVO);
 
-        assertFalse(result.getPassed());
-        assertTrue(result.getErrors().stream()
-                .anyMatch(issue -> "MATERIAL_TOO_LONG_FOR_TARGET".equals(issue.getCode())
-                        && Integer.valueOf(7).equals(issue.getRequiredDuration())));
+        assertTrue(result.getPassed());
+        TkGenerationPrecheckRespVO.PrecheckIssue warning = result.getWarnings().stream()
+                .filter(issue -> "MATERIAL_TOO_LONG_FOR_TARGET".equals(issue.getCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(7, warning.getRequiredDuration());
+        assertEquals(8, warning.getActualDuration());
+        assertTrue(warning.getActionHint().contains("补充更贴近目标时长"));
     }
 
     @Test
@@ -341,7 +367,7 @@ class TkGenerationPrecheckServiceImplTest {
     }
 
     @Test
-    void precheckFullPoolRandomModeFailsWhenAllClipsAreLongerThanTargetDuration() {
+    void precheckFullPoolRandomModeWarnsWhenAllClipsAreLongerThanTargetDuration() {
         TkGenerationPrecheckServiceImpl service = createService(Arrays.asList(
                 material(1L, 12L, "GENERAL"),
                 material(2L, 15L, "GENERAL")
@@ -353,9 +379,14 @@ class TkGenerationPrecheckServiceImplTest {
 
         TkGenerationPrecheckRespVO result = service.precheck(reqVO);
 
-        assertFalse(result.getPassed());
-        assertTrue(result.getErrors().stream()
-                .anyMatch(issue -> "MATERIAL_TOO_LONG_FOR_TARGET".equals(issue.getCode())));
+        assertTrue(result.getPassed());
+        TkGenerationPrecheckRespVO.PrecheckIssue warning = result.getWarnings().stream()
+                .filter(issue -> "MATERIAL_TOO_LONG_FOR_TARGET".equals(issue.getCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(7, warning.getRequiredDuration());
+        assertEquals(12, warning.getActualDuration());
+        assertTrue(warning.getActionHint().contains("补充更贴近目标时长"));
     }
 
     private TkGenerationPrecheckServiceImpl createService(java.util.List<TkMaterialVideoDO> materials) {

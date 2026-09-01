@@ -458,7 +458,7 @@
           <Icon icon="ep:upload-filled" class="upload-icon" />
           <div>拖拽视频到此处，或点击批量选择文件</div>
           <template #tip>
-            <div class="el-upload__tip">支持 mp4、mov、webm，单文件最大 100MB，单次最多 10 个</div>
+            <div class="el-upload__tip">支持 mp4、mov、webm，单文件最大 1GB，单次最多 10 个</div>
           </template>
         </el-upload>
         <div v-if="folderUploadSummary" class="folder-upload-summary">
@@ -466,7 +466,7 @@
           <span>
             文件夹识别到 {{ folderUploadSummary.validCount }} 个视频，已加入 {{ folderUploadSummary.addedCount }} 个
             <template v-if="folderUploadSummary.ignoredCount">，忽略非视频 {{ folderUploadSummary.ignoredCount }} 个</template>
-            <template v-if="folderUploadSummary.oversizedCount">，超过 100MB {{ folderUploadSummary.oversizedCount }} 个</template>
+            <template v-if="folderUploadSummary.oversizedCount">，超过 1GB {{ folderUploadSummary.oversizedCount }} 个</template>
             <template v-if="folderUploadSummary.limitedCount">，超过上限未加入 {{ folderUploadSummary.limitedCount }} 个</template>
           </span>
         </div>
@@ -605,6 +605,7 @@ import axios from 'axios'
 import type { AxiosProgressEvent } from 'axios'
 import { useLocaleStore } from '@/store/modules/locale'
 import { translateUiText } from '@/utils/tkI18n'
+import { getTkUploadErrorMessage, uploadFileInChunks } from '@/utils/tkChunkUpload'
 
 defineOptions({ name: 'TkMaterialLibrary' })
 
@@ -1129,7 +1130,7 @@ const folderInputRef = ref<HTMLInputElement>()
 const uploadFileList = ref<UploadUserFile[]>([])
 const MAX_BATCH_UPLOAD_COUNT = 10
 const MAX_FOLDER_UPLOAD_COUNT = 200
-const MAX_UPLOAD_FILE_SIZE = 100 * 1024 * 1024
+const MAX_UPLOAD_FILE_SIZE = 1_000_000_000
 const DEFAULT_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024
 const UPLOAD_FILE_CONCURRENCY = 2
 const UPLOAD_CHUNK_RETRY_COUNT = 2
@@ -1200,7 +1201,7 @@ const validateUploadFile = (file: UploadUserFile) => {
     return false
   }
   if (rawFile.size > MAX_UPLOAD_FILE_SIZE) {
-    message.warning(`${file.name} 超过 100MB，无法上传`)
+    message.warning(`${file.name} 超过 1GB，无法上传`)
     return false
   }
   return true
@@ -1352,89 +1353,62 @@ const uploadSingleFile = async (item: UploadQueueItem) => {
   item.status = 'uploading'
   item.progress = Math.max(item.progress, 1)
   item.error = ''
-  let uploadId = ''
+  let materialSession: any
   try {
-    const session = await TkMaterialApi.createMaterialVideoUploadSession({
-      libraryId: uploadForm.value.libraryId as number,
-      fileName: item.file.name || item.name,
-      fileSize: item.file.size,
-      contentType: item.file.type
-    })
-    uploadId = session.uploadId
-    if (session.uploadMode === 'oss') {
-      await uploadOssFileWithRetry(item, session)
-      item.status = 'merging'
-      item.progress = 99
-      await TkMaterialApi.completeMaterialVideoUpload({
-        uploadId,
-        libraryId: uploadForm.value.libraryId as number,
-        fileName: item.file.name || item.name,
-        fileSize: item.file.size,
-        contentType: item.file.type,
-        objectKey: session.objectKey,
-        fileUrl: session.publicUrl,
-        tags: uploadForm.value.tags || '',
-        usagePhase: uploadForm.value.usagePhase,
-        segmentType: uploadForm.value.segmentType
-      })
-      item.status = 'success'
-      item.progress = 100
-      return
-    }
-    const chunkSize = session.chunkSize || DEFAULT_UPLOAD_CHUNK_SIZE
-    const totalChunks = session.totalChunks || Math.ceil(item.file.size / chunkSize)
-    const uploadedChunks = new Set(session.uploadedChunks || [])
-    let completedBytes = session.uploadedSize || 0
-    item.progress = Math.max(item.progress, Math.min(98, Math.round((completedBytes * 100) / item.file.size)))
-    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-      const start = chunkIndex * chunkSize
-      const end = Math.min(start + chunkSize, item.file.size)
-      if (uploadedChunks.has(chunkIndex)) continue
-      const chunk = item.file.slice(start, end)
-      await uploadChunkWithRetry(item, uploadId, chunkIndex, chunk, completedBytes)
-      completedBytes += chunk.size
-      item.progress = Math.min(98, Math.round((completedBytes * 100) / item.file.size))
-    }
-    item.status = 'merging'
-    item.progress = 99
-    await TkMaterialApi.completeMaterialVideoUpload({
-      uploadId,
-      tags: uploadForm.value.tags || '',
-      usagePhase: uploadForm.value.usagePhase,
-      segmentType: uploadForm.value.segmentType
+    await uploadFileInChunks(item.file, {
+      createSession: async () => {
+        materialSession = await TkMaterialApi.createMaterialVideoUploadSession({
+          libraryId: uploadForm.value.libraryId as number,
+          fileName: item.file.name || item.name,
+          fileSize: item.file.size,
+          contentType: item.file.type
+        })
+        return materialSession
+      },
+      uploadChunk: async (uploadId, chunkIndex, chunk, onProgress) => {
+        const formData = new FormData()
+        formData.append('uploadId', uploadId)
+        formData.append('chunkIndex', String(chunkIndex))
+        formData.append('chunk', chunk)
+        return TkMaterialApi.uploadMaterialVideoChunk(formData, {
+          onUploadProgress: (event: AxiosProgressEvent) => onProgress?.(event.loaded, event.total || chunk.size)
+        })
+      },
+      complete: async (uploadId) => {
+        item.status = 'merging'
+        item.progress = 99
+        return TkMaterialApi.completeMaterialVideoUpload({
+          uploadId,
+          libraryId: uploadForm.value.libraryId as number,
+          fileName: item.file.name || item.name,
+          fileSize: item.file.size,
+          contentType: item.file.type,
+          objectKey: materialSession?.objectKey,
+          fileUrl: materialSession?.publicUrl,
+          tags: uploadForm.value.tags || '',
+          usagePhase: uploadForm.value.usagePhase,
+          segmentType: uploadForm.value.segmentType
+        })
+      },
+      cancel: TkMaterialApi.cancelMaterialVideoUpload,
+      uploadOss: (file, session, onProgress) => uploadOssFile(file, session, onProgress),
+      chunkSize: DEFAULT_UPLOAD_CHUNK_SIZE,
+      retryCount: UPLOAD_CHUNK_RETRY_COUNT,
+      onProgress: ({ percent }) => { item.progress = Math.max(item.progress, percent) },
+      onRetry: (attempt) => { item.error = `上传失败，正在重试第 ${attempt} 次` }
     })
     item.status = 'success'
     item.progress = 100
   } catch (error: any) {
-    if (uploadId) {
-      TkMaterialApi.cancelMaterialVideoUpload(uploadId).catch(() => undefined)
-    }
     item.status = 'failed'
     item.progress = item.progress || 0
     item.error = isUploadTimeoutError(error)
       ? '上传等待超时，服务端可能仍在保存或解析，请稍后刷新素材列表确认后再重试'
-      : error?.msg || error?.message || '上传失败'
+      : getTkUploadErrorMessage(error)
   }
 }
 
-const uploadOssFileWithRetry = async (item: UploadQueueItem, session: any) => {
-  let lastError: any
-  for (let attempt = 0; attempt <= UPLOAD_CHUNK_RETRY_COUNT; attempt++) {
-    try {
-      await uploadOssFile(item, session)
-      return
-    } catch (error) {
-      lastError = error
-      if (attempt < UPLOAD_CHUNK_RETRY_COUNT) {
-        item.error = `上传到云存储失败，正在重试第 ${attempt + 1} 次`
-        await sleep(1200 * (attempt + 1))
-      }
-    }
-  }
-  throw lastError
-}
-
-const uploadOssFile = async (item: UploadQueueItem, session: any) => {
+const uploadOssFile = async (file: File, session: any, onProgress?: (loaded: number, total: number) => void) => {
   if (!session.uploadUrl || !session.objectKey || !session.policy || !session.signature || !session.accessKeyId) {
     throw new Error('OSS 上传会话信息不完整')
   }
@@ -1444,53 +1418,17 @@ const uploadOssFile = async (item: UploadQueueItem, session: any) => {
   formData.append('OSSAccessKeyId', session.accessKeyId)
   formData.append('signature', session.signature)
   formData.append('success_action_status', session.successActionStatus || '200')
-  if (item.file.type) {
-    formData.append('Content-Type', item.file.type)
+  if (file.type) {
+    formData.append('Content-Type', file.type)
   }
-  formData.append('file', item.file)
+  formData.append('file', file)
   await axios.post(session.uploadUrl, formData, {
     timeout: MATERIAL_VIDEO_UPLOAD_TIMEOUT,
     onUploadProgress: (event: AxiosProgressEvent) => {
-      if (!event.total) return
-      item.progress = Math.min(98, Math.round((event.loaded * 100) / event.total))
+      onProgress?.(event.loaded, event.total || file.size)
     }
   })
-  item.progress = Math.max(item.progress, 98)
 }
-
-const uploadChunkWithRetry = async (
-  item: UploadQueueItem,
-  uploadId: string,
-  chunkIndex: number,
-  chunk: Blob,
-  completedBytes: number
-) => {
-  let lastError: any
-  for (let attempt = 0; attempt <= UPLOAD_CHUNK_RETRY_COUNT; attempt++) {
-    try {
-      const formData = new FormData()
-      formData.append('uploadId', uploadId)
-      formData.append('chunkIndex', String(chunkIndex))
-      formData.append('chunk', chunk)
-      await TkMaterialApi.uploadMaterialVideoChunk(formData, {
-        onUploadProgress: (event: AxiosProgressEvent) => {
-          if (!event.total) return
-          const currentLoaded = Math.min(chunk.size, event.loaded)
-          item.progress = Math.min(98, Math.round(((completedBytes + currentLoaded) * 100) / item.file.size))
-        }
-      })
-      return
-    } catch (error) {
-      lastError = error
-      if (attempt < UPLOAD_CHUNK_RETRY_COUNT) {
-        await sleep(800 * (attempt + 1))
-      }
-    }
-  }
-  throw lastError
-}
-
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 const refreshAfterUpload = async () => {
   const libraryId = uploadForm.value.libraryId

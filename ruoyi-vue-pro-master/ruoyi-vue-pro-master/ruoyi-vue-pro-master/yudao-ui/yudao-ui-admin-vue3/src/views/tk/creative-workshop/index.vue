@@ -19,7 +19,7 @@
 
     <section class="prompt-panel">
       <div class="prompt-topline">
-        <button class="upload-entry" type="button" @click="handleUploadClick">
+        <button class="upload-entry" type="button" disabled>
           <Icon icon="ep:picture-filled" />
         </button>
         <button class="wizard-button" type="button" @click="handlePromptWizard">
@@ -123,7 +123,7 @@
       </article>
     </section>
 
-    <button class="floating-help" type="button" @click="handleHelp">
+    <button class="floating-help" type="button" disabled>
       <Icon icon="ep:chat-dot-round" />
     </button>
   </div>
@@ -303,21 +303,11 @@ const nextValue = <T,>(list: T[], current: T) => {
   return list[(index + 1) % list.length]
 }
 
-const handleUploadClick = () => {
-  message.info('素材上传入口已预留，后续可接入图片/视频上传接口')
-}
-
 const handlePromptWizard = () => {
   if (!form.prompt) {
     form.prompt =
       '为一款跨境电商商品生成 TikTok 创意短视频，要求：前 3 秒强钩子，中段展示核心卖点和使用场景，结尾加入购买引导；画面干净、节奏快、适合竖屏投放。'
-    return
   }
-  message.info('提示词助手接口已预留，可在此接入 AI 改写能力')
-}
-
-const handleHelp = () => {
-  message.info('客服与使用帮助入口已预留')
 }
 
 const handleGenerate = async () => {
@@ -338,8 +328,8 @@ const handleGenerate = async () => {
       style: form.style
     })
     message.success('创意生成任务已提交')
-  } catch (error) {
-    message.info('外部生成接口仍是占位状态，请后续补充真实接口')
+  } catch {
+    message.error('创意生成失败，请稍后重试')
   } finally {
     generating.value = false
   }
@@ -484,9 +474,15 @@ const handleGenerate = async () => {
   border-radius: 8px;
 }
 
-.upload-entry:hover {
+.upload-entry:not(:disabled):hover {
   color: #6f47df;
   border-color: #9e8cff;
+}
+
+.upload-entry:disabled,
+.floating-help:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 .wizard-button {

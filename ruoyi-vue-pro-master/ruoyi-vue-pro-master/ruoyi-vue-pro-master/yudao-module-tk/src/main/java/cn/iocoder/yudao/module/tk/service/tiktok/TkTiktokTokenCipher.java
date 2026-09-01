@@ -18,7 +18,7 @@ import java.util.Base64;
 public class TkTiktokTokenCipher {
 
     private static final String PROVIDER = "TIKTOK";
-    private static final String FALLBACK_PREFIX = "b64:";
+    private static final String LEGACY_PREFIX = "b64:";
     private static final String AES_PREFIX = "aesgcm:";
     private static final int GCM_TAG_BITS = 128;
     private static final int IV_BYTES = 12;
@@ -32,7 +32,7 @@ public class TkTiktokTokenCipher {
         }
         String secret = configService.getValue(PROVIDER, "token-secret");
         if (StrUtil.isBlank(secret)) {
-            return FALLBACK_PREFIX + Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+            throw new IllegalStateException("TikTok token-secret 未配置，无法加密 Token");
         }
         try {
             byte[] iv = new byte[IV_BYTES];
@@ -53,15 +53,15 @@ public class TkTiktokTokenCipher {
         if (StrUtil.isBlank(value)) {
             return value;
         }
-        if (value.startsWith(FALLBACK_PREFIX)) {
-            return new String(Base64.getDecoder().decode(value.substring(FALLBACK_PREFIX.length())), StandardCharsets.UTF_8);
+        if (value.startsWith(LEGACY_PREFIX)) {
+            return new String(Base64.getDecoder().decode(value.substring(LEGACY_PREFIX.length())), StandardCharsets.UTF_8);
         }
         if (!value.startsWith(AES_PREFIX)) {
-            return value;
+            throw new IllegalStateException("TikTok Token 密文格式不受支持");
         }
         String secret = configService.getValue(PROVIDER, "token-secret");
         if (StrUtil.isBlank(secret)) {
-            return null;
+            throw new IllegalStateException("TikTok token-secret 未配置，无法解密 Token");
         }
         try {
             byte[] payload = Base64.getDecoder().decode(value.substring(AES_PREFIX.length()));

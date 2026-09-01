@@ -13,7 +13,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 
-class TkOssPostPolicySigner {
+public final class TkOssPostPolicySigner {
 
     private static final String HMAC_SHA1 = "HmacSHA1";
     private static final DateTimeFormatter OSS_EXPIRATION_FORMATTER =
@@ -22,14 +22,24 @@ class TkOssPostPolicySigner {
     private TkOssPostPolicySigner() {
     }
 
-    static Policy sign(String accessKeyId, String accessKeySecret, String keyPrefix, Long maxFileSize,
-                       Integer expireSeconds, Clock clock) {
+    public static Policy sign(String accessKeyId, String accessKeySecret, String keyPrefix, Long maxFileSize,
+                              Integer expireSeconds, Clock clock) {
+        return sign(accessKeyId, accessKeySecret, "starts-with", keyPrefix, maxFileSize, expireSeconds, clock);
+    }
+
+    public static Policy signExact(String accessKeyId, String accessKeySecret, String objectKey, Long maxFileSize,
+                                   Integer expireSeconds, Clock clock) {
+        return sign(accessKeyId, accessKeySecret, "eq", objectKey, maxFileSize, expireSeconds, clock);
+    }
+
+    private static Policy sign(String accessKeyId, String accessKeySecret, String keyCondition,
+                               String keyValue, Long maxFileSize, Integer expireSeconds, Clock clock) {
         long maxSize = maxFileSize == null || maxFileSize <= 0 ? 100L * 1024 * 1024 : maxFileSize;
         int seconds = expireSeconds == null || expireSeconds <= 0 ? 1800 : expireSeconds;
         Instant expiration = Instant.now(clock).plus(seconds, ChronoUnit.SECONDS);
         String expirationText = OSS_EXPIRATION_FORMATTER.format(expiration.truncatedTo(ChronoUnit.MILLIS));
         String policyJson = "{\"expiration\":\"" + expirationText + "\",\"conditions\":["
-                + "[\"starts-with\",\"$key\",\"" + escapeJson(keyPrefix) + "\"],"
+                + "[\"" + keyCondition + "\",\"$key\",\"" + escapeJson(keyValue) + "\"],"
                 + "[\"content-length-range\",1," + maxSize + "]]}";
         String policy = Base64.getEncoder().encodeToString(policyJson.getBytes(StandardCharsets.UTF_8));
         return new Policy(accessKeyId, policy, signature(policy, accessKeySecret), expirationText);
@@ -51,7 +61,7 @@ class TkOssPostPolicySigner {
 
     @Getter
     @AllArgsConstructor
-    static class Policy {
+    public static class Policy {
         private final String accessKeyId;
         private final String policy;
         private final String signature;

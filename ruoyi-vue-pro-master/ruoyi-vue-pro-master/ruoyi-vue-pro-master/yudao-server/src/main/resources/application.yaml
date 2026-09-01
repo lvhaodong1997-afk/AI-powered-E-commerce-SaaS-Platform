@@ -12,8 +12,8 @@ spring:
   servlet:
     # 文件上传相关配置项
     multipart:
-      max-file-size: 100MB # 单个文件大小，匹配 TK 素材视频上传限制
-      max-request-size: 110MB # 总请求大小，预留 multipart 表单开销
+      max-file-size: 1GB # 单个文件大小，支持 1GB 以下 TikTok 视频
+      max-request-size: 1100MB # 总请求大小，预留 multipart 表单开销
 
   # Jackson 配置项
   jackson:

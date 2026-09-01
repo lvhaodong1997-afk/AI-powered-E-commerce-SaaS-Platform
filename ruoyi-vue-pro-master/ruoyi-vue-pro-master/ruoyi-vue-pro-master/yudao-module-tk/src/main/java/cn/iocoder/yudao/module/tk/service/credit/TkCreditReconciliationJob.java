@@ -1,10 +1,12 @@
 package cn.iocoder.yudao.module.tk.service.credit;
 
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkAudioExportTaskDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkCreditLogDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkReferenceAnalysisDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkCreditLogMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.TkAudioExportTaskMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkGenerationTaskMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkReferenceAnalysisMapper;
 import cn.iocoder.yudao.module.tk.enums.TkGenerationStatusEnum;
@@ -17,6 +19,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static cn.iocoder.yudao.module.tk.enums.TkCreditBizTypeEnum.GENERATION_TASK;
+import static cn.iocoder.yudao.module.tk.enums.TkCreditBizTypeEnum.AUDIO_EXPORT;
 import static cn.iocoder.yudao.module.tk.enums.TkCreditBizTypeEnum.REFERENCE_ANALYSIS;
 
 @Slf4j
@@ -34,6 +37,8 @@ public class TkCreditReconciliationJob {
     private TkReferenceAnalysisMapper referenceAnalysisMapper;
     @Resource
     private TkGenerationTaskMapper generationTaskMapper;
+    @Resource
+    private TkAudioExportTaskMapper audioExportTaskMapper;
     @Resource
     private TkCreditService creditService;
 
@@ -59,6 +64,10 @@ public class TkCreditReconciliationJob {
         }
         if (GENERATION_TASK.equals(creditLog.getBizType())) {
             reconcileGenerationTask(creditLog);
+            return;
+        }
+        if (AUDIO_EXPORT.equals(creditLog.getBizType())) {
+            reconcileAudioExport(creditLog);
         }
     }
 
@@ -86,6 +95,21 @@ public class TkCreditReconciliationJob {
             return;
         }
         if (TkGenerationStatusEnum.FAILED.equals(task.getStatus())) {
+            creditService.refundByLogId(creditLog.getId(), task.getFailReason());
+        }
+    }
+
+    private void reconcileAudioExport(TkCreditLogDO creditLog) {
+        TkAudioExportTaskDO task = audioExportTaskMapper.selectById(creditLog.getBizId());
+        if (task == null) {
+            creditService.refundByLogId(creditLog.getId(), "音频导出任务不存在");
+            return;
+        }
+        if (STATUS_SUCCESS.equals(task.getStatus())) {
+            creditService.settleByLogId(creditLog.getId());
+            return;
+        }
+        if (STATUS_FAILED.equals(task.getStatus())) {
             creditService.refundByLogId(creditLog.getId(), task.getFailReason());
         }
     }

@@ -7,14 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class TkVideoDurationSupportTest {
 
     @Test
-    void normalizeShouldSupportUpToOneHundredEightySeconds() {
-        assertEquals(180, TkVideoDurationSupport.normalize(180));
-        assertEquals(180, TkVideoDurationSupport.normalize(181));
+    void normalizeShouldSupportUpToFiveHundredSeconds() {
+        assertEquals(500, TkVideoDurationSupport.normalize(500));
+        assertEquals(500, TkVideoDurationSupport.normalize(501));
     }
 
     @Test
     void normalizeShouldStillHonorLowerConfiguredMaximum() {
-        assertEquals(120, TkVideoDurationSupport.normalize(180, 120));
+        assertEquals(120, TkVideoDurationSupport.normalize(500, 120));
     }
 
 }

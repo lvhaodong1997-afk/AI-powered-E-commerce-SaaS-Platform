@@ -55,6 +55,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -307,6 +308,22 @@ public class TkReferenceAnalysisServiceImpl implements TkReferenceAnalysisServic
             throw exception(TK_REFERENCE_SCRIPT_OPTION_NOT_EXISTS);
         }
         dataScopeService.validateReadable(option.getTenantId(), option.getCompanyId(), option.getCreator());
+        return option;
+    }
+
+    @Override
+    public TkReferenceScriptOptionDO validateScriptOptionForGeneration(Long id, Long tenantId, Long companyId,
+                                                                        Long libraryId, Long analysisId) {
+        TkReferenceScriptOptionDO option = scriptOptionMapper.selectById(id);
+        if (option == null) {
+            throw exception(TK_REFERENCE_SCRIPT_OPTION_NOT_EXISTS);
+        }
+        if (!Objects.equals(option.getTenantId(), tenantId)
+                || !Objects.equals(option.getCompanyId(), companyId)
+                || !Objects.equals(option.getLibraryId(), libraryId)
+                || (analysisId != null && !Objects.equals(option.getAnalysisId(), analysisId))) {
+            throw exception(TK_REFERENCE_BINDING_MISMATCH);
+        }
         return option;
     }
 

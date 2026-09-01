@@ -1,5 +1,7 @@
 CREATE TABLE IF NOT EXISTS `tk_open_video_transcript_task` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '任务编号',
+  `tenant_id` bigint NOT NULL DEFAULT 0 COMMENT '租户编号',
+  `company_id` bigint DEFAULT NULL COMMENT '公司编号',
   `source_url` varchar(2048) NOT NULL COMMENT '原始视频链接',
   `source_url_hash` varchar(64) NOT NULL COMMENT '原始链接 SHA-256',
   `target_language` varchar(32) DEFAULT NULL COMMENT '目标语言',
@@ -25,5 +27,7 @@ CREATE TABLE IF NOT EXISTS `tk_open_video_transcript_task` (
   PRIMARY KEY (`id`),
   KEY `idx_source_url_hash` (`source_url_hash`),
   KEY `idx_status` (`status`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_create_time` (`create_time`),
+  KEY `idx_tenant_company_status` (`tenant_id`, `company_id`, `status`, `id`),
+  KEY `idx_tenant_creator` (`tenant_id`, `creator`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='TK Open 视频文案时间轴提取任务';

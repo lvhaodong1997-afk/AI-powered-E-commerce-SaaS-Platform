@@ -74,7 +74,7 @@ public class TkGenerationProperties {
         private String preset = "veryfast";
         private Integer clipSeconds = 3;
         private List<Integer> clipDurationPool = Arrays.asList(2, 3, 4);
-        private Integer maxTargetDuration = 180;
+        private Integer maxTargetDuration = 500;
 
     }
 
@@ -174,8 +174,8 @@ public class TkGenerationProperties {
         private String storageType = "local";
         private String rootDir = "${java.io.tmpdir}/tk-uploads";
         private String publicBaseUrl = "/uploads";
-        private Integer chunkSizeBytes = 8 * 1024 * 1024;
-        private Long maxFileSizeBytes = 100L * 1024 * 1024;
+        private Integer chunkSizeBytes = 1 * 1024 * 1024;
+        private Long maxFileSizeBytes = 1_000_000_000L;
         private Integer sessionExpireHours = 24;
         private Oss oss = new Oss();
 
@@ -207,6 +207,10 @@ public class TkGenerationProperties {
         private String python = "py";
         private String scriptPath = "tools/subtitle/asr_faster_whisper.py";
         private String model = "small";
+        /**
+         * 项目专用的本地 ASR 模型根目录。配置后按 model 名称拼接子目录，避免请求期间访问远程 Hub。
+         */
+        private String modelCacheDir;
         private Boolean retryEnabled = true;
         private String retryModel = "medium";
         private Boolean estimatedFallbackOnMismatch = true;

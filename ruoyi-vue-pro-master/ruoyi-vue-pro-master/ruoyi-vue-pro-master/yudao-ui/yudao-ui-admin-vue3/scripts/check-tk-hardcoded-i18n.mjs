@@ -9,8 +9,11 @@ const scanRoots = [
 ]
 
 const ignoredFiles = new Set([
-  // This page already carries an internal zh/en copy table and is covered by tk i18n coverage checks.
-  'src/views/tk/dashboard/index.vue'
+  // These pages already carry internal zh/en copy tables covered by tk i18n coverage checks.
+  'src/views/tk/dashboard/index.vue',
+  'src/views/tk/data-dashboard/index.vue',
+  'src/views/tk/generation-batch/index.vue',
+  'src/views/tk/generation-route/index.vue'
 ])
 
 const legacyAllowedFiles = new Set([

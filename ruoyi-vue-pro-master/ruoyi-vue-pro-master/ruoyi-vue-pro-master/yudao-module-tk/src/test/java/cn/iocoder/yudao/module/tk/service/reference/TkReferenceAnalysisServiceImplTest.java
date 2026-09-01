@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.tk.service.reference;
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalyzeReqVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkMaterialLibraryDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkReferenceAnalysisDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkReferenceScriptOptionDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkReferenceAnalysisMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkReferenceScriptOptionMapper;
 import cn.iocoder.yudao.module.tk.enums.TkApiKeyProviderEnum;
@@ -34,6 +35,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -42,9 +44,49 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class TkReferenceAnalysisServiceImplTest {
+
+    @Test
+    void validateScriptOptionForGenerationUsesTaskOwnershipWithoutUserScope() {
+        TkReferenceAnalysisServiceImpl service = new TkReferenceAnalysisServiceImpl();
+        TkReferenceScriptOptionMapper scriptOptionMapper = mock(TkReferenceScriptOptionMapper.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        ReflectionTestUtils.setField(service, "scriptOptionMapper", scriptOptionMapper);
+        ReflectionTestUtils.setField(service, "dataScopeService", dataScopeService);
+        TkReferenceScriptOptionDO option = TkReferenceScriptOptionDO.builder()
+                .id(1267L)
+                .analysisId(170L)
+                .companyId(166L)
+                .libraryId(29L)
+                .build();
+        option.setTenantId(166L);
+        when(scriptOptionMapper.selectById(1267L)).thenReturn(option);
+
+        assertEquals(option, service.validateScriptOptionForGeneration(1267L, 166L, 166L, 29L, 170L));
+
+        verifyNoInteractions(dataScopeService);
+    }
+
+    @Test
+    void validateScriptOptionForGenerationRejectsDifferentTaskOwnership() {
+        TkReferenceAnalysisServiceImpl service = new TkReferenceAnalysisServiceImpl();
+        TkReferenceScriptOptionMapper scriptOptionMapper = mock(TkReferenceScriptOptionMapper.class);
+        ReflectionTestUtils.setField(service, "scriptOptionMapper", scriptOptionMapper);
+        TkReferenceScriptOptionDO option = TkReferenceScriptOptionDO.builder()
+                .id(1267L)
+                .analysisId(170L)
+                .companyId(166L)
+                .libraryId(29L)
+                .build();
+        option.setTenantId(166L);
+        when(scriptOptionMapper.selectById(1267L)).thenReturn(option);
+
+        assertThrows(RuntimeException.class,
+                () -> service.validateScriptOptionForGeneration(1267L, 166L, 166L, 30L, 170L));
+    }
 
     @Test
     void analyzeCreatesWaitingAnalysisAndSubmitsAsyncWorker() {

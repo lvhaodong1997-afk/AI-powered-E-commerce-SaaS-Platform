@@ -20,11 +20,13 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -139,7 +141,7 @@ class TkMaterialVideoServiceImplTest {
 
         verify(fileApi).deleteFileByUrl("https://cdn.example.com/material/demo.mp4");
         verify(fileApi).deleteFileByUrl("https://cdn.example.com/material/demo-cover.jpg");
-        verify(videoMapper).deleteById(88L);
+        verify(videoMapper).deleteBatchIds(Collections.singletonList(88L));
     }
 
     @Test
@@ -162,7 +164,10 @@ class TkMaterialVideoServiceImplTest {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
                 () -> service.deleteMaterialVideo(89L));
 
-        verify(videoMapper, never()).deleteById(89L);
+        verify(videoMapper, never()).deleteBatchIds(any());
+        verify(videoMapper, never()).deleteById(any(java.io.Serializable.class));
+        verify(videoMapper, never()).deleteById(any(TkMaterialVideoDO.class));
+        verify(videoMapper, never()).deleteById(any(), anyBoolean());
     }
 
     @Test
@@ -197,7 +202,7 @@ class TkMaterialVideoServiceImplTest {
 
         verify(ossUploadService).deleteByUrl(video.getFileUrl());
         verify(fileApi, never()).deleteFileByUrl(video.getFileUrl());
-        verify(videoMapper).deleteById(91L);
+        verify(videoMapper).deleteBatchIds(Collections.singletonList(91L));
     }
 
     @Test
@@ -225,7 +230,7 @@ class TkMaterialVideoServiceImplTest {
 
         assertFalse(Files.exists(localFile));
         verify(fileApi).deleteFileByUrl(fileUrl);
-        verify(videoMapper).deleteById(90L);
+        verify(videoMapper).deleteBatchIds(Collections.singletonList(90L));
     }
 
     private TkMaterialVideoServiceImpl createService(TkMaterialVideoMapper videoMapper,

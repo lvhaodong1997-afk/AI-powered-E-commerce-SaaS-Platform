@@ -8,6 +8,7 @@ public interface TkCreditService {
 
     int COST_REFERENCE_ANALYSIS = 1;
     int COST_GENERATION_TASK = 1;
+    int COST_AUDIO_EXPORT = 1;
 
     TkCreditBalanceRespVO getCurrentTenantBalance();
 
@@ -20,6 +21,8 @@ public interface TkCreditService {
     Long freezeForReferenceAnalysis(Long tenantId);
 
     Long freezeForGenerationTask(Long tenantId);
+
+    Long freezeForAudioExport(Long tenantId);
 
     void bindBusiness(Long logId, Long bizId);
 

@@ -75,6 +75,7 @@ public class TkMaterialVideoParseServiceImpl implements TkMaterialVideoParseServ
             videoMapper.updateById(new TkMaterialVideoDO()
                     .setId(videoId)
                     .setDuration(metadata.durationSeconds)
+                    .setDurationMs(metadata.durationMillis)
                     .setResolution(metadata.resolution)
                     .setCoverUrl(coverUrl)
                     .setStatus(TkMaterialVideoStatusEnum.AVAILABLE)
@@ -111,8 +112,10 @@ public class TkMaterialVideoParseServiceImpl implements TkMaterialVideoParseServ
             throw new IllegalStateException("FFprobe 未识别到视频分辨率");
         }
         BigDecimal duration = new BigDecimal(root.path("format").path("duration").asText("0"));
-        long durationSeconds = Math.max(1L, duration.setScale(0, RoundingMode.CEILING).longValue());
-        return new VideoMetadata(durationSeconds, width + "x" + height);
+        long durationMillis = Math.max(1L, duration.multiply(BigDecimal.valueOf(1000L))
+                .setScale(0, RoundingMode.HALF_UP).longValue());
+        long durationSeconds = Math.max(1L, (durationMillis + 999L) / 1000L);
+        return new VideoMetadata(durationSeconds, durationMillis, width + "x" + height);
     }
 
     private String extractCover(TkMaterialVideoDO video, File source, File taskDir) throws Exception {
@@ -199,10 +202,12 @@ public class TkMaterialVideoParseServiceImpl implements TkMaterialVideoParseServ
     private static class VideoMetadata {
 
         private final Long durationSeconds;
+        private final Long durationMillis;
         private final String resolution;
 
-        private VideoMetadata(Long durationSeconds, String resolution) {
+        private VideoMetadata(Long durationSeconds, Long durationMillis, String resolution) {
             this.durationSeconds = durationSeconds;
+            this.durationMillis = durationMillis;
             this.resolution = resolution;
         }
 

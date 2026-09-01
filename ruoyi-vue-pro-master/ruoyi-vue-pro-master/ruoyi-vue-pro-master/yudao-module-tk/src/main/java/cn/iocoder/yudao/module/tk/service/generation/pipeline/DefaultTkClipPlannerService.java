@@ -58,13 +58,15 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
     public List<TkClipPlanItem> plan(TkGenerationTaskDO task, String scriptText, Integer effectiveTargetDuration) {
         int requestedTargetDuration = TkVideoDurationSupport.normalize(task.getTargetDuration());
         int targetDuration = resolveEffectiveTargetDuration(requestedTargetDuration, effectiveTargetDuration);
+        List<TkClipPlanItem> plan;
         if (TkGenerationRouteConfigSupport.isFullPoolRandom(task.getGenerationRouteConfig())) {
-            return planFullPoolRandom(task, targetDuration);
+            plan = planFullPoolRandom(task, targetDuration);
+            return normalizePrecisePlan(task, plan, targetDuration);
+        } else if (TkGeminiPromptConfig.isLeadGeneration(task.getMaterialPurpose())) {
+            plan = planLeadGeneration(task, scriptText, targetDuration);
+            return normalizePrecisePlan(task, plan, targetDuration);
         }
-        if (TkGeminiPromptConfig.isLeadGeneration(task.getMaterialPurpose())) {
-            return planLeadGeneration(task, scriptText, targetDuration);
-        }
-        List<TkClipPlanItem> plan = new ArrayList<>();
+        plan = new ArrayList<>();
         int orderNo = 1;
         List<SegmentSection> sections = resolveSections(task, targetDuration);
         if (StrUtil.isNotBlank(task.getOpeningVideoUrl())) {
@@ -83,17 +85,13 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
             throw new IllegalStateException("素材库没有可用于混剪的视频");
         }
         Set<Long> recentlyUsedMaterialIds = resolveRecentlyUsedMaterialIds(task);
+        Set<Long> selectedMaterialIds = new HashSet<>();
 
         for (SegmentSection section : sections) {
             int selectedDuration = plan.stream()
                     .filter(item -> section.code().equals(item.getSection()))
                     .mapToInt(TkClipPlanItem::getDurationSecond)
                     .sum();
-            Set<Long> selectedMaterialIds = plan.stream()
-                    .filter(item -> section.code().equals(item.getSection()))
-                    .map(TkClipPlanItem::getMaterialVideoId)
-                    .filter(id -> id != null)
-                    .collect(Collectors.toCollection(HashSet::new));
             for (TkMaterialVideoDO material : prioritizedSegmentCandidates(section.segment, materials, recentlyUsedMaterialIds)) {
                 if (selectedDuration >= section.targetDuration) {
                     break;
@@ -113,16 +111,27 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                 selectedMaterialIds.add(material.getId());
                 selectedDuration += duration;
             }
-            if (selectedDuration < section.targetDuration) {
-                throw new IllegalStateException(StrUtil.format("{}用途素材不足，还缺 {} 秒，请上传或重新标记该素材用途",
-                        section.name(), section.targetDuration - selectedDuration));
+            while (selectedDuration < section.targetDuration) {
+                TkMaterialVideoDO material = selectClosestUnusedMaterial(
+                        materials, selectedMaterialIds, section.targetDuration - selectedDuration);
+                if (material == null) {
+                    break;
+                }
+                int duration = materialDuration(material);
+                plan.add(new TkClipPlanItem(orderNo++, "MATERIAL", material.getId(), material.getFileName(),
+                        material.getFileUrl(), 0, duration,
+                        StrUtil.format("{}素材不足，选择最接近缺口的未使用素材并在渲染时适配到目标时长", section.name()),
+                        section.code(), section.name(), section.order(), null,
+                        section.scriptLine, section.visualDirection, section.targetDuration));
+                selectedMaterialIds.add(material.getId());
+                selectedDuration += duration;
             }
         }
         if (planDuration(plan) < targetDuration) {
             backfillWholeMaterials(plan, randomBackfillCandidates(materials), targetDuration, orderNo,
                     "音频时长补足，完整追加{}秒素材，避免尾帧停留");
         }
-        return plan;
+        return normalizePrecisePlan(task, plan, targetDuration);
     }
 
     private int resolveEffectiveTargetDuration(int requestedTargetDuration, Integer effectiveTargetDuration) {
@@ -159,15 +168,16 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         if (candidates.isEmpty()) {
             throw new IllegalStateException("素材库没有可用于随机混剪的可用视频");
         }
-        List<TkMaterialVideoDO> selected = selectBestFitRandomClips(candidates, randomTargetDuration);
+        List<TkMaterialVideoDO> selected = new ArrayList<>(selectBestFitRandomClips(candidates, randomTargetDuration));
         if (selected.isEmpty()) {
-            throw new IllegalStateException("目标时长过短，素材库中没有任何可完整使用的视频片段");
+            selected.add(selectClosestDurationMaterial(candidates, randomTargetDuration));
         }
         for (TkMaterialVideoDO material : selected) {
             int duration = materialDuration(material);
             plan.add(new TkClipPlanItem(orderNo++, "MATERIAL", material.getId(), material.getFileName(),
                     material.getFileUrl(), 0, duration,
-                    StrUtil.format("全素材池随机混剪，完整使用{}秒素材", duration)));
+                    StrUtil.format("全素材池随机混剪，完整使用{}秒素材", duration),
+                    null, null, null, null, null, null, randomTargetDuration));
         }
         if (planDuration(plan) < targetDuration) {
             backfillWholeMaterials(plan, randomBackfillCandidates(candidates), targetDuration, orderNo,
@@ -242,17 +252,23 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         Set<Long> recentlyUsedMaterialIds = resolveRecentlyUsedMaterialIds(task);
         List<TkClipPlanItem> plan = new ArrayList<>();
         int orderNo = 1;
+        Set<Long> selectedMaterialIds = new HashSet<>();
         for (TkMaterialSegmentTypeEnum segment : TkMaterialSegmentTypeEnum.LEAD_GENERATION_SEGMENTS) {
-            TkMaterialVideoDO selected = prioritizedSegmentCandidates(segment, materials, recentlyUsedMaterialIds).stream()
+            TkMaterialVideoDO selected = prioritizedSectionCandidates(segment, materials, recentlyUsedMaterialIds).stream()
                     .filter(material -> materialDuration(material) > 0)
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException(StrUtil.format(
-                            "{}至少需要 1 个可用视频，请上传或重新标记该素材用途", segment.getName())));
+                    .filter(material -> material.getId() == null || !selectedMaterialIds.contains(material.getId()))
+                    .findFirst().orElse(null);
+            if (selected == null) {
+                continue;
+            }
             int duration = materialDuration(selected);
             plan.add(new TkClipPlanItem(orderNo, "MATERIAL", selected.getId(), selected.getFileName(),
                     selected.getFileUrl(), 0, duration,
                     StrUtil.format("引流素材按固定结构拼装，完整使用{} {} 秒素材", segment.getName(), duration),
                     segment.getCode(), segment.getName(), orderNo, null, null, null, null));
+            if (selected.getId() != null) {
+                selectedMaterialIds.add(selected.getId());
+            }
             orderNo++;
         }
         backfillLeadGenerationPlan(plan, materials, recentlyUsedMaterialIds, orderNo, targetDuration);
@@ -285,27 +301,7 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
             int currentOrderNo = orderNo++;
             plan.add(new TkClipPlanItem(currentOrderNo, "MATERIAL", material.getId(), material.getFileName(),
                     material.getFileUrl(), 0, duration,
-                    StrUtil.format("引流素材时长补足，完整复用{} {} 秒素材，避免口播被截断",
-                            segment.getName(), duration),
-                    segment.getCode(), segment.getName(), currentOrderNo, null, null, null, null));
-            selectedDuration += duration;
-        }
-        int cursor = 0;
-        while (selectedDuration < targetDuration) {
-            TkMaterialVideoDO material = candidates.get(cursor % candidates.size());
-            cursor++;
-            int duration = materialDuration(material);
-            if (duration <= 0) {
-                if (cursor >= candidates.size()) {
-                    break;
-                }
-                continue;
-            }
-            TkMaterialSegmentTypeEnum segment = resolveSegmentType(material);
-            int currentOrderNo = orderNo++;
-            plan.add(new TkClipPlanItem(currentOrderNo, "MATERIAL", material.getId(), material.getFileName(),
-                    material.getFileUrl(), 0, duration,
-                    StrUtil.format("引流素材时长补足，完整复用{} {} 秒素材，避免口播被截断",
+                    StrUtil.format("引流素材时长补足，完整追加{} {} 秒素材，避免口播被截断",
                             segment.getName(), duration),
                     segment.getCode(), segment.getName(), currentOrderNo, null, null, null, null));
             selectedDuration += duration;
@@ -335,21 +331,6 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
             if (material.getId() != null) {
                 selectedMaterialIds.add(material.getId());
             }
-        }
-        int cursor = 0;
-        while (selectedDuration < targetDuration) {
-            TkMaterialVideoDO material = candidates.get(cursor % candidates.size());
-            cursor++;
-            int duration = materialDuration(material);
-            if (duration <= 0) {
-                if (cursor >= candidates.size()) {
-                    break;
-                }
-                continue;
-            }
-            plan.add(new TkClipPlanItem(orderNo++, "MATERIAL", material.getId(), material.getFileName(),
-                    material.getFileUrl(), 0, duration, StrUtil.format(reasonTemplate, duration)));
-            selectedDuration += duration;
         }
     }
 
@@ -415,7 +396,7 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                         || !selectedMaterialIds.contains(material.getId()))
                 .collect(Collectors.toList());
         BackfillChoice bestChoice = findBestFitBackfillChoice(usableCandidates, missingDuration);
-        return bestChoice == null ? Collections.emptyList() : bestChoice.materials;
+        return bestChoice == null ? usableCandidates : bestChoice.materials;
     }
 
     private BackfillChoice findBestFitBackfillChoice(List<TkMaterialVideoDO> candidates, int missingDuration) {
@@ -690,6 +671,44 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         return freshCandidates;
     }
 
+    private List<TkMaterialVideoDO> prioritizedSectionCandidates(TkMaterialSegmentTypeEnum segment,
+                                                                  List<TkMaterialVideoDO> materials,
+                                                                  Set<Long> recentlyUsedMaterialIds) {
+        List<TkMaterialVideoDO> candidates = new ArrayList<>(
+                prioritizedSegmentCandidates(segment, materials, recentlyUsedMaterialIds));
+        Set<Long> addedIds = candidates.stream().map(TkMaterialVideoDO::getId)
+                .filter(id -> id != null).collect(Collectors.toSet());
+        for (TkMaterialVideoDO material : materials) {
+            if (!isUsableRandomClip(material) || resolveSegmentType(material) == segment
+                    || (material.getId() != null && addedIds.contains(material.getId()))) {
+                continue;
+            }
+            candidates.add(material);
+            if (material.getId() != null) {
+                addedIds.add(material.getId());
+            }
+        }
+        return candidates;
+    }
+
+    private TkMaterialVideoDO selectClosestDurationMaterial(List<TkMaterialVideoDO> candidates, int targetDuration) {
+        return candidates.stream().min((left, right) -> Integer.compare(
+                        Math.abs(materialDuration(left) - targetDuration), Math.abs(materialDuration(right) - targetDuration)))
+                .orElseThrow(() -> new IllegalStateException("素材库没有可用于随机混剪的可用视频"));
+    }
+
+    private TkMaterialVideoDO selectClosestUnusedMaterial(List<TkMaterialVideoDO> materials,
+                                                           Set<Long> selectedMaterialIds,
+                                                           int missingDuration) {
+        return materials.stream()
+                .filter(this::isUsableRandomClip)
+                .filter(material -> !selectedMaterialIds.contains(material.getId()))
+                .min((left, right) -> Integer.compare(
+                        Math.abs(materialDuration(left) - missingDuration),
+                        Math.abs(materialDuration(right) - missingDuration)))
+                .orElse(null);
+    }
+
     private List<TkMaterialVideoDO> segmentCandidates(TkMaterialSegmentTypeEnum segment, List<TkMaterialVideoDO> materials) {
         return materials.stream()
                 .filter(material -> resolveSegmentType(material) == segment)
@@ -708,8 +727,51 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         return remaining > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) Math.max(remaining, 0);
     }
 
+    private List<TkClipPlanItem> normalizePrecisePlan(TkGenerationTaskDO task, List<TkClipPlanItem> originalPlan,
+                                                       int targetDuration) {
+        if (CollUtil.isEmpty(originalPlan)) {
+            return originalPlan;
+        }
+        List<TkMaterialVideoDO> materials = materialVideoMapper.selectListByLibraryId(task.getLibraryId());
+        if (materials.stream().noneMatch(material -> material.getDurationMs() != null && material.getDurationMs() > 0L)) {
+            // 历史素材尚未回填真实时长时保持旧计划，由渲染阶段探测并适配片段时长。
+            return originalPlan;
+        }
+        Map<Long, TkMaterialVideoDO> materialMap = materials.stream()
+                .filter(material -> material.getId() != null)
+                .collect(Collectors.toMap(TkMaterialVideoDO::getId, material -> material, (left, right) -> left));
+        for (TkClipPlanItem item : originalPlan) {
+            TkMaterialVideoDO material = item.getMaterialVideoId() == null ? null : materialMap.get(item.getMaterialVideoId());
+            if (material == null || material.getDurationMs() == null || material.getDurationMs() <= 0L) {
+                continue;
+            }
+            long startMillis = item.getStartSecond() == null ? 0L : Math.max(0L, item.getStartSecond()) * 1000L;
+            long durationMillis = Math.max(0L, material.getDurationMs() - startMillis);
+            if (durationMillis > 0L) {
+                item.setStartMillis(startMillis);
+                item.setDurationMillis(durationMillis);
+                item.setReuseMode("ORIGINAL");
+            }
+        }
+        return originalPlan;
+    }
+
+    private long materialDurationMillis(TkMaterialVideoDO material) {
+        if (material == null) {
+            return 0L;
+        }
+        if (material.getDurationMs() != null && material.getDurationMs() > 0L) {
+            return material.getDurationMs();
+        }
+        return material.getDuration() == null ? 0L : Math.max(0L, material.getDuration()) * 1000L;
+    }
+
+    private int ceilSeconds(long durationMillis) {
+        return (int) Math.max(1L, (durationMillis + 999L) / 1000L);
+    }
+
     private int materialDuration(TkMaterialVideoDO material) {
-        return remainingSecond(material, 0);
+        return ceilSeconds(materialDurationMillis(material));
     }
 
     private int openingDuration(TkGenerationTaskDO task, int sectionTargetDuration, int targetDuration) {

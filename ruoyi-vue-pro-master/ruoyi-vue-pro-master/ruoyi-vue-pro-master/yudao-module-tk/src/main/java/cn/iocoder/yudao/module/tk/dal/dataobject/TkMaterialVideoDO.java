@@ -31,6 +31,11 @@ public class TkMaterialVideoDO extends TenantBaseDO {
 
     private Long duration;
 
+    /**
+     * FFprobe 原始视频时长，单位毫秒。duration 保留用于兼容旧接口和页面展示。
+     */
+    private Long durationMs;
+
     private Long size;
 
     private String resolution;

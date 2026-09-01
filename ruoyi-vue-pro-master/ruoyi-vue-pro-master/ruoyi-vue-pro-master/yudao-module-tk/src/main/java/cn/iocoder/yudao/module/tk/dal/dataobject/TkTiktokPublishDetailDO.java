@@ -26,6 +26,8 @@ public class TkTiktokPublishDetailDO extends TenantBaseDO {
     private Long companyId;
     private Long publishTaskId;
     private Long generationTaskId;
+    private Long uploadedVideoId;
+    private String sourceType;
     private Long accountId;
     private String accountDisplayName;
     private String publishId;
@@ -34,6 +36,8 @@ public class TkTiktokPublishDetailDO extends TenantBaseDO {
     private String status;
     private String postMode;
     private String privacyLevel;
+    private String coverUrl;
+    private Long coverTimestampMs;
     private Boolean allowComment;
     private Boolean allowDuet;
     private Boolean allowStitch;

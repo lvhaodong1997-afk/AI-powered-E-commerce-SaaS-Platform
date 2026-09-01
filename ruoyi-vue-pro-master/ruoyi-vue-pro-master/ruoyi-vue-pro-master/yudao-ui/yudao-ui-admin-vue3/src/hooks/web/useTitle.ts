@@ -6,19 +6,22 @@ import { sanitizeEnglishTitleText } from '@/utils/tkTextSanitizer'
 
 const appStore = useAppStoreWithOut()
 const localeStore = useLocaleStoreWithOut()
+const DEFAULT_APP_TITLE = 'ClipForge Studio'
+const normalizeTitleSegment = (value?: string) => sanitizeEnglishTitleText(value).trim()
 
 export const useTitle = (newTitle?: string) => {
   const { t } = useI18n()
   const title = computed(() => {
     const currentLang = localeStore.getCurrentLocale.lang
-    const appTitle = sanitizeEnglishTitleText(appStore.getTitle)
+    const appTitle = normalizeTitleSegment(appStore.getTitle) || DEFAULT_APP_TITLE
+    const routeTitle = newTitle?.trim()
+    let sanitizedPageTitle = ''
 
-    if (!newTitle) {
-      return appTitle
+    if (routeTitle) {
+      const pageTitle = routeTitle.includes('.') ? t(routeTitle, currentLang) : routeTitle
+      sanitizedPageTitle = normalizeTitleSegment(pageTitle)
     }
-    const pageTitle = newTitle.includes('.') ? t(newTitle, currentLang) : newTitle
-    const sanitizedPageTitle = sanitizeEnglishTitleText(pageTitle)
-    return `${appTitle} - ${sanitizedPageTitle}`
+    return [appTitle, sanitizedPageTitle].filter(Boolean).join(' - ')
   })
 
   watch(

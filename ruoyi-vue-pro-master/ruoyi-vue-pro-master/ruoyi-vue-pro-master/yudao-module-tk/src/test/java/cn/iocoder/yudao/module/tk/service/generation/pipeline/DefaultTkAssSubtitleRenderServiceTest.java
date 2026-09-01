@@ -75,6 +75,30 @@ class DefaultTkAssSubtitleRenderServiceTest {
     }
 
     @Test
+    void renderFallsBackToStableCaptionWhenWordTimingIsEstimated() throws Exception {
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .subtitleStyle("classic_white")
+                .subtitleFontSize("medium")
+                .subtitleKaraokeEnabled(true)
+                .build();
+        TkSubtitleSegment segment = new TkSubtitleSegment("Limited offer today",
+                0D, 2D, "bottom_center", 540, 1450, Arrays.asList(
+                new TkSubtitleWord("Limited", 0D, 0.8D, false),
+                new TkSubtitleWord("offer", 0.8D, 1.4D, false),
+                new TkSubtitleWord("today", 1.4D, 2D, false)
+        ));
+        segment.setWordTimingReliable(false);
+        File file = File.createTempFile("subtitle-stable", ".ass");
+
+        service.render(task, new TkSubtitleLayout(Collections.singletonList(segment)), file);
+
+        String ass = Files.readString(file.toPath());
+        assertFalse(ass.contains("{\\kf"),
+                "Estimated word timing must render as a stable caption instead of a visibly incorrect karaoke animation");
+        assertTrue(ass.contains("Limited offer today"));
+    }
+
+    @Test
     void renderUsesDistinctAssStylesForSubtitlePresets() throws Exception {
         String classic = renderStyleLine("classic_white");
         String yellowKeyword = renderStyleLine("yellow_keyword");

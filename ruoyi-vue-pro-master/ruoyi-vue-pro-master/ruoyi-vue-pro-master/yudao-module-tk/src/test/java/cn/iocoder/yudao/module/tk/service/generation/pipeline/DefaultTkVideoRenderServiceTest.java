@@ -115,6 +115,37 @@ class DefaultTkVideoRenderServiceTest {
     }
 
     @Test
+    void normalizeClipCommandUsesExactMillisecondTrim() {
+        List<String> command = DefaultTkVideoRenderService.buildNormalizeClipCommand(
+                "ffmpeg", new File("source.mp4"), new File("clip.mp4"), 0.0D, 2.243D, "veryfast", false);
+
+        assertTrue(command.contains("-ss"));
+        assertTrue(command.contains("0.000"));
+        assertTrue(command.contains("-t"));
+        assertTrue(command.contains("2.243"));
+        assertFalse(String.join(" ", command).contains("tpad"));
+    }
+
+    @Test
+    void normalizeClipCommandNeverMirrorsMaterialWhenLegacyVariantIsRequested() {
+        List<String> command = DefaultTkVideoRenderService.buildNormalizeClipCommand(
+                "ffmpeg", new File("source.mp4"), new File("clip.mp4"), 0.0D, 2.243D, "veryfast", true);
+
+        assertFalse(String.join(" ", command).contains("hflip"));
+    }
+
+    @Test
+    void adaptClipCommandStretchesOneUniqueSourceToTargetDuration() {
+        List<String> command = DefaultTkVideoRenderService.buildAdaptClipCommand(
+                "ffmpeg", new File("source.mp4"), new File("clip.mp4"), 0.0D, 2.0D, 3.0D, "veryfast");
+
+        String joined = String.join(" ", command);
+        assertTrue(joined.contains("setpts=PTS/0.666667"));
+        assertFalse(joined.contains("hflip"));
+        assertFalse(joined.contains("tpad"));
+    }
+
+    @Test
     void compressSectionCommandSpeedsWholeSectionToTargetDurationWithoutTrimArguments() {
         List<String> command = DefaultTkVideoRenderService.buildCompressSectionCommand(
                 "ffmpeg", new File("section-raw.mp4"), new File("section.mp4"), 8.0D, 7.0D);
@@ -125,14 +156,13 @@ class DefaultTkVideoRenderServiceTest {
     }
 
     @Test
-    void padSectionCommandExtendsShortSectionToPlannedDurationWithoutTrimming() {
+    void padSectionCommandSlowsUniqueMaterialInsteadOfCloningLastFrame() {
         List<String> command = DefaultTkVideoRenderService.buildPadSectionCommand(
                 "ffmpeg", new File("section-raw.mp4"), new File("section.mp4"), 23.337D, 27.0D);
 
         String joined = String.join(" ", command);
-        assertFalse(command.contains("-ss"));
-        assertFalse(command.contains("-t"));
-        assertTrue(joined.contains("tpad=stop_mode=clone:stop_duration=3.663"));
+        assertFalse(joined.contains("tpad=stop_mode=clone"));
+        assertTrue(joined.contains("setpts=PTS/0.864333"));
     }
 
     @Test

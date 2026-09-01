@@ -5,6 +5,8 @@ import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationPrecheckRespVO;
+import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkAudioExportTaskCreateReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkAudioExportTaskRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskCreateReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskPageReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskRespVO;
@@ -15,6 +17,7 @@ import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishUrlR
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.service.generation.TkGenerationPrecheckService;
 import cn.iocoder.yudao.module.tk.service.generation.TkGenerationTaskService;
+import cn.iocoder.yudao.module.tk.service.generation.TkAudioExportTaskService;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkDashScopeTtsClient;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkTtsProviderEnum;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkVoiceProviderRouter;
@@ -64,6 +67,8 @@ public class TkGenerationTaskController {
     @Resource
     private TkGenerationTaskService generationTaskService;
     @Resource
+    private TkAudioExportTaskService audioExportTaskService;
+    @Resource
     private TkGenerationPrecheckService precheckService;
     @Resource
     private TkDashScopeTtsClient dashScopeTtsClient;
@@ -90,6 +95,13 @@ public class TkGenerationTaskController {
     @PreAuthorize("@ss.hasPermission('tk:generation:create')")
     public CommonResult<Long> createGenerationTask(@Valid @RequestBody TkGenerationTaskCreateReqVO createReqVO) {
         return success(generationTaskService.createGenerationTask(createReqVO));
+    }
+
+    @PostMapping("/audio-export")
+    @Operation(summary = "生成独立 AI 配音音频")
+    @PreAuthorize("@ss.hasPermission('tk:generation:create')")
+    public CommonResult<TkAudioExportTaskRespVO> exportAudio(@Valid @RequestBody TkAudioExportTaskCreateReqVO reqVO) {
+        return success(audioExportTaskService.export(reqVO));
     }
 
     @PostMapping("/create-batch")

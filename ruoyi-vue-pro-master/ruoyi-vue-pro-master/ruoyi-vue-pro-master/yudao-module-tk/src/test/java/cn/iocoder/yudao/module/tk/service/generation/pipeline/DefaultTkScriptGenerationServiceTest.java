@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.tk.service.generation.pipeline;
 
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkMaterialLibraryDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkReferenceScriptOptionDO;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.service.config.TkApiKeyConfigService;
 import cn.iocoder.yudao.module.tk.service.reference.TkReferenceAnalysisService;
@@ -11,9 +12,41 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DefaultTkScriptGenerationServiceTest {
+
+    @Test
+    void generateScriptLoadsOptionByTaskOwnershipInsteadOfCurrentLoginUser() {
+        DefaultTkScriptGenerationService service = new DefaultTkScriptGenerationService();
+        TkReferenceAnalysisService referenceAnalysisService = mock(TkReferenceAnalysisService.class);
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        ReflectionTestUtils.setField(service, "referenceAnalysisService", referenceAnalysisService);
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .companyId(166L)
+                .libraryId(29L)
+                .referenceAnalysisId(170L)
+                .scriptOptionId(1267L)
+                .referenceDuration(15)
+                .build();
+        task.setTenantId(166L);
+        TkReferenceScriptOptionDO option = TkReferenceScriptOptionDO.builder()
+                .id(1267L)
+                .title("归属任务的文案")
+                .scriptText("后台生成使用任务归属校验。")
+                .build();
+        when(referenceAnalysisService.validateScriptOptionForGeneration(
+                1267L, 166L, 166L, 29L, 170L)).thenReturn(option);
+
+        TkGeneratedScript script = service.generateScript(task, new TkMaterialLibraryDO());
+
+        assertEquals("归属任务的文案", script.getTitle());
+        assertEquals("后台生成使用任务归属校验。", script.getContent());
+        verify(referenceAnalysisService).validateScriptOptionForGeneration(1267L, 166L, 166L, 29L, 170L);
+        verify(referenceAnalysisService, never()).validateScriptOptionReadable(1267L);
+    }
 
     @Test
     void generateScriptUsesLeadGenerationManualPromptTextWithoutGeminiRewrite() {

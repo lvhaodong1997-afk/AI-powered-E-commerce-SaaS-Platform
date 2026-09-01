@@ -47,7 +47,8 @@ public interface TkGenerationTaskMapper extends BaseMapperX<TkGenerationTaskDO> 
     int releaseTaskLease(@Param("id") Long id, @Param("leaseToken") String leaseToken);
 
     @Update("<script>UPDATE tk_generation_task SET status = 'PENDING', progress = 0, fail_reason = NULL, "
-            + "fail_code = NULL, current_step = 'RETRY_PENDING', retry_count = #{retryCount}, "
+            + "fail_code = NULL, current_step = 'RETRY_PENDING', current_step_code = 'PENDING', "
+            + "current_step_completed = NULL, current_step_total = NULL, retry_count = #{retryCount}, "
             + "last_retry_time = #{lastRetryTime}, worker_id = NULL, heartbeat_time = NULL, "
             + "lease_token = NULL, lease_expire_time = NULL, step_started_at = NULL, step_finished_at = NULL, "
             + "output_url = NULL, subtitle_url = NULL, subtitle_timeline_url = NULL, "
@@ -195,6 +196,9 @@ public interface TkGenerationTaskMapper extends BaseMapperX<TkGenerationTaskDO> 
                 TkGenerationTaskDO::getFailReason,
                 TkGenerationTaskDO::getFailCode,
                 TkGenerationTaskDO::getCurrentStep,
+                TkGenerationTaskDO::getCurrentStepCode,
+                TkGenerationTaskDO::getCurrentStepCompleted,
+                TkGenerationTaskDO::getCurrentStepTotal,
                 TkGenerationTaskDO::getHeartbeatTime,
                 TkGenerationTaskDO::getStepStartedAt,
                 TkGenerationTaskDO::getStepFinishedAt);

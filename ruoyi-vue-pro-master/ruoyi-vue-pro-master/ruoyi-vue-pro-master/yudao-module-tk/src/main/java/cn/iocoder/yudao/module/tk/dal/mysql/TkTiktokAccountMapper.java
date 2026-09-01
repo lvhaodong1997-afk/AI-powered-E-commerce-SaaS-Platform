@@ -9,6 +9,7 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokAccountDO;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import org.apache.ibatis.annotations.Mapper;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -63,7 +64,27 @@ public interface TkTiktokAccountMapper extends BaseMapperX<TkTiktokAccountDO> {
     default Long selectTokenAbnormalCount(TkUserScope scope) {
         return selectCount(new LambdaQueryWrapperX<TkTiktokAccountDO>()
                 .eqIfPresent(TkTiktokAccountDO::getTenantId, scope.isGlobalPlatformView() ? null : scope.getTenantId())
-                .ne(TkTiktokAccountDO::getTokenStatus, "VALID"));
+                .and(wrapper -> wrapper.ne(TkTiktokAccountDO::getAuthStatus, "AUTHORIZED")
+                        .or().isNull(TkTiktokAccountDO::getRefreshTokenCipher)
+                        .or().isNull(TkTiktokAccountDO::getRefreshTokenExpireTime)
+                        .or().le(TkTiktokAccountDO::getRefreshTokenExpireTime, LocalDateTime.now())));
+    }
+
+    default List<TkTiktokAccountDO> selectExpiringActiveAccounts(LocalDateTime activeAfter,
+                                                                  LocalDateTime expireBefore,
+                                                                  int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 200));
+        return selectList(new LambdaQueryWrapperX<TkTiktokAccountDO>()
+                .eq(TkTiktokAccountDO::getStatus, 0)
+                .eq(TkTiktokAccountDO::getAuthStatus, "AUTHORIZED")
+                .isNotNull(TkTiktokAccountDO::getRefreshTokenCipher)
+                .gt(TkTiktokAccountDO::getRefreshTokenExpireTime, LocalDateTime.now())
+                .and(wrapper -> wrapper.isNull(TkTiktokAccountDO::getAccessTokenExpireTime)
+                        .or().le(TkTiktokAccountDO::getAccessTokenExpireTime, expireBefore))
+                .and(wrapper -> wrapper.ge(TkTiktokAccountDO::getLastPublishTime, activeAfter)
+                        .or().ge(TkTiktokAccountDO::getLastAuthTime, activeAfter))
+                .orderByAsc(TkTiktokAccountDO::getAccessTokenExpireTime)
+                .last("LIMIT " + safeLimit));
     }
 
 }

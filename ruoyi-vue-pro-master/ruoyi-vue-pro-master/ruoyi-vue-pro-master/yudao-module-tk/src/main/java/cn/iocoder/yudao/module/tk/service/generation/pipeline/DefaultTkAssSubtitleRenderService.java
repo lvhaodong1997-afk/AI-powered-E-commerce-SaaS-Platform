@@ -52,7 +52,9 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
     }
 
     private String renderText(TkGenerationTaskDO task, SubtitleStyle style, TkSubtitleSegment segment) {
-        if (!Boolean.TRUE.equals(task.getSubtitleKaraokeEnabled()) || segment.getWords() == null || segment.getWords().isEmpty()) {
+        if (!Boolean.TRUE.equals(task.getSubtitleKaraokeEnabled())
+                || !Boolean.TRUE.equals(segment.getWordTimingReliable())
+                || segment.getWords() == null || segment.getWords().isEmpty()) {
             return renderPlainText(style, segment);
         }
         StringBuilder text = new StringBuilder();
