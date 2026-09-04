@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.tk.enums.TkMaterialSegmentTypeEnum;
 import cn.iocoder.yudao.module.tk.enums.TkMaterialUsagePhaseEnum;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkGeminiPromptConfig;
+import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkNativeOpeningSupport;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkVideoDurationSupport;
 import org.springframework.stereotype.Service;
 
@@ -90,6 +91,9 @@ public class TkGenerationPrecheckServiceImpl implements TkGenerationPrecheckServ
 
     private int resolveFullPoolRandomTargetDuration(TkGenerationTaskCreateReqVO createReqVO, int targetDuration) {
         if (!hasOpeningVideo(createReqVO)) {
+            return targetDuration;
+        }
+        if (TkNativeOpeningSupport.isNativeMode(createReqVO.getOpeningProcessMode())) {
             return targetDuration;
         }
         return Math.max(0, targetDuration - Math.min(OPENING_SECONDS, targetDuration));

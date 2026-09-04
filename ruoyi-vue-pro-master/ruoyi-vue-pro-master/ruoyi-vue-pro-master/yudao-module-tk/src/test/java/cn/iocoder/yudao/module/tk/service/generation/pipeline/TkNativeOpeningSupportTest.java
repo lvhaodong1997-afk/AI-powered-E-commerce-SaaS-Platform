@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TkNativeOpeningSupportTest {
@@ -25,46 +24,30 @@ class TkNativeOpeningSupportTest {
     }
 
     @Test
-    void nativeModeExcludesS1HookFromNarrationScript() {
+    void nativeModeKeepsCompleteScriptWithoutTimeline() {
+        assertEquals("Hook line Body line", TkNativeOpeningSupport.resolveNarrationScript(
+                "Hook line Body line", null, TkNativeOpeningSupport.MODE_NATIVE));
+    }
+
+    @Test
+    void nativeModeKeepsCompleteScriptWhenTimelineContainsS1Hook() {
         String timeline = "["
                 + "{\"timeWindow\":\"0-3s\",\"segmentLibrary\":\"S1_HOOK\",\"scriptLine\":\"Hook line\"},"
                 + "{\"timeWindow\":\"3-6s\",\"segmentLibrary\":\"S2_PAIN\",\"scriptLine\":\"Body line\"}"
                 + "]";
 
-        assertEquals("Body line", TkNativeOpeningSupport.resolveNarrationScript(
-                "Hook line Body line", timeline, TkNativeOpeningSupport.MODE_NATIVE));
-    }
-
-    @Test
-    void nativeModeReturnsEmptyNarrationWhenTimelineOnlyContainsHook() {
-        String timeline = "["
-                + "{\"timeWindow\":\"0-3s\",\"segmentLibrary\":\"S1_HOOK\",\"scriptLine\":\"Hook line\"}"
-                + "]";
-
-        assertEquals("", TkNativeOpeningSupport.resolveNarrationScript(
-                "Hook line", timeline, TkNativeOpeningSupport.MODE_NATIVE));
-    }
-
-    @Test
-    void nativeModeRejectsMissingOrMalformedNarrationTimeline() {
-        assertThrows(IllegalStateException.class, () -> TkNativeOpeningSupport.resolveNarrationScript(
-                "Hook line Body line", null, TkNativeOpeningSupport.MODE_NATIVE));
-        assertThrows(IllegalStateException.class, () -> TkNativeOpeningSupport.resolveNarrationScript(
-                "Hook line Body line", "not-json", TkNativeOpeningSupport.MODE_NATIVE));
-        assertThrows(IllegalStateException.class, () -> TkNativeOpeningSupport.resolveNarrationScript(
-                "Hook line Body line", "{\"segmentLibrary\":\"S1_HOOK\"}", TkNativeOpeningSupport.MODE_NATIVE));
-        assertThrows(IllegalStateException.class, () -> TkNativeOpeningSupport.resolveNarrationScript(
-                "Hook line Body line", "[]", TkNativeOpeningSupport.MODE_NATIVE));
-    }
-
-    @Test
-    void nativeModeKeepsCompleteScriptWhenTimelineContainsOnlyBodySegments() {
-        String timeline = "["
-                + "{\"timeWindow\":\"0-5s\",\"segmentLibrary\":\"S2_PAIN\",\"scriptLine\":\"Body line\"}"
-                + "]";
-
         assertEquals("Hook line Body line", TkNativeOpeningSupport.resolveNarrationScript(
                 "Hook line Body line", timeline, TkNativeOpeningSupport.MODE_NATIVE));
+    }
+
+    @Test
+    void nativeModeIgnoresMissingOrMalformedTimeline() {
+        assertEquals("Hook line Body line", TkNativeOpeningSupport.resolveNarrationScript(
+                "Hook line Body line", "not-json", TkNativeOpeningSupport.MODE_NATIVE));
+        assertEquals("Hook line Body line", TkNativeOpeningSupport.resolveNarrationScript(
+                "Hook line Body line", "{\"segmentLibrary\":\"S1_HOOK\"}", TkNativeOpeningSupport.MODE_NATIVE));
+        assertEquals("Hook line Body line", TkNativeOpeningSupport.resolveNarrationScript(
+                "Hook line Body line", "[]", TkNativeOpeningSupport.MODE_NATIVE));
     }
 
     @Test

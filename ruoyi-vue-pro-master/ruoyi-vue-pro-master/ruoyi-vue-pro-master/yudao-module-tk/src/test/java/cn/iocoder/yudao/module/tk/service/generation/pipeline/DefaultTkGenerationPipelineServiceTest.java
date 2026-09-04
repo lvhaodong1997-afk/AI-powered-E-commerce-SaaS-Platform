@@ -127,7 +127,7 @@ class DefaultTkGenerationPipelineServiceTest {
     }
 
     @Test
-    void resolveAudioAssetUsesBodyScriptForNativeOpening() {
+    void resolveAudioAssetUsesCompleteScriptForNativeOpening() {
         DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
         TkVoiceSynthesisService voiceSynthesisService = mock(TkVoiceSynthesisService.class);
         ReflectionTestUtils.setField(service, "voiceSynthesisService", voiceSynthesisService);
@@ -139,16 +139,16 @@ class DefaultTkGenerationPipelineServiceTest {
                         + "{\"segmentLibrary\":\"S2_PAIN\",\"scriptLine\":\"Body line\"}"
                         + "]");
         TkAudioAsset expected = new TkAudioAsset("https://example.com/body.mp3", null);
-        when(voiceSynthesisService.synthesize(task, "Body line")).thenReturn(expected);
+        when(voiceSynthesisService.synthesize(task, "Hook line Body line")).thenReturn(expected);
 
         TkAudioAsset actual = service.resolveAudioAsset(task, "Hook line Body line");
 
         assertEquals(expected, actual);
-        verify(voiceSynthesisService).synthesize(task, "Body line");
+        verify(voiceSynthesisService).synthesize(task, "Hook line Body line");
     }
 
     @Test
-    void resolveAudioAssetSkipsSynthesisWhenNativeOpeningHasNoBodyScript() {
+    void resolveAudioAssetKeepsHookOnlyScriptForNativeOpening() {
         DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
         TkVoiceSynthesisService voiceSynthesisService = mock(TkVoiceSynthesisService.class);
         ReflectionTestUtils.setField(service, "voiceSynthesisService", voiceSynthesisService);
@@ -159,11 +159,13 @@ class DefaultTkGenerationPipelineServiceTest {
                         + "{\"segmentLibrary\":\"S1_HOOK\",\"scriptLine\":\"Hook line\"}"
                         + "]");
 
+        TkAudioAsset expected = new TkAudioAsset("https://example.com/hook.mp3", null);
+        when(voiceSynthesisService.synthesize(task, "Hook line")).thenReturn(expected);
+
         TkAudioAsset actual = service.resolveAudioAsset(task, "Hook line");
 
-        assertNotNull(actual);
-        assertNull(actual.getAudioUrl());
-        verifyNoInteractions(voiceSynthesisService);
+        assertEquals(expected, actual);
+        verify(voiceSynthesisService).synthesize(task, "Hook line");
     }
 
     @Test
@@ -176,6 +178,7 @@ class DefaultTkGenerationPipelineServiceTest {
                 .setOpeningDurationMs(3000L);
 
         assertEquals(32, service.resolveEffectiveTargetDuration(task, 29D));
+        assertEquals(33, service.resolveEffectiveTargetDuration(task, 30D));
     }
 
     @Test
@@ -282,6 +285,16 @@ class DefaultTkGenerationPipelineServiceTest {
         String sqlSet = wrapperCaptor.getValue().getSqlSet();
         assertTrue(sqlSet.contains("fail_code"));
         assertTrue(sqlSet.contains("fail_reason"));
+    }
+
+    @Test
+    void nativeOpeningDoesNotMapMissingTimelineToDedicatedFailureCode() {
+        DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
+
+        String failCode = ReflectionTestUtils.invokeMethod(service, "resolveFailCode",
+                new IllegalStateException("原生开头模式缺少可用的分段时间轴"));
+
+        assertEquals("PIPELINE_INTERRUPTED", failCode);
     }
 
     private byte[] oneSecondSilentWav() throws IOException {

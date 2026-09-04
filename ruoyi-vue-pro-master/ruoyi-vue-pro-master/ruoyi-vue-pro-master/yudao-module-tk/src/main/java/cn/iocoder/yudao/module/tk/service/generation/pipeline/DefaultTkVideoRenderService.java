@@ -840,7 +840,10 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         if (task.getOpeningDurationMs() != null && task.getOpeningDurationMs() > 0L) {
             return task.getOpeningDurationMs() / 1000D;
         }
-        return Math.min(3D, TkVideoDurationSupport.normalize(task.getTargetDuration()));
+        if (StrUtil.isNotBlank(task.getOpeningVideoUrl())) {
+            throw new IllegalStateException("无法识别黄金开头视频时长，请检查视频文件或链接后重试");
+        }
+        return 0D;
     }
 
     private void runCommand(List<String> command) throws Exception {

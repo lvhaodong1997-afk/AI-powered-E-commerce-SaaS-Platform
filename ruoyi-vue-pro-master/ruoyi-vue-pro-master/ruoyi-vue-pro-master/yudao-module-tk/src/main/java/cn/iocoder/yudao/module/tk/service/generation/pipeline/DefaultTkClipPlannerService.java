@@ -872,10 +872,13 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
     }
 
     private double nativeOpeningDurationSeconds(TkGenerationTaskDO task) {
-        if (task != null && task.getOpeningDurationMs() != null && task.getOpeningDurationMs() > 0L) {
+        if (!hasOpeningVideo(task)) {
+            return 0D;
+        }
+        if (task.getOpeningDurationMs() != null && task.getOpeningDurationMs() > 0L) {
             return task.getOpeningDurationMs() / 1000D;
         }
-        return OPENING_SECONDS;
+        throw new IllegalStateException("无法识别黄金开头视频时长，请检查视频文件或链接后重试");
     }
 
     private int resolveNativeBodyTargetDuration(TkGenerationTaskDO task, int targetDuration) {
@@ -883,9 +886,7 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
     }
 
     private TkClipPlanItem buildNativeOpeningPlanItem(int orderNo, TkGenerationTaskDO task, int targetDuration) {
-        long durationMillis = task.getOpeningDurationMs() != null && task.getOpeningDurationMs() > 0L
-                ? task.getOpeningDurationMs()
-                : Math.round(Math.min(OPENING_SECONDS, targetDuration) * 1000D);
+        long durationMillis = Math.max(1L, Math.round(nativeOpeningDurationSeconds(task) * 1000D));
         TkClipPlanItem item = new TkClipPlanItem(orderNo, "OPENING", null, task.getOpeningVideoName(),
                 task.getOpeningVideoUrl(), 0, ceilSeconds(durationMillis),
                 "原生保留黄金开头，后续配音和系统字幕从开头之后开始",

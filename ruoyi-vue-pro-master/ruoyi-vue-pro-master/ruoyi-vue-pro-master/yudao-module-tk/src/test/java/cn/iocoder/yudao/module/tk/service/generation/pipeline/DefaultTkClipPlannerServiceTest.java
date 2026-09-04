@@ -130,6 +130,29 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
+    void nativeOpeningRequiresMeasuredDurationBeforePlanning() {
+        DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        TkMaterialVideoMapper materialVideoMapper = mock(TkMaterialVideoMapper.class);
+        ReflectionTestUtils.setField(service, "materialVideoMapper", materialVideoMapper);
+        when(materialVideoMapper.selectListByLibraryId(10L)).thenReturn(Arrays.asList(
+                material(1L, 30L, "GENERAL")
+        ));
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .libraryId(10L)
+                .targetDuration(30)
+                .openingProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .openingVideoUrl("https://example.com/opening.mp4")
+                .generationRouteConfig("{\"clipPlanMode\":\"FULL_POOL_RANDOM\"}")
+                .build();
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.plan(task, "body script", 30));
+
+        assertTrue(error.getMessage().contains("开头视频时长"));
+    }
+
+    @Test
     void planLeadGenerationKeepsEveryMaterialUniqueWhenTargetDurationIsLongerThanLibrary() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         ReflectionTestUtils.setField(service, "random", new FixedRandom(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));

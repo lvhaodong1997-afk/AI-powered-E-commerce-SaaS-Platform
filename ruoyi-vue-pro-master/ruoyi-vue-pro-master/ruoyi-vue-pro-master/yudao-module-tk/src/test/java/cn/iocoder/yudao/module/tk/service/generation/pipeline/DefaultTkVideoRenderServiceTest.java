@@ -10,6 +10,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -222,7 +223,7 @@ class DefaultTkVideoRenderServiceTest {
     }
 
     @Test
-    void nativeSubtitleTimelineUsesBodyScriptAndStartsAfterOpening() {
+    void nativeSubtitleTimelineUsesCompleteScriptAndStartsAfterOpening() {
         DefaultTkVideoRenderService service = new DefaultTkVideoRenderService();
         TkSubtitleTimelineService timelineService = mock(TkSubtitleTimelineService.class);
         ReflectionTestUtils.setField(service, "subtitleTimelineService", timelineService);
@@ -239,14 +240,27 @@ class DefaultTkVideoRenderServiceTest {
                 null, 0, 0, Collections.emptyList());
         TkSubtitleTimeline timeline = new TkSubtitleTimeline("en-US", 1D,
                 Collections.singletonList(segment));
-        when(timelineService.buildTimeline(task, "Body line", audioFile, Collections.emptyList()))
+        when(timelineService.buildTimeline(task, "Hook line Body line", audioFile, Collections.emptyList()))
                 .thenReturn(timeline);
 
         TkSubtitleTimeline actual = service.buildSubtitleTimeline(task, audioFile, Collections.emptyList());
 
         assertEquals(3.2D, actual.getSegments().get(0).getStart(), 0.001D);
         assertEquals(4.2D, actual.getSegments().get(0).getEnd(), 0.001D);
-        verify(timelineService).buildTimeline(task, "Body line", audioFile, Collections.emptyList());
+        verify(timelineService).buildTimeline(task, "Hook line Body line", audioFile, Collections.emptyList());
+    }
+
+    @Test
+    void nativeRenderRequiresMeasuredOpeningDuration() {
+        DefaultTkVideoRenderService service = new DefaultTkVideoRenderService();
+        TkGenerationTaskDO task = new TkGenerationTaskDO()
+                .setOpeningProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .setOpeningVideoUrl("https://example.com/opening.mp4");
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> ReflectionTestUtils.invokeMethod(service, "nativeOpeningDurationSeconds", task));
+
+        assertTrue(error.getMessage().contains("开头视频时长"));
     }
 
     @Test

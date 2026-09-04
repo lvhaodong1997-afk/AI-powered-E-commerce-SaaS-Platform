@@ -389,6 +389,37 @@ class TkGenerationPrecheckServiceImplTest {
         assertTrue(warning.getActionHint().contains("补充更贴近目标时长"));
     }
 
+    @Test
+    void precheckAllowsNativeOpeningWithoutScriptTimelineSource() {
+        TkGenerationPrecheckServiceImpl service = createService(Arrays.asList(
+                material(1L, 4L, "PRODUCT_SHOW", "S3_REVEAL"),
+                material(2L, 8L, "PRODUCT_SHOW", "S4_DEMO"),
+                material(3L, 5L, "RESULT_EFFECT", "S5_PROOF")
+        ));
+        TkGenerationTaskCreateReqVO reqVO = createRequest(15);
+        reqVO.setOpeningProcessMode("NATIVE");
+        reqVO.setOpeningVideoUrl("https://example.com/opening.mp4");
+        reqVO.setScriptOptionId(1579L);
+
+        TkGenerationPrecheckRespVO result = service.precheck(reqVO);
+
+        assertTrue(result.getPassed());
+        assertTrue(result.getErrors().stream()
+                .noneMatch(issue -> "NATIVE_OPENING_TIMELINE_MISSING".equals(issue.getCode())));
+    }
+
+    @Test
+    void nativePrecheckDoesNotAssumeUploadedOpeningIsThreeSeconds() {
+        TkGenerationPrecheckServiceImpl service = createService(Collections.emptyList());
+        TkGenerationTaskCreateReqVO reqVO = createRequest(10);
+        reqVO.setOpeningProcessMode("NATIVE");
+
+        Integer bodyTargetDuration = ReflectionTestUtils.invokeMethod(service,
+                "resolveFullPoolRandomTargetDuration", reqVO, 10);
+
+        assertEquals(10, bodyTargetDuration);
+    }
+
     private TkGenerationPrecheckServiceImpl createService(java.util.List<TkMaterialVideoDO> materials) {
         TkGenerationPrecheckServiceImpl service = new TkGenerationPrecheckServiceImpl();
         TkMaterialVideoMapper materialVideoMapper = mock(TkMaterialVideoMapper.class);

@@ -1856,7 +1856,7 @@ const copy = computed(() =>
         openingModeNative: 'Keep original (recommended)',
         openingModeStandard: 'Process as material',
         openingModeNativeHint:
-          'Keep the original video, audio, and embedded captions. AI voiceover and system subtitles start after the opening ends.',
+          'Keep the original video, audio, and embedded captions. The complete script voiceover and system subtitles start after the opening ends.',
         openingModeStandardHint:
           'Use the opening as regular material. AI voiceover and system subtitles still use the complete script.',
         openingNativeDurationHint:
@@ -2135,7 +2135,7 @@ const copy = computed(() =>
         openingProcessModeLabel: '开头处理方式',
         openingModeNative: '保留原生（推荐）',
         openingModeStandard: '按普通素材处理',
-        openingModeNativeHint: '保留原画面、原声和视频内字幕；AI 配音和系统字幕从开头结束后开始。',
+        openingModeNativeHint: '保留原画面、原声和视频内字幕；完整原始文案的 AI 配音和系统字幕从开头视频结束后开始。',
         openingModeStandardHint: '按普通开头素材处理；AI 配音和系统字幕仍使用完整文案。',
         openingNativeDurationHint: '开头视频时长不限于 3 秒，系统会自动识别并完整使用实际时长。',
         openingFullVideoHint: '该视频会作为完整素材使用，超过黄金3秒环节目标时长时按环节压缩。',
