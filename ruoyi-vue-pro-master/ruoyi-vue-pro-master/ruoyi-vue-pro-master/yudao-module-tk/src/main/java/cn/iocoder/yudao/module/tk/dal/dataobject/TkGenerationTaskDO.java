@@ -75,6 +75,10 @@ public class TkGenerationTaskDO extends TenantBaseDO {
 
     private String openingVideoName;
 
+    private String openingProcessMode;
+
+    private Long openingDurationMs;
+
     private Integer openingClipStartSecond;
 
     private Integer openingClipEndSecond;

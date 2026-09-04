@@ -27,6 +27,11 @@ public class TkOpenVideoTranscriptExtractRespVO {
     private String transcriptText;
     private List<Map<String, Object>> segments;
     private List<Map<String, Object>> words;
+    private String verifiedTranscriptText;
+    private List<Map<String, Object>> verifiedSegments;
+    private String textVerifyStatus;
+    private String textVerifyFailReason;
+    private String textVerifyModel;
     private String asrProvider;
     private String asrModel;
     private LocalDateTime createTime;

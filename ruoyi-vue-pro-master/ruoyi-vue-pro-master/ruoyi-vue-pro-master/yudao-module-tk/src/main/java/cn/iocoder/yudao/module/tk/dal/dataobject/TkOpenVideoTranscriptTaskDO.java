@@ -35,6 +35,12 @@ public class TkOpenVideoTranscriptTaskDO extends TenantBaseDO {
     private String transcriptText;
     private String segmentsJson;
     private String wordsJson;
+    private String verifiedTranscriptText;
+    private String verifiedSegmentsJson;
+    private String textVerifyStatus;
+    private String textVerifyFailReason;
+    private String textVerifyModel;
+    private String textVerifyPromptVersion;
     private String asrProvider;
     private String asrModel;
     private String rawAsrResult;

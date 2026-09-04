@@ -172,7 +172,7 @@ public class TkGenerationOutputStorageServiceImpl implements TkGenerationOutputS
             return publicUrl;
         }
         long expires = Instant.now().getEpochSecond() + expireSeconds;
-        String contentDisposition = "attachment; filename=\"" + normalizeFileName(downloadFileName) + "\"";
+        String contentDisposition = buildContentDisposition(downloadFileName);
         String dispositionQuery = "response-content-disposition=" + contentDisposition;
         String resource = "/" + oss.getBucket() + "/" + objectKey + "?" + dispositionQuery;
         String signature = TkOssRestSigner.sign("GET", "", "", String.valueOf(expires), resource, oss.getAccessKeySecret());
@@ -180,6 +180,22 @@ public class TkGenerationOutputStorageServiceImpl implements TkGenerationOutputS
                 + "&Expires=" + expires
                 + "&response-content-disposition=" + encodeQuery(contentDisposition)
                 + "&Signature=" + encodeQuery(signature);
+    }
+
+    static String buildContentDisposition(String downloadFileName) {
+        String normalizedFileName = normalizeFileName(downloadFileName);
+        return "attachment; filename=\"" + buildAsciiDownloadFileName(normalizedFileName)
+                + "\"; filename*=UTF-8''" + encodeQuery(normalizedFileName);
+    }
+
+    private static String buildAsciiDownloadFileName(String fileName) {
+        String extension = FileUtil.extName(fileName).replaceAll("[^A-Za-z0-9]+", "");
+        String stem = FileUtil.mainName(fileName)
+                .replaceAll("[^A-Za-z0-9_-]+", "-")
+                .replaceAll("-+", "-")
+                .replaceAll("^[-_]+|[-_]+$", "");
+        stem = StrUtil.blankToDefault(stem, "download");
+        return StrUtil.isBlank(extension) ? stem : stem + "." + extension;
     }
 
     private String buildDownloadFileNameWithDailyNo(TkGenerationTaskDO task, String fileName) {

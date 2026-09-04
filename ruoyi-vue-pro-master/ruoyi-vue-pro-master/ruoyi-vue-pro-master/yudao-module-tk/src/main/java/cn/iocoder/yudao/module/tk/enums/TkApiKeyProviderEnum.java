@@ -9,7 +9,8 @@ public enum TkApiKeyProviderEnum {
 
     GEMINI("GEMINI", "Gemini"),
     DASHSCOPE("DASHSCOPE", "DashScope"),
-    MIMO("MIMO", "MiMo");
+    MIMO("MIMO", "MiMo"),
+    DEEPSEEK("DEEPSEEK", "DeepSeek");
 
     private final String provider;
     private final String name;

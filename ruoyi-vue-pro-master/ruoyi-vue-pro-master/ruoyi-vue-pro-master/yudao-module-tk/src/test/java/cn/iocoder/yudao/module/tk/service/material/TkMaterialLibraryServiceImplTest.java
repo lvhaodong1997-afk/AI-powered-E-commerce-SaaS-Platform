@@ -46,10 +46,10 @@ class TkMaterialLibraryServiceImplTest {
     }
 
     private TkMaterialLibraryServiceImpl createService(TkMaterialLibraryMapper libraryMapper) {
-        TkMaterialLibraryServiceImpl service = new TkMaterialLibraryServiceImpl();
         TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
         when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(10L, 166L, "TENANT_ADMIN", null));
         when(dataScopeService.getWritableCompanyId(eq(null))).thenReturn(200L);
+        TkMaterialLibraryServiceImpl service = new TkMaterialLibraryServiceImpl();
         ReflectionTestUtils.setField(service, "libraryMapper", libraryMapper);
         ReflectionTestUtils.setField(service, "videoMapper", mock(TkMaterialVideoMapper.class));
         ReflectionTestUtils.setField(service, "dataScopeService", dataScopeService);

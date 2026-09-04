@@ -177,7 +177,7 @@ VALUES
   (1, 'TIKTOK', 'client-key', '', 'TikTok Login Kit / Content Posting API Client Key', 0),
   (1, 'TIKTOK', 'client-secret', '', 'TikTok Login Kit / Content Posting API Client Secret', 0),
   (1, 'TIKTOK', 'redirect-uri', '', 'TikTok 瀹樻柟鎺堟潈鍥炶皟鍦板潃锛岄渶瑕佷笌寮€鍙戣€呭悗鍙颁竴鑷?, 0),
-  (1, 'TIKTOK', 'default-scopes', 'user.info.basic,video.publish,video.upload', '榛樿鎺堟潈鑼冨洿', 0),
+  (1, 'TIKTOK', 'default-scopes', 'user.info.basic,video.publish,video.upload,video.list', '榛樿鎺堟潈鑼冨洿', 0),
   (1, 'TIKTOK', 'default-post-mode', 'DIRECT_POST', '榛樿鍙戝竷妯″紡锛欴IRECT_POST/UPLOAD_TO_INBOX', 0),
   (1, 'TIKTOK', 'verified-pull-domain', '', 'TikTok 宸查獙璇佺殑瑙嗛鎷夊彇鍩熷悕锛涗负绌烘椂浼樺厛浣跨敤鏂囦欢涓婁紶', 0)
 ON DUPLICATE KEY UPDATE `remark` = VALUES(`remark`);

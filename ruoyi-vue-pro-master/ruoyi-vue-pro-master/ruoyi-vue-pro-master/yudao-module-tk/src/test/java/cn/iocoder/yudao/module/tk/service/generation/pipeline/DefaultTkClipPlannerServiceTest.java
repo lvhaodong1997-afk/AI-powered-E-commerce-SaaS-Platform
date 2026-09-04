@@ -65,6 +65,71 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
+    void nativeOpeningIsPinnedAtZeroAndBodyPlanStartsAfterItsActualDuration() {
+        DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
+        ReflectionTestUtils.setField(service, "random", new FixedRandom(0, 0, 0, 0, 0, 0, 0, 0));
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        TkMaterialVideoMapper materialVideoMapper = mock(TkMaterialVideoMapper.class);
+        TkGenerationTaskMapper taskMapper = mock(TkGenerationTaskMapper.class);
+        ReflectionTestUtils.setField(service, "materialVideoMapper", materialVideoMapper);
+        ReflectionTestUtils.setField(service, "taskMapper", taskMapper);
+        when(materialVideoMapper.selectListByLibraryId(10L)).thenReturn(Arrays.asList(
+                material(1L, 2L, "ATTENTION", "S1_HOOK"),
+                material(2L, 6L, "ATTENTION", "S2_PAIN"),
+                material(3L, 8L, "PRODUCT_SHOW", "S3_REVEAL"),
+                material(4L, 10L, "PRODUCT_SHOW", "S4_DEMO"),
+                material(5L, 8L, "RESULT_EFFECT", "S5_PROOF")
+        ));
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .id(190L)
+                .libraryId(10L)
+                .materialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION)
+                .targetDuration(30)
+                .openingProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .openingVideoUrl("https://example.com/opening.mp4")
+                .openingDurationMs(3200L)
+                .build();
+
+        List<TkClipPlanItem> plan = service.plan(task, "body script", 32);
+
+        assertEquals("OPENING", plan.get(0).getSourceType());
+        assertEquals(0, plan.get(0).getStartSecond());
+        assertEquals(3200L, plan.get(0).getDurationMillis());
+        assertTrue(plan.stream().skip(1).noneMatch(item -> "S1_HOOK".equals(item.getSection())));
+        assertTrue(plan.stream().skip(1).mapToInt(TkClipPlanItem::getDurationSecond).sum() >= 27);
+    }
+
+    @Test
+    void nativeOpeningWithSubsecondBodyDoesNotCreateNegativeDurationSections() {
+        DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
+        ReflectionTestUtils.setField(service, "random", new FixedRandom(0, 0, 0, 0, 0, 0));
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        TkMaterialVideoMapper materialVideoMapper = mock(TkMaterialVideoMapper.class);
+        TkGenerationTaskMapper taskMapper = mock(TkGenerationTaskMapper.class);
+        ReflectionTestUtils.setField(service, "materialVideoMapper", materialVideoMapper);
+        ReflectionTestUtils.setField(service, "taskMapper", taskMapper);
+        when(materialVideoMapper.selectListByLibraryId(10L)).thenReturn(Arrays.asList(
+                material(1L, 2L, "ATTENTION", "S2_PAIN"),
+                material(2L, 2L, "PRODUCT_SHOW", "S3_REVEAL"),
+                material(3L, 2L, "PRODUCT_SHOW", "S4_DEMO"),
+                material(4L, 2L, "RESULT_EFFECT", "S5_PROOF")
+        ));
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .id(191L)
+                .libraryId(10L)
+                .targetDuration(8)
+                .openingProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .openingVideoUrl("https://example.com/opening.mp4")
+                .openingDurationMs(7_500L)
+                .build();
+
+        List<TkClipPlanItem> plan = service.plan(task, "body script", 8);
+
+        assertTrue(plan.stream().skip(1).allMatch(item -> item.getDurationSecond() > 0));
+        assertEquals(1, plan.stream().skip(1).count());
+    }
+
+    @Test
     void planLeadGenerationKeepsEveryMaterialUniqueWhenTargetDurationIsLongerThanLibrary() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         ReflectionTestUtils.setField(service, "random", new FixedRandom(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));

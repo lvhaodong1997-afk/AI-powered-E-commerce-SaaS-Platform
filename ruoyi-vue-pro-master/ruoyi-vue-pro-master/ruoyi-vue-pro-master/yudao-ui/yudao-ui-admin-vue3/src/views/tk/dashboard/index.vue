@@ -945,9 +945,30 @@
                       <Icon icon="ep:link" />
                     </template>
                   </el-input>
+                  <div v-if="createForm.openingVideoUrl || openingVideoFile" class="opening-process-mode">
+                    <label>{{ copy.openingProcessModeLabel }}</label>
+                    <el-segmented
+                      v-model="createForm.openingProcessMode"
+                      :options="openingProcessModeOptions"
+                      class="opening-process-mode-control"
+                    />
+                    <small class="field-hint">
+                      {{
+                        createForm.openingProcessMode === 'NATIVE'
+                          ? copy.openingModeNativeHint
+                          : copy.openingModeStandardHint
+                      }}
+                    </small>
+                  </div>
                   <div v-if="createForm.openingVideoUrl || openingVideoFile" class="opening-clip-range">
                     <small class="field-hint">
-                      {{ isFullPoolRandomMode ? copy.openingFullPoolRandomHint : copy.openingFullVideoHint }}
+                      {{
+                        createForm.openingProcessMode === 'NATIVE'
+                          ? copy.openingNativeDurationHint
+                          : isFullPoolRandomMode
+                            ? copy.openingFullPoolRandomHint
+                            : copy.openingFullVideoHint
+                      }}
                     </small>
                   </div>
                 </div>
@@ -1353,7 +1374,6 @@ import type {
   TkGenerationTaskStatusVO,
   TkGenerationTaskVO
 } from '@/api/tk/generation'
-import { TkMaterialApi } from '@/api/tk/material'
 import type { TkMaterialLibraryVO } from '@/api/tk/material'
 import { TkReferenceApi } from '@/api/tk/reference'
 import type { TkReferenceAnalysisVO, TkReferenceScriptOptionVO } from '@/api/tk/reference'
@@ -1424,6 +1444,7 @@ interface PrecheckFailureState {
 type MaterialPurpose = 'ECOMMERCE' | 'LEAD_GENERATION'
 type AnalysisProvider = 'GEMINI' | 'DASHSCOPE_VIDEO'
 type ClipPlanMode = 'SEGMENTED' | 'FULL_POOL_RANDOM'
+type OpeningProcessMode = 'NATIVE' | 'STANDARD'
 type ProductCategoryCode =
   | 'DEFAULT'
   | '01'
@@ -1818,7 +1839,7 @@ const copy = computed(() =>
         bgmUploadError: 'BGM upload failed',
         bgmPlayError: 'Failed to play BGM',
         bgmRequiredWarning: 'Select or upload a BGM track before generating.',
-        openingRequired: 'Opening hook material (optional)',
+        openingRequired: 'Opening hook video (optional)',
         openingDrawerHint: 'Expand only when you need a fixed opening hook.',
         openingNotConfigured: 'Not configured',
         openingUploaded: 'Local video selected',
@@ -1831,10 +1852,19 @@ const copy = computed(() =>
         or: 'or',
         inputVideoLink: 'Enter hook video link',
         videoLinkPlaceholder: 'Enter video link',
+        openingProcessModeLabel: 'Opening processing',
+        openingModeNative: 'Keep original (recommended)',
+        openingModeStandard: 'Process as material',
+        openingModeNativeHint:
+          'Keep the original video, audio, and embedded captions. AI voiceover and system subtitles start after the opening ends.',
+        openingModeStandardHint:
+          'Use the opening as regular material. AI voiceover and system subtitles still use the complete script.',
+        openingNativeDurationHint:
+          'Opening videos do not need to be exactly 3 seconds long. The system uses the detected duration.',
         openingFullVideoHint:
           'This video is used as a whole source. If it exceeds the hook duration, the hook section is compressed.',
         openingFullPoolRandomHint:
-          'In Random pool mode, this video is fixed as the first 3 seconds; later clips are selected randomly from the full material pool.',
+          'In Random pool mode, this video is placed first; later clips are selected randomly from the full material pool.',
         generateVideo: 'Generate mixed video',
         generateAudio: 'Generate audio',
         audioExportCost: '1 credit / generation',
@@ -2090,7 +2120,7 @@ const copy = computed(() =>
         bgmUploadError: 'BGM 上传失败',
         bgmPlayError: 'BGM 播放失败',
         bgmRequiredWarning: '已开启 BGM，请先选择或上传一首背景音乐',
-        openingRequired: '开头黄金3秒素材（可选）',
+        openingRequired: '黄金开头视频（可选）',
         openingDrawerHint: '需要固定开头素材时再展开配置。',
         openingNotConfigured: '未配置',
         openingUploaded: '已选择本地视频',
@@ -2098,12 +2128,18 @@ const copy = computed(() =>
         subtitleEnabledSummary: '已开启',
         subtitleDisabledSummary: '已关闭',
         uploadLocalVideo: '上传本地视频',
-        uploadHint: '不上传则从 S1_HOOK 黄金3秒素材池随机使用完整视频，支持MP4/MOV，最大100MB',
+        uploadHint: '不上传则从 S1_HOOK 黄金开头素材池随机使用完整视频，支持MP4/MOV，最大100MB',
         or: '或',
         inputVideoLink: '输入开头视频链接',
         videoLinkPlaceholder: '请输入视频链接',
+        openingProcessModeLabel: '开头处理方式',
+        openingModeNative: '保留原生（推荐）',
+        openingModeStandard: '按普通素材处理',
+        openingModeNativeHint: '保留原画面、原声和视频内字幕；AI 配音和系统字幕从开头结束后开始。',
+        openingModeStandardHint: '按普通开头素材处理；AI 配音和系统字幕仍使用完整文案。',
+        openingNativeDurationHint: '开头视频时长不限于 3 秒，系统会自动识别并完整使用实际时长。',
         openingFullVideoHint: '该视频会作为完整素材使用，超过黄金3秒环节目标时长时按环节压缩。',
-        openingFullPoolRandomHint: '全素材随机拼接时，该视频固定作为前3秒片头，后续从全部素材中随机拼接。',
+        openingFullPoolRandomHint: '全素材随机拼接时，该视频固定放在最前面，后续从全部素材中随机拼接。',
         generateVideo: '生成混剪视频',
         generateAudio: '生成音频',
         audioExportCost: '1 积分 / 次',
@@ -2211,6 +2247,10 @@ const materialPurposeOptions = computed(() => [
 const clipPlanModeOptions = computed(() => [
   { label: copy.value.clipPlanModeSegmented, value: CLIP_PLAN_MODE_SEGMENTED },
   { label: copy.value.clipPlanModeFullPoolRandom, value: CLIP_PLAN_MODE_FULL_POOL_RANDOM }
+])
+const openingProcessModeOptions = computed(() => [
+  { label: copy.value.openingModeNative, value: 'NATIVE' as OpeningProcessMode },
+  { label: copy.value.openingModeStandard, value: 'STANDARD' as OpeningProcessMode }
 ])
 const analysisProviderOptions = computed(() => [
   { label: copy.value.geminiAnalysis, value: ANALYSIS_PROVIDER_GEMINI }
@@ -2602,6 +2642,7 @@ const createForm = reactive<{
   analysisProvider: AnalysisProvider
   referenceDuration?: number
   openingVideoUrl: string
+  openingProcessMode: OpeningProcessMode
   openingClipStartSecond: number
   openingClipEndSecond: number
   subtitleEnabled: boolean
@@ -2635,6 +2676,7 @@ const createForm = reactive<{
   analysisProvider: ANALYSIS_PROVIDER_GEMINI,
   referenceDuration: DEFAULT_TARGET_DURATION,
   openingVideoUrl: '',
+  openingProcessMode: 'NATIVE',
   openingClipStartSecond: DEFAULT_OPENING_CLIP_START,
   openingClipEndSecond: DEFAULT_OPENING_CLIP_START + DEFAULT_OPENING_CLIP_DURATION,
   subtitleEnabled: true,
@@ -2800,11 +2842,15 @@ const voicePreviewReady = computed(() => {
   return voiceConfigReady.value
 })
 const openingConfigSummary = computed(() => {
+  const modeLabel =
+    createForm.openingProcessMode === 'NATIVE'
+      ? copy.value.openingModeNative
+      : copy.value.openingModeStandard
   if (openingVideoFile.value) {
-    return copy.value.openingUploaded
+    return `${copy.value.openingUploaded} · ${modeLabel}`
   }
   if (createForm.openingVideoUrl.trim()) {
-    return copy.value.openingLinked
+    return `${copy.value.openingLinked} · ${modeLabel}`
   }
   return copy.value.openingNotConfigured
 })
@@ -3429,6 +3475,9 @@ const createGenerationPayload = (script: DashboardScriptOption): TkGenerationTas
   } else if (createForm.openingVideoUrl) {
     payload.openingVideoUrl = createForm.openingVideoUrl
     payload.openingVideoName = copy.value.remoteHookVideo
+  }
+  if (openingVideoFile.value || createForm.openingVideoUrl) {
+    payload.openingProcessMode = createForm.openingProcessMode
   }
   return payload
 }
@@ -4182,6 +4231,7 @@ async function hydrateReplayFromAnalysis(analysis: TkReferenceAnalysisVO) {
     createForm.productCategoryCode = DEFAULT_PRODUCT_CATEGORY_CODE
     createForm.analysisProvider = normalizeAnalysisProvider(analysis.analysisProvider)
     createForm.openingVideoUrl = ''
+    createForm.openingProcessMode = 'NATIVE'
     createForm.openingClipStartSecond = DEFAULT_OPENING_CLIP_START
     createForm.openingClipEndSecond = DEFAULT_OPENING_CLIP_START + DEFAULT_OPENING_CLIP_DURATION
     openingVideoFile.value = undefined
@@ -4230,6 +4280,7 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     createForm.referenceDuration =
       task.referenceDuration || task.targetDuration || DEFAULT_TARGET_DURATION
     createForm.openingVideoUrl = task.openingVideoUrl || ''
+    createForm.openingProcessMode = task.openingProcessMode || 'STANDARD'
     createForm.openingClipStartSecond = task.openingClipStartSecond ?? DEFAULT_OPENING_CLIP_START
     createForm.openingClipEndSecond =
       task.openingClipEndSecond ?? createForm.openingClipStartSecond + DEFAULT_OPENING_CLIP_DURATION
@@ -4299,27 +4350,10 @@ const getData = async () => {
   summary.value = data || {}
   libraries.value = data?.libraries || []
   recentTasks.value = data?.recentTasks || []
-  await ensureCurrentPurposeLibraries()
   if (!createForm.libraryId && currentPurposeLibraries.value.length) {
     createForm.libraryId = currentPurposeLibraries.value[0].id
   }
   await hydrateReplayPayload()
-}
-
-const ensureCurrentPurposeLibraries = async () => {
-  if (currentPurposeLibraries.value.length) {
-    return
-  }
-  const page = await TkMaterialApi.getLibraryPage({
-    pageNo: 1,
-    pageSize: 10,
-    materialPurpose: createForm.materialPurpose
-  })
-  const loadedLibraries = (page.list || []) as TkMaterialLibraryVO[]
-  const otherPurposeLibraries = libraries.value.filter(
-    (item) => normalizeMaterialPurpose(item.materialPurpose) !== createForm.materialPurpose
-  )
-  libraries.value = [...otherPurposeLibraries, ...loadedLibraries]
 }
 
 const refreshCreditBalance = async () => {
@@ -4650,6 +4684,7 @@ const buildOpeningGenerationFormData = (script: DashboardScriptOption) => {
   formData.append('referenceDuration', String(getTargetDuration()))
   formData.append('promptText', resolvePromptTextForGeneration(script))
   formData.append('openingVideoName', openingVideoFile.value?.name || 'opening.mp4')
+  formData.append('openingProcessMode', createForm.openingProcessMode)
   appendBgmConfig(formData)
   appendSubtitleConfig(formData)
   if (openingVideoFile.value) {
@@ -4861,7 +4896,6 @@ watch(
     if (!currentPurposeLibraries.value.some((item) => item.id === createForm.libraryId)) {
       createForm.libraryId = undefined
     }
-    await ensureCurrentPurposeLibraries()
     if (!createForm.libraryId && currentPurposeLibraries.value.length) {
       createForm.libraryId = currentPurposeLibraries.value[0].id
     }
@@ -4908,6 +4942,9 @@ const handleOpeningVideoChange = (file: any) => {
 
 const handleOpeningVideoRemove = () => {
   openingVideoFile.value = undefined
+  if (!createForm.openingVideoUrl) {
+    createForm.openingProcessMode = 'NATIVE'
+  }
 }
 
 watch(
@@ -4955,7 +4992,8 @@ watch(
 watch(
   () => createForm.openingVideoUrl,
   (url) => {
-    if (!url) {
+    if (!url && !openingVideoFile.value) {
+      createForm.openingProcessMode = 'NATIVE'
       createForm.openingClipStartSecond = DEFAULT_OPENING_CLIP_START
       createForm.openingClipEndSecond = DEFAULT_OPENING_CLIP_START + DEFAULT_OPENING_CLIP_DURATION
     }
@@ -6640,7 +6678,39 @@ onUnmounted(() => {
 }
 
 .opening-clip-range {
+  margin-top: 8px;
+}
+
+.opening-process-mode {
+  display: grid;
   margin-top: 12px;
+  gap: 8px;
+}
+
+.opening-process-mode > label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.opening-process-mode-control {
+  width: 100%;
+}
+
+.opening-process-mode-control :deep(.el-segmented__group) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.opening-process-mode-control :deep(.el-segmented__item) {
+  padding-inline: 5px;
+}
+
+.opening-process-mode-control :deep(.el-segmented__item-label) {
+  overflow-wrap: normal;
+  line-height: 1.3;
+  word-break: normal;
+  white-space: normal;
 }
 
 .opening-clip-controls {

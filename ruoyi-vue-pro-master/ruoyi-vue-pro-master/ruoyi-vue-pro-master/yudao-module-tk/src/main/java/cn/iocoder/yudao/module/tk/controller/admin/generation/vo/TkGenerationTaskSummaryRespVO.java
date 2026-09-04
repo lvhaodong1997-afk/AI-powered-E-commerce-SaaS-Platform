@@ -30,6 +30,8 @@ public class TkGenerationTaskSummaryRespVO {
     private Boolean bgmEnabled;
     private Boolean subtitleEnabled;
     private String openingVideoName;
+    private String openingProcessMode;
+    private Long openingDurationMs;
     private Integer referenceDuration;
     private Integer targetDuration;
     private String status;

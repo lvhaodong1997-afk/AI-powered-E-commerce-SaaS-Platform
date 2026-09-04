@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -91,6 +92,32 @@ class TkTiktokApiClientTest {
         assertEquals(false, userInfo.isSuccess());
         assertEquals("access_token_invalid：token invalid，log_id=abc", userInfo.getFailReason());
         assertNull(userInfo.getDisplayName());
+    }
+
+    @Test
+    void parsePostStatusExtractsPublicPostIds() {
+        TkTiktokApiClient.PostStatusResult result = TkTiktokApiClient.parsePostStatusResult(JsonUtils.parseTree(
+                "{\"data\":{\"status\":\"PUBLISH_COMPLETE\","
+                        + "\"publicaly_available_post_id\":[1234123412345678567,1010102020203030303]},"
+                        + "\"error\":{\"code\":\"ok\"}}"
+        ));
+
+        assertTrue(result.isSuccess());
+        assertEquals("PUBLISH_COMPLETE", result.getStatus());
+        assertEquals(Arrays.asList("1234123412345678567", "1010102020203030303"),
+                result.getPublicPostIds());
+    }
+
+    @Test
+    void parseVideoQueryExtractsFirstAvailableShareUrl() {
+        TkTiktokApiClient.VideoQueryResult result = TkTiktokApiClient.parseVideoQueryResult(JsonUtils.parseTree(
+                "{\"data\":{\"videos\":["
+                        + "{\"id\":\"123\",\"share_url\":\"https://www.tiktok.com/@demo/video/123\"}]},"
+                        + "\"error\":{\"code\":\"ok\"}}"
+        ));
+
+        assertTrue(result.isSuccess());
+        assertEquals("https://www.tiktok.com/@demo/video/123", result.getShareUrl());
     }
 
     @Test

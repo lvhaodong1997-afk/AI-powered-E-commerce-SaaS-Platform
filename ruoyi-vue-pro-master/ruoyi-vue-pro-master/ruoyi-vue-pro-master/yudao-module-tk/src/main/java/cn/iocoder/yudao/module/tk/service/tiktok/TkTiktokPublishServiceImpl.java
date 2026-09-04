@@ -197,6 +197,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         detail.setStatus(STATUS_PENDING);
         detail.setTiktokStatus("RETRY_PENDING");
         detail.setPublishId(null);
+        detail.setPublishUrl(null);
+        detail.setPublishUrlRegisteredTime(null);
         detail.setFailReason(null);
         detail.setRetryCount(detail.getRetryCount() == null ? 1 : detail.getRetryCount() + 1);
         detail.setLastSyncTime(LocalDateTime.now());
@@ -549,6 +551,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             detail.setTiktokStatus(tiktokStatus);
             detail.setLastSyncTime(LocalDateTime.now());
             if (isTikTokPublishSuccess(tiktokStatus)) {
+                capturePublishUrl(detail, account.getId(), result);
                 detail.setStatus(STATUS_SUCCESS);
                 detail.setFailReason(null);
                 updateDetailClearingFailReason(detail);
@@ -563,6 +566,32 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 return;
             }
             failDetail(detail, "TikTok 状态同步失败：" + ex.getMessage());
+        }
+    }
+
+    private void capturePublishUrl(TkTiktokPublishDetailDO detail, Long accountId,
+                                   TkTiktokApiClient.PostStatusResult statusResult) {
+        if (StrUtil.isNotBlank(detail.getPublishUrl()) || CollUtil.isEmpty(statusResult.getPublicPostIds())) {
+            return;
+        }
+        List<String> publicPostIds = statusResult.getPublicPostIds().stream()
+                .filter(StrUtil::isNotBlank)
+                .limit(20)
+                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(publicPostIds)) {
+            return;
+        }
+        try {
+            TkTiktokApiClient.VideoQueryResult videoResult = queryVideoShareUrlWithRetry(accountId, publicPostIds);
+            if (videoResult.isSuccess() && StrUtil.isNotBlank(videoResult.getShareUrl())) {
+                detail.setPublishUrl(videoResult.getShareUrl());
+                detail.setPublishUrlRegisteredTime(LocalDateTime.now());
+                return;
+            }
+            log.warn("[capturePublishUrl][detailId({}) TikTok 公开视频链接获取失败：{}]",
+                    detail.getId(), videoResult.getFailReason());
+        } catch (Exception ex) {
+            log.warn("[capturePublishUrl][detailId({}) TikTok 公开视频链接获取异常]", detail.getId(), ex);
         }
     }
 
@@ -650,6 +679,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 .set(TkTiktokPublishDetailDO::getStatus, detail.getStatus())
                 .set(TkTiktokPublishDetailDO::getTiktokStatus, detail.getTiktokStatus())
                 .set(TkTiktokPublishDetailDO::getPublishId, detail.getPublishId())
+                .set(TkTiktokPublishDetailDO::getPublishUrl, detail.getPublishUrl())
+                .set(TkTiktokPublishDetailDO::getPublishUrlRegisteredTime, detail.getPublishUrlRegisteredTime())
                 .set(TkTiktokPublishDetailDO::getRetryCount, detail.getRetryCount())
                 .set(TkTiktokPublishDetailDO::getLastSyncTime, detail.getLastSyncTime())
                 .set(TkTiktokPublishDetailDO::getFailReason, null));
@@ -793,6 +824,15 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         TkTiktokApiClient.PostStatusResult result = apiClient.fetchPostStatus(accessToken, publishId);
         if (result.isAccessTokenInvalid()) {
             result = apiClient.fetchPostStatus(tokenService.forceRefreshAccessToken(accountId), publishId);
+        }
+        return result;
+    }
+
+    private TkTiktokApiClient.VideoQueryResult queryVideoShareUrlWithRetry(Long accountId, List<String> videoIds) {
+        String accessToken = tokenService.getValidAccessToken(accountId);
+        TkTiktokApiClient.VideoQueryResult result = apiClient.queryVideoShareUrl(accessToken, videoIds);
+        if (result.isAccessTokenInvalid()) {
+            result = apiClient.queryVideoShareUrl(tokenService.forceRefreshAccessToken(accountId), videoIds);
         }
         return result;
     }

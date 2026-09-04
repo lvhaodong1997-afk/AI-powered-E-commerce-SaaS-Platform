@@ -58,6 +58,7 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
     public List<TkClipPlanItem> plan(TkGenerationTaskDO task, String scriptText, Integer effectiveTargetDuration) {
         int requestedTargetDuration = TkVideoDurationSupport.normalize(task.getTargetDuration());
         int targetDuration = resolveEffectiveTargetDuration(requestedTargetDuration, effectiveTargetDuration);
+        boolean nativeOpening = hasNativeOpening(task);
         List<TkClipPlanItem> plan;
         if (TkGenerationRouteConfigSupport.isFullPoolRandom(task.getGenerationRouteConfig())) {
             plan = planFullPoolRandom(task, targetDuration);
@@ -68,17 +69,25 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         }
         plan = new ArrayList<>();
         int orderNo = 1;
-        List<SegmentSection> sections = resolveSections(task, targetDuration);
-        if (StrUtil.isNotBlank(task.getOpeningVideoUrl())) {
+        int bodyTargetDuration = nativeOpening
+                ? resolveNativeBodyTargetDuration(task, targetDuration) : targetDuration;
+        List<SegmentSection> sections = nativeOpening
+                ? resolveNativeBodySections(task, requestedTargetDuration, bodyTargetDuration)
+                : resolveSections(task, targetDuration);
+        if (hasOpeningVideo(task)) {
             SegmentSection openingSection = sections.isEmpty()
                     ? new SegmentSection(TkMaterialSegmentTypeEnum.S1_HOOK, 0, 0, "", "")
                     : sections.get(0);
-            int openingDuration = openingDuration(task, openingSection.targetDuration, targetDuration);
-            plan.add(new TkClipPlanItem(orderNo++, "OPENING", null, task.getOpeningVideoName(),
-                    task.getOpeningVideoUrl(), 0, openingDuration,
-                    StrUtil.format("开头视频完整使用，归入{}环节", openingSection.name()),
-                    openingSection.code(), openingSection.name(), openingSection.order(), null,
-                    openingSection.scriptLine, openingSection.visualDirection, openingSection.targetDuration));
+            if (nativeOpening) {
+                plan.add(buildNativeOpeningPlanItem(orderNo++, task, targetDuration));
+            } else {
+                int openingDuration = openingDuration(task, openingSection.targetDuration, targetDuration);
+                plan.add(new TkClipPlanItem(orderNo++, "OPENING", null, task.getOpeningVideoName(),
+                        task.getOpeningVideoUrl(), 0, openingDuration,
+                        StrUtil.format("开头视频完整使用，归入{}环节", openingSection.name()),
+                        openingSection.code(), openingSection.name(), openingSection.order(), null,
+                        openingSection.scriptLine, openingSection.visualDirection, openingSection.targetDuration));
+            }
         }
         List<TkMaterialVideoDO> materials = materialVideoMapper.selectListByLibraryId(task.getLibraryId());
         if (CollUtil.isEmpty(materials)) {
@@ -127,8 +136,12 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                 selectedDuration += duration;
             }
         }
-        if (planDuration(plan) < targetDuration) {
-            backfillWholeMaterials(plan, randomBackfillCandidates(materials), targetDuration, orderNo,
+        int planTargetDuration = nativeOpening
+                ? (int) Math.ceil(nativeOpeningDurationSeconds(task)) + bodyTargetDuration : targetDuration;
+        if (planDuration(plan) < planTargetDuration) {
+            backfillWholeMaterials(plan, nativeOpening
+                            ? randomBackfillCandidatesWithoutHook(materials)
+                            : randomBackfillCandidates(materials), planTargetDuration, orderNo,
                     "音频时长补足，完整追加{}秒素材，避免尾帧停留");
         }
         return normalizePrecisePlan(task, plan, targetDuration);
@@ -146,7 +159,12 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         List<TkClipPlanItem> plan = new ArrayList<>();
         int orderNo = 1;
         int randomTargetDuration = targetDuration;
-        if (StrUtil.isNotBlank(task.getOpeningVideoUrl())) {
+        boolean nativeOpening = hasNativeOpening(task);
+        if (hasOpeningVideo(task)) {
+            if (nativeOpening) {
+                plan.add(buildNativeOpeningPlanItem(orderNo++, task, targetDuration));
+                randomTargetDuration = resolveNativeBodyTargetDuration(task, targetDuration);
+            } else {
             int fixedOpeningDuration = openingDuration(task, 0, targetDuration);
             TkMaterialSegmentTypeEnum openingSegment = TkMaterialSegmentTypeEnum.S1_HOOK;
             plan.add(new TkClipPlanItem(orderNo++, "OPENING", null, task.getOpeningVideoName(),
@@ -154,6 +172,7 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                     "固定黄金3秒片头，后续从全素材池随机拼接",
                     openingSegment.getCode(), openingSegment.getName(), 1, null));
             randomTargetDuration = Math.max(0, targetDuration - fixedOpeningDuration);
+            }
         }
         if (randomTargetDuration <= 0) {
             return plan;
@@ -164,6 +183,7 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         }
         List<TkMaterialVideoDO> candidates = materials.stream()
                 .filter(this::isUsableRandomClip)
+                .filter(material -> !nativeOpening || resolveSegmentType(material) != TkMaterialSegmentTypeEnum.S1_HOOK)
                 .collect(Collectors.toCollection(ArrayList::new));
         if (candidates.isEmpty()) {
             throw new IllegalStateException("素材库没有可用于随机混剪的可用视频");
@@ -179,8 +199,10 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                     StrUtil.format("全素材池随机混剪，完整使用{}秒素材", duration),
                     null, null, null, null, null, null, randomTargetDuration));
         }
-        if (planDuration(plan) < targetDuration) {
-            backfillWholeMaterials(plan, randomBackfillCandidates(candidates), targetDuration, orderNo,
+        int planTargetDuration = nativeOpening
+                ? (int) Math.ceil(nativeOpeningDurationSeconds(task)) + randomTargetDuration : targetDuration;
+        if (planDuration(plan) < planTargetDuration) {
+            backfillWholeMaterials(plan, randomBackfillCandidates(candidates), planTargetDuration, orderNo,
                     "全素材池随机混剪，音频时长补足，完整追加{}秒素材");
         }
         return plan;
@@ -252,8 +274,17 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         Set<Long> recentlyUsedMaterialIds = resolveRecentlyUsedMaterialIds(task);
         List<TkClipPlanItem> plan = new ArrayList<>();
         int orderNo = 1;
+        boolean nativeOpening = hasNativeOpening(task);
+        int bodyTargetDuration = nativeOpening
+                ? resolveNativeBodyTargetDuration(task, targetDuration) : targetDuration;
+        if (nativeOpening) {
+            plan.add(buildNativeOpeningPlanItem(orderNo++, task, targetDuration));
+        }
         Set<Long> selectedMaterialIds = new HashSet<>();
         for (TkMaterialSegmentTypeEnum segment : TkMaterialSegmentTypeEnum.LEAD_GENERATION_SEGMENTS) {
+            if (nativeOpening && segment == TkMaterialSegmentTypeEnum.S1_HOOK) {
+                continue;
+            }
             TkMaterialVideoDO selected = prioritizedSectionCandidates(segment, materials, recentlyUsedMaterialIds).stream()
                     .filter(material -> materialDuration(material) > 0)
                     .filter(material -> material.getId() == null || !selectedMaterialIds.contains(material.getId()))
@@ -271,7 +302,14 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
             }
             orderNo++;
         }
-        backfillLeadGenerationPlan(plan, materials, recentlyUsedMaterialIds, orderNo, targetDuration);
+        int planTargetDuration = nativeOpening
+                ? (int) Math.ceil(nativeOpeningDurationSeconds(task)) + bodyTargetDuration : targetDuration;
+        backfillLeadGenerationPlan(plan, nativeOpening
+                        ? materials.stream()
+                        .filter(material -> resolveSegmentType(material) != TkMaterialSegmentTypeEnum.S1_HOOK)
+                        .collect(Collectors.toList())
+                        : materials,
+                recentlyUsedMaterialIds, orderNo, planTargetDuration);
         return plan;
     }
 
@@ -452,6 +490,12 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         return candidates;
     }
 
+    private List<TkMaterialVideoDO> randomBackfillCandidatesWithoutHook(List<TkMaterialVideoDO> materials) {
+        return randomBackfillCandidates(materials.stream()
+                .filter(material -> resolveSegmentType(material) != TkMaterialSegmentTypeEnum.S1_HOOK)
+                .collect(Collectors.toList()));
+    }
+
     private List<TkMaterialVideoDO> leadBackfillCandidates(List<TkMaterialVideoDO> materials,
                                                            Set<Long> recentlyUsedMaterialIds) {
         List<TkMaterialVideoDO> candidates = new ArrayList<>();
@@ -545,6 +589,44 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
             }
         }
         return allocateDefaultSections(targetDuration);
+    }
+
+    private List<SegmentSection> resolveNativeBodySections(TkGenerationTaskDO task, int requestedTargetDuration,
+                                                            int bodyTargetDuration) {
+        if (bodyTargetDuration <= 0) {
+            return new ArrayList<>();
+        }
+        List<SegmentSection> sourceSections = resolveSections(task, requestedTargetDuration).stream()
+                .filter(section -> section.segment != TkMaterialSegmentTypeEnum.S1_HOOK)
+                .collect(Collectors.toList());
+        if (sourceSections.isEmpty()) {
+            return allocateBodyDefaultSections(bodyTargetDuration);
+        }
+        if (sourceSections.size() > bodyTargetDuration) {
+            sourceSections = new ArrayList<>(sourceSections.subList(0, bodyTargetDuration));
+        }
+        int sourceTotal = sourceSections.stream().mapToInt(section -> section.targetDuration).sum();
+        if (sourceTotal <= 0) {
+            return allocateBodyDefaultSections(bodyTargetDuration);
+        }
+        int remaining = bodyTargetDuration;
+        List<SegmentSection> result = new ArrayList<>();
+        for (int index = 0; index < sourceSections.size(); index++) {
+            SegmentSection source = sourceSections.get(index);
+            int duration = index == sourceSections.size() - 1
+                    ? remaining
+                    : Math.max(1, Math.round(bodyTargetDuration * source.targetDuration / (float) sourceTotal));
+            remaining -= duration;
+            result.add(new SegmentSection(source.segment, duration, index + 1,
+                    source.scriptLine, source.visualDirection));
+        }
+        return result;
+    }
+
+    private List<SegmentSection> allocateBodyDefaultSections(int targetDuration) {
+        List<TkMaterialSegmentTypeEnum> segments = new ArrayList<>(TkMaterialSegmentTypeEnum.STORY_SEGMENTS);
+        segments.remove(TkMaterialSegmentTypeEnum.S1_HOOK);
+        return buildSections(segments, targetDuration);
     }
 
     private List<SegmentSection> resolveConfiguredSections(String segmentDurationConfig, int targetDuration) {
@@ -779,6 +861,39 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
             return sectionTargetDuration;
         }
         return Math.min(OPENING_SECONDS, targetDuration);
+    }
+
+    private boolean hasOpeningVideo(TkGenerationTaskDO task) {
+        return task != null && StrUtil.isNotBlank(task.getOpeningVideoUrl());
+    }
+
+    private boolean hasNativeOpening(TkGenerationTaskDO task) {
+        return hasOpeningVideo(task) && TkNativeOpeningSupport.isNativeMode(task.getOpeningProcessMode());
+    }
+
+    private double nativeOpeningDurationSeconds(TkGenerationTaskDO task) {
+        if (task != null && task.getOpeningDurationMs() != null && task.getOpeningDurationMs() > 0L) {
+            return task.getOpeningDurationMs() / 1000D;
+        }
+        return OPENING_SECONDS;
+    }
+
+    private int resolveNativeBodyTargetDuration(TkGenerationTaskDO task, int targetDuration) {
+        return Math.max(0, (int) Math.ceil(targetDuration - nativeOpeningDurationSeconds(task)));
+    }
+
+    private TkClipPlanItem buildNativeOpeningPlanItem(int orderNo, TkGenerationTaskDO task, int targetDuration) {
+        long durationMillis = task.getOpeningDurationMs() != null && task.getOpeningDurationMs() > 0L
+                ? task.getOpeningDurationMs()
+                : Math.round(Math.min(OPENING_SECONDS, targetDuration) * 1000D);
+        TkClipPlanItem item = new TkClipPlanItem(orderNo, "OPENING", null, task.getOpeningVideoName(),
+                task.getOpeningVideoUrl(), 0, ceilSeconds(durationMillis),
+                "原生保留黄金开头，后续配音和系统字幕从开头之后开始",
+                TkMaterialSegmentTypeEnum.S1_HOOK.getCode(), TkMaterialSegmentTypeEnum.S1_HOOK.getName(), 1, null);
+        item.setStartMillis(0L);
+        item.setDurationMillis(durationMillis);
+        item.setReuseMode("NATIVE");
+        return item;
     }
 
     private String buildReason(SegmentSection section, TkMaterialVideoDO material, String scriptText, int duration) {

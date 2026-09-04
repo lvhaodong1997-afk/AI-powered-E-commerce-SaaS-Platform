@@ -28,11 +28,13 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
 
 class DefaultTkGenerationPipelineServiceTest {
@@ -122,6 +124,129 @@ class DefaultTkGenerationPipelineServiceTest {
         assertEquals("https://example.com/audio.mp3", audioAsset.getAudioUrl());
         assertEquals("https://example.com/subtitle.ass", audioAsset.getSubtitleUrl());
         verifyNoInteractions(voiceSynthesisService);
+    }
+
+    @Test
+    void resolveAudioAssetUsesBodyScriptForNativeOpening() {
+        DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
+        TkVoiceSynthesisService voiceSynthesisService = mock(TkVoiceSynthesisService.class);
+        ReflectionTestUtils.setField(service, "voiceSynthesisService", voiceSynthesisService);
+        TkGenerationTaskDO task = new TkGenerationTaskDO()
+                .setVoiceEnabled(true)
+                .setOpeningProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .setSegmentTimeline("["
+                        + "{\"segmentLibrary\":\"S1_HOOK\",\"scriptLine\":\"Hook line\"},"
+                        + "{\"segmentLibrary\":\"S2_PAIN\",\"scriptLine\":\"Body line\"}"
+                        + "]");
+        TkAudioAsset expected = new TkAudioAsset("https://example.com/body.mp3", null);
+        when(voiceSynthesisService.synthesize(task, "Body line")).thenReturn(expected);
+
+        TkAudioAsset actual = service.resolveAudioAsset(task, "Hook line Body line");
+
+        assertEquals(expected, actual);
+        verify(voiceSynthesisService).synthesize(task, "Body line");
+    }
+
+    @Test
+    void resolveAudioAssetSkipsSynthesisWhenNativeOpeningHasNoBodyScript() {
+        DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
+        TkVoiceSynthesisService voiceSynthesisService = mock(TkVoiceSynthesisService.class);
+        ReflectionTestUtils.setField(service, "voiceSynthesisService", voiceSynthesisService);
+        TkGenerationTaskDO task = new TkGenerationTaskDO()
+                .setVoiceEnabled(true)
+                .setOpeningProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .setSegmentTimeline("["
+                        + "{\"segmentLibrary\":\"S1_HOOK\",\"scriptLine\":\"Hook line\"}"
+                        + "]");
+
+        TkAudioAsset actual = service.resolveAudioAsset(task, "Hook line");
+
+        assertNotNull(actual);
+        assertNull(actual.getAudioUrl());
+        verifyNoInteractions(voiceSynthesisService);
+    }
+
+    @Test
+    void effectiveTargetDurationIncludesNativeOpeningBeforeBodyAudio() {
+        DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        TkGenerationTaskDO task = new TkGenerationTaskDO()
+                .setTargetDuration(30)
+                .setOpeningProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .setOpeningDurationMs(3000L);
+
+        assertEquals(32, service.resolveEffectiveTargetDuration(task, 29D));
+    }
+
+    @Test
+    void nativeOpeningRejectsVoiceAudioWhenDurationCannotBeMeasured() {
+        DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getFfmpeg().setFfprobePath("missing-ffprobe-for-native-opening-test");
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        TkGenerationTaskDO task = new TkGenerationTaskDO()
+                .setTargetDuration(30)
+                .setOpeningProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .setOpeningDurationMs(3000L);
+        TkAudioAsset audioAsset = new TkAudioAsset("https://example.com/body.mp3", null);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> ReflectionTestUtils.invokeMethod(service, "resolveEffectiveTargetDuration", task, audioAsset));
+
+        assertTrue(error.getMessage().contains("AI 配音时长"));
+    }
+
+    @Test
+    void nativeOpeningRequiresMeasuredDurationBeforeResolvingFinalDuration() {
+        DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        TkGenerationTaskDO task = new TkGenerationTaskDO()
+                .setTargetDuration(30)
+                .setOpeningProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .setOpeningVideoUrl("https://example.com/opening.mp4");
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.resolveEffectiveTargetDuration(task, 29D));
+
+        assertTrue(error.getMessage().contains("开头视频时长"));
+    }
+
+    @Test
+    void nativeOpeningRejectsCompositionBeyondRenderLimitInsteadOfTruncatingVoice() {
+        DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        TkGenerationTaskDO task = new TkGenerationTaskDO()
+                .setTargetDuration(30)
+                .setOpeningProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .setOpeningVideoUrl("https://example.com/opening.mp4")
+                .setOpeningDurationMs(500_000L);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.resolveEffectiveTargetDuration(task, 1D));
+
+        assertTrue(error.getMessage().contains("系统上限"));
+    }
+
+    @Test
+    void resolveOpeningDurationUsesUploadedMediaActualDuration() throws Exception {
+        DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        byte[] wav = oneSecondSilentWav();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/opening.media", exchange -> {
+            exchange.sendResponseHeaders(200, wav.length);
+            exchange.getResponseBody().write(wav);
+            exchange.close();
+        });
+        server.start();
+        TkGenerationTaskDO task = new TkGenerationTaskDO()
+                .setOpeningProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .setOpeningVideoUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/opening.media");
+
+        Long durationMillis = service.resolveOpeningDurationMs(task);
+
+        assertNotNull(durationMillis);
+        assertTrue(durationMillis >= 900L && durationMillis <= 1100L);
     }
 
     @Test

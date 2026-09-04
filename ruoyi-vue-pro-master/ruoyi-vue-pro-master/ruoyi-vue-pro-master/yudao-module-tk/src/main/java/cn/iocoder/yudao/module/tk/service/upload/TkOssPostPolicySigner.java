@@ -24,23 +24,30 @@ public final class TkOssPostPolicySigner {
 
     public static Policy sign(String accessKeyId, String accessKeySecret, String keyPrefix, Long maxFileSize,
                               Integer expireSeconds, Clock clock) {
-        return sign(accessKeyId, accessKeySecret, "starts-with", keyPrefix, maxFileSize, expireSeconds, clock);
+        return sign(accessKeyId, accessKeySecret, "starts-with", keyPrefix, maxFileSize, expireSeconds, null, clock);
     }
 
     public static Policy signExact(String accessKeyId, String accessKeySecret, String objectKey, Long maxFileSize,
                                    Integer expireSeconds, Clock clock) {
-        return sign(accessKeyId, accessKeySecret, "eq", objectKey, maxFileSize, expireSeconds, clock);
+        return sign(accessKeyId, accessKeySecret, "eq", objectKey, maxFileSize, expireSeconds, null, clock);
+    }
+
+    public static Policy signExact(String accessKeyId, String accessKeySecret, String objectKey, Long maxFileSize,
+                                   Integer expireSeconds, String sha256, Clock clock) {
+        return sign(accessKeyId, accessKeySecret, "eq", objectKey, maxFileSize, expireSeconds, sha256, clock);
     }
 
     private static Policy sign(String accessKeyId, String accessKeySecret, String keyCondition,
-                               String keyValue, Long maxFileSize, Integer expireSeconds, Clock clock) {
+                               String keyValue, Long maxFileSize, Integer expireSeconds, String sha256, Clock clock) {
         long maxSize = maxFileSize == null || maxFileSize <= 0 ? 100L * 1024 * 1024 : maxFileSize;
         int seconds = expireSeconds == null || expireSeconds <= 0 ? 1800 : expireSeconds;
         Instant expiration = Instant.now(clock).plus(seconds, ChronoUnit.SECONDS);
         String expirationText = OSS_EXPIRATION_FORMATTER.format(expiration.truncatedTo(ChronoUnit.MILLIS));
+        String metadataCondition = sha256 == null || sha256.trim().isEmpty() ? ""
+                : ",[\"eq\",\"$x-oss-meta-sha256\",\"" + escapeJson(sha256.trim().toLowerCase()) + "\"]";
         String policyJson = "{\"expiration\":\"" + expirationText + "\",\"conditions\":["
                 + "[\"" + keyCondition + "\",\"$key\",\"" + escapeJson(keyValue) + "\"],"
-                + "[\"content-length-range\",1," + maxSize + "]]}";
+                + "[\"content-length-range\",1," + maxSize + "]" + metadataCondition + "]}";
         String policy = Base64.getEncoder().encodeToString(policyJson.getBytes(StandardCharsets.UTF_8));
         return new Policy(accessKeyId, policy, signature(policy, accessKeySecret), expirationText);
     }

@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,7 @@ public class TkTiktokApiClient {
     private static final String DIRECT_POST_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
     private static final String INBOX_POST_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/";
     private static final String STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
+    private static final String VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/?fields=id,share_url";
     private static final int UPLOAD_MAX_ATTEMPTS = 3;
     private static final int UPLOAD_TIMEOUT_MILLIS = 10 * 60 * 1000;
 
@@ -62,7 +64,8 @@ public class TkTiktokApiClient {
     }
 
     public String getDefaultScopes() {
-        return configService.getValueOrDefault(PROVIDER, "default-scopes", "user.info.basic,video.publish,video.upload");
+        return configService.getValueOrDefault(PROVIDER, "default-scopes",
+                "user.info.basic,video.publish,video.upload,video.list");
     }
 
     public String getDefaultPostMode() {
@@ -355,15 +358,61 @@ public class TkTiktokApiClient {
         return parsePostStatusResult(postJson(STATUS_URL, accessToken, payload));
     }
 
+    public VideoQueryResult queryVideoShareUrl(String accessToken, List<String> videoIds) {
+        if (StrUtil.isBlank(accessToken) || videoIds == null || videoIds.stream().noneMatch(StrUtil::isNotBlank)) {
+            return new VideoQueryResult(false, null, "账号缺少 Access Token 或公开视频编号", null);
+        }
+        Map<String, Object> filters = new HashMap<>();
+        filters.put("video_ids", videoIds);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("filters", filters);
+        return parseVideoQueryResult(postJson(VIDEO_QUERY_URL, accessToken, payload));
+    }
+
     static PostStatusResult parsePostStatusResult(JsonNode root) {
         JsonNode error = getErrorNode(root);
         if (!"ok".equals(error.path("code").asText())) {
             return new PostStatusResult(false, "FAILED", formatApiError(error, "TikTok 状态查询失败"),
-                    error.path("code").asText(null));
+                    error.path("code").asText(null), Collections.emptyList());
         }
         JsonNode data = root.path("data");
         return new PostStatusResult(true, data.path("status").asText("PROCESSING"),
-                data.path("fail_reason").asText(null), null);
+                data.path("fail_reason").asText(null), null,
+                parsePublicPostIds(data.path("publicaly_available_post_id")));
+    }
+
+    static VideoQueryResult parseVideoQueryResult(JsonNode root) {
+        JsonNode error = getErrorNode(root);
+        if (!"ok".equals(error.path("code").asText())) {
+            return new VideoQueryResult(false, null, formatApiError(error, "TikTok 视频详情查询失败"),
+                    error.path("code").asText(null));
+        }
+        for (JsonNode video : root.path("data").path("videos")) {
+            String shareUrl = video.path("share_url").asText(null);
+            if (StrUtil.isNotBlank(shareUrl)) {
+                return new VideoQueryResult(true, shareUrl, null, null);
+            }
+        }
+        return new VideoQueryResult(true, null, null, null);
+    }
+
+    private static List<String> parsePublicPostIds(JsonNode idsNode) {
+        List<String> ids = new ArrayList<>();
+        if (idsNode.isArray()) {
+            idsNode.forEach(idNode -> addPostId(ids, idNode));
+        } else {
+            addPostId(ids, idsNode);
+        }
+        return ids;
+    }
+
+    private static void addPostId(List<String> ids, JsonNode idNode) {
+        if (idNode.isIntegralNumber() || idNode.isTextual()) {
+            String id = StrUtil.trim(idNode.asText());
+            if (StrUtil.isNotBlank(id)) {
+                ids.add(id);
+            }
+        }
     }
 
     private JsonNode postForm(String url, Map<String, Object> form) {
@@ -483,6 +532,24 @@ public class TkTiktokApiClient {
     public static class PostStatusResult {
         private boolean success;
         private String status;
+        private String failReason;
+        private String errorCode;
+        private List<String> publicPostIds;
+
+        public PostStatusResult(boolean success, String status, String failReason, String errorCode) {
+            this(success, status, failReason, errorCode, Collections.emptyList());
+        }
+
+        public boolean isAccessTokenInvalid() {
+            return TkTiktokApiClient.isAccessTokenInvalid(errorCode);
+        }
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class VideoQueryResult {
+        private boolean success;
+        private String shareUrl;
         private String failReason;
         private String errorCode;
 

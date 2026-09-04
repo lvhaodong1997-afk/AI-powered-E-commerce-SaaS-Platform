@@ -104,7 +104,9 @@ class TkGenerationOutputStorageServiceImplTest {
         assertTrue(url.startsWith("https://oss.example.com/tk/5/9/generation-tasks/43/"));
         assertTrue(url.contains("/generated-43.mp4?OSSAccessKeyId=ak&Expires="));
         assertTrue(url.contains("&response-content-disposition="));
-        assertTrue(decodedUrl.contains("filename=\"2026-08-07-管理员-002.mp4\""));
+        assertTrue(decodedUrl.contains("filename=\"2026-08-07-002.mp4\""));
+        assertTrue(decodedUrl.contains(
+                "filename*=UTF-8''2026-08-07-%E7%AE%A1%E7%90%86%E5%91%98-002.mp4"));
         assertTrue(url.contains("&Signature="));
     }
 
@@ -139,7 +141,9 @@ class TkGenerationOutputStorageServiceImplTest {
         String decodedUrl = URLDecoder.decode(url, "UTF-8");
 
         assertTrue(url.startsWith("https://oss.example.com/tk/5/9/generation-tasks/45/20260808/generated-45.mp4?"));
-        assertTrue(decodedUrl.contains("filename=\"2026-08-08-王曦若-007.mp4\""));
+        assertTrue(decodedUrl.contains("filename=\"2026-08-08-007.mp4\""));
+        assertTrue(decodedUrl.contains(
+                "filename*=UTF-8''2026-08-08-%E7%8E%8B%E6%9B%A6%E8%8B%A5-007.mp4"));
         assertTrue(url.contains("&Signature="));
     }
 

@@ -18,7 +18,7 @@ import java.util.Arrays;
 import java.util.Locale;
 
 @Service
-public class TkOssObjectStorageService {
+public class TkOssObjectStorageService implements TkOssObjectStorageClient {
 
     private static final DateTimeFormatter OSS_GMT_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).withZone(ZoneOffset.UTC);
@@ -52,6 +52,35 @@ public class TkOssObjectStorageService {
             if (response.getStatus() != 204 && response.getStatus() != 404) {
                 throw new IllegalStateException(StrUtil.format("删除 OSS 文件失败，HTTP {}：{}",
                         response.getStatus(), objectKey));
+            }
+        }
+    }
+
+    public ObjectMetadata headObject(String objectKey) {
+        if (StrUtil.isBlank(objectKey)) {
+            throw new IllegalArgumentException("OSS object key is required");
+        }
+        TkGenerationProperties.Oss oss = getOss();
+        if (!isConfigured()) {
+            throw new IllegalStateException("OSS metadata configuration is incomplete");
+        }
+        String resource = "/" + oss.getBucket() + "/" + objectKey;
+        String date = OSS_GMT_DATE_FORMATTER.format(Instant.now());
+        String signature = TkOssRestSigner.sign("HEAD", "", "", date, resource, oss.getAccessKeySecret());
+        try (HttpResponse response = HttpRequest.head(uploadUrl(oss) + "/" + encodePath(objectKey))
+                .header("Date", date)
+                .header("Authorization", "OSS " + oss.getAccessKeyId() + ":" + signature)
+                .timeout(OSS_HTTP_TIMEOUT_MILLIS)
+                .execute()) {
+            if (response.getStatus() != 200) {
+                throw new IllegalStateException(StrUtil.format("读取 OSS 文件元数据失败，HTTP {}：{}",
+                        response.getStatus(), objectKey));
+            }
+            try {
+                return new ObjectMetadata(Long.parseLong(response.header("Content-Length")),
+                        response.header("x-oss-meta-sha256"));
+            } catch (NumberFormatException ex) {
+                throw new IllegalStateException("OSS 文件大小元数据无效：" + objectKey, ex);
             }
         }
     }
@@ -92,4 +121,5 @@ public class TkOssObjectStorageService {
             throw new IllegalStateException("OSS URL 编码失败", ex);
         }
     }
+
 }

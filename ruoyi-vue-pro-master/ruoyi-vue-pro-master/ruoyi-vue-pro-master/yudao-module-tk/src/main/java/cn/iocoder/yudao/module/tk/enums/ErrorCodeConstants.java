@@ -55,5 +55,6 @@ public interface ErrorCodeConstants {
     ErrorCode TK_REFERENCE_ANALYSIS_PROVIDER_INVALID = new ErrorCode(1_060_000_046, "分析引擎无效");
     ErrorCode TK_DASHSCOPE_VIDEO_CONFIG_MISSING = new ErrorCode(1_060_000_047, "百炼视频理解配置缺失：{}");
     ErrorCode TK_DASHSCOPE_VIDEO_CALL_FAILED = new ErrorCode(1_060_000_048, "百炼视频理解调用失败：{}");
+    ErrorCode TK_OPEN_COPYWRITING_AI_FAILED = new ErrorCode(1_060_000_051, "文案生成服务暂不可用，请稍后重试");
 
 }

@@ -16,8 +16,6 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.TkOpenVideoTranscriptTaskDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkOpenVideoTranscriptTaskMapper;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.framework.ffmpeg.TkFfmpegExecutableResolver;
-import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
-import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -45,10 +43,15 @@ import java.util.Locale;
 @Slf4j
 public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTranscriptExtractService {
 
+    private static final Long PUBLIC_TENANT_ID = 0L;
     private static final String STATUS_PENDING = "PENDING";
     private static final String STATUS_PROCESSING = "PROCESSING";
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
+    private static final String VERIFY_STATUS_PROCESSING = "PROCESSING";
+    private static final String VERIFY_STATUS_SUCCESS = "SUCCESS";
+    private static final String VERIFY_STATUS_FAILED = "FAILED";
+    private static final String VERIFY_STATUS_SKIPPED = "SKIPPED";
     private static final String ASR_PROVIDER = "FASTER_WHISPER";
     private static final int MAX_VIDEO_DURATION_SECONDS = 600;
 
@@ -65,12 +68,10 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
     @Resource
     private FileApi fileApi;
     @Resource
-    private TkDataScopeService dataScopeService;
+    private TkTranscriptTextVerifyService transcriptTextVerifyService;
 
     @Override
     public TkOpenVideoTranscriptExtractCreateRespVO createExtractTask(TkOpenVideoTranscriptExtractCreateReqVO reqVO) {
-        TkUserScope scope = dataScopeService.getCurrentScope();
-        Long tenantId = scope.getTenantId();
         TkOpenVideoTranscriptTaskDO task = TkOpenVideoTranscriptTaskDO.builder()
                 .sourceUrl(StrUtil.trim(reqVO.getSourceUrl()))
                 .sourceUrlHash(DigestUtil.sha256Hex(StrUtil.trim(reqVO.getSourceUrl())))
@@ -78,10 +79,10 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
                 .status(STATUS_PENDING)
                 .asrProvider(ASR_PROVIDER)
                 .build();
-        task.setTenantId(tenantId);
-        task.setCompanyId(scope.getCompanyId());
-        transcriptTaskMapper.insert(task);
-        executorService.execute(() -> TenantUtils.execute(tenantId, () -> runExtractTask(task.getId())));
+        task.setTenantId(PUBLIC_TENANT_ID);
+        task.setCompanyId(null);
+        TenantUtils.execute(PUBLIC_TENANT_ID, () -> transcriptTaskMapper.insert(task));
+        executorService.execute(() -> TenantUtils.execute(PUBLIC_TENANT_ID, () -> runExtractTask(task.getId())));
         return TkOpenVideoTranscriptExtractCreateRespVO.builder()
                 .taskId(task.getId())
                 .status(STATUS_PENDING)
@@ -90,35 +91,44 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
 
     @Override
     public TkOpenVideoTranscriptExtractRespVO getExtractTask(Long taskId) {
-        TkOpenVideoTranscriptTaskDO task = transcriptTaskMapper.selectById(taskId);
-        if (task == null) {
-            return null;
-        }
-        dataScopeService.validateReadable(task.getTenantId(), task.getCompanyId(), task.getCreator());
-        String normalizedSegmentsJson = TkOpenVideoTranscriptTextNormalizer
-                .normalizeJsonArray(task.getSegmentsJson());
-        String normalizedWordsJson = TkOpenVideoTranscriptTextNormalizer
-                .normalizeJsonArray(task.getWordsJson());
-        return TkOpenVideoTranscriptExtractRespVO.builder()
-                .taskId(task.getId())
-                .status(task.getStatus())
-                .failReason(task.getFailReason())
-                .sourceUrl(task.getSourceUrl())
-                .targetLanguage(task.getTargetLanguage())
-                .resolvedVideoUrl(task.getResolvedVideoUrl())
-                .coverUrl(task.getCoverUrl())
-                .videoDuration(task.getVideoDuration())
-                .resolution(task.getResolution())
-                .audioUrl(task.getAudioUrl())
-                .audioDuration(task.getAudioDuration())
-                .transcriptText(TkOpenVideoTranscriptTextNormalizer.normalizeText(task.getTranscriptText()))
-                .segments(parseJsonArray(normalizedSegmentsJson))
-                .words(parseJsonArray(normalizedWordsJson))
-                .asrProvider(task.getAsrProvider())
-                .asrModel(task.getAsrModel())
-                .createTime(task.getCreateTime())
-                .updateTime(task.getUpdateTime())
-                .build();
+        return TenantUtils.execute(PUBLIC_TENANT_ID, () -> {
+            TkOpenVideoTranscriptTaskDO task = transcriptTaskMapper.selectById(taskId);
+            if (task == null) {
+                return null;
+            }
+            String normalizedWordsJson = TkOpenVideoTranscriptTextNormalizer
+                    .normalizeJsonArray(task.getWordsJson());
+            String verifiedTranscriptText = StrUtil.blankToDefault(task.getVerifiedTranscriptText(),
+                    task.getTranscriptText());
+            String verifiedSegmentsJson = StrUtil.blankToDefault(task.getVerifiedSegmentsJson(),
+                    task.getSegmentsJson());
+            verifiedSegmentsJson = TkOpenVideoTranscriptTextNormalizer.normalizeJsonArray(verifiedSegmentsJson);
+            return TkOpenVideoTranscriptExtractRespVO.builder()
+                    .taskId(task.getId())
+                    .status(task.getStatus())
+                    .failReason(task.getFailReason())
+                    .sourceUrl(task.getSourceUrl())
+                    .targetLanguage(task.getTargetLanguage())
+                    .resolvedVideoUrl(task.getResolvedVideoUrl())
+                    .coverUrl(task.getCoverUrl())
+                    .videoDuration(task.getVideoDuration())
+                    .resolution(task.getResolution())
+                    .audioUrl(task.getAudioUrl())
+                    .audioDuration(task.getAudioDuration())
+                    .transcriptText(TkOpenVideoTranscriptTextNormalizer.normalizeText(verifiedTranscriptText))
+                    .segments(parseJsonArray(verifiedSegmentsJson))
+                    .words(parseJsonArray(normalizedWordsJson))
+                    .verifiedTranscriptText(TkOpenVideoTranscriptTextNormalizer.normalizeText(verifiedTranscriptText))
+                    .verifiedSegments(parseJsonArray(verifiedSegmentsJson))
+                    .textVerifyStatus(task.getTextVerifyStatus())
+                    .textVerifyFailReason(task.getTextVerifyFailReason())
+                    .textVerifyModel(task.getTextVerifyModel())
+                    .asrProvider(task.getAsrProvider())
+                    .asrModel(task.getAsrModel())
+                    .createTime(task.getCreateTime())
+                    .updateTime(task.getUpdateTime())
+                    .build();
+        });
     }
 
     @Override
@@ -173,9 +183,14 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
                 .resolution(result.getResolution())
                 .audioUrl(result.getAudioUrl())
                 .audioDuration(result.getAudioDuration())
-                .transcriptText(result.getTranscriptText())
-                .segments(result.getSegments())
+                .transcriptText(result.getVerifiedTranscriptText())
+                .segments(result.getVerifiedSegments())
                 .words(result.getWords())
+                .verifiedTranscriptText(result.getVerifiedTranscriptText())
+                .verifiedSegments(result.getVerifiedSegments())
+                .textVerifyStatus(result.getTextVerifyStatus())
+                .textVerifyFailReason(result.getTextVerifyFailReason())
+                .textVerifyModel(result.getTextVerifyModel())
                 .asrProvider(result.getAsrProvider())
                 .asrModel(result.getAsrModel())
                 .createTime(result.getCreateTime())
@@ -210,19 +225,7 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
             File audioFile = extractAudio(videoFile, new File(taskDir, "audio.wav"));
             String audioUrl = uploadAudio(taskId, audioFile);
             AsrResult asrResult = runAsrWithRetry(task, audioFile);
-            transcriptTaskMapper.updateById(TkOpenVideoTranscriptTaskDO.builder()
-                    .id(taskId)
-                    .audioUrl(audioUrl)
-                    .audioDuration(asrResult.audioDuration)
-                    .status(STATUS_SUCCESS)
-                    .failReason("")
-                    .transcriptText(asrResult.transcriptText)
-                    .segmentsJson(asrResult.segmentsJson)
-                    .wordsJson(asrResult.wordsJson)
-                    .asrProvider(ASR_PROVIDER)
-                    .asrModel(asrResult.model)
-                    .rawAsrResult(asrResult.rawJson)
-                    .build());
+            persistAsrResult(taskId, audioUrl, asrResult);
         } catch (Exception ex) {
             log.warn("[runExtractTask][taskId({}) open video transcript extract failed]", taskId, ex);
             transcriptTaskMapper.updateById(TkOpenVideoTranscriptTaskDO.builder()
@@ -233,6 +236,100 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
         } finally {
             FileUtil.del(taskDir);
         }
+    }
+
+    private void persistAsrResult(Long taskId, String audioUrl, AsrResult asrResult) {
+        persistAsrResult(taskId, audioUrl, asrResult.audioDuration, asrResult.transcriptText,
+                asrResult.segmentsJson, asrResult.wordsJson, asrResult.model, asrResult.rawJson);
+    }
+
+    private void persistAsrResult(Long taskId, String audioUrl, Double audioDuration, String transcriptText,
+                                  String segmentsJson, String wordsJson, String asrModel, String rawAsrResult) {
+        TkGenerationProperties.TranscriptVerify verifyProperties = getTranscriptVerifyProperties();
+        String fallbackText = StrUtil.blankToDefault(transcriptText, "");
+        String fallbackSegments = StrUtil.blankToDefault(segmentsJson, "[]");
+        String verifyModel = StrUtil.blankToDefault(
+                generationProperties == null || generationProperties.getDeepseek() == null
+                        ? null : generationProperties.getDeepseek().getModel(),
+                "deepseek-v4-flash");
+        transcriptTaskMapper.updateById(TkOpenVideoTranscriptTaskDO.builder()
+                .id(taskId)
+                .audioUrl(audioUrl)
+                .audioDuration(audioDuration)
+                .status(STATUS_SUCCESS)
+                .failReason("")
+                .transcriptText(transcriptText)
+                .segmentsJson(segmentsJson)
+                .wordsJson(wordsJson)
+                .verifiedTranscriptText(fallbackText)
+                .verifiedSegmentsJson(fallbackSegments)
+                .textVerifyStatus(VERIFY_STATUS_PROCESSING)
+                .textVerifyFailReason("")
+                .textVerifyModel(verifyModel)
+                .textVerifyPromptVersion(StrUtil.blankToDefault(verifyProperties.getPromptVersion(), "v1"))
+                .asrProvider(ASR_PROVIDER)
+                .asrModel(asrModel)
+                .rawAsrResult(rawAsrResult)
+                .build());
+
+        if (!Boolean.TRUE.equals(verifyProperties.getEnabled())) {
+            updateTextVerifyResult(taskId, fallbackText, fallbackSegments, VERIFY_STATUS_SKIPPED, "");
+            return;
+        }
+        String limitFailure = validateTranscriptVerifyLimits(fallbackText, fallbackSegments, verifyProperties);
+        if (limitFailure != null) {
+            updateTextVerifyResult(taskId, fallbackText, fallbackSegments, VERIFY_STATUS_FAILED, limitFailure);
+            return;
+        }
+        try {
+            TkTranscriptTextVerifyResult verified = transcriptTextVerifyService.verify(fallbackText, fallbackSegments);
+            updateTextVerifyResult(taskId, verified.getTranscriptText(), verified.getSegmentsJson(),
+                    VERIFY_STATUS_SUCCESS, "");
+        } catch (Exception ex) {
+            String failReason = StrUtil.maxLength(StrUtil.blankToDefault(ex.getMessage(), "DeepSeek 文案校验失败"), 1024);
+            log.warn("[persistAsrResult][taskId({}) DeepSeek transcript verification failed, fallback to ASR result]",
+                    taskId, ex);
+            updateTextVerifyResult(taskId, fallbackText, fallbackSegments, VERIFY_STATUS_FAILED, failReason);
+        }
+    }
+
+    private TkGenerationProperties.TranscriptVerify getTranscriptVerifyProperties() {
+        if (generationProperties == null || generationProperties.getTranscriptVerify() == null) {
+            return new TkGenerationProperties().getTranscriptVerify();
+        }
+        return generationProperties.getTranscriptVerify();
+    }
+
+    private String validateTranscriptVerifyLimits(String transcriptText, String segmentsJson,
+                                                  TkGenerationProperties.TranscriptVerify verifyProperties) {
+        Integer maxInputCharacters = verifyProperties.getMaxInputCharacters();
+        if (maxInputCharacters != null && maxInputCharacters > 0 && transcriptText.length() > maxInputCharacters) {
+            return "文案超过 DeepSeek 校验长度限制：" + maxInputCharacters;
+        }
+        Integer maxSegments = verifyProperties.getMaxSegments();
+        if (maxSegments != null && maxSegments > 0) {
+            try {
+                JsonNode segments = JsonUtils.parseTree(segmentsJson);
+                if (segments != null && segments.isArray() && segments.size() > maxSegments) {
+                    return "时间轴片段超过 DeepSeek 校验数量限制：" + maxSegments;
+                }
+            } catch (Exception ex) {
+                return "ASR 时间轴 JSON 无效，跳过 DeepSeek 校验";
+            }
+        }
+        return null;
+    }
+
+    private void updateTextVerifyResult(Long taskId, String verifiedTranscriptText, String verifiedSegmentsJson,
+                                        String status, String failReason) {
+        transcriptTaskMapper.updateById(TkOpenVideoTranscriptTaskDO.builder()
+                .id(taskId)
+                .status(STATUS_SUCCESS)
+                .verifiedTranscriptText(verifiedTranscriptText)
+                .verifiedSegmentsJson(verifiedSegmentsJson)
+                .textVerifyStatus(status)
+                .textVerifyFailReason(StrUtil.blankToDefault(failReason, ""))
+                .build());
     }
 
     private String normalizeTargetLanguage(String targetLanguage) {

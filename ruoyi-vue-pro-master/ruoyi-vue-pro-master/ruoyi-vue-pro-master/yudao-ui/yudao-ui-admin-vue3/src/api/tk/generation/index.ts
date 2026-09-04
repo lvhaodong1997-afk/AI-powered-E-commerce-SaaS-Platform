@@ -33,6 +33,8 @@ export interface TkGenerationTaskVO {
   videosPerScript?: number
   openingVideoUrl?: string
   openingVideoName?: string
+  openingProcessMode?: 'NATIVE' | 'STANDARD'
+  openingDurationMs?: number
   openingClipStartSecond?: number
   openingClipEndSecond?: number
   referenceDuration?: number
@@ -110,6 +112,8 @@ export interface TkGenerationTaskSummaryVO {
   bgmEnabled?: boolean
   subtitleEnabled?: boolean
   openingVideoName?: string
+  openingProcessMode?: 'NATIVE' | 'STANDARD'
+  openingDurationMs?: number
   referenceDuration?: number
   targetDuration?: number
   status?: string

@@ -25,6 +25,7 @@ import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkGeminiPromptConf
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkMimoVoiceModeEnum;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkLanguageSupport;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkGenerationPipelineService;
+import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkNativeOpeningSupport;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkVideoDurationSupport;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkTtsProviderEnum;
 import cn.iocoder.yudao.module.tk.service.generation.route.TkGenerationRoute;
@@ -106,11 +107,13 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
 
     @Override
     public Long createGenerationTask(TkGenerationTaskCreateReqVO createReqVO) {
+        validateRequestedReferenceDuration(createReqVO);
         return createGenerationTask(createReqVO, null, true);
     }
 
     @Override
     public List<Long> createGenerationTasks(TkGenerationTaskCreateReqVO createReqVO) {
+        validateRequestedReferenceDuration(createReqVO);
         List<Long> scriptOptionIds = normalizeBatchScriptOptionIds(createReqVO);
         int videosPerScript = normalizeVideosPerScript(createReqVO.getVideosPerScript());
         int totalCount = scriptOptionIds.size() * videosPerScript;
@@ -138,7 +141,28 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
 
     @Override
     public Long createGenerationTask(TkGenerationTaskCreateReqVO createReqVO, MultipartFile openingVideoFile) {
+        validateRequestedReferenceDuration(createReqVO);
         return createGenerationTask(createReqVO, openingVideoFile, true);
+    }
+
+    private void validateRequestedReferenceDuration(TkGenerationTaskCreateReqVO createReqVO) {
+        if (createReqVO == null || createReqVO.getReferenceDuration() == null) {
+            return;
+        }
+        int maxDuration = resolveMaxReferenceDuration();
+        if (createReqVO.getReferenceDuration() > maxDuration) {
+            throw new IllegalArgumentException("目标时长不能超过系统上限 " + maxDuration + " 秒");
+        }
+    }
+
+    private int resolveMaxReferenceDuration() {
+        if (generationProperties == null || generationProperties.getFfmpeg() == null
+                || generationProperties.getFfmpeg().getMaxTargetDuration() == null
+                || generationProperties.getFfmpeg().getMaxTargetDuration() <= 0) {
+            return TkVideoDurationSupport.MAX_TARGET_DURATION;
+        }
+        return Math.min(TkVideoDurationSupport.MAX_TARGET_DURATION,
+                generationProperties.getFfmpeg().getMaxTargetDuration());
     }
 
     private List<Long> normalizeBatchScriptOptionIds(TkGenerationTaskCreateReqVO createReqVO) {
@@ -187,6 +211,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         target.setScriptOptionId(source.getScriptOptionId());
         target.setOpeningVideoUrl(source.getOpeningVideoUrl());
         target.setOpeningVideoName(source.getOpeningVideoName());
+        target.setOpeningProcessMode(source.getOpeningProcessMode());
         target.setOpeningClipStartSecond(source.getOpeningClipStartSecond());
         target.setOpeningClipEndSecond(source.getOpeningClipEndSecond());
         target.setReferenceDuration(source.getReferenceDuration());
@@ -219,6 +244,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         }
         if (openingVideoFile == null && StrUtil.isBlank(createReqVO.getOpeningVideoUrl())) {
             createReqVO.setOpeningVideoName(null);
+            createReqVO.setOpeningProcessMode(null);
             createReqVO.setOpeningClipStartSecond(null);
             createReqVO.setOpeningClipEndSecond(null);
         }
@@ -290,6 +316,8 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
                     createReqVO.getProductCategoryCode());
             String generationRouteConfig = resolveGenerationRouteConfig(createReqVO, materialPurpose, generationRoute);
             BgmSelection bgmSelection = resolveBgmSelection(createReqVO, materialPurpose);
+            String openingProcessMode = openingVideo == null ? null
+                    : TkNativeOpeningSupport.normalizeMode(createReqVO.getOpeningProcessMode());
             TkGenerationTaskDO task = TkGenerationTaskDO.builder()
                     .businessTraceId(businessTraceId)
                     .batchId(batchId)
@@ -318,6 +346,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
                     .scriptOptionId(createReqVO.getScriptOptionId())
                     .openingVideoUrl(openingVideo == null ? null : openingVideo.url)
                     .openingVideoName(openingVideo == null ? null : openingVideo.name)
+                    .openingProcessMode(openingProcessMode)
                     .openingClipStartSecond(openingVideo == null ? null : openingVideo.startSecond)
                     .openingClipEndSecond(openingVideo == null ? null : openingVideo.endSecond)
                     .referenceDuration(referenceDuration)

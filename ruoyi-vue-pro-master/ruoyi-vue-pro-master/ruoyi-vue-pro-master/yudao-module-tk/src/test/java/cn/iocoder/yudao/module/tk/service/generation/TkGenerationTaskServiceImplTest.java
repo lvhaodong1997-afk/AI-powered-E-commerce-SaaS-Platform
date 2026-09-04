@@ -35,6 +35,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -44,6 +46,22 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TkGenerationTaskServiceImplTest {
+
+    @Test
+    void createGenerationTaskRejectsReferenceDurationAboveSystemLimit() {
+        TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
+        TkCreditService creditService = mock(TkCreditService.class);
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        ReflectionTestUtils.setField(service, "creditService", creditService);
+        TkGenerationTaskCreateReqVO reqVO = new TkGenerationTaskCreateReqVO();
+        reqVO.setReferenceDuration(501);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> service.createGenerationTask(reqVO));
+
+        assertTrue(exception.getMessage().contains("500"));
+        verify(creditService, never()).freezeForGenerationTask(any());
+    }
 
     @Test
     void retryGenerationTaskResetsFailedTaskAndSubmitsPipeline() {

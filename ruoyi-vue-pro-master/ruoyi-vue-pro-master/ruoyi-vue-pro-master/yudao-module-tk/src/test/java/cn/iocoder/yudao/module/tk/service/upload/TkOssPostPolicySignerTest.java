@@ -36,4 +36,14 @@ class TkOssPostPolicySignerTest {
         assertFalse(policy.getSignature().contains("secret-key-value"));
         assertNotEquals(policy.getPolicy(), policy.getSignature());
     }
+
+    @Test
+    void signExactCanBindSha256Metadata() {
+        Policy policy = TkOssPostPolicySigner.signExact(
+                "access-key-id", "secret-key-value", "tk/open-api/client/video.mp4",
+                1024L, 1800, "abc123", Clock.fixed(Instant.parse("2026-07-07T08:00:00Z"), ZoneOffset.UTC));
+
+        String decodedPolicy = new String(Base64.getDecoder().decode(policy.getPolicy()), StandardCharsets.UTF_8);
+        assertTrue(decodedPolicy.contains("[\"eq\",\"$x-oss-meta-sha256\",\"abc123\"]"));
+    }
 }

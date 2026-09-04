@@ -48,6 +48,7 @@ public class TkGenerationTaskCreateReqVO {
     private Integer videosPerScript;
     private String openingVideoUrl;
     private String openingVideoName;
+    private String openingProcessMode;
     private Integer openingClipStartSecond;
     private Integer openingClipEndSecond;
     private Integer referenceDuration;

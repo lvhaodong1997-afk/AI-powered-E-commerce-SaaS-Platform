@@ -1,13 +1,19 @@
 package cn.iocoder.yudao.module.tk.service.generation.pipeline;
 
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.File;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class DefaultTkVideoRenderServiceTest {
 
@@ -61,6 +67,36 @@ class DefaultTkVideoRenderServiceTest {
         assertTrue(joined.contains("[voice][bgm]amix=inputs=2:duration=first:dropout_transition=0[aout]"));
         assertTrue(joined.contains("-map [aout]"));
         assertTrue(command.contains("192k"));
+    }
+
+    @Test
+    void nativeFinalRenderKeepsOpeningAudioAndDelaysGeneratedAudio() {
+        List<String> command = DefaultTkVideoRenderService.buildFinalRenderCommand(
+                "ffmpeg", new File("merged-video.mp4"), new File("voice.wav"),
+                new File("bgm.mp3"), 0.10D, 32.0D, new File("subtitle.ass"),
+                new File("final-video.mp4"), "veryfast", 3.2D);
+
+        String joined = String.join(" ", command);
+        assertTrue(joined.contains("[0:a]atrim=duration=3.200"));
+        assertTrue(joined.contains("adelay=3200|3200"));
+        assertTrue(joined.contains("afade=t=out:st=27.800:d=1"));
+        assertTrue(joined.contains("atrim=duration=28.800"));
+        assertTrue(joined.contains("[opening][voice][bgm]amix=inputs=3:duration=longest"));
+        assertTrue(joined.contains("-t 32.000"));
+        assertFalse(joined.contains("-t 30.000"));
+    }
+
+    @Test
+    void nativeFinalRenderUsesBgmInputOneWhenVoiceIsDisabled() {
+        List<String> command = DefaultTkVideoRenderService.buildFinalRenderCommand(
+                "ffmpeg", new File("merged-video.mp4"), null,
+                new File("bgm.mp3"), 0.10D, 30.0D, null,
+                new File("final-video.mp4"), "veryfast", 3.0D);
+
+        String joined = String.join(" ", command);
+        assertTrue(joined.contains("[1:a]volume=0.100"));
+        assertFalse(joined.contains("[2:a]volume=0.100"));
+        assertTrue(joined.contains("[opening][bgm]amix=inputs=2:duration=longest"));
     }
 
     @Test
@@ -143,6 +179,74 @@ class DefaultTkVideoRenderServiceTest {
         assertTrue(joined.contains("setpts=PTS/0.666667"));
         assertFalse(joined.contains("hflip"));
         assertFalse(joined.contains("tpad"));
+    }
+
+    @Test
+    void nativeOpeningClipCommandKeepsSourceAudioWithoutChangingSpeed() {
+        List<String> command = DefaultTkVideoRenderService.buildNativeOpeningClipCommand(
+                "ffmpeg", new File("opening.mp4"), new File("opening-normalized.mp4"),
+                0D, 3.2D, "veryfast", true);
+
+        String joined = String.join(" ", command);
+        assertTrue(joined.contains("-map 0:v:0 -map 0:a:0"));
+        assertTrue(joined.contains("-c:a aac"));
+        assertTrue(joined.contains("-t 3.200"));
+        assertFalse(joined.contains("setpts=PTS/"));
+        assertFalse(command.contains("-an"));
+    }
+
+    @Test
+    void nativeBodyClipCommandAddsSilentAudioForConcat() {
+        List<String> command = DefaultTkVideoRenderService.buildSilentBodyClipCommand(
+                "ffmpeg", new File("body.mp4"), new File("body-normalized.mp4"),
+                0D, 2D, 3D, "veryfast");
+
+        String joined = String.join(" ", command);
+        assertTrue(joined.contains("anullsrc=channel_layout=stereo:sample_rate=44100"));
+        assertTrue(joined.contains("-map 0:v:0 -map 1:a:0"));
+        assertTrue(joined.contains("-c:a aac"));
+        assertTrue(joined.contains("setpts=PTS/0.666667"));
+    }
+
+    @Test
+    void nativeDurationPaddingPreservesAudioAndDoesNotRetimeOpening() {
+        List<String> command = DefaultTkVideoRenderService.buildNativeDurationPadCommand(
+                "ffmpeg", new File("merged.mp4"), new File("padded.mp4"), 31.5D, 32D, "veryfast");
+
+        String joined = String.join(" ", command);
+        assertTrue(joined.contains("tpad=stop_mode=clone:stop_duration=0.500"));
+        assertTrue(joined.contains("-af apad"));
+        assertTrue(joined.contains("-map 0:v:0 -map 0:a:0"));
+        assertFalse(joined.contains("setpts=PTS/"));
+        assertFalse(command.contains("-an"));
+    }
+
+    @Test
+    void nativeSubtitleTimelineUsesBodyScriptAndStartsAfterOpening() {
+        DefaultTkVideoRenderService service = new DefaultTkVideoRenderService();
+        TkSubtitleTimelineService timelineService = mock(TkSubtitleTimelineService.class);
+        ReflectionTestUtils.setField(service, "subtitleTimelineService", timelineService);
+        TkGenerationTaskDO task = new TkGenerationTaskDO()
+                .setOpeningProcessMode(TkNativeOpeningSupport.MODE_NATIVE)
+                .setOpeningDurationMs(3200L)
+                .setScriptText("Hook line Body line")
+                .setSegmentTimeline("["
+                        + "{\"segmentLibrary\":\"S1_HOOK\",\"scriptLine\":\"Hook line\"},"
+                        + "{\"segmentLibrary\":\"S2_PAIN\",\"scriptLine\":\"Body line\"}"
+                        + "]");
+        File audioFile = new File("voice.wav");
+        TkSubtitleSegment segment = new TkSubtitleSegment("Body line", 0D, 1D,
+                null, 0, 0, Collections.emptyList());
+        TkSubtitleTimeline timeline = new TkSubtitleTimeline("en-US", 1D,
+                Collections.singletonList(segment));
+        when(timelineService.buildTimeline(task, "Body line", audioFile, Collections.emptyList()))
+                .thenReturn(timeline);
+
+        TkSubtitleTimeline actual = service.buildSubtitleTimeline(task, audioFile, Collections.emptyList());
+
+        assertEquals(3.2D, actual.getSegments().get(0).getStart(), 0.001D);
+        assertEquals(4.2D, actual.getSegments().get(0).getEnd(), 0.001D);
+        verify(timelineService).buildTimeline(task, "Body line", audioFile, Collections.emptyList());
     }
 
     @Test

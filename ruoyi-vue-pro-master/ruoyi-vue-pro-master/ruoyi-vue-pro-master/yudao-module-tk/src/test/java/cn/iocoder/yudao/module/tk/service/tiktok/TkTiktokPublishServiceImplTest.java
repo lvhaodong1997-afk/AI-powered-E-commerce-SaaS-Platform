@@ -18,6 +18,7 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.OutputStream;
@@ -29,6 +30,7 @@ import java.util.HashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -245,6 +247,134 @@ class TkTiktokPublishServiceImplTest {
         assertEquals("PROCESSING", detail.getStatus());
         assertEquals("UPLOAD_PENDING", detail.getTiktokStatus());
         assertEquals("publish_id 尚未可查询", detail.getFailReason());
+    }
+
+    @Test
+    void successfulPublicPostAutomaticallyPersistsShareUrl() {
+        TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
+        TkTiktokTokenService tokenService = mock(TkTiktokTokenService.class);
+        cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokAccountMapper accountMapper =
+                mock(cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokAccountMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkBusinessLogService businessLogService = mock(TkBusinessLogService.class);
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "apiClient", apiClient);
+        ReflectionTestUtils.setField(service, "tokenService", tokenService);
+        ReflectionTestUtils.setField(service, "accountMapper", accountMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        ReflectionTestUtils.setField(service, "businessLogService", businessLogService);
+
+        TkTiktokAccountDO account = TkTiktokAccountDO.builder()
+                .id(1L)
+                .authStatus("AUTHORIZED")
+                .build();
+        TkTiktokPublishDetailDO detail = TkTiktokPublishDetailDO.builder()
+                .id(3L)
+                .accountId(1L)
+                .publishId("publish-1")
+                .status("PROCESSING")
+                .tiktokStatus("PROCESSING")
+                .build();
+        when(accountMapper.selectById(1L)).thenReturn(account);
+        when(tokenService.getValidAccessToken(1L)).thenReturn("access-token");
+        when(apiClient.fetchPostStatus("access-token", "publish-1")).thenReturn(
+                new TkTiktokApiClient.PostStatusResult(true, "PUBLISH_COMPLETE", null, null,
+                        Collections.singletonList("post-1")));
+        when(apiClient.queryVideoShareUrl("access-token", Collections.singletonList("post-1"))).thenReturn(
+                new TkTiktokApiClient.VideoQueryResult(true,
+                        "https://www.tiktok.com/@demo/video/post-1", null, null));
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkTiktokPublishDetailDO.class);
+
+        ReflectionTestUtils.invokeMethod(service, "syncProcessingDetail", detail);
+
+        assertEquals("SUCCESS", detail.getStatus());
+        assertEquals("PUBLISH_COMPLETE", detail.getTiktokStatus());
+        assertEquals("https://www.tiktok.com/@demo/video/post-1", detail.getPublishUrl());
+        assertNotNull(detail.getPublishUrlRegisteredTime());
+        verify(apiClient).queryVideoShareUrl("access-token", Collections.singletonList("post-1"));
+        verify(detailMapper).update(any(), any());
+    }
+
+    @Test
+    void publicPostWaitsForPublicIdBeforeMarkingPublishSuccessful() {
+        TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
+        TkTiktokTokenService tokenService = mock(TkTiktokTokenService.class);
+        cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokAccountMapper accountMapper =
+                mock(cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokAccountMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkBusinessLogService businessLogService = mock(TkBusinessLogService.class);
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "apiClient", apiClient);
+        ReflectionTestUtils.setField(service, "tokenService", tokenService);
+        ReflectionTestUtils.setField(service, "accountMapper", accountMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        ReflectionTestUtils.setField(service, "businessLogService", businessLogService);
+
+        TkTiktokAccountDO account = TkTiktokAccountDO.builder()
+                .id(1L)
+                .authStatus("AUTHORIZED")
+                .build();
+        TkTiktokPublishDetailDO detail = TkTiktokPublishDetailDO.builder()
+                .id(3L)
+                .accountId(1L)
+                .publishId("publish-1")
+                .privacyLevel("PUBLIC_TO_EVERYONE")
+                .status("PROCESSING")
+                .tiktokStatus("PROCESSING")
+                .build();
+        when(accountMapper.selectById(1L)).thenReturn(account);
+        when(tokenService.getValidAccessToken(1L)).thenReturn("access-token");
+        when(apiClient.fetchPostStatus("access-token", "publish-1")).thenReturn(
+                new TkTiktokApiClient.PostStatusResult(true, "PUBLISH_COMPLETE", null, null,
+                        Collections.emptyList()));
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkTiktokPublishDetailDO.class);
+
+        ReflectionTestUtils.invokeMethod(service, "syncProcessingDetail", detail);
+
+        assertEquals("PROCESSING", detail.getStatus());
+        assertEquals("PUBLISH_COMPLETE", detail.getTiktokStatus());
+        verify(detailMapper).updateById(detail);
+        verify(apiClient, never()).queryVideoShareUrl(anyString(), any());
+    }
+
+    @Test
+    void retryClearsPreviousPublishUrlBeforeNewAttempt() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        TkTiktokPublishServiceImpl service = createService(taskMapper, detailMapper, null, dataScopeService);
+        TkTiktokPublishDetailDO detail = TkTiktokPublishDetailDO.builder()
+                .id(30L)
+                .companyId(20L)
+                .publishTaskId(31L)
+                .status("FAILED")
+                .publishUrl("https://www.tiktok.com/@demo/video/old")
+                .publishUrlRegisteredTime(java.time.LocalDateTime.now())
+                .retryCount(1)
+                .build();
+        detail.setTenantId(8L);
+        when(detailMapper.selectById(30L)).thenReturn(detail);
+        when(taskMapper.selectById(31L)).thenReturn(null);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkTiktokPublishDetailDO.class);
+
+        try {
+            TransactionSynchronizationManager.setActualTransactionActive(true);
+            TransactionSynchronizationManager.initSynchronization();
+            service.retry(30L);
+        } finally {
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.clearSynchronization();
+            }
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+
+        assertNull(detail.getPublishUrl());
+        assertNull(detail.getPublishUrlRegisteredTime());
+        assertEquals("PENDING", detail.getStatus());
+        verify(detailMapper).update(any(), any());
     }
 
     @Test

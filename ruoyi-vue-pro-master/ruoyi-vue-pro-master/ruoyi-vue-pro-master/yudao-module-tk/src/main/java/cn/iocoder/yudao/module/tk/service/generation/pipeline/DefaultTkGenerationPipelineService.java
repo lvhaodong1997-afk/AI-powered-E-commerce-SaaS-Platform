@@ -45,6 +45,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -183,6 +184,12 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
             if (task == null) {
                 return;
             }
+            Long openingDurationMs = resolveOpeningDurationMs(task);
+            if (!Objects.equals(task.getOpeningDurationMs(), openingDurationMs)) {
+                task.setOpeningDurationMs(openingDurationMs);
+                updateOwned(new TkGenerationTaskDO().setId(taskId).setOpeningDurationMs(openingDurationMs));
+            }
+            validateNativeOpeningDuration(task);
             businessTraceId = task.getBusinessTraceId();
             TkMaterialLibraryDO library = libraryMapper.selectById(task.getLibraryId());
             update(taskId, TkGenerationStatusEnum.ANALYZING, 10, "分析任务配置", null, null);
@@ -329,7 +336,12 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
         if (StrUtil.isNotBlank(task.getAudioUrl())) {
             return new TkAudioAsset(task.getAudioUrl(), task.getSubtitleUrl());
         }
-        return voiceSynthesisService.synthesize(task, scriptText);
+        String narrationScript = TkNativeOpeningSupport.resolveNarrationScript(
+                scriptText, task.getSegmentTimeline(), task.getOpeningProcessMode());
+        if (StrUtil.isBlank(narrationScript)) {
+            return new TkAudioAsset(null, null);
+        }
+        return voiceSynthesisService.synthesize(task, narrationScript);
     }
 
     List<TkClipPlanItem> resolveClipPlan(TkGenerationTaskDO task, String scriptText, Integer effectiveTargetDuration) {
@@ -355,19 +367,65 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
         int targetDuration = TkVideoDurationSupport.normalize(task.getTargetDuration(),
                 generationProperties.getFfmpeg().getMaxTargetDuration());
         if (audioAsset == null || audioAsset.getAudioUrl() == null) {
-            return targetDuration;
+            return resolveEffectiveTargetDuration(task, (Double) null);
         }
         Double audioDuration = probeMediaDuration(audioAsset.getAudioUrl());
         if (audioDuration == null || audioDuration <= 0D) {
-            return targetDuration;
+            if (TkNativeOpeningSupport.isNativeMode(task.getOpeningProcessMode())) {
+                throw new IllegalStateException("无法识别 AI 配音时长，为避免配音被截断，请稍后重试");
+            }
+            return resolveEffectiveTargetDuration(task, (Double) null);
         }
-        int audioTargetDuration = TkVideoDurationSupport.normalize((int) Math.ceil(audioDuration),
-                generationProperties.getFfmpeg().getMaxTargetDuration());
-        if (audioTargetDuration > targetDuration) {
+        int effectiveTargetDuration = resolveEffectiveTargetDuration(task, audioDuration);
+        if (effectiveTargetDuration > targetDuration) {
             log.info("[resolveEffectiveTargetDuration][taskId({}) trace({}) targetDuration({}) audioDuration({}) effectiveTargetDuration({})]",
-                    task.getId(), task.getBusinessTraceId(), targetDuration, audioDuration, audioTargetDuration);
+                    task.getId(), task.getBusinessTraceId(), targetDuration, audioDuration, effectiveTargetDuration);
         }
-        return Math.max(targetDuration, audioTargetDuration);
+        return effectiveTargetDuration;
+    }
+
+    int resolveEffectiveTargetDuration(TkGenerationTaskDO task, Double bodyAudioDuration) {
+        validateNativeOpeningDuration(task);
+        int targetDuration = TkVideoDurationSupport.normalize(task.getTargetDuration(),
+                generationProperties.getFfmpeg().getMaxTargetDuration());
+        double effectiveDuration = Math.max(targetDuration,
+                bodyAudioDuration == null ? 0D : bodyAudioDuration);
+        if (TkNativeOpeningSupport.isNativeMode(task.getOpeningProcessMode())) {
+            double openingDuration = task.getOpeningDurationMs() == null
+                    ? 0D : Math.max(0D, task.getOpeningDurationMs() / 1000D);
+            effectiveDuration = TkNativeOpeningSupport.resolveEffectiveDuration(
+                    targetDuration, openingDuration, bodyAudioDuration == null ? 0D : bodyAudioDuration);
+            int configuredMax = generationProperties.getFfmpeg().getMaxTargetDuration() == null
+                    ? TkVideoDurationSupport.MAX_TARGET_DURATION
+                    : generationProperties.getFfmpeg().getMaxTargetDuration();
+            int renderLimit = Math.min(TkVideoDurationSupport.MAX_TARGET_DURATION, Math.max(1, configuredMax));
+            if (effectiveDuration > renderLimit) {
+                throw new IllegalStateException("黄金开头和正文配音总时长超过系统上限 " + renderLimit
+                        + " 秒，请缩短开头视频或正文文案后重试");
+            }
+        }
+        return TkVideoDurationSupport.normalize((int) Math.ceil(effectiveDuration),
+                generationProperties.getFfmpeg().getMaxTargetDuration());
+    }
+
+    private void validateNativeOpeningDuration(TkGenerationTaskDO task) {
+        if (task != null && TkNativeOpeningSupport.isNativeMode(task.getOpeningProcessMode())
+                && StrUtil.isNotBlank(task.getOpeningVideoUrl())
+                && (task.getOpeningDurationMs() == null || task.getOpeningDurationMs() <= 0L)) {
+            throw new IllegalStateException("无法识别黄金开头视频时长，请检查视频文件或链接后重试");
+        }
+    }
+
+    Long resolveOpeningDurationMs(TkGenerationTaskDO task) {
+        if (task == null || !TkNativeOpeningSupport.isNativeMode(task.getOpeningProcessMode())
+                || StrUtil.isBlank(task.getOpeningVideoUrl())) {
+            return null;
+        }
+        if (task.getOpeningDurationMs() != null && task.getOpeningDurationMs() > 0L) {
+            return task.getOpeningDurationMs();
+        }
+        Double duration = probeMediaDuration(task.getOpeningVideoUrl());
+        return duration == null || duration <= 0D ? null : Math.max(1L, Math.round(duration * 1000D));
     }
 
     private Double probeMediaDuration(String mediaUrl) {

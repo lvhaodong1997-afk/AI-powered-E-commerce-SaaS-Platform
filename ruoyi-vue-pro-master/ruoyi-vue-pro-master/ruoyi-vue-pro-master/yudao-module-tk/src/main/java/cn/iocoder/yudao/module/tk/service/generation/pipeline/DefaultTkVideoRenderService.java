@@ -104,7 +104,7 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                         File bgmFile = resolveBgmFile(taskDir, task);
                         List<String> renderCommand = buildFinalRenderCommand(ffmpeg(), mergedVideo, renderMedia.audioFile, bgmFile,
                                 normalizeBgmVolume(task.getBgmVolume()), TkVideoDurationSupport.normalize(task.getTargetDuration()),
-                                renderMedia.subtitleAssets.assFile, output, ffmpegPreset());
+                                renderMedia.subtitleAssets.assFile, output, ffmpegPreset(), nativeOpeningDurationSeconds(task));
                         runCommand(renderCommand);
                         return output;
                     });
@@ -143,11 +143,19 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
             return assets;
         }
         List<String> keywords = keywordHighlightService.resolveKeywords(task, task.getScriptText());
-        assets.timeline = subtitleTimelineService.buildTimeline(task, task.getScriptText(), audioFile, keywords);
+        assets.timeline = buildSubtitleTimeline(task, audioFile, keywords);
         assets.visualAnalysis = visualAnalysisService.analyze(videoFile, clipPlan);
         assets.layout = subtitleLayoutService.layout(task, assets.timeline, assets.visualAnalysis);
         assets.assFile = assSubtitleRenderService.render(task, assets.layout, new File(taskDir, "subtitle.ass"));
         return assets;
+    }
+
+    TkSubtitleTimeline buildSubtitleTimeline(TkGenerationTaskDO task, File audioFile, List<String> keywords) {
+        String narrationScript = TkNativeOpeningSupport.resolveNarrationScript(
+                task.getScriptText(), task.getSegmentTimeline(), task.getOpeningProcessMode());
+        TkSubtitleTimeline timeline = subtitleTimelineService.buildTimeline(task, narrationScript, audioFile, keywords);
+        TkNativeOpeningSupport.shiftTimeline(timeline, nativeOpeningDurationSeconds(task));
+        return timeline;
     }
 
     static List<String> buildNormalizeFullSourceCommand(String ffmpeg, File source, File segment) {
@@ -179,6 +187,42 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                 "-r", "30", "-an", "-c:v", "libx264", "-preset", normalizePreset(preset), segment.getAbsolutePath());
     }
 
+    static List<String> buildNativeOpeningClipCommand(String ffmpeg, File source, File segment,
+                                                       double startSeconds, double durationSeconds,
+                                                       String preset, boolean hasSourceAudio) {
+        List<String> command = new ArrayList<>(Arrays.asList(ffmpeg, "-y",
+                "-ss", formatDecimal(Math.max(0D, startSeconds)),
+                "-t", formatDecimal(Math.max(0.001D, durationSeconds)),
+                "-i", source.getAbsolutePath()));
+        if (!hasSourceAudio) {
+            command.addAll(Arrays.asList("-f", "lavfi", "-t", formatDecimal(Math.max(0.001D, durationSeconds)),
+                    "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"));
+        }
+        command.addAll(Arrays.asList("-vf", NORMALIZE_VIDEO_FILTER,
+                "-map", "0:v:0", "-map", hasSourceAudio ? "0:a:0" : "1:a:0",
+                "-r", "30", "-c:v", "libx264", "-preset", normalizePreset(preset),
+                "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+                "-t", formatDecimal(Math.max(0.001D, durationSeconds)), segment.getAbsolutePath()));
+        return command;
+    }
+
+    static List<String> buildSilentBodyClipCommand(String ffmpeg, File source, File segment,
+                                                    double startSeconds, double sourceDuration,
+                                                    double targetDuration, String preset) {
+        String videoFilter = NORMALIZE_VIDEO_FILTER;
+        if (Math.abs(sourceDuration - targetDuration) > SECTION_COMPRESS_EPSILON_SECONDS) {
+            videoFilter += "," + TkRenderMediaSupport.buildVideoSpeedFilter(sourceDuration, targetDuration);
+        }
+        return Arrays.asList(ffmpeg, "-y", "-ss", formatDecimal(Math.max(0D, startSeconds)),
+                "-t", formatDecimal(Math.max(0.001D, sourceDuration)), "-i", source.getAbsolutePath(),
+                "-f", "lavfi", "-t", formatDecimal(Math.max(0.001D, targetDuration)),
+                "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                "-vf", videoFilter, "-map", "0:v:0", "-map", "1:a:0",
+                "-r", "30", "-c:v", "libx264", "-preset", normalizePreset(preset),
+                "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+                "-t", formatDecimal(Math.max(0.001D, targetDuration)), segment.getAbsolutePath());
+    }
+
     static List<String> buildCompressSectionCommand(String ffmpeg, File source, File segment,
                                                     double sourceDuration, double targetDuration) {
         return buildCompressSectionCommand(ffmpeg, source, segment, sourceDuration, targetDuration, "veryfast");
@@ -199,6 +243,18 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                 "-t", formatDecimal(targetDuration), output.getAbsolutePath());
     }
 
+    static List<String> buildNativeDurationPadCommand(String ffmpeg, File source, File output,
+                                                       double sourceDuration, double targetDuration,
+                                                       String preset) {
+        double padDuration = Math.max(0D, targetDuration - sourceDuration);
+        return Arrays.asList(ffmpeg, "-y", "-i", source.getAbsolutePath(),
+                "-vf", "tpad=stop_mode=clone:stop_duration=" + formatDecimal(padDuration),
+                "-af", "apad", "-map", "0:v:0", "-map", "0:a:0",
+                "-r", "30", "-c:v", "libx264", "-preset", normalizePreset(preset),
+                "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+                "-t", formatDecimal(targetDuration), output.getAbsolutePath());
+    }
+
     static List<String> buildPadSectionCommand(String ffmpeg, File source, File segment,
                                                double sourceDuration, double targetDuration) {
         return buildPadSectionCommand(ffmpeg, source, segment, sourceDuration, targetDuration, "veryfast");
@@ -213,12 +269,20 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                                                 File bgmFile, Double bgmVolume, double videoDuration,
                                                 File assFile, File finalVideo) {
         return buildFinalRenderCommand(ffmpeg, mergedVideo, finalAudioFile, bgmFile, bgmVolume, videoDuration,
-                assFile, finalVideo, "veryfast");
+                assFile, finalVideo, "veryfast", 0D);
     }
 
     static List<String> buildFinalRenderCommand(String ffmpeg, File mergedVideo, File finalAudioFile,
                                                 File bgmFile, Double bgmVolume, double videoDuration,
                                                 File assFile, File finalVideo, String preset) {
+        return buildFinalRenderCommand(ffmpeg, mergedVideo, finalAudioFile, bgmFile, bgmVolume, videoDuration,
+                assFile, finalVideo, preset, 0D);
+    }
+
+    static List<String> buildFinalRenderCommand(String ffmpeg, File mergedVideo, File finalAudioFile,
+                                                File bgmFile, Double bgmVolume, double videoDuration,
+                                                File assFile, File finalVideo, String preset,
+                                                double nativeOpeningDuration) {
         List<String> renderCommand = new ArrayList<>(Arrays.asList(ffmpeg, "-y", "-i", mergedVideo.getAbsolutePath()));
         boolean hasVoice = finalAudioFile != null;
         if (hasVoice) {
@@ -230,6 +294,16 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         if (assFile != null) {
             renderCommand.add("-vf");
             renderCommand.add("ass=" + escapeSubtitlePath(assFile));
+        }
+        if (nativeOpeningDuration > SECTION_COMPRESS_EPSILON_SECONDS) {
+            renderCommand.addAll(Arrays.asList("-filter_complex",
+                    buildNativeAudioMixFilter(bgmVolume, videoDuration, nativeOpeningDuration, hasVoice,
+                            bgmFile != null),
+                    "-map", "0:v:0", "-map", "[aout]",
+                    "-c:v", "libx264", "-preset", normalizePreset(preset),
+                    "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+                    "-t", formatDecimal(videoDuration), finalVideo.getAbsolutePath()));
+            return renderCommand;
         }
         if (hasVoice && bgmFile == null) {
             renderCommand.addAll(Arrays.asList("-map", "0:v:0", "-map", "1:a:0",
@@ -261,6 +335,47 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         return renderCommand;
     }
 
+    private static String buildNativeAudioMixFilter(Double bgmVolume, double videoDuration,
+                                                     double nativeOpeningDuration, boolean hasVoice,
+                                                     boolean hasBgm) {
+        double openingDuration = Math.max(0D, nativeOpeningDuration);
+        double delayMillis = Math.max(0L, Math.round(openingDuration * 1000D));
+        double bodyDuration = Math.max(0D, videoDuration - openingDuration);
+        double fadeOutStart = Math.max(0D, bodyDuration - 1D);
+        List<String> inputs = new ArrayList<>();
+        StringBuilder filter = new StringBuilder()
+                .append("[0:a]atrim=duration=").append(formatDecimal(openingDuration))
+                .append(",asetpts=PTS-STARTPTS[opening]");
+        if (hasVoice) {
+            filter.append(';')
+                    .append("[1:a]").append(FINAL_AUDIO_FILTER)
+                    .append(",adelay=").append(Math.round(delayMillis)).append('|').append(Math.round(delayMillis))
+                    .append(",asetpts=PTS-STARTPTS[voice]");
+            inputs.add("[voice]");
+        }
+        if (hasBgm) {
+            int bgmInputIndex = hasVoice ? 2 : 1;
+            filter.append(';')
+                    .append('[').append(bgmInputIndex).append(":a]volume=")
+                    .append(formatDecimal(normalizeBgmVolume(bgmVolume)))
+                    .append(",afade=t=in:ss=0:d=1")
+                    .append(",afade=t=out:st=").append(formatDecimal(fadeOutStart)).append(":d=1")
+                    .append(",atrim=duration=").append(formatDecimal(bodyDuration))
+                    .append(",adelay=").append(Math.round(delayMillis)).append('|').append(Math.round(delayMillis))
+                    .append(",asetpts=PTS-STARTPTS[bgm]");
+            inputs.add("[bgm]");
+        }
+        if (inputs.isEmpty()) {
+            return filter.append(";[opening]apad,atrim=duration=")
+                    .append(formatDecimal(videoDuration)).append(",asetpts=PTS-STARTPTS[aout]").toString();
+        }
+        filter.append(';').append("[opening]").append(String.join("", inputs))
+                .append("amix=inputs=").append(inputs.size() + 1)
+                .append(":duration=longest:dropout_transition=0,atrim=duration=")
+                .append(formatDecimal(videoDuration)).append(",asetpts=PTS-STARTPTS[aout]");
+        return filter.toString();
+    }
+
     private File ensureTargetDuration(TkGenerationTaskDO task, File taskDir, File mergedVideo) throws Exception {
         double targetDuration = TkVideoDurationSupport.normalize(task.getTargetDuration());
         double mergedDuration = probeDuration(mergedVideo);
@@ -270,8 +385,13 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         File adjustedVideo = new File(taskDir, "merged-video-duration-adjusted.mp4");
         log.info("[ensureTargetDuration][taskId({}) targetDuration({}) mergedDuration({})]",
                 task.getId(), targetDuration, mergedDuration);
-        runCommand(buildDurationCorrectionCommand(ffmpeg(), mergedVideo, adjustedVideo,
-                mergedDuration, targetDuration, ffmpegPreset()));
+        if (TkNativeOpeningSupport.isNativeMode(task.getOpeningProcessMode())) {
+            runCommand(buildNativeDurationPadCommand(ffmpeg(), mergedVideo, adjustedVideo,
+                    mergedDuration, targetDuration, ffmpegPreset()));
+        } else {
+            runCommand(buildDurationCorrectionCommand(ffmpeg(), mergedVideo, adjustedVideo,
+                    mergedDuration, targetDuration, ffmpegPreset()));
+        }
         return adjustedVideo;
     }
 
@@ -340,6 +460,7 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                                      TkRenderProgressReporter reporter) throws Exception {
         List<ClipSpec> clipSpecs = new ArrayList<>();
         Map<String, Double> durationCache = new LinkedHashMap<>();
+        boolean nativeOpeningMode = TkNativeOpeningSupport.isNativeMode(task.getOpeningProcessMode());
         for (StageGroup group : groupSections(clipPlan)) {
             List<ClipSpec> groupSpecs = new ArrayList<>();
             double groupTargetDuration = group.targetDuration();
@@ -371,8 +492,16 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         int total = clipSpecs.size();
         for (ClipSpec spec : clipSpecs) {
             File segment = new File(taskDir, StrUtil.format("clip-{}.mp4", index++));
-            runCommand(buildAdaptClipCommand(ffmpeg(), spec.source, segment, spec.startSeconds,
-                    spec.sourceDurationSeconds, spec.durationSeconds, ffmpegPreset()));
+            if (spec.nativeOpening) {
+                runCommand(buildNativeOpeningClipCommand(ffmpeg(), spec.source, segment, spec.startSeconds,
+                        spec.durationSeconds, ffmpegPreset(), probeHasAudio(spec.source)));
+            } else if (nativeOpeningMode) {
+                runCommand(buildSilentBodyClipCommand(ffmpeg(), spec.source, segment, spec.startSeconds,
+                        spec.sourceDurationSeconds, spec.durationSeconds, ffmpegPreset()));
+            } else {
+                runCommand(buildAdaptClipCommand(ffmpeg(), spec.source, segment, spec.startSeconds,
+                        spec.sourceDurationSeconds, spec.durationSeconds, ffmpegPreset()));
+            }
             segments.add(segment);
             reporter.report("RENDER_TRANSCODE_SEGMENTS", "正在转码拼接素材",
                     TkGenerationProgressSupport.stageProgress(72, 88, segments.size(), total), segments.size(), total);
@@ -399,7 +528,8 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         if (durationSeconds <= 0.001D) {
             return null;
         }
-        return new ClipSpec(source, startSeconds, durationSeconds, durationSeconds);
+        boolean nativeOpening = "NATIVE".equalsIgnoreCase(StrUtil.trimToEmpty(item.getReuseMode()));
+        return new ClipSpec(source, startSeconds, durationSeconds, durationSeconds, nativeOpening);
     }
 
     private void adaptClipSpecs(List<ClipSpec> clipSpecs, double targetDuration) {
@@ -407,10 +537,20 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         if (renderedDuration + SECTION_COMPRESS_EPSILON_SECONDS >= targetDuration || clipSpecs.isEmpty()) {
             return;
         }
-        double scale = targetDuration / renderedDuration;
+        double fixedDuration = clipSpecs.stream()
+                .filter(spec -> spec.nativeOpening)
+                .mapToDouble(spec -> spec.durationSeconds)
+                .sum();
+        double adaptableDuration = renderedDuration - fixedDuration;
+        if (adaptableDuration <= SECTION_COMPRESS_EPSILON_SECONDS) {
+            return;
+        }
+        double scale = Math.max(0D, targetDuration - fixedDuration) / adaptableDuration;
         for (int index = 0; index < clipSpecs.size(); index++) {
             ClipSpec spec = clipSpecs.get(index);
-            clipSpecs.set(index, spec.withDuration(spec.durationSeconds * scale));
+            if (!spec.nativeOpening) {
+                clipSpecs.set(index, spec.withDuration(spec.durationSeconds * scale));
+            }
         }
     }
 
@@ -687,6 +827,22 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         }
     }
 
+    private boolean probeHasAudio(File file) throws Exception {
+        String output = runCommandForOutput(Arrays.asList(ffprobe(), "-v", "error", "-select_streams", "a:0",
+                "-show_entries", "stream=index", "-of", "csv=p=0", file.getAbsolutePath()), 60);
+        return StrUtil.isNotBlank(output);
+    }
+
+    private double nativeOpeningDurationSeconds(TkGenerationTaskDO task) {
+        if (task == null || !TkNativeOpeningSupport.isNativeMode(task.getOpeningProcessMode())) {
+            return 0D;
+        }
+        if (task.getOpeningDurationMs() != null && task.getOpeningDurationMs() > 0L) {
+            return task.getOpeningDurationMs() / 1000D;
+        }
+        return Math.min(3D, TkVideoDurationSupport.normalize(task.getTargetDuration()));
+    }
+
     private void runCommand(List<String> command) throws Exception {
         File outputFile = File.createTempFile("tk-ffmpeg-", ".log");
         try {
@@ -799,17 +955,19 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         private final double startSeconds;
         private final double sourceDurationSeconds;
         private final double durationSeconds;
+        private final boolean nativeOpening;
 
         private ClipSpec(File source, double startSeconds, double sourceDurationSeconds,
-                         double durationSeconds) {
+                         double durationSeconds, boolean nativeOpening) {
             this.source = source;
             this.startSeconds = startSeconds;
             this.sourceDurationSeconds = sourceDurationSeconds;
             this.durationSeconds = durationSeconds;
+            this.nativeOpening = nativeOpening;
         }
 
         private ClipSpec withDuration(double durationSeconds) {
-            return new ClipSpec(source, startSeconds, sourceDurationSeconds, durationSeconds);
+            return new ClipSpec(source, startSeconds, sourceDurationSeconds, durationSeconds, nativeOpening);
         }
 
     }
@@ -837,9 +995,9 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                 return sectionTargetSecond;
             }
             return items.stream()
-                    .map(TkClipPlanItem::getDurationSecond)
-                    .filter(duration -> duration != null && duration > 0)
-                    .mapToInt(Integer::intValue)
+                    .mapToDouble(item -> item.getDurationMillis() != null && item.getDurationMillis() > 0L
+                            ? item.getDurationMillis() / 1000D
+                            : item.getDurationSecond() == null ? 0D : Math.max(0D, item.getDurationSecond()))
                     .sum();
         }
 

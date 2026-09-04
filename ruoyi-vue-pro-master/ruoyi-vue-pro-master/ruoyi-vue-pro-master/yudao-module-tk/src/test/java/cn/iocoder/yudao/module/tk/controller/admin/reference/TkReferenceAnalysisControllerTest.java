@@ -50,7 +50,7 @@ class TkReferenceAnalysisControllerTest {
     }
 
     @Test
-    void openTranscriptExtractShouldRequirePermissionsAndTenantScope() throws Exception {
+    void openTranscriptExtractShouldAllowAnonymousCreateAndQuery() throws Exception {
         Class<?> controllerClass = Class.forName(
                 "cn.iocoder.yudao.module.tk.controller.admin.reference.TkOpenVideoTranscriptExtractController");
 
@@ -64,11 +64,9 @@ class TkReferenceAnalysisControllerTest {
         PostMapping postMapping = createMethod.getAnnotation(PostMapping.class);
         assertNotNull(postMapping);
         assertTrue(Arrays.asList(postMapping.value()).contains("/extract"));
-        assertFalse(createMethod.isAnnotationPresent(PermitAll.class));
+        assertNotNull(createMethod.getAnnotation(PermitAll.class));
         assertFalse(createMethod.isAnnotationPresent(TenantIgnore.class));
-        PreAuthorize createPermission = createMethod.getAnnotation(PreAuthorize.class);
-        assertNotNull(createPermission);
-        assertEquals("@ss.hasPermission('tk:reference:analyze')", createPermission.value());
+        assertFalse(createMethod.isAnnotationPresent(PreAuthorize.class));
 
         Method syncMethod = controllerClass.getMethod(
                 "extractAndWait",
@@ -87,11 +85,9 @@ class TkReferenceAnalysisControllerTest {
                 getMethod.getAnnotation(org.springframework.web.bind.annotation.GetMapping.class);
         assertNotNull(getMapping);
         assertTrue(Arrays.asList(getMapping.value()).contains("/extract/{taskId}"));
-        assertFalse(getMethod.isAnnotationPresent(PermitAll.class));
+        assertNotNull(getMethod.getAnnotation(PermitAll.class));
         assertFalse(getMethod.isAnnotationPresent(TenantIgnore.class));
-        PreAuthorize queryPermission = getMethod.getAnnotation(PreAuthorize.class);
-        assertNotNull(queryPermission);
-        assertEquals("@ss.hasPermission('tk:reference:query')", queryPermission.value());
+        assertFalse(getMethod.isAnnotationPresent(PreAuthorize.class));
     }
 
 }

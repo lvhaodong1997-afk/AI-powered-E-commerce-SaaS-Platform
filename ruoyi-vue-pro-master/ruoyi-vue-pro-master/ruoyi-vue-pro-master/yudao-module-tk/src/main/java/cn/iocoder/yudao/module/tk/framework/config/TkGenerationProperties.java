@@ -13,6 +13,8 @@ public class TkGenerationProperties {
     private Gemini gemini = new Gemini();
     private DashScope dashscope = new DashScope();
     private Mimo mimo = new Mimo();
+    private DeepSeek deepseek = new DeepSeek();
+    private TranscriptVerify transcriptVerify = new TranscriptVerify();
     private Ffmpeg ffmpeg = new Ffmpeg();
     private ReferenceDownload referenceDownload = new ReferenceDownload();
     private RenderDownload renderDownload = new RenderDownload();
@@ -62,6 +64,29 @@ public class TkGenerationProperties {
         private Boolean optimizeTextPreview = true;
         private String defaultVoice = "Mia";
         private Integer timeoutSeconds = 120;
+
+    }
+
+    @Data
+    public static class DeepSeek {
+
+        private String apiKey;
+        private String baseUrl = "https://api.deepseek.com";
+        private String model = "deepseek-v4-flash";
+        private Integer timeoutSeconds = 60;
+        private Integer maxOutputTokens = 2048;
+        private Integer retryCount = 1;
+        private Integer retryDelayMs = 500;
+
+    }
+
+    @Data
+    public static class TranscriptVerify {
+
+        private Boolean enabled = true;
+        private Integer maxInputCharacters = 20000;
+        private Integer maxSegments = 200;
+        private String promptVersion = "v1";
 
     }
 

@@ -13,6 +13,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.annotation.security.PermitAll;
 import javax.validation.Valid;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
@@ -28,7 +29,7 @@ public class TkOpenVideoTranscriptExtractController {
 
     @PostMapping("/extract")
     @Operation(summary = "创建视频文案时间轴提取任务")
-    @PreAuthorize("@ss.hasPermission('tk:reference:analyze')")
+    @PermitAll
     public CommonResult<TkOpenVideoTranscriptExtractCreateRespVO> createExtractTask(
             @Valid @RequestBody TkOpenVideoTranscriptExtractCreateReqVO reqVO) {
         return success(transcriptExtractService.createExtractTask(reqVO));
@@ -44,7 +45,7 @@ public class TkOpenVideoTranscriptExtractController {
 
     @GetMapping("/extract/{taskId}")
     @Operation(summary = "查询视频文案时间轴提取任务")
-    @PreAuthorize("@ss.hasPermission('tk:reference:query')")
+    @PermitAll
     public CommonResult<TkOpenVideoTranscriptExtractRespVO> getExtractTask(@PathVariable("taskId") Long taskId) {
         return success(transcriptExtractService.getExtractTask(taskId));
     }

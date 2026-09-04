@@ -41,6 +41,8 @@ public class TkGenerationTaskRespVO {
     private Long scriptOptionId;
     private String openingVideoUrl;
     private String openingVideoName;
+    private String openingProcessMode;
+    private Long openingDurationMs;
     private Integer openingClipStartSecond;
     private Integer openingClipEndSecond;
     private Integer referenceDuration;
