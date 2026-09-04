@@ -29,11 +29,10 @@ public interface TkMaterialLibraryMapper extends BaseMapperX<TkMaterialLibraryDO
                 .orderByDesc(TkMaterialLibraryDO::getId));
     }
 
-    default List<TkMaterialLibraryDO> selectTop5(TkUserScope scope) {
+    default List<TkMaterialLibraryDO> selectAll(TkUserScope scope) {
         return selectList(new LambdaQueryWrapperX<TkMaterialLibraryDO>()
                 .eqIfPresent(TkMaterialLibraryDO::getTenantId, scope.isGlobalPlatformView() ? null : scope.getTenantId())
-                .orderByDesc(TkMaterialLibraryDO::getId)
-                .last("LIMIT 5"));
+                .orderByDesc(TkMaterialLibraryDO::getId));
     }
 
     default Long selectCount(TkUserScope scope) {

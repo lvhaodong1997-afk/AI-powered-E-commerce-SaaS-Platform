@@ -62,19 +62,19 @@ public class TkDashboardServiceImpl implements TkDashboardService {
         TkUserScope scope = dataScopeService.getCurrentScope();
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
         LocalDateTime tomorrowStart = todayStart.plusDays(1);
-        List<TkMaterialLibraryRespVO> topLibraries = BeanUtils.toBean(
-                libraryMapper.selectTop5(scope), TkMaterialLibraryRespVO.class);
-        Map<Long, TkMaterialVideoDO> previewMap = videoMapper.selectFirstByLibraryIds(topLibraries.stream()
+        List<TkMaterialLibraryRespVO> libraries = BeanUtils.toBean(
+                libraryMapper.selectAll(scope), TkMaterialLibraryRespVO.class);
+        Map<Long, TkMaterialVideoDO> previewMap = videoMapper.selectFirstByLibraryIds(libraries.stream()
                         .map(TkMaterialLibraryRespVO::getId).collect(java.util.stream.Collectors.toList())).stream()
                 .collect(java.util.stream.Collectors.toMap(TkMaterialVideoDO::getLibraryId, item -> item,
                         (left, right) -> left));
-        topLibraries.forEach(library -> fillLibraryPreview(library, previewMap.get(library.getId())));
+        libraries.forEach(library -> fillLibraryPreview(library, previewMap.get(library.getId())));
         return TenantUtils.executeIgnore(() -> new TkDashboardSummaryRespVO(
                         taskMapper.selectCount(scope, todayStart, tomorrowStart),
                         videoMapper.selectCount(scope),
                         videoMapper.selectCountByStatus(scope, TkMaterialVideoStatusEnum.PARSING),
                         creditLogMapper.selectSettledCredits(scope, todayStart, tomorrowStart),
-                        topLibraries,
+                        libraries,
                         BeanUtils.toBean(taskMapper.selectTop5(scope), TkGenerationTaskRespVO.class)
                 )
         );

@@ -3866,7 +3866,7 @@ const displayScriptOptions = computed<DisplayScriptOption[]>(() => {
 })
 
 const displayMaterials = computed(() => {
-  return libraries.value.slice(0, 5).map((item) => ({
+  return libraries.value.map((item) => ({
     id: item.id || item.name,
     name: item.name || copy.value.libraryFallback,
     count: formatNumber(item.videoCount, '0'),
