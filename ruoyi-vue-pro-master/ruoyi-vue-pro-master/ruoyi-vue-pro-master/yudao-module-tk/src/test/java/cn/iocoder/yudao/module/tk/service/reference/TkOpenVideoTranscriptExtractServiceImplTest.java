@@ -153,7 +153,7 @@ class TkOpenVideoTranscriptExtractServiceImplTest {
                 .segmentsJson("[{\"text\":\"團隊 回歸\",\"start\":0.1,\"end\":1.2}]")
                 .wordsJson("[{\"text\":\"回 歸\",\"start\":0.1,\"end\":0.8}]")
                 .verifiedTranscriptText("校验后的文案")
-                .verifiedSegmentsJson("[{\"text\":\"校验后的团队\",\"start\":0.1,\"end\":1.2}]")
+                .verifiedSegmentsJson("[{\"text\":\"團隊 回歸\",\"start\":0.1,\"end\":1.2}]")
                 .textVerifyStatus("SUCCESS")
                 .textVerifyModel("deepseek-v4-flash")
                 .build());
@@ -161,15 +161,36 @@ class TkOpenVideoTranscriptExtractServiceImplTest {
         TkOpenVideoTranscriptExtractRespVO result = service(mapper).getExtractTask(104L);
 
         assertEquals("校验后的文案", result.getTranscriptText());
-        assertEquals("校验后的团队", result.getSegments().get(0).get("text"));
+        assertEquals("团队回归", result.getSegments().get(0).get("text"));
         assertEquals(0.1D, result.getSegments().get(0).get("start"));
         assertEquals("回归", result.getWords().get(0).get("text"));
         assertEquals(0.8D, result.getWords().get(0).get("end"));
         assertEquals("校验后的文案", result.getVerifiedTranscriptText());
-        assertEquals("校验后的团队", result.getVerifiedSegments().get(0).get("text"));
+        assertEquals("团队回归", result.getVerifiedSegments().get(0).get("text"));
         assertEquals(0.1D, result.getVerifiedSegments().get(0).get("start"));
         assertEquals("SUCCESS", result.getTextVerifyStatus());
         assertEquals("deepseek-v4-flash", result.getTextVerifyModel());
+    }
+
+    @Test
+    void getExtractTaskDoesNotExposeRawTranscriptWhileTextVerificationIsProcessing() {
+        TkOpenVideoTranscriptTaskMapper mapper = mock(TkOpenVideoTranscriptTaskMapper.class);
+        when(mapper.selectById(107L)).thenReturn(TkOpenVideoTranscriptTaskDO.builder()
+                .id(107L)
+                .status("PROCESSING")
+                .transcriptText("无标点的原始文案")
+                .segmentsJson("[{\"text\":\"原始片段\",\"start\":0.1,\"end\":1.2}]")
+                .wordsJson("[{\"text\":\"原始\",\"start\":0.1,\"end\":0.5}]")
+                .textVerifyStatus("PROCESSING")
+                .build());
+
+        TkOpenVideoTranscriptExtractRespVO result = service(mapper).getExtractTask(107L);
+
+        assertEquals(null, result.getTranscriptText());
+        assertEquals("原始片段", result.getSegments().get(0).get("text"));
+        assertEquals("原始", result.getWords().get(0).get("text"));
+        assertEquals(null, result.getVerifiedTranscriptText());
+        assertEquals("PROCESSING", result.getTextVerifyStatus());
     }
 
     @Test
@@ -185,9 +206,8 @@ class TkOpenVideoTranscriptExtractServiceImplTest {
             return 1;
         });
         String originalSegments = "[{\"start\":1.25,\"end\":2.75,\"text\":\"原始错字\"}]";
-        when(verifier.verify("原始错字", originalSegments))
-                .thenReturn(new TkTranscriptTextVerifyResult("校验后的文字",
-                        "[{\"start\":1.25,\"end\":2.75,\"text\":\"校验后的文字\"}]"));
+        when(verifier.verify("原始错字"))
+                .thenReturn(new TkTranscriptTextVerifyResult("校验后的文字。"));
 
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getTranscriptVerify().setEnabled(true);
@@ -200,10 +220,12 @@ class TkOpenVideoTranscriptExtractServiceImplTest {
 
         assertEquals("原始错字", ReflectionTestUtils.getField(updates.get(0), "transcriptText"));
         assertEquals(originalSegments, ReflectionTestUtils.getField(updates.get(0), "segmentsJson"));
-        assertEquals("校验后的文字", ReflectionTestUtils.getField(lastUpdate.get(), "verifiedTranscriptText"));
-        assertEquals("[{\"start\":1.25,\"end\":2.75,\"text\":\"校验后的文字\"}]",
+        assertEquals("PROCESSING", ReflectionTestUtils.getField(updates.get(0), "status"));
+        assertEquals("校验后的文字。", ReflectionTestUtils.getField(lastUpdate.get(), "verifiedTranscriptText"));
+        assertEquals(originalSegments,
                 ReflectionTestUtils.getField(lastUpdate.get(), "verifiedSegmentsJson"));
         assertEquals("SUCCESS", ReflectionTestUtils.getField(lastUpdate.get(), "textVerifyStatus"));
+        assertEquals("SUCCESS", ReflectionTestUtils.getField(lastUpdate.get(), "status"));
     }
 
     @Test
@@ -216,7 +238,7 @@ class TkOpenVideoTranscriptExtractServiceImplTest {
             return 1;
         });
         String originalSegments = "[{\"start\":3.0,\"end\":4.0,\"text\":\"原始文案\"}]";
-        when(verifier.verify("原始文案", originalSegments)).thenThrow(new IllegalStateException("DeepSeek unavailable"));
+        when(verifier.verify("原始文案")).thenThrow(new IllegalStateException("DeepSeek unavailable"));
 
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getTranscriptVerify().setEnabled(true);
@@ -227,9 +249,9 @@ class TkOpenVideoTranscriptExtractServiceImplTest {
         ReflectionTestUtils.invokeMethod(service, "persistAsrResult", 202L, "audio-url", 4.0D,
                 "原始文案", originalSegments, "[]", "small", "{\"segments\":[]}");
 
-        assertEquals("SUCCESS", ReflectionTestUtils.getField(lastUpdate.get(), "status"));
-        assertEquals("原始文案", ReflectionTestUtils.getField(lastUpdate.get(), "verifiedTranscriptText"));
-        assertEquals(originalSegments, ReflectionTestUtils.getField(lastUpdate.get(), "verifiedSegmentsJson"));
+        assertEquals("FAILED", ReflectionTestUtils.getField(lastUpdate.get(), "status"));
+        assertEquals("", ReflectionTestUtils.getField(lastUpdate.get(), "verifiedTranscriptText"));
+        assertEquals("", ReflectionTestUtils.getField(lastUpdate.get(), "verifiedSegmentsJson"));
         assertEquals("FAILED", ReflectionTestUtils.getField(lastUpdate.get(), "textVerifyStatus"));
         assertEquals("DeepSeek unavailable", ReflectionTestUtils.getField(lastUpdate.get(), "textVerifyFailReason"));
     }
@@ -266,6 +288,31 @@ class TkOpenVideoTranscriptExtractServiceImplTest {
         assertFalse(Arrays.stream(TkOpenVideoTranscriptExtractSyncRespVO.class.getDeclaredFields())
                 .map(Field::getName)
                 .anyMatch("taskId"::equals));
+    }
+
+    @Test
+    void extractAndWaitReturnsSkippedVerificationResult() {
+        TkOpenVideoTranscriptTaskMapper mapper = mock(TkOpenVideoTranscriptTaskMapper.class);
+        doAnswer(invocation -> {
+            TkOpenVideoTranscriptTaskDO task = invocation.getArgument(0);
+            task.setId(108L);
+            return 1;
+        }).when(mapper).insert(any(TkOpenVideoTranscriptTaskDO.class));
+        when(mapper.selectById(108L)).thenReturn(TkOpenVideoTranscriptTaskDO.builder()
+                .id(108L)
+                .sourceUrl("https://example.com/video")
+                .status("SUCCESS")
+                .verifiedTranscriptText("原始文案。")
+                .verifiedSegmentsJson("[]")
+                .wordsJson("[]")
+                .textVerifyStatus("SKIPPED")
+                .build());
+
+        TkOpenVideoTranscriptExtractSyncRespVO result = service(mapper).extractAndWait(request());
+
+        assertEquals("SUCCESS", result.getStatus());
+        assertEquals("原始文案。", result.getTranscriptText());
+        assertEquals("SKIPPED", result.getTextVerifyStatus());
     }
 
     @Test

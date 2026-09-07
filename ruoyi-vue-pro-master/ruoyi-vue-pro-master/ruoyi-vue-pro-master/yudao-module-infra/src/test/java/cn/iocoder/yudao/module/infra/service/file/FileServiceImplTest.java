@@ -185,7 +185,7 @@ public class FileServiceImplTest extends BaseDbUnitTest {
     }
 
     @Test
-    public void testDeleteFileByUrl_success() {
+    public void testDeleteFileByUrl_success() throws Exception {
         // mock 数据
         String url = "https://cdn.example.com/tk/material/demo.mp4";
         FileDO dbFile = randomPojo(FileDO.class, o -> o.setConfigId(10L)

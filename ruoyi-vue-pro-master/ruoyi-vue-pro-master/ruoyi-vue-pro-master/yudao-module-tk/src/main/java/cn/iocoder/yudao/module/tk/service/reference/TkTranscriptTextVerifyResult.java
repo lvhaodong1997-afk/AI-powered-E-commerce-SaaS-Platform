@@ -8,6 +8,5 @@ import lombok.Getter;
 public class TkTranscriptTextVerifyResult {
 
     private final String transcriptText;
-    private final String segmentsJson;
 
 }

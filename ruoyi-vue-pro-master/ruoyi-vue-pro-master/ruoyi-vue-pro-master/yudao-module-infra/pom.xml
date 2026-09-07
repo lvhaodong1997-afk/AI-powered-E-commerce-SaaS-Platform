@@ -52,6 +52,14 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- DefaultDatabaseQueryTest 使用 MyBatis-Plus 的数据库元数据查询工具 -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-generator</artifactId>
+            <version>3.5.16</version>
+            <scope>test</scope>
+        </dependency>
+
         <!-- 工具类相关 -->
         <dependency>
             <groupId>cn.iocoder.boot</groupId>

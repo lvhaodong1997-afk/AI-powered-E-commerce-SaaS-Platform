@@ -8,10 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 
 @Service
 @Slf4j
@@ -19,92 +15,25 @@ public class TkTranscriptTextVerifyServiceImpl implements TkTranscriptTextVerify
 
     private static final double MIN_TEXT_SIMILARITY = 0.45D;
     private static final int MAX_TEXT_GROWTH = 8;
-    private static final int VERIFY_BATCH_SIZE = 20;
+    private static final int MIN_PUNCTUATION_CHECK_LENGTH = 6;
 
     @Resource
     private TkDeepSeekClient deepSeekClient;
 
     @Override
-    public TkTranscriptTextVerifyResult verify(String transcriptText, String segmentsJson) {
+    public TkTranscriptTextVerifyResult verify(String transcriptText) {
         if (StrUtil.isBlank(transcriptText)) {
             throw new IllegalArgumentException("ASR 文案不能为空");
         }
-        JsonNode originalSegments = parseSegments(segmentsJson);
-        List<Map<String, Object>> resultSegments = new ArrayList<>();
-        List<String> transcriptParts = new ArrayList<>();
-        for (int batchStart = 0; batchStart < originalSegments.size(); batchStart += VERIFY_BATCH_SIZE) {
-            int batchEnd = Math.min(originalSegments.size(), batchStart + VERIFY_BATCH_SIZE);
-            verifyBatch(transcriptText, originalSegments, batchStart, batchEnd, resultSegments, transcriptParts);
+        String responseText = deepSeekClient.verifyText(transcriptText, buildPrompt(transcriptText));
+        JsonNode response = parseResponse(responseText);
+        String verifiedText = response.path("text").asText(null);
+        if (verifiedText == null) {
+            throw new IllegalStateException("DeepSeek 校验结果缺少 text 字段");
         }
-        return new TkTranscriptTextVerifyResult(String.join("\n", transcriptParts),
-                JsonUtils.toJsonString(resultSegments));
-    }
-
-    private void verifyBatch(String transcriptText, JsonNode originalSegments, int batchStart, int batchEnd,
-                             List<Map<String, Object>> resultSegments, List<String> transcriptParts) {
-        try {
-            verifyBatchOnce(transcriptText, originalSegments, batchStart, batchEnd, resultSegments, transcriptParts);
-        } catch (IllegalStateException ex) {
-            int batchSize = batchEnd - batchStart;
-            if (batchSize <= 1) {
-                throw new IllegalStateException("DeepSeek 文案校验失败，已完成拆批重试，片段序号：" + batchStart
-                        + "，原因：" + ex.getMessage(), ex);
-            }
-            int middle = batchStart + batchSize / 2;
-            log.warn("DeepSeek 文案校验响应无效，拆分批次重试，batchStart={}, batchEnd={}, reason={}",
-                    batchStart, batchEnd, StrUtil.maxLength(StrUtil.blankToDefault(ex.getMessage(), "unknown"), 160));
-            verifyBatch(transcriptText, originalSegments, batchStart, middle, resultSegments, transcriptParts);
-            verifyBatch(transcriptText, originalSegments, middle, batchEnd, resultSegments, transcriptParts);
-        }
-    }
-
-    private void verifyBatchOnce(String transcriptText, JsonNode originalSegments, int batchStart, int batchEnd,
-                                 List<Map<String, Object>> resultSegments, List<String> transcriptParts) {
-        String prompt = buildPrompt(transcriptText, originalSegments, batchStart, batchEnd);
-        JsonNode response = parseResponse(deepSeekClient.verifyText(transcriptText, prompt));
-        JsonNode verifiedSegments = response.path("segments");
-        int batchSize = batchEnd - batchStart;
-        if (!verifiedSegments.isArray() || verifiedSegments.size() != batchSize) {
-            throw new IllegalStateException("DeepSeek 返回的文案片段数量不一致");
-        }
-
-        List<Map<String, Object>> batchResultSegments = new ArrayList<>();
-        List<String> batchTranscriptParts = new ArrayList<>();
-        for (int batchIndex = 0; batchIndex < batchSize; batchIndex++) {
-            JsonNode original = originalSegments.get(batchStart + batchIndex);
-            JsonNode verified = verifiedSegments.get(batchIndex);
-            validateIndex(verified, batchIndex);
-            String originalText = original.path("text").asText("");
-            String verifiedText = verified.path("text").asText(null);
-            if (verifiedText == null) {
-                throw new IllegalStateException("DeepSeek 返回的文案文字为空");
-            }
-            verifiedText = verifiedText.trim();
-            validateTextChange(originalText, verifiedText);
-
-            Map<String, Object> resultSegment = JsonUtils.parseObject(original.toString(), Map.class);
-            resultSegment.put("text", verifiedText);
-            batchResultSegments.add(new LinkedHashMap<>(resultSegment));
-            if (StrUtil.isNotBlank(verifiedText)) {
-                batchTranscriptParts.add(verifiedText);
-            }
-        }
-        resultSegments.addAll(batchResultSegments);
-        transcriptParts.addAll(batchTranscriptParts);
-    }
-
-    private JsonNode parseSegments(String segmentsJson) {
-        try {
-            JsonNode segments = JsonUtils.parseTree(segmentsJson);
-            if (segments == null || !segments.isArray() || segments.size() == 0) {
-                throw new IllegalStateException("ASR 未返回有效时间轴");
-            }
-            return segments;
-        } catch (IllegalStateException ex) {
-            throw ex;
-        } catch (Exception ex) {
-            throw new IllegalStateException("ASR 时间轴 JSON 无效", ex);
-        }
+        verifiedText = verifiedText.trim();
+        validateTextChange(transcriptText, verifiedText);
+        return new TkTranscriptTextVerifyResult(verifiedText);
     }
 
     private JsonNode parseResponse(String responseText) {
@@ -160,41 +89,26 @@ public class TkTranscriptTextVerifyServiceImpl implements TkTranscriptTextVerify
         throw new IllegalStateException("DeepSeek 校验结果 JSON 截断");
     }
 
-    private String buildPrompt(String transcriptText, JsonNode segments, int batchStart, int batchEnd) {
-        List<Map<String, Object>> inputSegments = new ArrayList<>();
-        for (int i = batchStart; i < batchEnd; i++) {
-            JsonNode segment = segments.get(i);
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("index", i - batchStart);
-            item.put("text", segment.path("text").asText(""));
-            inputSegments.add(item);
-        }
+    private String buildPrompt(String transcriptText) {
         return "你只做文字校验，不做文案优化。保留原文的语气、风格、顺序、事实、数字和口语表达。"
-                + "只在上下文足以确定时修正文字；无法确定时原样保留。不要新增、删除、合并或拆分文字片段。"
-                + "标点和语义断句是必做项；原文没有标点时，必须根据完整上下文补充必要的中文标点；只有无法判断的位置才原样保留。"
-                + "必须返回合法 JSON，格式为 {\"segments\":[{\"index\":0,\"text\":\"校验后的文字\"}]}，"
-                + "segments 数量和 index 必须与本批输入完全一致，只返回 index 和 text。"
-                + "\n\n完整原文：\n" + transcriptText
-                + "\n\n本批分段文字输入：\n" + JsonUtils.toJsonString(inputSegments);
-    }
-
-    private void validateIndex(JsonNode verified, int expectedIndex) {
-        if (verified == null || !verified.isObject() || !verified.has("index")
-                || verified.path("index").asInt(-1) != expectedIndex) {
-            throw new IllegalStateException("DeepSeek 返回的时间轴片段顺序不一致");
-        }
+                + "只在上下文足以确定时修正错别字、同音字、漏字、多字和专有名词；无法确定时原样保留。"
+                + "标点和语义断句是必做项；原文没有标点时，必须根据完整上下文补充必要的中文逗号、句号、问号、感叹号等标点。"
+                + "不要新增、删除、总结、改写或优化内容。必须返回合法 JSON，格式为 {\"text\":\"校验后的完整文案\"}，只返回 text 字段。"
+                + "\n\n完整原文：\n" + transcriptText;
     }
 
     private void validateTextChange(String originalText, String verifiedText) {
-        if (StrUtil.isBlank(originalText)) {
-            if (StrUtil.isNotBlank(verifiedText)) {
-                throw new IllegalStateException("DeepSeek 为原始空片段新增了文字");
-            }
-            return;
+        if (StrUtil.isBlank(verifiedText)) {
+            throw new IllegalStateException("DeepSeek 返回的校验文案为空");
         }
-        if (StrUtil.isBlank(verifiedText) || verifiedText.contains("```")
-                || verifiedText.length() > originalText.length() + Math.max(MAX_TEXT_GROWTH, originalText.length() / 2)) {
+        if (verifiedText.contains("```")
+                || verifiedText.length() > originalText.length()
+                + Math.max(MAX_TEXT_GROWTH, originalText.length() / 2)) {
             throw new IllegalStateException("DeepSeek 校验结果存在异常扩写");
+        }
+        if (containsChinese(verifiedText) && verifiedText.length() >= MIN_PUNCTUATION_CHECK_LENGTH
+                && !containsPunctuation(verifiedText)) {
+            throw new IllegalStateException("DeepSeek 校验结果未补充必要标点");
         }
         String originalCompact = compactForSimilarity(originalText);
         String verifiedCompact = compactForSimilarity(verifiedText);
@@ -206,6 +120,14 @@ public class TkTranscriptTextVerifyServiceImpl implements TkTranscriptTextVerify
         if (similarity < MIN_TEXT_SIMILARITY) {
             throw new IllegalStateException("DeepSeek 校验结果与原文差异过大");
         }
+    }
+
+    private boolean containsChinese(String text) {
+        return text.matches(".*[\\u4e00-\\u9fff].*");
+    }
+
+    private boolean containsPunctuation(String text) {
+        return text.matches(".*[，。！？；：、,.!?;:…].*");
     }
 
     private String compactForSimilarity(String text) {
