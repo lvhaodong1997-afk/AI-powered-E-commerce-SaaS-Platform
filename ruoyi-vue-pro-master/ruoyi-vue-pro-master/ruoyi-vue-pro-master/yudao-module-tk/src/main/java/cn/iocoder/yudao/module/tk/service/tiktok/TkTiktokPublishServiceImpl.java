@@ -110,8 +110,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             }
         } else {
             uploadedVideo = publishMediaMapper.selectById(reqVO.getUploadedVideoId());
-            if (uploadedVideo == null || StrUtil.isBlank(uploadedVideo.getFileUrl())
-                    || "FAILED".equalsIgnoreCase(uploadedVideo.getStatus())) {
+            if (!isUsableUploadedVideo(uploadedVideo)) {
                 throw exception(TK_TIKTOK_PUBLISH_VIDEO_REQUIRED);
             }
             dataScopeService.validateWritable(uploadedVideo.getTenantId(), uploadedVideo.getCompanyId());
@@ -135,6 +134,12 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         if (generated == uploaded) {
             throw new IllegalArgumentException("生成任务和上传视频必须二选一");
         }
+    }
+
+    static boolean isUsableUploadedVideo(TkTiktokPublishMediaDO media) {
+        return media != null
+                && StrUtil.isNotBlank(media.getFileUrl())
+                && "READY".equalsIgnoreCase(media.getStatus());
     }
 
     @Override

@@ -5,12 +5,17 @@ import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.module.infra.dal.dataobject.file.FileDO;
 import cn.iocoder.yudao.module.infra.service.file.FileService;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkOpenVideoTranscriptTaskDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkReferenceAnalysisDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishMediaDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkCleanupFileMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkGenerationTaskMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.TkOpenVideoTranscriptTaskMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkReferenceAnalysisMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishMediaMapper;
 import cn.iocoder.yudao.module.tk.enums.TkGenerationStatusEnum;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
+import cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService;
 import cn.iocoder.yudao.module.tk.service.upload.TkMaterialOssUploadService;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import lombok.AllArgsConstructor;
@@ -19,9 +24,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -53,7 +61,13 @@ public class TkFileCleanupService {
     @Resource
     private TkReferenceAnalysisMapper referenceAnalysisMapper;
     @Resource
+    private TkTiktokPublishMediaMapper publishMediaMapper;
+    @Resource
+    private TkOpenVideoTranscriptTaskMapper transcriptTaskMapper;
+    @Resource
     private FileService fileService;
+    @Resource
+    private TkLocalUploadStorageService localUploadStorageService;
     @Resource
     private TkMaterialOssUploadService ossUploadService;
 
@@ -67,6 +81,142 @@ public class TkFileCleanupService {
         generatedCount += cleanupExpiredGenerationTaskUrlColumns(now, cleanup);
         int referenceCount = cleanupExpiredReferencePreviewFiles(now, cleanup);
         return new CleanupResult(generatedCount, referenceCount);
+    }
+
+    public int cleanupExpiredPublishMedia() {
+        TkGenerationProperties.Cleanup cleanup = generationProperties.getCleanup();
+        if (!Boolean.TRUE.equals(cleanup.getEnabled())) {
+            return 0;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime successDeadline = now.minusHours(normalizeHours(cleanup.getPublishMediaRetentionHours()));
+        LocalDateTime failedDeadline = now.minusHours(normalizeHours(cleanup.getPublishMediaFailedRetentionHours()));
+        List<TkTiktokPublishMediaDO> candidates = publishMediaMapper.selectExpiredCleanupCandidates(
+                successDeadline, failedDeadline, normalizeBatchSize(cleanup.getBatchSize()));
+        if (Boolean.TRUE.equals(cleanup.getDryRun())) {
+            log.info("[cleanupExpiredPublishMedia][dryRun mediaCount({})]", candidates.size());
+            return candidates.size();
+        }
+
+        int cleanedCount = 0;
+        for (TkTiktokPublishMediaDO media : candidates) {
+            if (media == null || media.getId() == null
+                    || publishMediaMapper.claimForCleanup(media.getId()) <= 0) {
+                continue;
+            }
+            try {
+                deletePublishMediaFile(media);
+                publishMediaMapper.deleteById(media.getId());
+                cleanedCount++;
+            } catch (Exception ex) {
+                publishMediaMapper.restoreReadyAfterCleanupFailure(media.getId());
+                log.warn("[cleanupExpiredPublishMedia][mediaId({}) TK 发布上传视频删除失败]", media.getId(), ex);
+            }
+        }
+        return cleanedCount;
+    }
+
+    public int cleanupExpiredTranscriptAudio() {
+        TkGenerationProperties.Cleanup cleanup = generationProperties.getCleanup();
+        if (!Boolean.TRUE.equals(cleanup.getEnabled())) {
+            return 0;
+        }
+        LocalDateTime deadline = LocalDateTime.now()
+                .minusHours(normalizeHours(cleanup.getTranscriptAudioRetentionHours()));
+        List<FileDO> candidates = cleanupFileMapper.selectExpiredTranscriptAudioCandidates(
+                deadline, normalizeBatchSize(cleanup.getBatchSize()));
+        List<FileDO> managedCandidates = candidates.stream()
+                .filter(file -> file != null && TkFileCleanupPathPolicy.extractTranscriptTaskId(file.getPath()).isPresent())
+                .collect(Collectors.toList());
+        Set<Long> taskIds = managedCandidates.stream()
+                .map(file -> TkFileCleanupPathPolicy.extractTranscriptTaskId(file.getPath()).getAsLong())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Long, TkOpenVideoTranscriptTaskDO> tasksById = taskIds.isEmpty()
+                ? Collections.emptyMap()
+                : transcriptTaskMapper.selectByIds(taskIds).stream()
+                .filter(task -> task != null && task.getId() != null)
+                .collect(Collectors.toMap(TkOpenVideoTranscriptTaskDO::getId, task -> task, (left, right) -> left));
+        List<FileDO> expiredFiles = managedCandidates.stream()
+                .filter(file -> isCleanableTranscriptAudio(file, tasksById))
+                .collect(Collectors.toList());
+        if (Boolean.TRUE.equals(cleanup.getDryRun())) {
+            log.info("[cleanupExpiredTranscriptAudio][dryRun fileCount({})]", expiredFiles.size());
+            return expiredFiles.size();
+        }
+
+        int cleanedCount = 0;
+        for (FileDO file : expiredFiles) {
+            try {
+                fileService.deleteFile(file.getId());
+                clearTranscriptTaskAudioUrl(file, tasksById);
+                cleanedCount++;
+            } catch (Exception ex) {
+                log.warn("[cleanupExpiredTranscriptAudio][fileId({}) path({}) 转写音频删除失败]",
+                        file.getId(), file.getPath(), ex);
+            }
+        }
+        return cleanedCount;
+    }
+
+    private boolean isCleanableTranscriptAudio(FileDO file,
+                                               Map<Long, TkOpenVideoTranscriptTaskDO> tasksById) {
+        long taskId = TkFileCleanupPathPolicy.extractTranscriptTaskId(file.getPath()).getAsLong();
+        TkOpenVideoTranscriptTaskDO task = tasksById.get(taskId);
+        if (task == null) {
+            return true;
+        }
+        if ("FAILED".equalsIgnoreCase(task.getStatus())) {
+            return true;
+        }
+        return "SUCCESS".equalsIgnoreCase(task.getStatus())
+                && !"PROCESSING".equalsIgnoreCase(task.getTextVerifyStatus());
+    }
+
+    private void clearTranscriptTaskAudioUrl(FileDO file,
+                                             Map<Long, TkOpenVideoTranscriptTaskDO> tasksById) {
+        long taskId = TkFileCleanupPathPolicy.extractTranscriptTaskId(file.getPath()).getAsLong();
+        TkOpenVideoTranscriptTaskDO task = tasksById.get(taskId);
+        if (task == null || StrUtil.isBlank(task.getAudioUrl())) {
+            return;
+        }
+        Optional<String> taskPath = TkFileCleanupPathPolicy.extractTranscriptAudioPath(task.getAudioUrl());
+        if (taskPath.isPresent() && taskPath.get().equals(file.getPath())) {
+            transcriptTaskMapper.clearAudioUrlIfMatches(task.getId(), task.getAudioUrl());
+        }
+    }
+
+    private void deletePublishMediaFile(TkTiktokPublishMediaDO media) throws Exception {
+        String fileUrl = media.getFileUrl();
+        if (StrUtil.isBlank(fileUrl)) {
+            throw new IllegalStateException("发布上传视频 URL 为空");
+        }
+        if (ossUploadService != null && ossUploadService.isEnabled()) {
+            if (!isManagedPublishMediaUrl(fileUrl) || !ossUploadService.isManagedUrl(fileUrl)) {
+                throw new IllegalStateException("发布上传视频 URL 不属于受管 OSS 路径");
+            }
+            ossUploadService.deleteByUrl(fileUrl);
+            return;
+        }
+        if (localUploadStorageService == null) {
+            throw new IllegalStateException("本地上传存储服务未配置");
+        }
+        Path localPath = localUploadStorageService.resolveLocalPath(fileUrl)
+                .orElseThrow(() -> new IllegalStateException("发布上传视频 URL 无法解析为本地路径"));
+        Path managedRoot = localUploadStorageService.getRootDir()
+                .resolve("tk")
+                .resolve(String.valueOf(media.getTenantId()))
+                .resolve(String.valueOf(media.getCompanyId()))
+                .resolve("tiktok-publish-media")
+                .normalize();
+        if (!localPath.normalize().startsWith(managedRoot)) {
+            throw new IllegalStateException("发布上传视频本地路径不属于受管路径");
+        }
+        Files.deleteIfExists(localPath);
+    }
+
+    private boolean isManagedPublishMediaUrl(String url) {
+        String cleanUrl = StrUtil.subBefore(StrUtil.blankToDefault(url, ""), "?", false);
+        return StrUtil.contains(cleanUrl, "/tiktok-publish-media/");
     }
 
     private int cleanupExpiredGeneratedTaskFiles(LocalDateTime now, TkGenerationProperties.Cleanup cleanup) {

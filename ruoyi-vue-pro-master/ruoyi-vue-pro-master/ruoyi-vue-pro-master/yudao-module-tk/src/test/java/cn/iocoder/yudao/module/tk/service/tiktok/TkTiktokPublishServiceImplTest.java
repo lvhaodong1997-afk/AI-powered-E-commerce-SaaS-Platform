@@ -6,6 +6,7 @@ import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishUrlR
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokAccountDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishDetailDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishMediaDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishTaskDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishDetailMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishTaskMapper;
@@ -29,6 +30,7 @@ import java.util.Collections;
 import java.util.HashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -386,6 +388,21 @@ class TkTiktokPublishServiceImplTest {
         both.setGenerationTaskId(1L);
         both.setUploadedVideoId(2L);
         assertThrows(IllegalArgumentException.class, () -> TkTiktokPublishServiceImpl.validateVideoSource(both));
+    }
+
+    @Test
+    void onlyReadyUploadedMediaCanBeUsedForPublishing() {
+        TkTiktokPublishMediaDO cleaning = TkTiktokPublishMediaDO.builder()
+                .fileUrl("https://oss.example.com/video.mp4")
+                .status("CLEANING")
+                .build();
+        TkTiktokPublishMediaDO ready = TkTiktokPublishMediaDO.builder()
+                .fileUrl("https://oss.example.com/video.mp4")
+                .status("READY")
+                .build();
+
+        assertFalse(TkTiktokPublishServiceImpl.isUsableUploadedVideo(cleaning));
+        assertTrue(TkTiktokPublishServiceImpl.isUsableUploadedVideo(ready));
     }
 
     @Test

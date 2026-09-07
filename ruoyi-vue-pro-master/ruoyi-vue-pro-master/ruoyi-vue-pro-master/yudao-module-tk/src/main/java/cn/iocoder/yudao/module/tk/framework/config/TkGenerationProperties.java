@@ -176,6 +176,10 @@ public class TkGenerationProperties {
         private Integer generatedVideoRetentionHours = 24;
         private Integer referenceVideoRetentionHours = 24;
         private Integer renderWorkDirRetentionHours = 24;
+        private Integer publishMediaRetentionHours = 24;
+        private Integer publishMediaFailedRetentionHours = 7 * 24;
+        private Integer transcriptAudioRetentionHours = 24;
+        private String dailyCleanupCron = "0 10 3 * * ?";
         private Integer businessLogRetentionDays = 30;
         private Integer batchSize = 200;
         private Boolean dryRun = false;

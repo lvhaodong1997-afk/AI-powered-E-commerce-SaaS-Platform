@@ -30,4 +30,14 @@ public interface TkCleanupFileMapper extends BaseMapperX<FileDO> {
                 .orderByAsc(FileDO::getId)
                 .last("LIMIT " + limit));
     }
+
+    default List<FileDO> selectExpiredTranscriptAudioCandidates(LocalDateTime deadline, int limit) {
+        return selectList(new LambdaQueryWrapper<FileDO>()
+                .lt(FileDO::getCreateTime, deadline)
+                .likeRight(FileDO::getPath, "tk/open-video-transcripts/")
+                .like(FileDO::getPath, "transcript-audio-")
+                .like(FileDO::getPath, ".wav")
+                .orderByAsc(FileDO::getId)
+                .last("LIMIT " + Math.max(1, limit)));
+    }
 }

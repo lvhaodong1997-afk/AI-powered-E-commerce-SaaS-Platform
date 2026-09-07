@@ -27,4 +27,19 @@ public class TkFileCleanupJob {
             log.warn("[cleanupExpiredFiles][TK 过期文件自动清理失败]", ex);
         }
     }
+
+    @TenantIgnore
+    @Scheduled(cron = "${tk.generation.cleanup.daily-cron:0 10 3 * * ?}")
+    public void cleanupExpiredDailyFiles() {
+        try {
+            int publishMediaCount = cleanupService.cleanupExpiredPublishMedia();
+            int transcriptAudioCount = cleanupService.cleanupExpiredTranscriptAudio();
+            if (publishMediaCount > 0 || transcriptAudioCount > 0) {
+                log.info("[cleanupExpiredDailyFiles][publishMediaCount({}) transcriptAudioCount({})]",
+                        publishMediaCount, transcriptAudioCount);
+            }
+        } catch (Exception ex) {
+            log.warn("[cleanupExpiredDailyFiles][TK 每日上传媒体清理失败]", ex);
+        }
+    }
 }

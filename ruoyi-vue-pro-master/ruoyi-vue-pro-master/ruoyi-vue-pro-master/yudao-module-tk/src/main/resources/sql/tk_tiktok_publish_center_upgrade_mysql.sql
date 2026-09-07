@@ -109,3 +109,39 @@ SET @tk_publish_detail_cover_timestamp_sql := IF(@tk_publish_detail_cover_timest
 PREPARE tk_publish_detail_cover_timestamp_stmt FROM @tk_publish_detail_cover_timestamp_sql;
 EXECUTE tk_publish_detail_cover_timestamp_stmt;
 DEALLOCATE PREPARE tk_publish_detail_cover_timestamp_stmt;
+
+SET @tk_publish_media_cleanup_index_exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'tk_tiktok_publish_media'
+    AND index_name = 'idx_tk_publish_media_cleanup'
+);
+SET @tk_publish_media_cleanup_index_sql := IF(@tk_publish_media_cleanup_index_exists = 0,
+  'ALTER TABLE `tk_tiktok_publish_media` ADD KEY `idx_tk_publish_media_cleanup` (`status`, `deleted`, `create_time`)',
+  'SELECT 1');
+PREPARE tk_publish_media_cleanup_index_stmt FROM @tk_publish_media_cleanup_index_sql;
+EXECUTE tk_publish_media_cleanup_index_stmt;
+DEALLOCATE PREPARE tk_publish_media_cleanup_index_stmt;
+
+SET @tk_publish_task_cleanup_index_exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'tk_tiktok_publish_task'
+    AND index_name = 'idx_tk_publish_task_cleanup'
+);
+SET @tk_publish_task_cleanup_index_sql := IF(@tk_publish_task_cleanup_index_exists = 0,
+  'ALTER TABLE `tk_tiktok_publish_task` ADD KEY `idx_tk_publish_task_cleanup` (`uploaded_video_id`, `status`, `deleted`)',
+  'SELECT 1');
+PREPARE tk_publish_task_cleanup_index_stmt FROM @tk_publish_task_cleanup_index_sql;
+EXECUTE tk_publish_task_cleanup_index_stmt;
+DEALLOCATE PREPARE tk_publish_task_cleanup_index_stmt;
+
+SET @tk_publish_detail_cleanup_index_exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'tk_tiktok_publish_detail'
+    AND index_name = 'idx_tk_publish_detail_cleanup'
+);
+SET @tk_publish_detail_cleanup_index_sql := IF(@tk_publish_detail_cleanup_index_exists = 0,
+  'ALTER TABLE `tk_tiktok_publish_detail` ADD KEY `idx_tk_publish_detail_cleanup` (`uploaded_video_id`, `status`, `tiktok_status`, `deleted`)',
+  'SELECT 1');
+PREPARE tk_publish_detail_cleanup_index_stmt FROM @tk_publish_detail_cleanup_index_sql;
+EXECUTE tk_publish_detail_cleanup_index_stmt;
+DEALLOCATE PREPARE tk_publish_detail_cleanup_index_stmt;

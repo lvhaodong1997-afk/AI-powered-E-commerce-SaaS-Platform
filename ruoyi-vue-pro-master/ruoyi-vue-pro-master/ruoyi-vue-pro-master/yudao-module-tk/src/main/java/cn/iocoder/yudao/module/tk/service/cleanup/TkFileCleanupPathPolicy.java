@@ -12,6 +12,7 @@ final class TkFileCleanupPathPolicy {
 
     private static final String TK_PREFIX = "tk/";
     private static final String GENERATION_TASK_SEGMENT = "/generation-tasks/";
+    private static final String TRANSCRIPT_AUDIO_PREFIX = "tk/open-video-transcripts/";
     private static final String REFERENCE_VIDEO_PREFIX = "tk/reference-videos/";
     private static final String REFERENCE_COVER_PREFIX = "tk/reference-covers/";
 
@@ -50,6 +51,40 @@ final class TkFileCleanupPathPolicy {
         }
         return StrUtil.startWith(path, REFERENCE_VIDEO_PREFIX)
                 || StrUtil.startWith(path, REFERENCE_COVER_PREFIX);
+    }
+
+    static OptionalLong extractTranscriptTaskId(String value) {
+        Optional<String> transcriptAudioPath = extractTranscriptAudioPath(value);
+        if (!transcriptAudioPath.isPresent()) {
+            return OptionalLong.empty();
+        }
+        String[] parts = transcriptAudioPath.get().split("/");
+        try {
+            return OptionalLong.of(Long.parseLong(parts[2]));
+        } catch (NumberFormatException ex) {
+            return OptionalLong.empty();
+        }
+    }
+
+    static Optional<String> extractTranscriptAudioPath(String value) {
+        String path = normalizeToPath(value);
+        if (!isSafeTkPath(path) || !StrUtil.startWith(path, TRANSCRIPT_AUDIO_PREFIX)) {
+            return Optional.empty();
+        }
+        String[] parts = path.split("/");
+        if (parts.length != 5 || !parts[4].matches("transcript-audio-[0-9]+\\.wav")) {
+            return Optional.empty();
+        }
+        try {
+            long taskId = Long.parseLong(parts[2]);
+            String fileTaskId = parts[4].substring("transcript-audio-".length(), parts[4].length() - ".wav".length());
+            if (taskId != Long.parseLong(fileTaskId)) {
+                return Optional.empty();
+            }
+        } catch (NumberFormatException ex) {
+            return Optional.empty();
+        }
+        return Optional.of(path);
     }
 
     private static boolean isSafeTkPath(String path) {
