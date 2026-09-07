@@ -35,6 +35,19 @@ public class TkOpenTiktokAuthController {
         return TkOpenApiResponse.success(authService.getSession(authSessionId));
     }
 
+    @PermitAll
+    @GetMapping(value = "/auth/sessions/{authSessionId}/launch", produces = MediaType.TEXT_HTML_VALUE)
+    public String launch(@PathVariable String authSessionId) {
+        return authService.renderLaunchPage(authSessionId);
+    }
+
+    @PermitAll
+    @GetMapping("/auth/sessions/{authSessionId}/launch/status")
+    public TkOpenApiResponse<TkOpenTiktokAuthVO.SessionStatusResp> publicStatus(
+            @PathVariable String authSessionId) {
+        return TkOpenApiResponse.success(authService.getPublicSessionStatus(authSessionId));
+    }
+
     @GetMapping("/connections")
     public TkOpenApiResponse<List<TkOpenTiktokAuthVO.ConnectionResp>> getConnections(
             @RequestParam(required = false) String externalAccountId,

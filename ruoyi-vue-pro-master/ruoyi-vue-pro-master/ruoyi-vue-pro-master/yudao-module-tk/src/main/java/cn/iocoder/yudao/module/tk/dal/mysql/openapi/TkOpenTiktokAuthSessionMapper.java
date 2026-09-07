@@ -7,6 +7,16 @@ import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
 public interface TkOpenTiktokAuthSessionMapper extends BaseMapperX<TkOpenTiktokAuthSessionDO> {
+    default TkOpenTiktokAuthSessionDO selectByAuthSessionId(String authSessionId) {
+        return selectOne(TkOpenTiktokAuthSessionDO::getAuthSessionId, authSessionId);
+    }
+
+    default TkOpenTiktokAuthSessionDO selectByAuthSessionIdForUpdate(String authSessionId) {
+        return selectOne(new LambdaQueryWrapperX<TkOpenTiktokAuthSessionDO>()
+                .eq(TkOpenTiktokAuthSessionDO::getAuthSessionId, authSessionId)
+                .last("FOR UPDATE"));
+    }
+
     default TkOpenTiktokAuthSessionDO selectByClientAndSessionId(String clientId, String authSessionId) {
         return selectOne(new LambdaQueryWrapperX<TkOpenTiktokAuthSessionDO>()
                 .eq(TkOpenTiktokAuthSessionDO::getClientId, clientId)

@@ -15,6 +15,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import org.mockito.ArgumentCaptor;
 
 class TkOpenApiAuthenticationFilterTest {
@@ -87,6 +88,22 @@ class TkOpenApiAuthenticationFilterTest {
         ArgumentCaptor<TkOpenApiAuthRequest> captor = ArgumentCaptor.forClass(TkOpenApiAuthRequest.class);
         verify(authenticationService).authenticate(captor.capture());
         assertEquals("192.0.2.10", captor.getValue().getClientIp());
+    }
+
+    @Test
+    void shouldBypassHmacForPublicAuthorizationLaunchRoutes() throws Exception {
+        TkOpenApiAuthenticationService authenticationService = mock(TkOpenApiAuthenticationService.class);
+        TkOpenApiAuthenticationFilter filter = new TkOpenApiAuthenticationFilter(
+                authenticationService, mock(TkOpenApiRequestLogMapper.class), 16);
+        for (String uri : new String[]{
+                "/admin-api/tk/open/v1/tiktok/auth/sessions/auth_1/launch",
+                "/admin-api/tk/open/v1/tiktok/auth/sessions/auth_1/launch/status"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest();
+            request.setMethod("GET");
+            request.setRequestURI(uri);
+            filter.doFilter(request, new MockHttpServletResponse(), (req, res) -> { });
+        }
+        verifyNoInteractions(authenticationService);
     }
 
     private static final class CountingServletInputStream extends ServletInputStream {

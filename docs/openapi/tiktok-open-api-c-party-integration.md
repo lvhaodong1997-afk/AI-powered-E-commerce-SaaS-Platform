@@ -1,13 +1,48 @@
 # A 方 TikTok Open API
 
-## C 方授权发布对接开发文档
+## C 方授权发布最终联调文档
 
-**文档版本：** v1.1
+**文档版本：** v1.3
 **适用对象：** C 方后端、前端和联调人员
 **A 方生产服务：** `https://tkassetplant.fnn.net.cn`
-**更新时间：** 2026-09-04
+**更新时间：** 2026-09-07
 
-本文用于指导 C 方调用 A 方的 TikTok 授权、视频上传、视频发布和状态查询接口。C 方不需要访问 A 方数据库，也不需要了解 A 方内部实现。
+本文是交付给 C 方的唯一主联调文档，用于指导 C 方调用 A 方的 TikTok 授权、视频上传、视频发布和状态查询接口。C 方不需要访问 A 方数据库，也不需要了解 A 方内部实现。
+
+官方接口基地址固定为：
+
+```text
+https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok
+```
+
+除文档明确标记为“公开浏览器接口”的地址外，C 方所有请求都必须由 C 方服务端使用 `clientSecret` 生成 HMAC 签名。`clientSecret` 和 `callbackSecret` 不能下发到浏览器。
+
+## 0. C 方最小联调清单
+
+如果 C 方的视频已经有公网 HTTPS 地址，完成授权发布只需要实现以下 6 项调用能力（最后一项包含两个查询端点）：
+
+| 顺序 | 方法 | 端点 | 调用位置 | 是否签名 |
+| --- | --- | --- | --- | --- |
+| 1 | `POST` | `/auth/sessions` | C 方服务端 | 是 |
+| 2 | `GET` | `/auth/sessions/{authSessionId}/launch` | C 方浏览器 | 否 |
+| 3 | `GET` | `/auth/sessions/{authSessionId}` | C 方服务端 | 是 |
+| 4 | `GET` | `/connections` | C 方服务端 | 是 |
+| 5 | `POST` | `/publish/quick-tasks` | C 方服务端 | 是 |
+| 6 | `GET` | `/publish/tasks/{taskId}`、`/publish/tasks/{taskId}/details` | C 方服务端 | 是 |
+
+推荐调用链：
+
+```text
+POST /auth/sessions (authMode=AUTO)
+  -> 浏览器打开 data.launchUrl
+  -> 用户浏览器授权或扫描二维码
+  -> 轮询 GET /auth/sessions/{authSessionId}
+  -> 保存 data.connectionId
+  -> POST /publish/quick-tasks
+  -> 轮询任务和明细
+```
+
+使用该最小流程，C 方不需要生成二维码、不需要接收 TikTok OAuth 回调、不需要实现 A 方授权页，也不需要实现 OSS 或 LOCAL 上传。视频必须是 A 方能够访问的公网 HTTPS 地址。
 
 ## 1. 对接目标
 
@@ -49,10 +84,10 @@ A 方完成客户端配置后，向 C 方安全地提供以下信息：
 | --- | --- | --- |
 | `clientId` | 标识 C 方应用 | C 方服务端配置 |
 | `clientSecret` | 签名 C 方发往 A 方的请求 | C 方服务端密钥管理系统 |
-| `callbackSecret` | 校验 A 方发往 C 方的回调 | C 方服务端密钥管理系统 |
+| `callbackSecret` | 校验 A 方发往 C 方的回调 | C 方服务端密钥管理系统；不接收回调时可不配置 |
 | A 方生产 API 地址 | 固定为本文第 3 节地址 | C 方服务端配置 |
-| C 方授权回调地址 | 接收 `authorization.*` 事件 | A 方客户端配置 |
-| C 方发布回调地址 | 接收 `publish.*` 事件 | A 方客户端配置 |
+| C 方授权回调地址 | 接收 `authorization.*` 事件 | A 方客户端配置；可选 |
+| C 方发布回调地址 | 接收 `publish.*` 事件 | A 方客户端配置；可选 |
 | C 方出口 IP | 配置 A 方 IP 白名单，可选 | A 方客户端配置 |
 
 ### 2.1 A 方后台“新增调用方”配置
@@ -64,10 +99,10 @@ A 方管理员在开放 API 管理页面为每个外部系统创建一个独立�
 | 后台字段 | 填写内容 | 是否必填 | 说明 |
 | --- | --- | --- | --- |
 | 调用方名称 | `C方视频发布系统`（示例） | 是 | 用于 A 方后台识别调用方 |
-| 授权回调地址 | `https://c.example.com/webhooks/tiktok/authorization`（示例） | 建议填写 | C 方接收 `authorization.completed`、`authorization.failed` |
-| 发布回调地址 | `https://c.example.com/webhooks/tiktok/publish`（示例） | 建议填写 | C 方接收 `publish.processing`、`publish.success`、`publish.failed` |
+| 授权回调地址 | `https://c.example.com/webhooks/tiktok/authorization`（示例） | 可选 | C 方需要接收授权事件时填写；不填写则轮询状态 |
+| 发布回调地址 | `https://c.example.com/webhooks/tiktok/publish`（示例） | 可选 | C 方需要接收发布事件时填写；不填写则轮询任务 |
 | 允许 IP | C 方调用 A 方 API 的公网出口 IP（`【待C方提供】`） | 可选 | 配置后仅允许这些 IP 调用；多个 IP 使用逗号分隔 |
-| 权限 | 勾选 `auth`、`media`、`publish` | 是 | 完成授权、上传和发布闭环需要这三类权限 |
+| 权限 | 勾选 `auth`、`media`、`publish` | 是 | 使用最简远程视频发布流程也需要这三类权限 |
 | 每分钟限额 | `120`（建议初始值） | 是 | 最终值按 C 方调用量确认 |
 | 每日限额 | `10000`（建议初始值） | 是 | 最终值按 C 方调用量确认 |
 | 状态 | 启用 | 是 | 联调前必须启用 |
@@ -113,12 +148,12 @@ A 方点击保存后，将在结果窗口中向管理员展示以下凭证：
 | --- | --- | --- |
 | `clientId` | 标识 C 方调用方 | 是 |
 | `clientSecret` | C 方生成请求 HMAC 签名 | 是 |
-| `callbackSecret` | C 方验证 A 方回调签名 | 是 |
+| `callbackSecret` | C 方验证 A 方回调签名 | 仅接收回调时需要 |
 
 注意：
 
-- 三项凭证只交付给 C 方后端负责人，不发送到浏览器或前端页面。
-- `clientSecret` 和 `callbackSecret` 只在创建或轮换时展示，关闭窗口后不能依赖再次查看。
+- 凭证只交付给 C 方后端负责人，不发送到浏览器或前端页面。
+- `clientSecret` 和 `callbackSecret` 只在创建或轮换时展示，关闭窗口后不能依赖再次查看；不接收回调时可以不使用 `callbackSecret`。
 - 轮换调用密钥会使旧的 `clientSecret` 立即失效。
 - 轮换回调密钥会使旧的 `callbackSecret` 立即失效。
 - 文档、工单、聊天记录和日志中不得记录完整密钥。
@@ -149,7 +184,9 @@ POST https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions
 | 模块 | 方法 | 路径 | C 方用途 |
 | --- | --- | --- | --- |
 | 授权 | `POST` | `/auth/sessions` | 创建授权会话 |
-| 授权 | `GET` | `/auth/sessions/{authSessionId}` | 查询授权状态 |
+| 授权 | `GET` | `/auth/sessions/{authSessionId}` | 服务端查询授权状态 |
+| 授权 | `GET` | `/auth/sessions/{authSessionId}/launch` | 浏览器打开 A 方托管授权页；无需签名 |
+| 授权 | `GET` | `/auth/sessions/{authSessionId}/launch/status` | 托管授权页轮询状态；无需签名 |
 | 授权 | `GET` | `/connections` | 查询已授权账号 |
 | 授权 | `POST` | `/connections/{connectionId}/disconnect` | 解绑账号 |
 | TikTok 回调 | `GET` | `/auth/callback` | A 方接收 TikTok 回调，C 方不调用 |
@@ -159,11 +196,35 @@ POST https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions
 | 媒体 | `POST` | `/media/uploads/{uploadId}/complete` | 完成上传并获取 `mediaId` |
 | 媒体 | `DELETE` | `/media/uploads/{uploadId}` | 取消上传 |
 | 发布 | `POST` | `/publish/tasks` | 创建异步发布任务 |
+| 发布 | `POST` | `/publish/quick-tasks` | 使用 HTTPS 视频地址直接创建异步发布任务 |
 | 发布 | `GET` | `/publish/tasks/{taskId}` | 查询任务汇总状态 |
 | 发布 | `GET` | `/publish/tasks/{taskId}/details` | 查询每个账号的发布明细 |
 | 发布 | `POST` | `/publish/details/{detailId}/retry` | 重试失败明细 |
 
-除 `/auth/callback` 外，所有接口都必须带 A 方请求签名。
+除 `/auth/callback`、`/auth/sessions/{authSessionId}/launch` 和 `/auth/sessions/{authSessionId}/launch/status` 外，所有接口都必须带 A 方请求签名。
+
+### 3.3 C 方最简接入方式
+
+C 方只实现服务端签名调用和一个业务页面即可：
+
+```text
+1. C 方服务端 POST /auth/sessions，authMode=AUTO
+2. 将返回的 launchUrl 交给 C 方前端，在用户浏览器打开
+3. A 方托管页显示浏览器授权入口和二维码，并自动轮询授权结果
+4. C 方服务端查询 /connections，确认 connectionId
+5. C 方服务端 POST /publish/quick-tasks，传入 externalAccountId 和 videoUrl
+6. C 方轮询 /publish/tasks/{taskId} 和 /publish/tasks/{taskId}/details
+```
+
+该方式下，C 方不需要：
+
+- 自己生成二维码
+- 接收 TikTok OAuth 回调
+- 实现 A 方托管授权页
+- 实现 `/media/uploads` 的 OSS 表单上传或 LOCAL 分片上传
+- 配置 `callbackSecret` 和回调接口（仅在不满足轮询需求、希望由 A 方主动推送结果时使用）
+
+`videoUrl` 必须是 A 方服务器可以访问的公网 HTTPS 视频地址。A 方会拒绝 HTTP、回环地址、内网地址和云元数据地址。
 
 ## 4. 通用请求认证
 
@@ -224,8 +285,24 @@ signature = Base64(HMAC-SHA256(clientSecret, canonicalString))
 - 二进制分片直接对原始分片字节计算 SHA-256。
 - 没有请求体时，对空字节计算 SHA-256。
 - 不要对 JSON 先签名、再重新格式化后发送。
+- HMAC key 只能是 `clientSecret` 的 UTF-8 原文，不能使用 `clientId + clientSecret`、`callbackSecret`、Base64 解码结果、带引号的密钥或包含空格/换行的密钥。
+- 输出必须是标准 Base64，不能使用 Base64URL。
 
-### 4.3 Node.js 签名调用模板
+### 4.3 签名失败排查
+
+出现 `OPEN_API_SIGNATURE_INVALID` 时，按以下顺序核对：
+
+1. `X-TK-Client-Id` 是否对应当前 `clientSecret`。
+2. `REQUEST_TARGET` 是否包含 `/admin-api`、完整路径和原始查询字符串。
+3. 查询参数顺序、编码和实际发送 URL 是否完全一致。
+4. JSON 是否使用签名前生成的同一份 UTF-8 字节发送。
+5. 空请求体是否使用 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`。
+6. canonical 原文是否只有 5 行、行间单个 LF、末尾无换行。
+7. HMAC key 是否直接使用 `clientSecret` 原文，结果是否为标准 Base64。
+
+调试时将 C 方的 `X-TK-Request-Id` 提供给 A 方即可。不要提交完整 `clientSecret`、`callbackSecret`、access token 或 refresh token。
+
+### 4.4 Node.js 签名调用模板
 
 以下代码只能运行在 C 方服务端。示例使用 Node.js 18+ 的 `fetch`：
 
@@ -321,7 +398,7 @@ C 方处理规则：
 
 ## 6. 授权对接
 
-### 6.1 推荐的 REDIRECT 授权流程
+### 6.1 推荐的 AUTO 托管授权流程
 
 #### 第一步：C 方服务端创建授权会话
 
@@ -333,7 +410,7 @@ Content-Type: application/json
 ```json
 {
   "externalAccountId": "c-user-10001",
-  "authMode": "REDIRECT",
+  "authMode": "AUTO",
   "clientState": "c-order-202609020001"
 }
 ```
@@ -343,7 +420,7 @@ Content-Type: application/json
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `externalAccountId` | 是 | C 方自己的账号编号，同一个 C 方内应保持稳定 |
-| `authMode` | 是 | `REDIRECT` 或 `QR_CODE` |
+| `authMode` | 是 | `AUTO`、`REDIRECT` 或 `QR_CODE`；推荐 `AUTO` |
 | `clientState` | 否 | C 方透传状态，例如用户 ID、页面状态或业务单号 |
 
 响应：
@@ -356,9 +433,11 @@ Content-Type: application/json
     "authSessionId": "auth_example",
     "externalAccountId": "c-user-10001",
     "clientState": "c-order-202609020001",
-    "authMode": "REDIRECT",
+    "authMode": "AUTO",
     "authorizeUrl": "https://www.tiktok.com/v2/auth/authorize/?...",
-    "qrcodeUrl": null,
+    "qrcodeUrl": "https://www.tiktok.com/qr/example?client_ticket=...",
+    "qrcodeImageUrl": "data:image/png;base64,iVBORw0KGgoAAA...",
+    "launchUrl": "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions/auth_example/launch",
     "status": "WAITING",
     "expireTime": "2026-09-02T11:00:00"
   },
@@ -366,9 +445,11 @@ Content-Type: application/json
 }
 ```
 
-#### 第二步：C 方引导用户打开 `authorizeUrl`
+#### 第二步：C 方引导用户打开 `launchUrl`
 
-C 方前端打开 A 方返回的 `authorizeUrl`。用户在 TikTok 页面完成授权后，TikTok 会回调 A 方固定地址：
+C 方前端直接打开 A 方返回的 `launchUrl`。A 方托管页会根据当前会话展示 `authorizeUrl` 和 `qrcodeImageUrl`，用户可以选择浏览器授权或扫码授权。C 方不需要自己拼接二维码，也不需要自己实现授权页面。
+
+用户在 TikTok 页面完成授权后，TikTok 会回调 A 方固定地址：
 
 ```text
 https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/callback
@@ -380,8 +461,8 @@ C 方不需要调用该地址，也不需要自己接收 TikTok 的 `code`。
 
 授权完成后，C 方有两种方式获知结果：
 
-- 推荐：接收 A 方的 `authorization.completed` 或 `authorization.failed` 回调。
-- 兜底：轮询 `GET /auth/sessions/{authSessionId}`。
+- 推荐：轮询 `GET /auth/sessions/{authSessionId}`；C 方不配置回调也可以完成流程。
+- 可选：接收 A 方的 `authorization.completed` 或 `authorization.failed` 回调。
 
 ### 6.2 查询授权状态
 
@@ -420,6 +501,26 @@ GET /auth/sessions/{authSessionId}
 
 建议轮询间隔：3 秒。授权会话有效期为 15 分钟，超过 `expireTime` 不要继续轮询。
 
+### 6.2.1 打开托管授权页
+
+```http
+GET /auth/sessions/{authSessionId}/launch
+```
+
+该接口返回 HTML 页面，不需要 `X-TK-*` 签名。C 方将响应中的 `launchUrl` 直接作为浏览器跳转地址即可。页面会：
+
+- 显示浏览器授权入口（如果当前会话有 `authorizeUrl`）
+- 显示 A 方生成的二维码图片（如果当前会话有 `qrcodeImageUrl`）
+- 每 3 秒请求公开状态接口并显示 `WAITING`、`SUCCESS`、`FAILED` 或 `EXPIRED`
+
+公开状态接口为：
+
+```http
+GET /auth/sessions/{authSessionId}/launch/status
+```
+
+该接口也不需要签名。`authSessionId` 是短期 opaque ID，C 方仍应避免把它写入日志或公开传播。
+
 ### 6.3 QR_CODE 授权
 
 创建会话时改为：
@@ -432,7 +533,9 @@ GET /auth/sessions/{authSessionId}
 }
 ```
 
-A 方返回 `qrcodeUrl`。C 方展示二维码，并在 `status=WAITING` 时轮询同一个授权会话接口。二维码被确认后，查询结果会变为 `SUCCESS` 并返回 `connectionId`。
+A 方返回 `qrcodeUrl` 和 `qrcodeImageUrl`。如果 C 方不使用托管授权页，可将 `qrcodeImageUrl` 直接作为前端 `<img src>` 展示；C 方不需要引入二维码生成库。授权过程中轮询同一个授权会话接口，二维码被确认后，查询结果会变为 `SUCCESS` 并返回 `connectionId`。
+
+其中，`qrcodeUrl` 是 TikTok 二维码授权数据地址，不是二维码图片；C 方自行展示二维码时应使用 A 方已经生成的 `qrcodeImageUrl`。更简单的方式是直接打开 `launchUrl`。
 
 ### 6.4 查询已授权账号
 
@@ -633,7 +736,59 @@ DELETE /media/uploads/{uploadId}
 
 ## 8. 视频发布对接
 
-### 8.1 创建异步发布任务
+### 8.1 快速发布任务（推荐）
+
+当视频已经存放在 C 方或其他可公开访问的 HTTPS 地址时，优先使用快速发布接口。它把“创建媒体、准备媒体、创建发布任务”合并为一次 A 方 API 调用。
+
+```http
+POST /publish/quick-tasks
+Content-Type: application/json
+Idempotency-Key: c-quick-publish-202609020001
+```
+
+请求示例：
+
+```json
+{
+  "externalAccountId": "c-user-10001",
+  "videoUrl": "https://cdn.c.example.com/videos/demo.mp4",
+  "fileName": "demo.mp4",
+  "contentType": "video/mp4",
+  "coverTimestampMs": 1200,
+  "title": "C 方视频标题",
+  "caption": "C 方视频文案",
+  "postMode": "DIRECT_POST",
+  "privacyLevel": "PUBLIC_TO_EVERYONE",
+  "externalRequestId": "c-business-order-202609020001"
+}
+```
+
+字段说明：
+
+| 字段 | 必填 | 默认值或限制 | 说明 |
+| --- | --- | --- | --- |
+| `externalAccountId` | 是 | 最长 128 字符 | 授权时使用的 C 方账号编号；A 方通过它定位唯一连接 |
+| `videoUrl` | 是 | 最长 2048 字符，必须 HTTPS | A 方服务器可访问的公网视频地址；拒绝 HTTP、内网、回环和云元数据地址 |
+| `fileName` | 否 | 最长 512 字符 | 扩展名必须为 `mp4`、`mov` 或 `webm`；缺省时从 URL 或使用 `video.mp4` |
+| `contentType` | 否 | 最长 128 字符 | 例如 `video/mp4` |
+| `coverTimestampMs` | 否 | - | 封面时间点，毫秒 |
+| `title` | 否 | 最长 512 字符 | 发布标题 |
+| `caption` | 否 | 最长 2200 字符 | 发布文案 |
+| `postMode` | 否 | `DIRECT_POST` | 可选 `DIRECT_POST`、`UPLOAD_TO_INBOX` |
+| `privacyLevel` | 否 | `PUBLIC_TO_EVERYONE` | TikTok 隐私级别 |
+| `allowComment` | 否 | `true` | 允许评论 |
+| `allowDuet` | 否 | `false` | 允许合拍 |
+| `allowStitch` | 否 | `false` | 允许拼接 |
+| `commercialContent` | 否 | `false` | 商业内容标记 |
+| `brandContent` | 否 | `false` | 品牌内容标记 |
+| `aigcContent` | 否 | `true` | AI 生成内容标记 |
+| `externalRequestId` | 否 | 最长 128 字符 | C 方业务编号 |
+
+响应结构与 `/publish/tasks` 相同，返回 `taskId`、`mediaId` 和初始任务状态。该接口仍然是异步的，不等到 TikTok 完成发布才返回。
+
+快速发布只适合服务端可访问的视频地址。A 方不会代替 C 方登录或访问带有 C 方私有登录态的地址；需要私有视频或大文件断点续传时，使用第 7 节标准上传流程。
+
+### 8.2 创建异步发布任务
 
 ```http
 POST /publish/tasks
@@ -681,7 +836,7 @@ Idempotency-Key: c-publish-202609020001
 
 建议 C 方把 `externalRequestId` 设置为自己的订单号或发布单号，把 `Idempotency-Key` 设置为一次发布请求的唯一键。
 
-### 8.2 幂等规则
+### 8.3 幂等规则
 
 `Idempotency-Key` 是必填请求头，最长 128 字符。
 
@@ -699,7 +854,7 @@ clientId + Idempotency-Key
 - 网络超时后，C 方应使用原来的 `Idempotency-Key` 重试，不要立即生成新 key。
 - 只有确认是新业务发布时，才生成新的 key。
 
-### 8.3 发布响应
+### 8.4 发布响应
 
 ```json
 {
@@ -724,7 +879,7 @@ clientId + Idempotency-Key
 
 创建任务只表示 A 方已接受任务，不表示 TikTok 已经发布成功。
 
-### 8.4 查询任务汇总状态
+### 8.5 查询任务汇总状态
 
 ```http
 GET /publish/tasks/{taskId}
@@ -740,7 +895,7 @@ GET /publish/tasks/{taskId}
 | `FAILED` | 所有账号发布失败 | 订单失败，可查看明细 |
 | `PARTIAL_SUCCESS` | 部分成功、部分失败 | 订单部分成功，逐条查看明细 |
 
-### 8.5 查询发布明细
+### 8.6 查询发布明细
 
 ```http
 GET /publish/tasks/{taskId}/details
@@ -771,7 +926,7 @@ GET /publish/tasks/{taskId}/details
 
 C 方业务判断优先使用明细 `status`，`tiktokStatus` 仅作为 TikTok 或 A 方内部状态补充信息。`publishUrl` 可能为空，不能把 `publishId` 当作公开视频地址。
 
-### 8.6 重试失败明细
+### 8.7 重试失败明细
 
 ```http
 POST /publish/details/{detailId}/retry
@@ -781,16 +936,16 @@ POST /publish/details/{detailId}/retry
 
 ## 9. A 方结果回调
 
-### 9.1 C 方需要实现的回调接口
+### 9.1 C 方可选实现的回调接口
 
-C 方需要提供并交给 A 方配置两个 HTTPS 地址：
+C 方只有在希望由 A 方主动推送状态时，才需要提供并交给 A 方配置以下 HTTPS 地址：
 
 ```text
 POST https://c.example.com/webhooks/tiktok/authorization
 POST https://c.example.com/webhooks/tiktok/publish
 ```
 
-实际路径由 C 方决定，但必须满足：
+不配置回调地址时，C 方通过授权会话、连接列表、发布任务和发布明细接口轮询即可完成全流程，不需要 `callbackSecret`。配置回调时，实际路径由 C 方决定，但必须满足：
 
 - 使用 HTTPS。
 - 接收 `Content-Type: application/json`。
@@ -959,14 +1114,32 @@ A 方当前回调行为：
 
 ## 10. C 方完整实现伪代码
 
+### 10.1 最小实现（推荐）
+
+如果 C 方的视频可以通过公网 HTTPS 地址访问，服务端只需要保留授权会话、账号连接和发布任务编号：
+
 ```text
-1. C 方将系统名称、两个 HTTPS 回调地址和公网出口 IP 提供给 A 方
+1. C 方服务端调用 POST /auth/sessions，authMode=AUTO
+2. C 方前端跳转 data.launchUrl，用户在 A 方托管页完成浏览器授权或扫码授权
+3. C 方服务端轮询 GET /auth/sessions/{authSessionId}，直到 status=SUCCESS
+4. C 方服务端调用 GET /connections?externalAccountId=...，展示已授权账号
+5. C 方服务端调用 POST /publish/quick-tasks，传入 externalAccountId、videoUrl 和发布参数
+6. C 方服务端轮询 GET /publish/tasks/{taskId}，需要单账号结果时再查询 details
+7. C 方不配置回调时，按 task.status 和 detail.status 更新自己的业务状态
+```
+
+`launchUrl` 是浏览器地址，不需要签名；`POST /auth/sessions`、`GET /auth/sessions/{authSessionId}`、`GET /connections` 和 `POST /publish/quick-tasks` 仍必须由 C 方服务端签名调用。
+
+### 10.2 完整上传实现
+
+```text
+1. C 方将系统名称和公网出口 IP 提供给 A 方；回调地址按需提供
 2. A 方在开放 API 管理页面创建 C 方调用方，并启用 `auth`、`media`、`publish` 权限
 3. A 方将 `clientId`、`clientSecret`、`callbackSecret` 安全交给 C 方
-4. C 方后端保存三项凭证
-5. A 方配置 C 方授权回调地址和发布回调地址
+4. C 方后端保存需要使用的凭证；仅轮询时不需要 `callbackSecret`
+5. 如果使用回调，A 方配置 C 方授权回调地址和发布回调地址
 6. C 方调用 POST /auth/sessions
-7. C 方前端打开 data.authorizeUrl，或展示 data.qrcodeUrl
+7. C 方前端打开 data.launchUrl；也可以自行使用 data.authorizeUrl 或 data.qrcodeImageUrl
 8. C 方接收授权回调，或轮询 GET /auth/sessions/{authSessionId}
 9. status=SUCCESS 后保存 connectionId
 10. C 方计算视频 fileSize 和完整 sha256
@@ -1015,12 +1188,13 @@ A 方当前回调行为：
 
 ### 12.1 A 方配置
 
-- [ ] 已获得 C 方专用 `clientId`、`clientSecret`、`callbackSecret`
+- [ ] 已获得 C 方专用 `clientId`、`clientSecret`；如接收回调再配置 `callbackSecret`
 - [ ] 后台调用方名称已填写且能明确对应 C 方系统
 - [ ] C 方客户端已开启 `auth`、`media`、`publish` 权限
 - [ ] C 方出口 IP 已加入白名单，或双方确认不限制 IP
-- [ ] C 方授权回调地址已配置为 C 方自己的公网 HTTPS 接口
-- [ ] C 方发布回调地址已配置为 C 方自己的公网 HTTPS 接口
+- [ ] 如使用事件推送，C 方授权回调地址已配置为 C 方自己的公网 HTTPS 接口
+- [ ] 如使用事件推送，C 方发布回调地址已配置为 C 方自己的公网 HTTPS 接口
+- [ ] 如只使用轮询，已确认不配置回调地址和 `callbackSecret`
 - [ ] 未将 A 方 TikTok OAuth 回调地址填入 C 方回调字段
 - [ ] 每分钟限额和每日限额已按 C 方调用量确认
 - [ ] 调用方状态已启用
@@ -1038,12 +1212,14 @@ A 方当前回调行为：
 
 ### 12.3 授权发布闭环
 
-- [ ] REDIRECT 授权能够打开 TikTok 授权页面
+- [ ] AUTO 托管授权能够打开 `launchUrl`
+- [ ] 如使用 REDIRECT，能够打开 TikTok 授权页面
 - [ ] 授权成功后能够获得 `connectionId`
 - [ ] 授权失败和过期能够展示明确状态
 - [ ] 能够查询已授权连接
 - [ ] OSS 或 LOCAL 上传路径至少完成一条联调
 - [ ] `complete` 返回 `READY` 和 `mediaId`
+- [ ] 如使用快速发布，`quick-tasks` 能够接受公网 HTTPS 视频地址并返回 `taskId`
 - [ ] 能够创建 `DIRECT_POST` 或 `UPLOAD_TO_INBOX` 任务
 - [ ] 能够查询任务和明细状态
 - [ ] 能够接收并校验授权回调签名
@@ -1060,4 +1236,4 @@ A 方仓库同时提供：
 - Python 示例：`docs/sdk/tiktok-open-api-python.md`
 - Java 示例：`docs/sdk/tiktok-open-api-java.md`
 
-本文是面向 C 方项目落地的流程文档；字段和接口发生疑问时，以 OpenAPI JSON 和 A 方实际返回为准，并通过 `requestId` 与 A 方联调定位问题。
+本文是面向 C 方项目落地的最终流程文档。字段和接口发生疑问时，以本文、OpenAPI JSON 和 A 方实际返回共同核对，并通过 `requestId` 与 A 方联调定位问题。对外正式请求只使用本文件第 3 节的 `/admin-api/tk/open/v1/tiktok` 基地址。

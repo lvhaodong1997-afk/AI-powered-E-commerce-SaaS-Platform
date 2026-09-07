@@ -60,6 +60,14 @@ class TkOpenTiktokMediaServiceTest {
     }
 
     @Test
+    void shouldRejectInsecureRemoteVideoUrls() {
+        assertThrows(IllegalArgumentException.class,
+                () -> TkOpenTiktokMediaService.validateRemoteVideoUrl("http://example.com/video.mp4"));
+        assertThrows(IllegalArgumentException.class,
+                () -> TkOpenTiktokMediaService.validateRemoteVideoUrl("https://127.0.0.1/video.mp4"));
+    }
+
+    @Test
     void shouldRejectOssCompletionWhenObjectMetadataDoesNotMatch() {
         TkOpenTiktokMediaMapper mapper = mock(TkOpenTiktokMediaMapper.class);
         TkOssObjectStorageClient oss = mock(TkOssObjectStorageClient.class);

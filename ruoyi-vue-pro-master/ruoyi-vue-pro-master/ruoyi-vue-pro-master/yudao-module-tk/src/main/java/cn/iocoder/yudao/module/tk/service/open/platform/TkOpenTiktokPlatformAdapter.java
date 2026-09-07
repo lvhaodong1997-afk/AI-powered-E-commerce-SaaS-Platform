@@ -58,14 +58,14 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
     public QrStatusResult checkQrCode(String token) {
         JsonNode root = apiClient.checkQrCode(token);
         if (hasError(root)) {
-            return new QrStatusResult(false, "FAILED", null, errorMessage(root));
+            return new QrStatusResult(false, "FAILED", null, null, errorMessage(root));
         }
         String status = root.path("status").asText("WAITING");
         String code = root.path("code").asText(null);
         if (StrUtil.isBlank(code)) {
             code = extractQueryValue(root.path("redirect_uri").asText(null), "code");
         }
-        return new QrStatusResult(true, status, code, null);
+        return new QrStatusResult(true, status, code, root.path("client_ticket").asText(null), null);
     }
 
     @Override

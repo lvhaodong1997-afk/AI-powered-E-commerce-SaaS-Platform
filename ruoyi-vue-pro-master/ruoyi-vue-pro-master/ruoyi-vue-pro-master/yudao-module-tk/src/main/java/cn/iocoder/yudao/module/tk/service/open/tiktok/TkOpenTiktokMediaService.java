@@ -9,6 +9,7 @@ import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiContext;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiException;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiIds;
+import cn.iocoder.yudao.module.tk.service.reference.TkSafeRemoteUrlValidator;
 import cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssPostPolicySigner;
@@ -25,7 +26,9 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.net.URI;
 import java.security.MessageDigest;
+import java.util.Collections;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -34,6 +37,8 @@ public class TkOpenTiktokMediaService {
 
     private static final DateTimeFormatter DATE = DateTimeFormatter.BASIC_ISO_DATE;
     private static final String[] EXTENSIONS = {"mp4", "mov", "webm"};
+    private static final TkSafeRemoteUrlValidator REMOTE_URL_VALIDATOR =
+            new TkSafeRemoteUrlValidator(Collections.emptyList(), true);
     private final TkOpenTiktokMediaMapper mediaMapper;
     private final TkLocalUploadStorageService localStorageService;
     private final TkGenerationProperties properties;
@@ -84,6 +89,50 @@ public class TkOpenTiktokMediaService {
         }
         mediaMapper.insert(media);
         return toLocalResp(media);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public TkOpenTiktokMediaDO createRemote(String videoUrl, String fileName, String contentType,
+                                            Long coverTimestampMs) {
+        String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
+        URI uri;
+        try {
+            uri = validateRemoteVideoUrl(videoUrl);
+            String resolvedName = StrUtil.blankToDefault(fileName, FileUtil.getName(uri.getPath()));
+            resolvedName = StrUtil.blankToDefault(resolvedName, "video.mp4");
+            validateFile(resolvedName, 1L, contentType, null);
+            fileName = resolvedName;
+        } catch (IllegalArgumentException ex) {
+            throw TkOpenApiException.badRequest("MEDIA_FILE_INVALID", ex.getMessage());
+        }
+        String extension = normalizeExtension(fileName);
+        String mediaId = TkOpenApiIds.next("media");
+        TkOpenTiktokMediaDO media = TkOpenTiktokMediaDO.builder()
+                .uploadId(TkOpenApiIds.next("upload"))
+                .mediaId(mediaId)
+                .clientId(clientId)
+                .uploadMode("REMOTE")
+                .fileName(fileName)
+                .fileSize(0L)
+                .contentType(StrUtil.blankToDefault(contentType, "video/" + extension))
+                .fileUrl(uri.toString())
+                .uploadedSize(0L)
+                .uploadedChunks("[]")
+                .coverTimestampMs(coverTimestampMs)
+                .status("READY")
+                .expireTime(LocalDateTime.now().plusHours(expireHours()))
+                .completedTime(LocalDateTime.now())
+                .build();
+        mediaMapper.insert(media);
+        return media;
+    }
+
+    static URI validateRemoteVideoUrl(String videoUrl) {
+        URI uri = REMOTE_URL_VALIDATOR.validate(videoUrl);
+        if (!"https".equalsIgnoreCase(uri.getScheme())) {
+            throw new IllegalArgumentException("remote video URL must use HTTPS");
+        }
+        return uri;
     }
 
     public TkOpenTiktokMediaVO.UploadStatusResp getStatus(String uploadId) {

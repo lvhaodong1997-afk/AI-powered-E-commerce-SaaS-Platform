@@ -39,6 +39,37 @@ public final class TkOpenTiktokPublishVO {
     }
 
     @Data
+    public static class QuickTaskCreateReq {
+        @NotBlank
+        @Size(max = 128)
+        private String externalAccountId;
+        @NotBlank
+        @Size(max = 2048)
+        private String videoUrl;
+        @Size(max = 512)
+        private String fileName;
+        @Size(max = 128)
+        private String contentType;
+        private Long coverTimestampMs;
+        @Size(max = 512)
+        private String title;
+        @Size(max = 2200)
+        private String caption;
+        @Pattern(regexp = "DIRECT_POST|UPLOAD_TO_INBOX")
+        private String postMode;
+        @Size(max = 64)
+        private String privacyLevel;
+        private Boolean allowComment;
+        private Boolean allowDuet;
+        private Boolean allowStitch;
+        private Boolean commercialContent;
+        private Boolean brandContent;
+        private Boolean aigcContent;
+        @Size(max = 128)
+        private String externalRequestId;
+    }
+
+    @Data
     public static class TaskResp {
         private String taskId;
         private String mediaId;

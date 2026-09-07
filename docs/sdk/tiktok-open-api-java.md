@@ -18,7 +18,7 @@ import javax.crypto.spec.SecretKeySpec;
 final class TikTokOpenApi {
   static final String BASE = "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok";
   static final String CLIENT_ID = requireEnv("TK_OPEN_API_CLIENT_ID");
-  static final String HMAC_KEY = requireEnv("TK_OPEN_API_HMAC_KEY");
+  static final String CLIENT_SECRET = requireEnv("TK_OPEN_API_CLIENT_SECRET");
   static final HttpClient HTTP = HttpClient.newHttpClient();
 
   static String requireEnv(String name) {
@@ -35,7 +35,7 @@ final class TikTokOpenApi {
   static String sign(String method, String target, String timestamp, String nonce, byte[] body) throws Exception {
     String canonical = method.toUpperCase() + "\n" + target + "\n" + timestamp + "\n" + nonce + "\n" + sha256(body);
     Mac mac = Mac.getInstance("HmacSHA256");
-    mac.init(new SecretKeySpec(HMAC_KEY.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+    mac.init(new SecretKeySpec(CLIENT_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
     return Base64.getEncoder().encodeToString(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
   }
   static String api(String method, String path, byte[] body, String contentType, String idempotencyKey) throws Exception {
@@ -58,17 +58,62 @@ final class TikTokOpenApi {
 }
 ```
 
-The workflow below uses placeholders for JSON parsing so it works with Jackson, Gson, or another existing library. Build JSON bytes once and sign precisely those same bytes.
+Recommended minimum flow: create an `AUTO` session, open `data.launchUrl` in the user's browser, poll the signed session endpoint, then call `quick-tasks` with a public HTTPS video URL. The hosted page includes browser authorization and an A-generated QR image.
 
 ```java
-byte[] authBody = jsonBytes("{\"externalAccountId\":\"your-account-reference\",\"authMode\":\"REDIRECT\"}");
+byte[] authBody = jsonBytes("{\"externalAccountId\":\"your-account-reference\",\"authMode\":\"AUTO\"}");
+String authJson = TikTokOpenApi.api("POST", "/auth/sessions", authBody, "application/json", null);
+String launchUrl = jsonText(authJson, "data.launchUrl"); // Open in the user browser.
+String authSessionId = jsonText(authJson, "data.authSessionId");
+
+String authorizedJson = null;
+long deadline = System.currentTimeMillis() + 15 * 60 * 1000;
+while (System.currentTimeMillis() < deadline) {
+  authorizedJson = TikTokOpenApi.api("GET", "/auth/sessions/" + authSessionId, null, null, null);
+  String status = jsonText(authorizedJson, "data.status");
+  if ("SUCCESS".equals(status)) break;
+  if ("FAILED".equals(status) || "EXPIRED".equals(status)) {
+    throw new IllegalStateException("authorization is " + status);
+  }
+  Thread.sleep(3000);
+}
+if (authorizedJson == null || !"SUCCESS".equals(jsonText(authorizedJson, "data.status"))) {
+  throw new IllegalStateException("authorization polling timed out");
+}
+
+String quickJson = TikTokOpenApi.api("POST", "/publish/quick-tasks",
+    jsonBytes("{\"externalAccountId\":\"your-account-reference\",\"videoUrl\":\"https://cdn.example.com/video.mp4\",\"postMode\":\"DIRECT_POST\",\"privacyLevel\":\"PUBLIC_TO_EVERYONE\"}"),
+    "application/json", UUID.randomUUID().toString());
+String taskId = jsonText(quickJson, "data.taskId");
+```
+
+`launchUrl` and `/launch/status` are public browser endpoints and do not use HMAC. The C server must sign session creation, signed status queries, connection queries, and publishing calls. `videoUrl` must be a public HTTPS URL; HTTP, loopback, private-network, and cloud-metadata destinations are rejected.
+
+The full upload workflow below uses placeholders for JSON parsing so it works with Jackson, Gson, or another existing library. Build JSON bytes once and sign precisely those same bytes.
+
+```java
+byte[] authBody = jsonBytes("{\"externalAccountId\":\"your-account-reference\",\"authMode\":\"AUTO\"}");
 String authJson = TikTokOpenApi.api("POST", "/auth/sessions", authBody, "application/json", null);
 String authSessionId = jsonText(authJson, "data.authSessionId");
-String authorizeUrl = jsonText(authJson, "data.authorizeUrl"); // Open only in the user browser.
+String launchUrl = jsonText(authJson, "data.launchUrl"); // Open this URL in the user browser.
 
-// After the user completes authorization, query the session. QR_CODE is also supported:
-// create with authMode QR_CODE, display data.qrcodeUrl, then poll this endpoint while WAITING.
-String sessionJson = TikTokOpenApi.api("GET", "/auth/sessions/" + authSessionId, null, null, null);
+// Create the session with authMode AUTO. The hosted launchUrl displays the
+// browser authorization link and the data.qrcodeImageUrl QR image;
+// no QR library is needed.
+String sessionJson = null;
+long deadline = System.currentTimeMillis() + 15 * 60 * 1000;
+while (System.currentTimeMillis() < deadline) {
+  sessionJson = TikTokOpenApi.api("GET", "/auth/sessions/" + authSessionId, null, null, null);
+  String status = jsonText(sessionJson, "data.status");
+  if ("SUCCESS".equals(status)) break;
+  if ("FAILED".equals(status) || "EXPIRED".equals(status)) {
+    throw new IllegalStateException("authorization is " + status);
+  }
+  Thread.sleep(3000);
+}
+if (sessionJson == null || !"SUCCESS".equals(jsonText(sessionJson, "data.status"))) {
+  throw new IllegalStateException("authorization polling timed out");
+}
 String connectionId = jsonText(sessionJson, "data.connectionId");
 
 byte[] video = java.nio.file.Files.readAllBytes(java.nio.file.Path.of("/absolute/path/video.mp4"));

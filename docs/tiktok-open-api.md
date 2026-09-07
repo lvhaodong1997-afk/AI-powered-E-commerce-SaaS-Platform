@@ -2,11 +2,13 @@
 
 > 文档状态：按当前控制器、VO 和服务实现整理的调用方接口说明。
 >
-> 版本：v1
+> 版本：v1.2
 >
 > 重要说明：本文描述的是当前源码已经实现的接口契约，不代表这些接口已经完成部署、联调或具备生产可用性。调用前仍需由双方确认目标环境连通性和客户端配置。
 >
 > 适用范围：服务 A 为多个独立外部应用提供 TikTok 授权、视频上传、视频发布和状态查询能力，所有外部应用使用同一套通用 API。
+>
+> C 方交付主文档：[`tiktok-open-api-c-party-integration.md`](openapi/tiktok-open-api-c-party-integration.md)。本文件用于 A 方内部接口说明，内容应与主文档保持一致。
 
 ## 1. 服务定位
 
@@ -134,7 +136,7 @@ callbackSecret
 
 ### 3.2 请求头
 
-除 `GET /auth/callback` 外，其他接口都需要签名认证：
+除 `GET /auth/callback`、`GET /auth/sessions/{authSessionId}/launch` 和 `GET /auth/sessions/{authSessionId}/launch/status` 外，其他接口都需要签名认证：
 
 ```http
 X-TK-Client-Id: client_example
@@ -304,14 +306,27 @@ GET /auth/callback
 
 ```text
 1. 调用 POST /auth/sessions，authMode=QR_CODE
-2. 向用户展示 qrcodeUrl
+2. 向用户展示 qrcodeImageUrl，或直接打开 launchUrl 使用 A 方托管授权页
 3. 用户扫码并确认
 4. 调用方轮询 GET /auth/sessions/{authSessionId}
 5. 查询接口同步检查二维码状态
 6. 授权成功后获得 connectionId
 ```
 
-### 5.3 上传和发布流程
+### 5.3 最简授权发布流程（推荐）
+
+```text
+1. C 方服务端 POST /auth/sessions，authMode=AUTO
+2. C 方前端打开返回的 launchUrl
+3. 用户在 A 方托管页选择浏览器授权或扫码授权
+4. C 方服务端轮询 GET /auth/sessions/{authSessionId}，直到 status=SUCCESS
+5. C 方服务端 POST /publish/quick-tasks，传入 externalAccountId 和公网 HTTPS videoUrl
+6. C 方轮询 GET /publish/tasks/{taskId}，需要单账号状态时查询 details
+```
+
+使用该流程，C 方不需要实现二维码生成、TikTok OAuth 回调、A 方授权页、OSS 表单上传或 LOCAL 分片上传。`launchUrl` 和 `launch/status` 是公开浏览器接口，不需要 HMAC；创建会话、查询授权、查询连接和创建发布任务仍由 C 方服务端签名调用。
+
+### 5.4 标准上传和发布流程
 
 ```text
 1. 创建上传会话
@@ -348,12 +363,12 @@ Content-Type: application/json
 | 字段 | 类型 | 必填 | 限制 | 说明 |
 | --- | --- | --- | --- | --- |
 | `externalAccountId` | string | 是 | 最大 128 字符 | 调用方自己的账号编号 |
-| `authMode` | string | 是 | `REDIRECT` 或 `QR_CODE` | 授权模式 |
+| `authMode` | string | 是 | `AUTO`、`REDIRECT` 或 `QR_CODE` | 授权模式；推荐 `AUTO` |
 | `clientState` | string | 否 | 最大 512 字符 | 调用方透传状态，不参与 OAuth 安全校验 |
 
 授权会话有效期固定为 15 分钟。
 
-#### 6.1.1 REDIRECT 响应
+#### 6.1.1 AUTO 响应
 
 ```json
 {
@@ -363,9 +378,11 @@ Content-Type: application/json
     "authSessionId": "auth_example",
     "externalAccountId": "account_10001",
     "clientState": "page_state_001",
-    "authMode": "REDIRECT",
+    "authMode": "AUTO",
     "authorizeUrl": "https://www.tiktok.com/v2/auth/authorize/?...",
-    "qrcodeUrl": null,
+    "qrcodeUrl": "https://www.tiktok.com/qr/example?client_ticket=...",
+    "qrcodeImageUrl": "data:image/png;base64,iVBORw0KGgoAAA...",
+    "launchUrl": "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions/auth_example/launch",
     "status": "WAITING",
     "expireTime": "2026-09-01T18:00:00"
   },
@@ -373,7 +390,7 @@ Content-Type: application/json
 }
 ```
 
-调用方必须在用户浏览器中打开 `authorizeUrl`，不得在服务端模拟用户授权或截取授权 code。
+推荐调用方在用户浏览器中打开 `launchUrl`，由 A 方托管页显示浏览器授权入口和二维码。调用方也可以按需使用 `authorizeUrl` 或直接将 `qrcodeImageUrl` 作为 `<img src>` 展示，不得在服务端模拟用户授权或截取授权 code。
 
 #### 6.1.2 QR_CODE 响应
 
@@ -388,6 +405,8 @@ Content-Type: application/json
     "authMode": "QR_CODE",
     "authorizeUrl": null,
     "qrcodeUrl": "https://www.tiktok.com/qr/example",
+    "qrcodeImageUrl": "data:image/png;base64,iVBORw0KGgoAAA...",
+    "launchUrl": "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions/auth_example/launch",
     "status": "WAITING",
     "expireTime": "2026-09-01T18:00:00"
   },
@@ -395,7 +414,21 @@ Content-Type: application/json
 }
 ```
 
-调用方展示 `qrcodeUrl`，并轮询授权会话。每次查询处于 `WAITING` 的二维码会话时，服务端会向 TikTok 查询二维码状态；确认成功后完成 Token 交换并建立账号连接。
+调用方可直接展示 `qrcodeImageUrl`，也可打开 `launchUrl` 使用 A 方托管页，然后轮询授权会话。每次查询处于 `WAITING` 的二维码会话时，服务端会向 TikTok 查询二维码状态；确认成功后完成 Token 交换并建立账号连接。
+
+#### 6.1.3 托管授权页
+
+```http
+GET /auth/sessions/{authSessionId}/launch
+```
+
+该接口返回 HTML，不需要外部客户端 HMAC。C 方前端直接打开创建会话响应中的 `launchUrl` 即可。A 方托管页会展示可用的 `authorizeUrl` 和 `qrcodeImageUrl`，并每 3 秒访问下面的公开状态接口：
+
+```http
+GET /auth/sessions/{authSessionId}/launch/status
+```
+
+公开状态接口不需要签名，只适合在 A 方托管页中使用。C 方服务端查询正式状态时，仍使用带签名的 `GET /auth/sessions/{authSessionId}`。
 
 ### 6.2 TikTok 授权回调
 
@@ -755,7 +788,37 @@ DELETE /media/uploads/{uploadId}
 
 ## 8. 发布接口
 
-### 8.1 创建发布任务
+### 8.1 快速发布任务（推荐）
+
+当视频已经在 C 方或其他服务的公网 HTTPS 地址上时，使用该接口可以跳过 `/media/uploads`、OSS 直传和 LOCAL 分片上传：
+
+```http
+POST /publish/quick-tasks
+Content-Type: application/json
+Idempotency-Key: c-quick-publish-202609020001
+```
+
+请求：
+
+```json
+{
+  "externalAccountId": "account_10001",
+  "videoUrl": "https://cdn.c.example.com/videos/demo.mp4",
+  "fileName": "demo.mp4",
+  "contentType": "video/mp4",
+  "title": "视频标题",
+  "caption": "视频文案",
+  "postMode": "DIRECT_POST",
+  "privacyLevel": "PUBLIC_TO_EVERYONE",
+  "externalRequestId": "business_order_001"
+}
+```
+
+必填字段只有 `externalAccountId` 和 `videoUrl`。`videoUrl` 必须是 A 方服务器可访问的公网 HTTPS 地址，A 方拒绝 HTTP、回环、内网和云元数据地址。`postMode` 默认 `DIRECT_POST`，`privacyLevel` 默认 `PUBLIC_TO_EVERYONE`，其他字段与普通发布任务一致。
+
+成功响应与普通发布任务相同，返回 `taskId` 和 `mediaId`。接口创建任务后立即返回，发布仍由 A 方异步执行；必须带 `Idempotency-Key`，网络超时重试时复用原 key。
+
+### 8.2 创建发布任务
 
 ```http
 POST /publish/tasks
@@ -838,7 +901,7 @@ Idempotency-Key: publish_order_001
 - 相同键但请求内容不同返回 `IDEMPOTENCY_KEY_CONFLICT`
 - 请求内容哈希基于服务端序列化后的完整发布请求
 
-### 8.2 查询发布任务
+### 8.3 查询发布任务
 
 ```http
 GET /publish/tasks/{taskId}
@@ -877,7 +940,7 @@ GET /publish/tasks/{taskId}
 | `FAILED` | 全部失败 |
 | `PARTIAL_SUCCESS` | 部分成功、部分失败 |
 
-### 8.3 查询发布明细
+### 8.4 查询发布明细
 
 ```http
 GET /publish/tasks/{taskId}/details
@@ -910,7 +973,7 @@ GET /publish/tasks/{taskId}/details
 
 `tiktokStatus` 保存 TikTok 返回或本地流程产生的状态，调用方应以明细 `status` 和任务汇总 `status` 作为主要业务判断依据。
 
-### 8.4 重试失败明细
+### 8.5 重试失败明细
 
 ```http
 POST /publish/details/{detailId}/retry
@@ -1038,7 +1101,7 @@ signature = Base64(HMAC-SHA256(callbackSecret, canonicalString))
 - 失败后的重试间隔：1、5、15、30、60、180、360 分钟
 - 达到最大次数仍失败后，事件状态变为 `FAILED`
 
-调用方应：
+回调是可选能力。C 方不配置回调地址和 `callbackSecret` 时，直接轮询授权会话、连接列表、任务和明细即可完成流程。配置回调时，调用方应：
 
 1. 先校验回调签名
 2. 使用 `eventId` 做幂等
@@ -1087,6 +1150,7 @@ signature = Base64(HMAC-SHA256(callbackSecret, canonicalString))
 | `PUBLISH_TASK_NOT_FOUND` | 发布任务不存在或不属于当前客户端 |
 | `PUBLISH_DETAIL_NOT_FOUND` | 发布明细不存在或不属于当前客户端 |
 | `PUBLISH_RETRY_STATUS_INVALID` | 明细当前状态不允许重试 |
+| `MEDIA_SERVICE_UNAVAILABLE` | 快速发布所需的远程媒体服务不可用 |
 
 ### 10.4 通用错误
 
@@ -1100,7 +1164,7 @@ signature = Base64(HMAC-SHA256(callbackSecret, canonicalString))
 
 ### 11.1 客户端和安全
 
-- [ ] 已获得独立的 `clientId`、`clientSecret` 和 `callbackSecret`
+- [ ] 已获得独立的 `clientId`、`clientSecret`；如接收回调再配置 `callbackSecret`
 - [ ] 密钥只保存在服务端环境变量或服务端密钥管理系统
 - [ ] 已实现 5 行请求 canonical string
 - [ ] 已使用实际请求字节计算 SHA-256
@@ -1112,9 +1176,9 @@ signature = Base64(HMAC-SHA256(callbackSecret, canonicalString))
 
 ### 11.2 授权
 
-- [ ] 已选择并实现 `REDIRECT` 或 `QR_CODE` 流程
-- [ ] 重定向授权只在用户浏览器中打开 `authorizeUrl`
-- [ ] 二维码授权展示 `qrcodeUrl` 并轮询会话
+- [ ] 已选择并实现 `AUTO`、`REDIRECT` 或 `QR_CODE` 流程
+- [ ] 推荐在用户浏览器打开 `launchUrl`
+- [ ] 如自行展示二维码，使用 `qrcodeImageUrl`，不要自己生成二维码
 - [ ] 已处理 `WAITING`、`SUCCESS`、`FAILED`、`EXPIRED`
 - [ ] 已保存 `authSessionId` 和 `connectionId`
 - [ ] 已处理解绑后的连接不可发布
@@ -1164,6 +1228,8 @@ signature = Base64(HMAC-SHA256(callbackSecret, canonicalString))
 | --- | --- | --- |
 | 授权 | POST | `/auth/sessions` |
 | 授权 | GET | `/auth/sessions/{authSessionId}` |
+| 授权 | GET | `/auth/sessions/{authSessionId}/launch` |
+| 授权 | GET | `/auth/sessions/{authSessionId}/launch/status` |
 | 连接 | GET | `/connections` |
 | 连接 | POST | `/connections/{connectionId}/disconnect` |
 | OAuth | GET | `/auth/callback` |
@@ -1173,6 +1239,7 @@ signature = Base64(HMAC-SHA256(callbackSecret, canonicalString))
 | 上传 | POST | `/media/uploads/{uploadId}/complete` |
 | 上传 | DELETE | `/media/uploads/{uploadId}` |
 | 发布 | POST | `/publish/tasks` |
+| 发布 | POST | `/publish/quick-tasks` |
 | 发布 | GET | `/publish/tasks/{taskId}` |
 | 发布 | GET | `/publish/tasks/{taskId}/details` |
 | 发布 | POST | `/publish/details/{detailId}/retry` |
