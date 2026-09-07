@@ -16,7 +16,7 @@ public final class TkOpenTiktokAuthVO {
         @Size(max = 128)
         private String externalAccountId;
         @NotBlank
-        @Pattern(regexp = "REDIRECT|QR_CODE")
+        @Pattern(regexp = "AUTO|REDIRECT|QR_CODE")
         private String authMode;
         @Size(max = 512)
         private String clientState;
@@ -30,6 +30,8 @@ public final class TkOpenTiktokAuthVO {
         private String authMode;
         private String authorizeUrl;
         private String qrcodeUrl;
+        private String qrcodeImageUrl;
+        private String launchUrl;
         private String status;
         private LocalDateTime expireTime;
     }

@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.open.tiktok;
 
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.extra.qrcode.QrCodeUtil;
 import cn.iocoder.yudao.module.tk.controller.open.tiktok.vo.TkOpenTiktokAuthVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokAuthSessionDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokConnectionDO;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @Service
@@ -28,6 +30,7 @@ public class TkOpenTiktokAuthService {
     private final TkOpenApiSecretCipher secretCipher;
     private final TkOpenApiCallbackService callbackService;
     private final String redirectUri;
+    private final String launchBaseUrl;
 
     public TkOpenTiktokAuthService(TkOpenTiktokAuthSessionMapper sessionMapper,
                                    TkOpenTiktokConnectionMapper connectionMapper,
@@ -35,13 +38,16 @@ public class TkOpenTiktokAuthService {
                                    TkOpenApiSecretCipher secretCipher,
                                    TkOpenApiCallbackService callbackService,
                                    @Value("${tk.open-api.tiktok-redirect-uri:https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/callback}")
-                                   String redirectUri) {
+                                   String redirectUri,
+                                   @Value("${tk.open-api.tiktok-launch-base-url:https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions}")
+                                   String launchBaseUrl) {
         this.sessionMapper = sessionMapper;
         this.connectionMapper = connectionMapper;
         this.platformRegistry = platformRegistry;
         this.secretCipher = secretCipher;
         this.callbackService = callbackService;
         this.redirectUri = redirectUri;
+        this.launchBaseUrl = StrUtil.removeSuffix(launchBaseUrl, "/");
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -56,16 +62,25 @@ public class TkOpenTiktokAuthService {
         String authorizeUrl = null;
         String qrToken = null;
         String qrUrl = null;
-        if ("QR_CODE".equals(request.getAuthMode())) {
-            TkOpenPublishPlatformAdapter.QrCodeResult result = adapter.createQrCode(state);
-            if (!result.isSuccess() || StrUtil.hasBlank(result.getToken(), result.getUrl())) {
+        String clientTicket = null;
+        if ("REDIRECT".equals(request.getAuthMode()) || "AUTO".equals(request.getAuthMode())) {
+            authorizeUrl = adapter.buildAuthorizeUrl(state, redirectUri);
+        }
+        if ("QR_CODE".equals(request.getAuthMode()) || "AUTO".equals(request.getAuthMode())) {
+            clientTicket = TkOpenApiIds.next("ticket");
+            TkOpenPublishPlatformAdapter.QrCodeResult result;
+            try {
+                result = adapter.createQrCode(state);
+            } catch (Exception ex) {
+                result = new TkOpenPublishPlatformAdapter.QrCodeResult(false, null, null, ex.getMessage());
+            }
+            if (result.isSuccess() && StrUtil.isNotBlank(result.getToken()) && StrUtil.isNotBlank(result.getUrl())) {
+                qrToken = result.getToken();
+                qrUrl = applyClientTicket(result.getUrl(), clientTicket);
+            } else if ("QR_CODE".equals(request.getAuthMode())) {
                 throw TkOpenApiException.unavailable("AUTHORIZATION_FAILED",
                         StrUtil.blankToDefault(result.getFailReason(), "TikTok QR authorization failed"));
             }
-            qrToken = result.getToken();
-            qrUrl = result.getUrl();
-        } else {
-            authorizeUrl = adapter.buildAuthorizeUrl(state, redirectUri);
         }
         TkOpenTiktokAuthSessionDO session = TkOpenTiktokAuthSessionDO.builder()
                 .authSessionId(authSessionId)
@@ -74,6 +89,7 @@ public class TkOpenTiktokAuthService {
                 .clientState(request.getClientState())
                 .authMode(request.getAuthMode())
                 .oauthState(state)
+                .clientTicket(clientTicket)
                 .qrcodeToken(qrToken)
                 .qrcodeUrl(qrUrl)
                 .authorizeUrl(authorizeUrl)
@@ -89,11 +105,45 @@ public class TkOpenTiktokAuthService {
         String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
         TkOpenTiktokAuthSessionDO session = requireSessionForUpdate(clientId, authSessionId);
         expireIfNeeded(session);
-        if ("QR_CODE".equals(session.getAuthMode()) && "WAITING".equals(session.getStatus())
+        if (isQrMode(session.getAuthMode()) && "WAITING".equals(session.getStatus())
                 && StrUtil.isNotBlank(session.getQrcodeToken())) {
             pollQrSession(session);
         }
         return toStatusResp(session);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public TkOpenTiktokAuthVO.SessionStatusResp getPublicSessionStatus(String authSessionId) {
+        TkOpenTiktokAuthSessionDO session = sessionMapper.selectByAuthSessionIdForUpdate(authSessionId);
+        if (session == null) {
+            throw TkOpenApiException.notFound("AUTH_SESSION_NOT_FOUND", "authorization session does not exist");
+        }
+        expireIfNeeded(session);
+        if (isQrMode(session.getAuthMode()) && "WAITING".equals(session.getStatus())
+                && StrUtil.isNotBlank(session.getQrcodeToken())) {
+            pollQrSession(session);
+        }
+        return toStatusResp(session);
+    }
+
+    public String renderLaunchPage(String authSessionId) {
+        TkOpenTiktokAuthSessionDO session = sessionMapper.selectByAuthSessionId(authSessionId);
+        if (session == null) {
+            return renderPage("TikTok authorization unavailable", "Authorization session does not exist or has expired", null,
+                    null, null);
+        }
+        String imageUrl = null;
+        if (StrUtil.isNotBlank(session.getQrcodeUrl())) {
+            try {
+                imageUrl = buildQrCodeImageUrl(session.getQrcodeUrl());
+            } catch (Exception ex) {
+                imageUrl = null;
+            }
+        }
+        String statusUrl = launchBaseUrl + "/" + session.getAuthSessionId() + "/launch/status";
+        return renderPage("TikTok authorization", "WAITING".equals(session.getStatus())
+                        ? "Complete authorization in the browser or scan the QR code."
+                        : session.getStatus(), session.getAuthorizeUrl(), imageUrl, statusUrl);
     }
 
     public List<TkOpenTiktokAuthVO.ConnectionResp> getConnections(String externalAccountId, String status) {
@@ -142,7 +192,7 @@ public class TkOpenTiktokAuthService {
             failSession(session, StrUtil.blankToDefault(description, StrUtil.blankToDefault(error, "TikTok did not return code")));
             return TkOpenTiktokAuthCallbackResult.of(false, session.getFailReason());
         }
-        return completeAuthorization(session, code);
+        return completeAuthorization(session, code, false);
     }
 
     private void pollQrSession(TkOpenTiktokAuthSessionDO session) {
@@ -151,8 +201,13 @@ public class TkOpenTiktokAuthService {
             failSession(session, result.getFailReason());
             return;
         }
+        if (StrUtil.isNotBlank(result.getClientTicket())
+                && !StrUtil.equals(result.getClientTicket(), session.getClientTicket())) {
+            failSession(session, "TikTok QR authorization failed: client_ticket does not match");
+            return;
+        }
         if ("confirmed".equalsIgnoreCase(result.getStatus()) && StrUtil.isNotBlank(result.getAuthorizationCode())) {
-            completeAuthorization(session, result.getAuthorizationCode());
+            completeAuthorization(session, result.getAuthorizationCode(), true);
         } else if ("expired".equalsIgnoreCase(result.getStatus())) {
             session.setStatus("EXPIRED");
             session.setFailReason("QR authorization has expired");
@@ -160,10 +215,11 @@ public class TkOpenTiktokAuthService {
         }
     }
 
-    private TkOpenTiktokAuthCallbackResult completeAuthorization(TkOpenTiktokAuthSessionDO session, String code) {
+    private TkOpenTiktokAuthCallbackResult completeAuthorization(TkOpenTiktokAuthSessionDO session, String code,
+                                                                  boolean fromQrCode) {
         try {
             TkOpenPublishPlatformAdapter.OAuthTokenResult token = platform().exchangeCode(code,
-                    "QR_CODE".equals(session.getAuthMode()) ? null : redirectUri);
+                    fromQrCode ? null : redirectUri);
             if (!token.isSuccess()) {
                 failSession(session, token.getFailReason());
                 return TkOpenTiktokAuthCallbackResult.of(false, session.getFailReason());
@@ -259,9 +315,70 @@ public class TkOpenTiktokAuthService {
         response.setAuthMode(session.getAuthMode());
         response.setAuthorizeUrl(session.getAuthorizeUrl());
         response.setQrcodeUrl(session.getQrcodeUrl());
+        response.setQrcodeImageUrl(StrUtil.isBlank(session.getQrcodeUrl())
+                ? null : buildQrCodeImageUrl(session.getQrcodeUrl()));
+        response.setLaunchUrl(launchBaseUrl + "/" + session.getAuthSessionId() + "/launch");
         response.setStatus(session.getStatus());
         response.setExpireTime(session.getExpireTime());
         return response;
+    }
+
+    private boolean isQrMode(String authMode) {
+        return "QR_CODE".equals(authMode) || "AUTO".equals(authMode);
+    }
+
+    private String buildQrCodeImageUrl(String qrcodeUrl) {
+        byte[] png = QrCodeUtil.generatePng(qrcodeUrl, 320, 320);
+        return "data:image/png;base64," + Base64.getEncoder().encodeToString(png);
+    }
+
+    private String applyClientTicket(String qrcodeUrl, String clientTicket) {
+        String encodedTicket = java.net.URLEncoder.encode(clientTicket, StandardCharsets.UTF_8).replace("+", "%20");
+        int index = qrcodeUrl.indexOf("client_ticket=");
+        if (index < 0) {
+            return qrcodeUrl + (qrcodeUrl.contains("?") ? "&" : "?") + "client_ticket=" + encodedTicket;
+        }
+        int valueStart = index + "client_ticket=".length();
+        int valueEnd = qrcodeUrl.indexOf('&', valueStart);
+        if (valueEnd < 0) {
+            return qrcodeUrl.substring(0, valueStart) + encodedTicket;
+        }
+        return qrcodeUrl.substring(0, valueStart) + encodedTicket + qrcodeUrl.substring(valueEnd);
+    }
+
+    private String renderPage(String title, String message, String authorizeUrl, String qrcodeImageUrl,
+                              String statusUrl) {
+        StringBuilder html = new StringBuilder("<!doctype html><html><head><meta charset=\"utf-8\"><title>")
+                .append(escapeHtml(title)).append("</title></head><body><h1>")
+                .append(escapeHtml(title)).append("</h1><p id=\"message\">")
+                .append(escapeHtml(StrUtil.blankToDefault(message, ""))).append("</p>");
+        if (StrUtil.isNotBlank(qrcodeImageUrl)) {
+            html.append("<img alt=\"TikTok QR code\" width=\"320\" height=\"320\" src=\"")
+                    .append(escapeHtml(qrcodeImageUrl)).append("\">");
+        }
+        if (StrUtil.isNotBlank(authorizeUrl)) {
+            html.append("<p><a href=\"").append(escapeHtml(authorizeUrl))
+                    .append("\">Continue with browser authorization</a></p>");
+        }
+        if (StrUtil.isNotBlank(statusUrl)) {
+            html.append("<script>(async function poll(){try{const r=await fetch('")
+                    .append(escapeJs(statusUrl)).append("');const j=await r.json();const d=j.data||{};"
+                            + "document.getElementById('message').textContent=d.status||'WAITING';"
+                            + "if(d.status==='WAITING'){setTimeout(poll,3000);}else if(d.status==='SUCCESS'){"
+                            + "document.getElementById('message').textContent='Authorization completed. You may close this window.';"
+                            + "}else{setTimeout(poll,3000);}}catch(e){setTimeout(poll,5000);}})();</script>");
+        }
+        return html.append("</body></html>").toString();
+    }
+
+    private String escapeHtml(String value) {
+        return StrUtil.blankToDefault(value, "").replace("&", "&amp;").replace("\"", "&quot;")
+                .replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    private String escapeJs(String value) {
+        return StrUtil.blankToDefault(value, "").replace("\\", "\\\\")
+                .replace("'", "\\'").replace("\r", "\\r").replace("\n", "\\n");
     }
 
     private TkOpenTiktokAuthVO.SessionStatusResp toStatusResp(TkOpenTiktokAuthSessionDO session) {

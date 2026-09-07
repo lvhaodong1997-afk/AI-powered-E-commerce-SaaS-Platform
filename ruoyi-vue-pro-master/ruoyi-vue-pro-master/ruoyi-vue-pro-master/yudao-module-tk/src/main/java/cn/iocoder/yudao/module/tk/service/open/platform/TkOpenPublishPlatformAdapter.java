@@ -64,6 +64,7 @@ public interface TkOpenPublishPlatformAdapter {
         private boolean success;
         private String status;
         private String authorizationCode;
+        private String clientTicket;
         private String failReason;
     }
 

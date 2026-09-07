@@ -8,15 +8,15 @@ import fs from 'node:fs/promises';
 
 const base = 'https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok';
 const clientId = process.env.TK_OPEN_API_CLIENT_ID;
-const hmacKey = process.env.TK_OPEN_API_HMAC_KEY;
-if (!clientId || !hmacKey) throw new Error('missing server-side Open API environment variables');
+const clientSecret = process.env.TK_OPEN_API_CLIENT_SECRET;
+if (!clientId || !clientSecret) throw new Error('missing server-side Open API environment variables');
 
 function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 function sign(method, target, timestamp, nonce, body = Buffer.alloc(0)) {
   const canonical = `${method.toUpperCase()}\n${target}\n${timestamp}\n${nonce}\n${sha256(body)}`;
-  return crypto.createHmac('sha256', hmacKey).update(canonical).digest('base64');
+  return crypto.createHmac('sha256', clientSecret).update(canonical).digest('base64');
 }
 async function api(method, path, body, extraHeaders = {}) {
   const bytes = body === undefined ? Buffer.alloc(0) : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body));
@@ -36,19 +36,52 @@ async function api(method, path, body, extraHeaders = {}) {
   if (!response.ok || result.code !== 0) throw new Error(`${response.status} ${result.code}: ${result.msg}`);
   return result.data;
 }
+
+async function waitForAuthorization(authSessionId) {
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const status = await api('GET', `/auth/sessions/${encodeURIComponent(authSessionId)}`);
+    if (status.status === 'SUCCESS') return status;
+    if (status.status === 'FAILED' || status.status === 'EXPIRED') {
+      throw new Error(`authorization is ${status.status}: ${status.failReason || ''}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+  throw new Error('authorization polling timed out');
+}
 ```
 
-The following is the minimum authorization, upload, publish, and query sequence. A redirect authorization must be completed by a user in a browser. `QR_CODE` is also implemented: use it as `authMode`, display `qrcodeUrl`, then poll the same session endpoint.
+Recommended minimum flow: create an `AUTO` session, open the returned `launchUrl` in the user's browser, then call `quick-tasks` with a public HTTPS video URL. The hosted page shows both browser authorization and the A-generated QR image, so the C-side browser does not need QR generation or TikTok OAuth callback code.
 
 ```js
 const auth = await api('POST', '/auth/sessions', {
-  externalAccountId: 'your-account-reference', authMode: 'REDIRECT', clientState: 'your-state'
+  externalAccountId: 'your-account-reference', authMode: 'AUTO'
 });
-console.log(`Open this URL in the user browser: ${auth.authorizeUrl}`);
+console.log(`Open in the user browser: ${auth.launchUrl}`);
 
-// Poll only after the user completes the authorization. For QR_CODE, poll while WAITING.
-const authorized = await api('GET', `/auth/sessions/${encodeURIComponent(auth.authSessionId)}`);
-if (authorized.status !== 'SUCCESS') throw new Error(`authorization is ${authorized.status}`);
+const authorized = await waitForAuthorization(auth.authSessionId);
+
+const task = await api('POST', '/publish/quick-tasks', {
+  externalAccountId: authorized.externalAccountId,
+  videoUrl: 'https://cdn.example.com/videos/video.mp4',
+  fileName: 'video.mp4', contentType: 'video/mp4',
+  postMode: 'DIRECT_POST', privacyLevel: 'PUBLIC_TO_EVERYONE',
+  caption: 'Published by server integration'
+}, {'Idempotency-Key': crypto.randomUUID()});
+console.log(task.taskId);
+```
+
+`launchUrl` and its `/launch/status` polling endpoint are public browser endpoints and do not use HMAC. The C server must still sign session creation, signed status queries, connection queries, and publishing calls. `videoUrl` must be a public HTTPS URL; HTTP, loopback, private-network, and cloud-metadata destinations are rejected.
+
+The following is the full upload flow for private files or callers that need OSS direct upload or LOCAL chunk upload. A redirect authorization must be completed by a user in a browser. `QR_CODE` is also implemented: use it as `authMode`, display `qrcodeImageUrl` or `launchUrl`, then poll the same session endpoint.
+
+```js
+const auth = await api('POST', '/auth/sessions', {
+  externalAccountId: 'your-account-reference', authMode: 'AUTO', clientState: 'your-state'
+});
+console.log(`Open this URL in the user browser: ${auth.launchUrl}`);
+
+const authorized = await waitForAuthorization(auth.authSessionId);
 
 const video = await fs.readFile('/absolute/path/video.mp4');
 const digest = sha256(video);

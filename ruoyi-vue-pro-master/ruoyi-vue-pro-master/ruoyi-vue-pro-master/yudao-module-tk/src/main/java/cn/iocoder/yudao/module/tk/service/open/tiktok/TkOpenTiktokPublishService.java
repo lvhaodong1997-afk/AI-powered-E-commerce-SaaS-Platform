@@ -15,6 +15,7 @@ import cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -50,6 +51,7 @@ public class TkOpenTiktokPublishService {
     private final TkOpenApiCallbackService callbackService;
     private final TkOpenApiSecretCipher secretCipher;
     private final TkLocalUploadStorageService localStorageService;
+    private final TkOpenTiktokMediaService mediaService;
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
 
     public TkOpenTiktokPublishService(TkOpenTiktokPublishTaskMapper taskMapper,
@@ -61,6 +63,21 @@ public class TkOpenTiktokPublishService {
                                       TkOpenApiCallbackService callbackService,
                                       TkOpenApiSecretCipher secretCipher,
                                       TkLocalUploadStorageService localStorageService) {
+        this(taskMapper, detailMapper, mediaMapper, connectionMapper, idempotencyMapper, platformRegistry,
+                callbackService, secretCipher, localStorageService, null);
+    }
+
+    @Autowired
+    public TkOpenTiktokPublishService(TkOpenTiktokPublishTaskMapper taskMapper,
+                                      TkOpenTiktokPublishDetailMapper detailMapper,
+                                      TkOpenTiktokMediaMapper mediaMapper,
+                                      TkOpenTiktokConnectionMapper connectionMapper,
+                                      TkOpenApiIdempotencyMapper idempotencyMapper,
+                                      TkOpenPublishPlatformRegistry platformRegistry,
+                                      TkOpenApiCallbackService callbackService,
+                                      TkOpenApiSecretCipher secretCipher,
+                                      TkLocalUploadStorageService localStorageService,
+                                      TkOpenTiktokMediaService mediaService) {
         this.taskMapper = taskMapper;
         this.detailMapper = detailMapper;
         this.mediaMapper = mediaMapper;
@@ -70,18 +87,61 @@ public class TkOpenTiktokPublishService {
         this.callbackService = callbackService;
         this.secretCipher = secretCipher;
         this.localStorageService = localStorageService;
+        this.mediaService = mediaService;
     }
 
     @Transactional(rollbackFor = Exception.class)
     public TkOpenTiktokPublishVO.TaskResp create(TkOpenTiktokPublishVO.TaskCreateReq request, String idempotencyKey) {
-        if (StrUtil.isBlank(idempotencyKey)) {
-            throw TkOpenApiException.badRequest("IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key header is required");
-        }
-        if (idempotencyKey.length() > 128) {
-            throw TkOpenApiException.badRequest("IDEMPOTENCY_KEY_INVALID", "Idempotency-Key is too long");
-        }
-        String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
+        return createInternal(request, idempotencyKey, requestHash(request));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public TkOpenTiktokPublishVO.TaskResp createQuick(TkOpenTiktokPublishVO.QuickTaskCreateReq request,
+                                                      String idempotencyKey) {
+        validateIdempotencyKey(idempotencyKey);
+        String clientId = currentClient();
         String hash = requestHash(request);
+        TkOpenApiIdempotencyDO existing = idempotencyMapper.selectByClientAndKey(clientId, idempotencyKey);
+        if (existing != null && (existing.getExpireTime() == null || existing.getExpireTime().isAfter(LocalDateTime.now()))) {
+            return resolveIdempotentResult(clientId, hash, existing, false);
+        }
+        if (existing != null) {
+            idempotencyMapper.deleteExpired(clientId, idempotencyKey, LocalDateTime.now());
+        }
+        TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndExternalAccountId(
+                clientId, request.getExternalAccountId());
+        if (connection == null) {
+            throw TkOpenApiException.notFound("CONNECTION_NOT_FOUND", "connection does not exist");
+        }
+        if (!"AUTHORIZED".equals(connection.getAuthStatus())) {
+            throw TkOpenApiException.badRequest("CONNECTION_NOT_AUTHORIZED", "connection is not authorized");
+        }
+        if (mediaService == null) {
+            throw TkOpenApiException.unavailable("MEDIA_SERVICE_UNAVAILABLE", "remote media service is unavailable");
+        }
+        TkOpenTiktokMediaDO media = mediaService.createRemote(request.getVideoUrl(), request.getFileName(),
+                request.getContentType(), request.getCoverTimestampMs());
+        TkOpenTiktokPublishVO.TaskCreateReq taskRequest = new TkOpenTiktokPublishVO.TaskCreateReq();
+        taskRequest.setConnectionIds(Collections.singletonList(connection.getConnectionId()));
+        taskRequest.setMediaId(media.getMediaId());
+        taskRequest.setTitle(request.getTitle());
+        taskRequest.setCaption(request.getCaption());
+        taskRequest.setPostMode(StrUtil.blankToDefault(request.getPostMode(), "DIRECT_POST"));
+        taskRequest.setPrivacyLevel(StrUtil.blankToDefault(request.getPrivacyLevel(), "PUBLIC_TO_EVERYONE"));
+        taskRequest.setAllowComment(request.getAllowComment());
+        taskRequest.setAllowDuet(request.getAllowDuet());
+        taskRequest.setAllowStitch(request.getAllowStitch());
+        taskRequest.setCommercialContent(request.getCommercialContent());
+        taskRequest.setBrandContent(request.getBrandContent());
+        taskRequest.setAigcContent(request.getAigcContent());
+        taskRequest.setExternalRequestId(request.getExternalRequestId());
+        return createInternal(taskRequest, idempotencyKey, hash);
+    }
+
+    private TkOpenTiktokPublishVO.TaskResp createInternal(TkOpenTiktokPublishVO.TaskCreateReq request,
+                                                           String idempotencyKey, String hash) {
+        validateIdempotencyKey(idempotencyKey);
+        String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
         LocalDateTime now = LocalDateTime.now();
         TkOpenApiIdempotencyDO existing = idempotencyMapper.selectByClientAndKey(clientId, idempotencyKey);
         if (existing != null) {
@@ -394,10 +454,12 @@ public class TkOpenTiktokPublishService {
 
     private UploadSource resolveSource(TkOpenTiktokMediaDO media, String verifiedDomain) throws Exception {
         if (isVerifiedPullUrl(media.getFileUrl(), verifiedDomain)) return UploadSource.pull();
-        Optional<Path> local = localStorageService.resolveLocalPath(media.getFileUrl());
+        Optional<Path> local = localStorageService == null ? Optional.empty()
+                : localStorageService.resolveLocalPath(media.getFileUrl());
         if (local.isPresent()) return UploadSource.file(local.get(), false);
+        URI remoteUrl = TkOpenTiktokMediaService.validateRemoteVideoUrl(media.getFileUrl());
         Path temporary = Files.createTempFile("tk-open-publish-", "." + TkOpenTiktokMediaService.normalizeExtension(media.getFileName()));
-        try (HttpResponse response = HttpRequest.get(media.getFileUrl()).timeout(600000).execute()) {
+        try (HttpResponse response = HttpRequest.get(remoteUrl.toString()).timeout(600000).execute()) {
             if (!response.isOk()) throw new IllegalStateException("cannot download media, HTTP " + response.getStatus());
             try (InputStream input = response.bodyStream()) { Files.copy(input, temporary, StandardCopyOption.REPLACE_EXISTING); }
         } catch (Exception ex) {
@@ -448,6 +510,19 @@ public class TkOpenTiktokPublishService {
 
     static String requestHash(TkOpenTiktokPublishVO.TaskCreateReq request) {
         return TkOpenApiSigner.sha256Hex(JsonUtils.toJsonString(request).getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String requestHash(TkOpenTiktokPublishVO.QuickTaskCreateReq request) {
+        return TkOpenApiSigner.sha256Hex(JsonUtils.toJsonString(request).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void validateIdempotencyKey(String idempotencyKey) {
+        if (StrUtil.isBlank(idempotencyKey)) {
+            throw TkOpenApiException.badRequest("IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key header is required");
+        }
+        if (idempotencyKey.length() > 128) {
+            throw TkOpenApiException.badRequest("IDEMPOTENCY_KEY_INVALID", "Idempotency-Key is too long");
+        }
     }
 
     private void submitAfterCommit(String clientId, String taskId) {

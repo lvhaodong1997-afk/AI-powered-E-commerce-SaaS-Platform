@@ -22,6 +22,13 @@ public class TkOpenTiktokPublishController {
         return TkOpenApiResponse.success(publishService.create(request, key));
     }
 
+    @PostMapping("/quick-tasks")
+    public TkOpenApiResponse<TkOpenTiktokPublishVO.TaskResp> createQuick(
+            @Valid @RequestBody TkOpenTiktokPublishVO.QuickTaskCreateReq request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+        return TkOpenApiResponse.success(publishService.createQuick(request, key));
+    }
+
     @GetMapping("/tasks/{taskId}")
     public TkOpenApiResponse<TkOpenTiktokPublishVO.TaskResp> task(@PathVariable String taskId) {
         return TkOpenApiResponse.success(publishService.getTask(taskId));

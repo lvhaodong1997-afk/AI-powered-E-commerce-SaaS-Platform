@@ -56,6 +56,95 @@ class TkOpenTiktokPublishServiceTest {
     }
 
     @Test
+    void quickPublishRequestExposesExternalAccountAndVideoUrlContract() throws Exception {
+        Class<?> requestType = Class.forName(
+                "cn.iocoder.yudao.module.tk.controller.open.tiktok.vo.TkOpenTiktokPublishVO$QuickTaskCreateReq");
+        assertNotNull(requestType.getDeclaredField("externalAccountId"));
+        assertNotNull(requestType.getDeclaredField("videoUrl"));
+        assertNotNull(TkOpenTiktokPublishService.class.getMethod("createQuick", requestType, String.class));
+    }
+
+    @Test
+    void shouldRejectQuickPublishForUnauthorizedConnection() {
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenApiIdempotencyMapper idempotencyMapper = mock(TkOpenApiIdempotencyMapper.class);
+        TkOpenTiktokMediaService mediaService = mock(TkOpenTiktokMediaService.class);
+        when(connectionMapper.selectByClientAndExternalAccountId("client_b", "external-1"))
+                .thenReturn(TkOpenTiktokConnectionDO.builder().externalAccountId("external-1")
+                        .authStatus("REAUTH_REQUIRED").build());
+        TkOpenTiktokPublishService service = newQuickService(connectionMapper, idempotencyMapper, mediaService);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-quick-denied");
+
+        TkOpenApiException error = assertThrows(TkOpenApiException.class,
+                () -> service.createQuick(quickRequest(), "quick-denied"));
+
+        assertEquals("CONNECTION_NOT_AUTHORIZED", error.getCode());
+        verifyNoInteractions(mediaService);
+    }
+
+    @Test
+    void shouldCreateRemoteMediaAndAsyncTaskForQuickPublish() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokMediaMapper mediaMapper = mock(TkOpenTiktokMediaMapper.class);
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenApiIdempotencyMapper idempotencyMapper = mock(TkOpenApiIdempotencyMapper.class);
+        TkOpenTiktokMediaService mediaService = mock(TkOpenTiktokMediaService.class);
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder().id(2L)
+                .connectionId("conn_quick").clientId("client_b").externalAccountId("external-1")
+                .displayName("TikTok account").authStatus("AUTHORIZED").build();
+        TkOpenTiktokMediaDO media = TkOpenTiktokMediaDO.builder().id(3L).mediaId("media_quick")
+                .clientId("client_b").fileName("video.mp4").fileUrl("https://cdn.example/video.mp4")
+                .contentType("video/mp4").status("READY").build();
+        when(connectionMapper.selectByClientAndExternalAccountId("client_b", "external-1")).thenReturn(connection);
+        when(mediaService.createRemote("https://cdn.example/video.mp4", null, null, null)).thenReturn(media);
+        when(mediaMapper.selectByClientAndMediaId("client_b", "media_quick")).thenReturn(media);
+        when(connectionMapper.selectListByClientAndIds(eq("client_b"), any()))
+                .thenReturn(Collections.singletonList(connection));
+        TkOpenTiktokPublishService service = newQuickService(taskMapper, detailMapper, mediaMapper,
+                connectionMapper, idempotencyMapper, mediaService);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-quick-create");
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+
+        TkOpenTiktokPublishVO.TaskResp response = service.createQuick(quickRequest(), "quick-create");
+
+        assertNotNull(response.getTaskId());
+        assertEquals("media_quick", response.getMediaId());
+        assertEquals("PENDING", response.getStatus());
+        verify(mediaService).createRemote("https://cdn.example/video.mp4", null, null, null);
+        verify(taskMapper).insert(any(TkOpenTiktokPublishTaskDO.class));
+        verify(detailMapper).insert(any(TkOpenTiktokPublishDetailDO.class));
+    }
+
+    @Test
+    void shouldReturnOriginalTaskForRepeatedQuickPublishKey() {
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenApiIdempotencyMapper idempotencyMapper = mock(TkOpenApiIdempotencyMapper.class);
+        TkOpenTiktokMediaService mediaService = mock(TkOpenTiktokMediaService.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task_quick_existing").mediaId("media_quick").status("PENDING").build();
+        TkOpenApiIdempotencyDO existing = TkOpenApiIdempotencyDO.builder().clientId("client_b")
+                .idempotencyKey("quick-repeat").requestHash(TkOpenTiktokPublishService.requestHash(quickRequest()))
+                .resourceType("PUBLISH_TASK").resourceId("task_quick_existing").status("COMPLETED").build();
+        when(idempotencyMapper.selectByClientAndKey("client_b", "quick-repeat"))
+                .thenReturn(existing);
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        when(taskMapper.selectByClientAndTaskId("client_b", "task_quick_existing")).thenReturn(task);
+        TkOpenTiktokPublishService service = newQuickService(taskMapper,
+                mock(TkOpenTiktokPublishDetailMapper.class), mock(TkOpenTiktokMediaMapper.class),
+                connectionMapper, idempotencyMapper, mediaService);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-quick-repeat");
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+
+        TkOpenTiktokPublishVO.TaskResp response = service.createQuick(quickRequest(), "quick-repeat");
+
+        assertEquals("task_quick_existing", response.getTaskId());
+        verifyNoInteractions(connectionMapper, mediaService);
+    }
+
+    @Test
     void shouldReturnExistingTaskForSameIdempotencyHash() {
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
         TkOpenApiIdempotencyMapper idempotencyMapper = mock(TkOpenApiIdempotencyMapper.class);
@@ -332,6 +421,25 @@ class TkOpenTiktokPublishServiceTest {
                 null, null, mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null);
     }
 
+    private TkOpenTiktokPublishService newQuickService(TkOpenTiktokConnectionMapper connectionMapper,
+                                                       TkOpenApiIdempotencyMapper idempotencyMapper,
+                                                       TkOpenTiktokMediaService mediaService) {
+        return newQuickService(mock(TkOpenTiktokPublishTaskMapper.class),
+                mock(TkOpenTiktokPublishDetailMapper.class), mock(TkOpenTiktokMediaMapper.class),
+                connectionMapper, idempotencyMapper, mediaService);
+    }
+
+    private TkOpenTiktokPublishService newQuickService(TkOpenTiktokPublishTaskMapper taskMapper,
+                                                       TkOpenTiktokPublishDetailMapper detailMapper,
+                                                       TkOpenTiktokMediaMapper mediaMapper,
+                                                       TkOpenTiktokConnectionMapper connectionMapper,
+                                                       TkOpenApiIdempotencyMapper idempotencyMapper,
+                                                       TkOpenTiktokMediaService mediaService) {
+        return new TkOpenTiktokPublishService(taskMapper, detailMapper, mediaMapper, connectionMapper,
+                idempotencyMapper, mock(TkOpenPublishPlatformRegistry.class), null,
+                mock(TkOpenApiSecretCipher.class), null, mediaService);
+    }
+
     static TkOpenTiktokPublishVO.TaskCreateReq request() {
         TkOpenTiktokPublishVO.TaskCreateReq request = new TkOpenTiktokPublishVO.TaskCreateReq();
         request.setMediaId("media_1");
@@ -339,6 +447,15 @@ class TkOpenTiktokPublishServiceTest {
         request.setPostMode("DIRECT_POST");
         request.setPrivacyLevel("PUBLIC_TO_EVERYONE");
         request.setCaption("caption");
+        return request;
+    }
+
+    private TkOpenTiktokPublishVO.QuickTaskCreateReq quickRequest() {
+        TkOpenTiktokPublishVO.QuickTaskCreateReq request = new TkOpenTiktokPublishVO.QuickTaskCreateReq();
+        request.setExternalAccountId("external-1");
+        request.setVideoUrl("https://cdn.example/video.mp4");
+        request.setTitle("Quick title");
+        request.setCaption("Quick caption");
         return request;
     }
 }

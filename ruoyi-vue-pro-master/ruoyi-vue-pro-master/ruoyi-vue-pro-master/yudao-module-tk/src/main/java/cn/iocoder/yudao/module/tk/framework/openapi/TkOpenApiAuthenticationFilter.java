@@ -41,7 +41,12 @@ public class TkOpenApiAuthenticationFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String uri = request.getRequestURI();
         return uri == null || !uri.contains("/tk/open/v1/tiktok/")
-                || uri.endsWith("/auth/callback") || "OPTIONS".equalsIgnoreCase(request.getMethod());
+                || uri.endsWith("/auth/callback") || isPublicLaunchUri(uri)
+                || "OPTIONS".equalsIgnoreCase(request.getMethod());
+    }
+
+    private boolean isPublicLaunchUri(String uri) {
+        return uri.matches(".*/auth/sessions/[^/]+/launch(?:/status)?$");
     }
 
     @Override
