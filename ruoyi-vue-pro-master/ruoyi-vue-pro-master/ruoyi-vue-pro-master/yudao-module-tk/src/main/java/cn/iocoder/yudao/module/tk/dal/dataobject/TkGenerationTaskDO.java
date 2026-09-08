@@ -71,6 +71,8 @@ public class TkGenerationTaskDO extends TenantBaseDO {
 
     private Long scriptOptionId;
 
+    private String scriptTitle;
+
     private String openingVideoUrl;
 
     private String openingVideoName;

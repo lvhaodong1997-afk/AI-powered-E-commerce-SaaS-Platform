@@ -200,6 +200,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
         reqVO.setReferenceAnalysisId(300L);
+        reqVO.setScriptOptionId(101L);
         reqVO.setVoiceCode("system-voice");
         reqVO.setTitle("  夏季防晒视频  ");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder().id(10L).companyId(20L).name("Demo").build();
@@ -217,6 +218,10 @@ class TkGenerationTaskServiceImplTest {
         when(precheckService.precheck(reqVO)).thenReturn(precheck);
         when(creditService.freezeForGenerationTask(8L)).thenReturn(900L);
         when(referenceAnalysisService.validateAnalysisReadable(300L)).thenReturn(analysis);
+        when(referenceAnalysisService.validateScriptOptionReadable(101L)).thenReturn(
+                cn.iocoder.yudao.module.tk.dal.dataobject.TkReferenceScriptOptionDO.builder()
+                        .id(101L).analysisId(300L).libraryId(10L)
+                        .title("Why your summer skin still feels dry?").build());
         when(voiceProfileService.resolveVoiceSelection(null, "system-voice")).thenReturn("system-voice");
 
         service.createGenerationTask(reqVO);
@@ -225,6 +230,7 @@ class TkGenerationTaskServiceImplTest {
         verify(taskMapper).insert(captor.capture());
         assertEquals("TRACE-ANALYSIS-001", captor.getValue().getBusinessTraceId());
         assertEquals("夏季防晒视频", captor.getValue().getTitle());
+        assertEquals("Why your summer skin still feels dry?", captor.getValue().getScriptTitle());
         verify(pipelineService).submit(8L, captor.getValue().getId());
     }
 

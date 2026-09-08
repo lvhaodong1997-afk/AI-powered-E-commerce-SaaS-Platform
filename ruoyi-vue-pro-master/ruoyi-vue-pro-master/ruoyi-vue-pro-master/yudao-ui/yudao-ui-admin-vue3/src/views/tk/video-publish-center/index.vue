@@ -51,6 +51,7 @@
         <el-table-column label="成片任务" min-width="240">
           <template #default="scope">
             <div class="main-title">{{ scope.row.title || 'Task #' + scope.row.id }}</div>
+            <div v-if="scope.row.scriptTitle" class="sub-text">文案标题：{{ scope.row.scriptTitle }}</div>
             <div class="trace-line">
               <span>流水号：{{ scope.row.businessTraceId || '-' }}</span>
               <el-button
@@ -432,6 +433,7 @@
         <el-form-item v-if="publishForm.sourceType === 'GENERATED'" label="成片任务">
           <div>
             <div class="main-title">{{ selectedVideo?.title || '-' }}</div>
+            <div v-if="selectedVideo?.scriptTitle" class="sub-text">文案标题：{{ selectedVideo.scriptTitle }}</div>
             <div class="trace-line">
               <span>流水号：{{ selectedVideo?.businessTraceId || '-' }}</span>
               <el-button
@@ -910,8 +912,8 @@ const openPublishDrawer = (row: TkGenerationTaskVO) => {
   publishForm.sourceType = 'GENERATED'
   publishForm.uploadedVideoId = undefined
   publishForm.generationTaskId = row.id
-  publishForm.title = row.title || `TikTok 成片任务 #${row.id}`
-  publishForm.caption = row.scriptText || row.title || ''
+  publishForm.title = row.scriptTitle || row.title || `TikTok 成片任务 #${row.id}`
+  publishForm.caption = row.scriptText || row.scriptTitle || row.title || ''
   publishForm.accountIds = []
   publishForm.groupIds = []
   publishDrawerVisible.value = true

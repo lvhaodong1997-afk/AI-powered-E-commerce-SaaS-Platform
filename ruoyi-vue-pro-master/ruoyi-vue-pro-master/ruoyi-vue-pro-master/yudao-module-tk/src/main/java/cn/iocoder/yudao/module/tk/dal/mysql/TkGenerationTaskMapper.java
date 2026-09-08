@@ -130,6 +130,7 @@ public interface TkGenerationTaskMapper extends BaseMapperX<TkGenerationTaskDO> 
                 TkGenerationTaskDO::getWorkerId,
                 TkGenerationTaskDO::getHeartbeatTime,
                 TkGenerationTaskDO::getTitle,
+                TkGenerationTaskDO::getScriptTitle,
                 TkGenerationTaskDO::getCreateTime);
         return selectPage(reqVO, wrapper
                 .eqIfPresent(TkGenerationTaskDO::getId, reqVO.getId())
@@ -200,6 +201,8 @@ public interface TkGenerationTaskMapper extends BaseMapperX<TkGenerationTaskDO> 
                 TkGenerationTaskDO::getCurrentStepCompleted,
                 TkGenerationTaskDO::getCurrentStepTotal,
                 TkGenerationTaskDO::getHeartbeatTime,
+                TkGenerationTaskDO::getTitle,
+                TkGenerationTaskDO::getScriptTitle,
                 TkGenerationTaskDO::getStepStartedAt,
                 TkGenerationTaskDO::getStepFinishedAt);
         return selectList(wrapper

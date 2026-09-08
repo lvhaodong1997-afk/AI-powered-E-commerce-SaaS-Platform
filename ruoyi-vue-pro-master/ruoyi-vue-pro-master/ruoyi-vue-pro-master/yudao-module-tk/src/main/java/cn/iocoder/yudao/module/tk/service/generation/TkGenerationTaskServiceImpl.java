@@ -322,6 +322,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
                     ? resolveMimoVoiceSelection(createReqVO)
                     : null;
             boolean subtitleEnabled = voiceEnabled && (createReqVO.getSubtitleEnabled() == null || createReqVO.getSubtitleEnabled());
+            String scriptTitle = null;
             if (createReqVO.getScriptOptionId() != null) {
                 TkReferenceScriptOptionDO option = referenceAnalysisService.validateScriptOptionReadable(createReqVO.getScriptOptionId());
                 if (!createReqVO.getLibraryId().equals(option.getLibraryId())) {
@@ -330,6 +331,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
                 if (createReqVO.getReferenceAnalysisId() != null && !createReqVO.getReferenceAnalysisId().equals(option.getAnalysisId())) {
                     throw exception(TK_REFERENCE_BINDING_MISMATCH);
                 }
+                scriptTitle = option.getTitle();
             }
             int referenceDuration = TkVideoDurationSupport.normalize(createReqVO.getReferenceDuration(),
                     generationProperties.getFfmpeg().getMaxTargetDuration());
@@ -365,6 +367,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
                     .generationRouteConfig(generationRouteConfig)
                     .referenceAnalysisId(createReqVO.getReferenceAnalysisId())
                     .scriptOptionId(createReqVO.getScriptOptionId())
+                    .scriptTitle(scriptTitle)
                     .openingVideoUrl(openingVideo == null ? null : openingVideo.url)
                     .openingVideoName(openingVideo == null ? null : openingVideo.name)
                     .openingProcessMode(openingProcessMode)

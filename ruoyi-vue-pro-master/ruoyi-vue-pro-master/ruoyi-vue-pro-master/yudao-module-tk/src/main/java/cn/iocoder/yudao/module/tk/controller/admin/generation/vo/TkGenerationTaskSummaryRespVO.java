@@ -48,6 +48,7 @@ public class TkGenerationTaskSummaryRespVO {
     private String latestPublishAccountName;
     private String latestPublishUrl;
     private LocalDateTime latestPublishUrlRegisteredTime;
+    private String scriptTitle;
     private LocalDateTime createTime;
 
 }

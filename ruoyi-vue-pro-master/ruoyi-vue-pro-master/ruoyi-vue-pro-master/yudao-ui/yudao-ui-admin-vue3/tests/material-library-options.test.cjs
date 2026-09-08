@@ -29,8 +29,18 @@ assert.match(
 )
 assert.match(
   dashboard,
-  /return libraries\.value\.map\(/,
-  'dashboard material overview must render every returned library'
+  /const HOME_MATERIAL_LIMIT = 36/,
+  'dashboard must define the six-row material overview limit'
+)
+assert.match(
+  dashboard,
+  /return libraries\.value\.slice\(0, HOME_MATERIAL_LIMIT\)\.map\(/,
+  'dashboard material overview must render only the first six rows'
+)
+assert.match(
+  dashboard,
+  /libraries\.value = data\?\.libraries \|\| \[\]/,
+  'dashboard must retain the complete library list for selectors and the full-list entry'
 )
 assert.doesNotMatch(materialApi, /getLibraryOptions:/)
 assert.doesNotMatch(controller, /@GetMapping\("\/options"\)/)

@@ -39,6 +39,7 @@ public class TkGenerationTaskRespVO {
     private String generationRouteConfig;
     private Long referenceAnalysisId;
     private Long scriptOptionId;
+    private String scriptTitle;
     private String openingVideoUrl;
     private String openingVideoName;
     private String openingProcessMode;

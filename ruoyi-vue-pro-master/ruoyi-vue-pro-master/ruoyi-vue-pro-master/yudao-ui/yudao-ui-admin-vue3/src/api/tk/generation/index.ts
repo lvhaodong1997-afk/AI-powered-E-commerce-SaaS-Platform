@@ -29,6 +29,7 @@ export interface TkGenerationTaskVO {
   generationRouteConfig?: string
   referenceAnalysisId?: number
   scriptOptionId?: number
+  scriptTitle?: string
   scriptOptionIds?: number[]
   videosPerScript?: number
   openingVideoUrl?: string
@@ -136,12 +137,14 @@ export interface TkGenerationTaskSummaryVO {
   latestPublishUrl?: string
   latestPublishUrlRegisteredTime?: string
   title?: string
+  scriptTitle?: string
   createTime?: string | number
 }
 
 export interface TkGenerationTaskStatusVO {
   id: number
   title?: string
+  scriptTitle?: string
   status?: string
   progress?: number
   outputUrl?: string

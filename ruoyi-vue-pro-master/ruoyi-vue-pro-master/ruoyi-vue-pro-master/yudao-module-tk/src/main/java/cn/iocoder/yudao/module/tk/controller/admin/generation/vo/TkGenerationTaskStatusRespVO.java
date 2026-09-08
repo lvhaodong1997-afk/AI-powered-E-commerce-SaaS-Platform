@@ -11,6 +11,7 @@ public class TkGenerationTaskStatusRespVO {
 
     private Long id;
     private String title;
+    private String scriptTitle;
     private Long batchId;
     private Integer scriptIndex;
     private Integer videoIndex;

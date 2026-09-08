@@ -2353,7 +2353,8 @@ const precheckingGenerationCount = ref(0)
 const precheckingGeneration = computed(() => precheckingGenerationCount.value > 0)
 const selectedScriptIndex = ref(0)
 const selectedBatchScriptIndexes = ref<number[]>([])
-const showBatchGenerationControls = true
+const showBatchGenerationControls = false
+const HOME_MATERIAL_LIMIT = 36
 const batchGenerationEnabled = ref(false)
 const videosPerScript = ref(1)
 const displayScriptIndexes = ref<number[]>([])
@@ -3942,7 +3943,7 @@ const displayScriptOptions = computed<DisplayScriptOption[]>(() => {
 })
 
 const displayMaterials = computed(() => {
-  return libraries.value.map((item) => ({
+  return libraries.value.slice(0, HOME_MATERIAL_LIMIT).map((item) => ({
     id: item.id || item.name,
     name: item.name || copy.value.libraryFallback,
     count: formatNumber(item.videoCount, '0'),
