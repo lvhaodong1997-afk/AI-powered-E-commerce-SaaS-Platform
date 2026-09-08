@@ -22,7 +22,7 @@ public class TkUserScope {
     }
 
     public boolean canReadAllTenantRecords() {
-        return isPlatformAdmin() || isTenantAdmin() || TkUserLevelEnum.isTenantUser(userLevel);
+        return isPlatformAdmin() || isTenantAdmin();
     }
 
     public boolean hasTenantScope() {

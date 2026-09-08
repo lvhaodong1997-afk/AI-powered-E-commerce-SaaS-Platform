@@ -9,15 +9,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TkUserScopeTest {
 
     @Test
-    void tenantUserCanReadAllRecordsInsideCurrentTenant() {
+    void tenantUserCannotReadAllTenantRecords() {
         TkUserScope scope = new TkUserScope(7L, 100L, TkUserLevelEnum.TENANT_USER.getCode(), 200L);
+
+        assertFalse(scope.canReadAllTenantRecords());
+    }
+
+    @Test
+    void companyUserCannotReadAllTenantRecords() {
+        TkUserScope scope = new TkUserScope(7L, 100L, TkUserLevelEnum.COMPANY_USER.getCode(), 200L);
+
+        assertFalse(scope.canReadAllTenantRecords());
+    }
+
+    @Test
+    void tenantAdminCanReadAllTenantRecords() {
+        TkUserScope scope = new TkUserScope(7L, 100L, TkUserLevelEnum.TENANT_ADMIN.getCode(), null);
 
         assertTrue(scope.canReadAllTenantRecords());
     }
 
     @Test
-    void companyUserCanReadAllRecordsInsideCurrentTenant() {
-        TkUserScope scope = new TkUserScope(7L, 100L, TkUserLevelEnum.COMPANY_USER.getCode(), 200L);
+    void companyAdminCanReadAllTenantRecords() {
+        TkUserScope scope = new TkUserScope(7L, 100L, TkUserLevelEnum.COMPANY_ADMIN.getCode(), 200L);
+
+        assertTrue(scope.canReadAllTenantRecords());
+    }
+
+    @Test
+    void platformAdminCanReadAllTenantRecords() {
+        TkUserScope scope = new TkUserScope(7L, null, TkUserLevelEnum.PLATFORM_ADMIN.getCode(), null);
 
         assertTrue(scope.canReadAllTenantRecords());
     }
