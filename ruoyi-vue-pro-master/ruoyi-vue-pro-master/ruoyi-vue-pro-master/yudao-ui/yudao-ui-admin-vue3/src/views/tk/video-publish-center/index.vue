@@ -327,15 +327,33 @@
             </el-button>
           </template>
         </el-table-column>
+        <el-table-column label="公开视频" width="130">
+          <template #default="scope">
+            <el-button v-if="scope.row.publicPostCount" link type="primary" @click="openPublicPostDialog(scope.row)">
+              {{ scope.row.publicPostCount }} 条
+            </el-button>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="链接状态" width="150">
+          <template #default="scope">
+            <el-tag :type="linkCaptureStatusType(scope.row.linkCaptureStatus)">
+              {{ linkCaptureStatusLabel(scope.row.linkCaptureStatus) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="失败原因" min-width="240" show-overflow-tooltip>
-          <template #default="scope">{{ failReasonLabel(scope.row) }}</template>
+          <template #default="scope">{{ detailFailureLabel(scope.row) }}</template>
         </el-table-column>
         <el-table-column label="重试" prop="retryCount" width="80" />
         <el-table-column label="同步时间" width="170">
           <template #default="scope">{{ formatTimestamp(scope.row.lastSyncTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column label="操作" width="190" fixed="right">
           <template #default="scope">
+            <el-button v-if="scope.row.publishId" link type="primary" @click="syncPublishLinks(scope.row)">
+              重新获取链接
+            </el-button>
             <el-button
               link
               type="warning"
@@ -351,6 +369,33 @@
       </el-table>
       <Pagination :total="detailTotal" v-model:page="detailQuery.pageNo" v-model:limit="detailQuery.pageSize" @pagination="getDetailList" />
     </ContentWrap>
+
+    <el-dialog v-model="publicPostDialogVisible" title="TikTok 公开视频" width="900px">
+      <el-table v-loading="publicPostLoading" :data="publicPostList" stripe>
+        <el-table-column label="封面" width="90">
+          <template #default="scope">
+            <el-image v-if="scope.row.coverUrl" :src="scope.row.coverUrl" fit="cover" class="post-cover" />
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="标题" prop="title" min-width="180" show-overflow-tooltip />
+        <el-table-column label="公开视频 ID" prop="publicPostId" min-width="190" show-overflow-tooltip />
+        <el-table-column label="链接" min-width="220" show-overflow-tooltip>
+          <template #default="scope">
+            <el-link v-if="scope.row.shareUrl" :href="scope.row.shareUrl" target="_blank" type="primary">
+              打开 TikTok
+            </el-link>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="150">
+          <template #default="scope">{{ publicPostStatusLabel(scope.row.status) }}</template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="publicPostDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="publishUrlDialogVisible" title="登记发布链接" width="560px">
       <el-form ref="publishUrlFormRef" :model="publishUrlForm" :rules="publishUrlRules" label-width="110px">
@@ -556,6 +601,7 @@ import type {
   TkTiktokAccountGroupVO,
   TkTiktokAccountVO,
   TkTiktokPublishDetailVO,
+  TkTiktokPublishPostVO,
   TkTiktokPublishTaskVO
 } from '@/api/tk/videoPublishCenter'
 
@@ -621,6 +667,11 @@ const detailQueryFormRef = ref()
 const detailQuery = reactive({ pageNo: 1, pageSize: 10, publishTaskId: undefined, keyword: undefined, businessTraceId: undefined, status: undefined })
 const retryingDetailIds = ref(new Set<number>())
 let publishStatusTimer: number | undefined
+
+const publicPostDialogVisible = ref(false)
+const publicPostLoading = ref(false)
+const publicPostList = ref<TkTiktokPublishPostVO[]>([])
+const publicPostTotal = ref(0)
 
 const publishUrlDialogVisible = ref(false)
 const publishUrlSubmitting = ref(false)
@@ -1083,6 +1134,26 @@ const openPublishUrlDialog = (row: TkTiktokPublishDetailVO) => {
   publishUrlDialogVisible.value = true
 }
 
+const syncPublishLinks = async (row: TkTiktokPublishDetailVO) => {
+  if (!row.id) return
+  await TkTiktokPublishApi.syncPublishLinks(row.id)
+  message.success('链接同步请求已完成')
+  await getDetailList()
+}
+
+const openPublicPostDialog = async (row: TkTiktokPublishDetailVO) => {
+  if (!row.id) return
+  publicPostDialogVisible.value = true
+  publicPostLoading.value = true
+  try {
+    const data = await TkTiktokPublishApi.getPostPage({ publishDetailId: row.id, pageNo: 1, pageSize: 50 })
+    publicPostList.value = data.list || []
+    publicPostTotal.value = data.total || 0
+  } finally {
+    publicPostLoading.value = false
+  }
+}
+
 const submitPublishUrl = async () => {
   await publishUrlFormRef.value?.validate()
   if (!publishUrlForm.generationTaskId) return
@@ -1174,6 +1245,23 @@ const tiktokStatusLabel = (status?: string) => ({
   SEND_TO_USER_INBOX: '已提交草稿箱',
   FAILED: '失败'
 })[status || ''] || status || '-'
+const linkCaptureStatusLabel = (status?: string) => ({
+  WAITING_PUBLIC_REVIEW: '等待公开审核',
+  AVAILABLE: '链接已获取',
+  PERMISSION_REQUIRED: '缺少 video.list',
+  NO_LONGER_PUBLIC: '已不再公开',
+  FAILED: '获取失败'
+}[status || ''] || (status ? status : '未同步'))
+const linkCaptureStatusType = (status?: string) => ({
+  AVAILABLE: 'success',
+  PERMISSION_REQUIRED: 'warning',
+  NO_LONGER_PUBLIC: 'warning',
+  FAILED: 'danger'
+}[status || ''] || 'info') as 'success' | 'warning' | 'danger' | 'info'
+const publicPostStatusLabel = (status?: string) => ({
+  PUBLICLY_AVAILABLE: '公开可见',
+  NO_LONGER_PUBLIC: '已不再公开'
+}[status || ''] || status || '-')
 const publishStatusType = (status?: string) => {
   if (status === 'SUCCESS') return 'success'
   if (status === 'FAILED') return 'danger'
@@ -1188,6 +1276,10 @@ const failReasonLabel = (row: { failReasonCode?: string; failReason?: string }) 
     if (translated !== key) return translated
   }
   return tText(row.failReason) || '-'
+}
+const detailFailureLabel = (row: TkTiktokPublishDetailVO) => {
+  if (row.failReasonCode) return failReasonLabel(row)
+  return tText(row.failReason) || tText(row.linkLastError) || '-'
 }
 const loadRouteGeneration = async () => {
   const generationTaskId = Number(currentRoute.value.query.generationTaskId)
@@ -1291,14 +1383,20 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.trace-line {
-
 .publish-url-cell {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
+
+.post-cover {
+  width: 56px;
+  height: 76px;
+  border-radius: 4px;
+}
+
+.trace-line {
   display: flex;
   align-items: center;
   gap: 8px;

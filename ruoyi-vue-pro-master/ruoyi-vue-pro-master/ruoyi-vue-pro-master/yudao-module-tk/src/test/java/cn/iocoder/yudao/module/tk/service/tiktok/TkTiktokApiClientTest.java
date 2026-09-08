@@ -121,6 +121,27 @@ class TkTiktokApiClientTest {
     }
 
     @Test
+    void parseVideoQueryPreservesAllVideoMetadata() {
+        TkTiktokApiClient.VideoQueryResult result = TkTiktokApiClient.parseVideoQueryResult(JsonUtils.parseTree(
+                "{\"data\":{\"videos\":["
+                        + "{\"id\":\"123\",\"share_url\":\"https://www.tiktok.com/@demo/video/123\","
+                        + "\"embed_link\":\"https://www.tiktok.com/static/profile-video?id=123\","
+                        + "\"title\":\"First\",\"duration\":12,\"create_time\":1700000000},"
+                        + "{\"id\":\"456\",\"share_url\":\"https://www.tiktok.com/@demo/video/456\","
+                        + "\"embed_link\":\"https://www.tiktok.com/static/profile-video?id=456\","
+                        + "\"title\":\"Second\",\"duration\":24,\"create_time\":1700000010}]},"
+                        + "\"error\":{\"code\":\"ok\"}}"
+        ));
+
+        assertEquals(2, result.getVideos().size());
+        assertEquals("123", result.getVideos().get(0).getId());
+        assertEquals("https://www.tiktok.com/static/profile-video?id=123",
+                result.getVideos().get(0).getEmbedLink());
+        assertEquals("Second", result.getVideos().get(1).getTitle());
+        assertEquals(24, result.getVideos().get(1).getDuration());
+    }
+
+    @Test
     void uploadVideoChunksClassifies403AsExpiredUploadUrl() throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext("/upload", exchange -> exchange.sendResponseHeaders(403, -1));

@@ -16,6 +16,10 @@ public interface TkTiktokPublishService {
 
     PageResult<TkTiktokPublishDetailRespVO> getDetailPage(TkTiktokPublishDetailPageReqVO reqVO);
 
+    PageResult<TkTiktokPublishPostRespVO> getPostPage(TkTiktokPublishPostPageReqVO reqVO);
+
+    TkTiktokPublishDetailRespVO syncPublishLinks(Long detailId);
+
     TkTiktokPublishUrlRespVO registerPublishUrl(TkTiktokPublishUrlRegisterReqVO reqVO);
 
     Map<Long, TkTiktokPublishUrlRespVO> getLatestPublishUrlMap(Collection<Long> generationTaskIds);

@@ -77,6 +77,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     private static final String MANUAL_LEAD_GENERATION_SOURCE_PREFIX = "manual-lead-generation://";
     private static final int MAX_VIDEOS_PER_SCRIPT = 5;
     private static final int MAX_BATCH_TASK_COUNT = 30;
+    private static final int MAX_TASK_TITLE_LENGTH = 128;
 
     @Resource
     private TkGenerationTaskMapper taskMapper;
@@ -153,6 +154,14 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         if (createReqVO.getReferenceDuration() > maxDuration) {
             throw new IllegalArgumentException("目标时长不能超过系统上限 " + maxDuration + " 秒");
         }
+    }
+
+    private String resolveTaskTitle(String requestedTitle, String libraryName) {
+        String title = StrUtil.trimToEmpty(requestedTitle);
+        if (title.length() > MAX_TASK_TITLE_LENGTH) {
+            throw new IllegalArgumentException("任务名称不能超过" + MAX_TASK_TITLE_LENGTH + "个字符");
+        }
+        return StrUtil.isBlank(title) ? StrUtil.format("{} · 智能混剪任务", libraryName) : title;
     }
 
     private int resolveMaxReferenceDuration() {
@@ -374,7 +383,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
                     .currentStep("PENDING")
                     .precheckResult(JsonUtils.toJsonString(precheck))
                     .retryCount(0)
-                    .title(StrUtil.format("{} · 智能混剪任务", library.getName()))
+                    .title(resolveTaskTitle(createReqVO.getTitle(), library.getName()))
                     .build();
             task.setTenantId(tenantId);
             taskMapper.insert(task);

@@ -162,6 +162,26 @@ const remainingRouter: AppRouteRecordRaw[] = [
     ]
   },
   {
+    path: '/tk/tiktok-content-display',
+    component: Layout,
+    name: 'TkTiktokContentDisplayDirectRoot',
+    meta: { hidden: true, noTagsView: true },
+    children: [
+      {
+        path: '',
+        component: () => import('@/views/tk/tiktok-content-display/index.vue'),
+        name: 'TkTiktokContentDisplayDirect',
+        meta: {
+          title: 'TikTok Content Display',
+          hidden: true,
+          noTagsView: false,
+          activeMenu: '/tk/tiktok-content-display',
+          icon: 'ep:video-camera'
+        }
+      }
+    ]
+  },
+  {
     path: '/user',
     component: Layout,
     name: 'UserInfo',

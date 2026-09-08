@@ -52,6 +52,11 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     private static final String TIKTOK_STATUS_UPLOAD_PENDING = "UPLOAD_PENDING";
     private static final String POST_MODE_MANUAL_REGISTER = "MANUAL_REGISTER";
     private static final String MANUAL_REGISTER_ACCOUNT_NAME = "手动登记";
+    private static final String LINK_WAITING_PUBLIC_REVIEW = "WAITING_PUBLIC_REVIEW";
+    private static final String LINK_AVAILABLE = "AVAILABLE";
+    private static final String LINK_PERMISSION_REQUIRED = "PERMISSION_REQUIRED";
+    private static final String LINK_FAILED = "FAILED";
+    private static final int MAX_LINK_CAPTURE_RETRIES = 30;
     private static final String SOURCE_GENERATED = "GENERATED";
     private static final String SOURCE_UPLOADED = "UPLOADED";
     private static final int DOWNLOAD_TIMEOUT_MILLIS = 10 * 60 * 1000;
@@ -65,6 +70,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     private TkTiktokPublishTaskMapper publishTaskMapper;
     @Resource
     private TkTiktokPublishDetailMapper publishDetailMapper;
+    @Resource
+    private TkTiktokPublishPostMapper publishPostMapper;
     @Resource
     private TkGenerationTaskMapper generationTaskMapper;
     @Resource
@@ -159,6 +166,23 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     }
 
     @Override
+    public PageResult<TkTiktokPublishPostRespVO> getPostPage(TkTiktokPublishPostPageReqVO reqVO) {
+        PageResult<TkTiktokPublishPostDO> pageResult = publishPostMapper.selectPage(reqVO, dataScopeService.getCurrentScope());
+        return new PageResult<>(BeanUtils.toBean(pageResult.getList(), TkTiktokPublishPostRespVO.class), pageResult.getTotal());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TkTiktokPublishDetailRespVO syncPublishLinks(Long detailId) {
+        TkTiktokPublishDetailDO detail = validateDetailReadable(detailId);
+        if (StrUtil.isBlank(detail.getPublishId())) {
+            throw new IllegalArgumentException("TikTok 尚未返回 publish_id，暂时无法获取公开视频链接");
+        }
+        syncProcessingDetail(detail);
+        return BeanUtils.toBean(detail, TkTiktokPublishDetailRespVO.class);
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public TkTiktokPublishUrlRespVO registerPublishUrl(TkTiktokPublishUrlRegisterReqVO reqVO) {
         TkGenerationTaskDO generationTask = generationTaskService.getGenerationTask(reqVO.getGenerationTaskId());
@@ -204,6 +228,11 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         detail.setPublishId(null);
         detail.setPublishUrl(null);
         detail.setPublishUrlRegisteredTime(null);
+        detail.setLinkCaptureStatus(null);
+        detail.setLinkRetryCount(0);
+        detail.setLinkNextRetryTime(null);
+        detail.setLinkLastError(null);
+        detail.setPublicPostCount(0);
         detail.setFailReason(null);
         detail.setRetryCount(detail.getRetryCount() == null ? 1 : detail.getRetryCount() + 1);
         detail.setLastSyncTime(LocalDateTime.now());
@@ -556,7 +585,26 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             detail.setTiktokStatus(tiktokStatus);
             detail.setLastSyncTime(LocalDateTime.now());
             if (isTikTokPublishSuccess(tiktokStatus)) {
-                capturePublishUrl(detail, account.getId(), result);
+                PublicLinkCaptureResult captureResult = capturePublishUrl(detail, account.getId(), result);
+                if (shouldWaitForPublicPost(detail, result)) {
+                    detail.setStatus(STATUS_PROCESSING);
+                    detail.setLinkCaptureStatus(LINK_WAITING_PUBLIC_REVIEW);
+                    scheduleLinkRetry(detail, null);
+                    detail.setFailReason(null);
+                    publishDetailMapper.updateById(detail);
+                    return;
+                }
+                if (captureResult.isRetryable() && scheduleLinkRetry(detail, captureResult.getFailReason())) {
+                    detail.setStatus(STATUS_PROCESSING);
+                    detail.setFailReason(null);
+                    publishDetailMapper.updateById(detail);
+                    return;
+                }
+                detail.setLinkCaptureStatus(captureResult.isPermissionRequired()
+                        ? LINK_PERMISSION_REQUIRED
+                        : captureResult.isAvailable() ? LINK_AVAILABLE : LINK_FAILED);
+                detail.setLinkLastError(captureResult.getFailReason());
+                detail.setLinkNextRetryTime(null);
                 detail.setStatus(STATUS_SUCCESS);
                 detail.setFailReason(null);
                 updateDetailClearingFailReason(detail);
@@ -574,29 +622,161 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         }
     }
 
-    private void capturePublishUrl(TkTiktokPublishDetailDO detail, Long accountId,
-                                   TkTiktokApiClient.PostStatusResult statusResult) {
-        if (StrUtil.isNotBlank(detail.getPublishUrl()) || CollUtil.isEmpty(statusResult.getPublicPostIds())) {
-            return;
+    private boolean shouldWaitForPublicPost(TkTiktokPublishDetailDO detail,
+                                             TkTiktokApiClient.PostStatusResult statusResult) {
+        return StrUtil.equalsIgnoreCase(statusResult.getStatus(), "PUBLISH_COMPLETE")
+                && StrUtil.equalsIgnoreCase(detail.getPrivacyLevel(), "PUBLIC_TO_EVERYONE")
+                && StrUtil.isBlank(detail.getPublishUrl())
+                && CollUtil.isEmpty(statusResult.getPublicPostIds());
+    }
+
+    private boolean scheduleLinkRetry(TkTiktokPublishDetailDO detail, String failReason) {
+        int retryCount = detail.getLinkRetryCount() == null ? 0 : detail.getLinkRetryCount();
+        if (retryCount >= MAX_LINK_CAPTURE_RETRIES) {
+            detail.setLinkCaptureStatus(LINK_FAILED);
+            detail.setLinkLastError(StrUtils.maxLength(failReason, 512));
+            detail.setLinkNextRetryTime(null);
+            return false;
+        }
+        detail.setLinkRetryCount(retryCount + 1);
+        detail.setLinkCaptureStatus(LINK_WAITING_PUBLIC_REVIEW);
+        detail.setLinkLastError(StrUtils.maxLength(failReason, 512));
+        detail.setLinkNextRetryTime(LocalDateTime.now().plusMinutes(2L));
+        return true;
+    }
+
+    private PublicLinkCaptureResult capturePublishUrl(TkTiktokPublishDetailDO detail, Long accountId,
+                                                      TkTiktokApiClient.PostStatusResult statusResult) {
+        if (StrUtil.isNotBlank(detail.getPublishUrl())) {
+            return PublicLinkCaptureResult.available();
+        }
+        if (CollUtil.isEmpty(statusResult.getPublicPostIds())) {
+            return PublicLinkCaptureResult.retryable(null);
         }
         List<String> publicPostIds = statusResult.getPublicPostIds().stream()
                 .filter(StrUtil::isNotBlank)
-                .limit(20)
+                .distinct()
                 .collect(Collectors.toList());
         if (CollUtil.isEmpty(publicPostIds)) {
-            return;
+            return PublicLinkCaptureResult.retryable(null);
         }
+        List<TkTiktokApiClient.VideoInfo> videos = new ArrayList<>();
         try {
-            TkTiktokApiClient.VideoQueryResult videoResult = queryVideoShareUrlWithRetry(accountId, publicPostIds);
-            if (videoResult.isSuccess() && StrUtil.isNotBlank(videoResult.getShareUrl())) {
-                detail.setPublishUrl(videoResult.getShareUrl());
-                detail.setPublishUrlRegisteredTime(LocalDateTime.now());
-                return;
+            for (int start = 0; start < publicPostIds.size(); start += 20) {
+                List<String> batch = publicPostIds.subList(start, Math.min(start + 20, publicPostIds.size()));
+                TkTiktokApiClient.VideoQueryResult videoResult = queryVideoShareUrlWithRetry(accountId, batch);
+                if (!videoResult.isSuccess()) {
+                    if ("scope_not_authorized".equals(videoResult.getErrorCode())) {
+                        return PublicLinkCaptureResult.permissionRequired(videoResult.getFailReason());
+                    }
+                    return PublicLinkCaptureResult.retryable(videoResult.getFailReason());
+                }
+                videos.addAll(videoResult.getVideos());
             }
-            log.warn("[capturePublishUrl][detailId({}) TikTok 公开视频链接获取失败：{}]",
-                    detail.getId(), videoResult.getFailReason());
+            LocalDateTime now = LocalDateTime.now();
+            int videoCount = 0;
+            for (TkTiktokApiClient.VideoInfo video : videos) {
+                if (StrUtil.isNotBlank(video.getId())) {
+                    persistPublicPost(detail, video, now);
+                    videoCount++;
+                }
+                if (StrUtil.isBlank(detail.getPublishUrl()) && StrUtil.isNotBlank(video.getShareUrl())) {
+                    detail.setPublishUrl(video.getShareUrl());
+                    detail.setPublishUrlRegisteredTime(now);
+                }
+            }
+            detail.setPublicPostCount(Math.max(videoCount, publicPostIds.size()));
+            if (StrUtil.isNotBlank(detail.getPublishUrl())) {
+                detail.setLinkCaptureStatus(LINK_AVAILABLE);
+                detail.setLinkLastError(null);
+                detail.setLinkRetryCount(0);
+                return PublicLinkCaptureResult.available();
+            }
+            return PublicLinkCaptureResult.retryable("TikTok 视频详情未返回 share_url");
         } catch (Exception ex) {
             log.warn("[capturePublishUrl][detailId({}) TikTok 公开视频链接获取异常]", detail.getId(), ex);
+            return PublicLinkCaptureResult.retryable("TikTok 公开视频链接获取异常：" + ex.getMessage());
+        }
+    }
+
+    private void persistPublicPost(TkTiktokPublishDetailDO detail, TkTiktokApiClient.VideoInfo video,
+                                   LocalDateTime now) {
+        if (publishPostMapper == null) {
+            return;
+        }
+        TkTiktokPublishPostDO post = publishPostMapper.selectByDetailIdAndPublicPostId(
+                detail.getId(), video.getId());
+        if (post == null) {
+            post = new TkTiktokPublishPostDO();
+            post.setTenantId(detail.getTenantId());
+            post.setCompanyId(detail.getCompanyId());
+            post.setPublishDetailId(detail.getId());
+            post.setPublishTaskId(detail.getPublishTaskId());
+            post.setAccountId(detail.getAccountId());
+            post.setPublishId(detail.getPublishId());
+            post.setPublicPostId(video.getId());
+            post.setFirstSeenTime(now);
+        }
+        post.setShareUrl(video.getShareUrl());
+        post.setEmbedLink(video.getEmbedLink());
+        post.setEmbedHtml(video.getEmbedHtml());
+        post.setTitle(video.getTitle());
+        post.setVideoDescription(video.getVideoDescription());
+        post.setVideoCreateTime(video.getCreateTime());
+        post.setDuration(video.getDuration());
+        post.setWidth(video.getWidth());
+        post.setHeight(video.getHeight());
+        post.setCoverUrl(video.getCoverImageUrl());
+        post.setStatus("PUBLICLY_AVAILABLE");
+        post.setFailReason(null);
+        post.setLastSyncTime(now);
+        if (post.getId() == null) {
+            publishPostMapper.insert(post);
+        } else {
+            publishPostMapper.updateById(post);
+        }
+    }
+
+    private static class PublicLinkCaptureResult {
+        private final boolean available;
+        private final boolean retryable;
+        private final boolean permissionRequired;
+        private final String failReason;
+
+        private PublicLinkCaptureResult(boolean available, boolean retryable, boolean permissionRequired,
+                                        String failReason) {
+            this.available = available;
+            this.retryable = retryable;
+            this.permissionRequired = permissionRequired;
+            this.failReason = failReason;
+        }
+
+        static PublicLinkCaptureResult available() {
+            return new PublicLinkCaptureResult(true, false, false, null);
+        }
+
+        static PublicLinkCaptureResult retryable(String failReason) {
+            return new PublicLinkCaptureResult(false, true, false, failReason);
+        }
+
+        static PublicLinkCaptureResult permissionRequired(String failReason) {
+            return new PublicLinkCaptureResult(false, false, true, failReason);
+        }
+
+        boolean isAvailable() {
+            return available;
+        }
+
+        boolean isRetryable() {
+            return retryable;
+        }
+
+        boolean isPermissionRequired() {
+            return permissionRequired;
+        }
+
+        String getFailReason() {
+            return failReason;
         }
     }
 
@@ -688,6 +868,11 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 .set(TkTiktokPublishDetailDO::getPublishUrlRegisteredTime, detail.getPublishUrlRegisteredTime())
                 .set(TkTiktokPublishDetailDO::getRetryCount, detail.getRetryCount())
                 .set(TkTiktokPublishDetailDO::getLastSyncTime, detail.getLastSyncTime())
+                .set(TkTiktokPublishDetailDO::getLinkCaptureStatus, detail.getLinkCaptureStatus())
+                .set(TkTiktokPublishDetailDO::getLinkRetryCount, detail.getLinkRetryCount())
+                .set(TkTiktokPublishDetailDO::getLinkNextRetryTime, detail.getLinkNextRetryTime())
+                .set(TkTiktokPublishDetailDO::getLinkLastError, detail.getLinkLastError())
+                .set(TkTiktokPublishDetailDO::getPublicPostCount, detail.getPublicPostCount())
                 .set(TkTiktokPublishDetailDO::getFailReason, null));
     }
 

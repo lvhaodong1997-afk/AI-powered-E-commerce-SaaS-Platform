@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import javax.validation.constraints.NotNull;
+import javax.validation.constraints.Size;
 import java.util.List;
 
 @Schema(description = "管理后台 - TK 智能生成任务创建 Request VO")
@@ -13,6 +14,10 @@ public class TkGenerationTaskCreateReqVO {
 
     private Long companyId;
     private String sourceUrl;
+
+    @Schema(description = "用户自定义生成任务名称", example = "夏季防晒视频")
+    @Size(max = 128, message = "任务名称不能超过128个字符")
+    private String title;
 
     @NotNull(message = "素材库不能为空")
     private Long libraryId;

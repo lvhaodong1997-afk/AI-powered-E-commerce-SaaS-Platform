@@ -40,7 +40,9 @@ public class TkTiktokApiClient {
     private static final String DIRECT_POST_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
     private static final String INBOX_POST_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/";
     private static final String STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
-    private static final String VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/?fields=id,share_url";
+    private static final String VIDEO_LIST_URL = "https://open.tiktokapis.com/v2/video/list/";
+    private static final String VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/"
+            + "?fields=id,create_time,cover_image_url,share_url,video_description,duration,height,width,title,embed_html,embed_link,like_count,comment_count,share_count,view_count,is_aigc";
     private static final int UPLOAD_MAX_ATTEMPTS = 3;
     private static final int UPLOAD_TIMEOUT_MILLIS = 10 * 60 * 1000;
 
@@ -384,16 +386,75 @@ public class TkTiktokApiClient {
     static VideoQueryResult parseVideoQueryResult(JsonNode root) {
         JsonNode error = getErrorNode(root);
         if (!"ok".equals(error.path("code").asText())) {
-            return new VideoQueryResult(false, null, formatApiError(error, "TikTok 视频详情查询失败"),
-                    error.path("code").asText(null));
+            return new VideoQueryResult(false, null, null,
+                    formatApiError(error, "TikTok 视频详情查询失败"), error.path("code").asText(null),
+                    Collections.emptyList());
         }
+        List<VideoInfo> videos = new ArrayList<>();
         for (JsonNode video : root.path("data").path("videos")) {
-            String shareUrl = video.path("share_url").asText(null);
-            if (StrUtil.isNotBlank(shareUrl)) {
-                return new VideoQueryResult(true, shareUrl, null, null);
-            }
+            videos.add(parseVideoInfo(video));
         }
-        return new VideoQueryResult(true, null, null, null);
+        VideoInfo first = videos.isEmpty() ? null : videos.get(0);
+        return new VideoQueryResult(true, first == null ? null : first.getShareUrl(),
+                first == null ? null : first.getEmbedLink(), null, null, videos);
+    }
+
+    public VideoListResult listVideos(String accessToken, Long cursor, Integer maxCount) {
+        if (StrUtil.isBlank(accessToken)) {
+            return new VideoListResult(false, Collections.emptyList(), null, false,
+                    "账号缺少 Access Token", null);
+        }
+        Map<String, Object> payload = new HashMap<>();
+        if (cursor != null && cursor > 0) {
+            payload.put("cursor", cursor);
+        }
+        payload.put("max_count", maxCount == null ? 20 : Math.min(Math.max(maxCount, 1), 20));
+        String url = VIDEO_LIST_URL + "?fields=id,create_time,cover_image_url,share_url,video_description,duration,height,width,title,embed_html,embed_link";
+        return parseVideoListResult(postJson(url, accessToken, payload));
+    }
+
+    static VideoListResult parseVideoListResult(JsonNode root) {
+        JsonNode error = getErrorNode(root);
+        if (!"ok".equals(error.path("code").asText())) {
+            return new VideoListResult(false, Collections.emptyList(), null, false,
+                    formatApiError(error, "TikTok 视频列表查询失败"), error.path("code").asText(null));
+        }
+        JsonNode data = root.path("data");
+        List<VideoInfo> videos = new ArrayList<>();
+        for (JsonNode video : data.path("videos")) {
+            videos.add(parseVideoInfo(video));
+        }
+        Long cursor = data.path("cursor").isIntegralNumber() ? data.path("cursor").asLong() : null;
+        return new VideoListResult(true, videos, cursor, data.path("has_more").asBoolean(false), null, null);
+    }
+
+    static VideoInfo parseVideoInfo(JsonNode video) {
+        return new VideoInfo(
+                video.path("id").asText(null),
+                numberAsLong(video.path("create_time")),
+                video.path("cover_image_url").asText(null),
+                video.path("share_url").asText(null),
+                video.path("video_description").asText(null),
+                numberAsInt(video.path("duration")),
+                numberAsInt(video.path("height")),
+                numberAsInt(video.path("width")),
+                video.path("title").asText(null),
+                video.path("embed_html").asText(null),
+                video.path("embed_link").asText(null),
+                numberAsLong(video.path("like_count")),
+                numberAsLong(video.path("comment_count")),
+                numberAsLong(video.path("share_count")),
+                numberAsLong(video.path("view_count")),
+                video.has("is_aigc") && !video.path("is_aigc").isNull()
+                        ? video.path("is_aigc").asBoolean() : null);
+    }
+
+    private static Long numberAsLong(JsonNode node) {
+        return node != null && node.isNumber() ? node.asLong() : null;
+    }
+
+    private static Integer numberAsInt(JsonNode node) {
+        return node != null && node.isNumber() ? node.asInt() : null;
     }
 
     private static List<String> parsePublicPostIds(JsonNode idsNode) {
@@ -550,12 +611,61 @@ public class TkTiktokApiClient {
     public static class VideoQueryResult {
         private boolean success;
         private String shareUrl;
+        private String embedLink;
+        private String failReason;
+        private String errorCode;
+        private List<VideoInfo> videos;
+
+        public VideoQueryResult(boolean success, String shareUrl, String failReason, String errorCode) {
+            this(success, shareUrl, null, failReason, errorCode,
+                    StrUtil.isBlank(shareUrl) ? Collections.emptyList()
+                            : Collections.singletonList(new VideoInfo(null, null, null, shareUrl, null,
+                            null, null, null, null, null, null, null, null, null, null, null)));
+        }
+
+        public List<VideoInfo> getVideos() {
+            return videos == null ? Collections.emptyList() : videos;
+        }
+
+        public boolean isAccessTokenInvalid() {
+            return TkTiktokApiClient.isAccessTokenInvalid(errorCode);
+        }
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class VideoListResult {
+        private boolean success;
+        private List<VideoInfo> videos;
+        private Long cursor;
+        private boolean hasMore;
         private String failReason;
         private String errorCode;
 
         public boolean isAccessTokenInvalid() {
             return TkTiktokApiClient.isAccessTokenInvalid(errorCode);
         }
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class VideoInfo {
+        private String id;
+        private Long createTime;
+        private String coverImageUrl;
+        private String shareUrl;
+        private String videoDescription;
+        private Integer duration;
+        private Integer height;
+        private Integer width;
+        private String title;
+        private String embedHtml;
+        private String embedLink;
+        private Long likeCount;
+        private Long commentCount;
+        private Long shareCount;
+        private Long viewCount;
+        private Boolean aigc;
     }
 
     @Data

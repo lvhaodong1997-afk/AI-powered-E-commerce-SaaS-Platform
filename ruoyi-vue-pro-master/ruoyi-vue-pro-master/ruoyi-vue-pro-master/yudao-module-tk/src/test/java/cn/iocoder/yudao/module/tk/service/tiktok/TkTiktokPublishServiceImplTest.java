@@ -7,8 +7,10 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokAccountDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishDetailDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishMediaDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishPostDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishTaskDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishDetailMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishPostMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishTaskMapper;
 import cn.iocoder.yudao.module.tk.service.generation.TkGenerationTaskService;
 import cn.iocoder.yudao.module.tk.service.log.TkBusinessLogService;
@@ -28,6 +30,8 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -339,6 +343,67 @@ class TkTiktokPublishServiceImplTest {
         assertEquals("PUBLISH_COMPLETE", detail.getTiktokStatus());
         verify(detailMapper).updateById(detail);
         verify(apiClient, never()).queryVideoShareUrl(anyString(), any());
+    }
+
+    @Test
+    void successfulPublicPostPersistsAllPublicVideos() {
+        TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
+        TkTiktokTokenService tokenService = mock(TkTiktokTokenService.class);
+        cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokAccountMapper accountMapper =
+                mock(cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokAccountMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkTiktokPublishPostMapper postMapper = mock(TkTiktokPublishPostMapper.class);
+        TkBusinessLogService businessLogService = mock(TkBusinessLogService.class);
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "apiClient", apiClient);
+        ReflectionTestUtils.setField(service, "tokenService", tokenService);
+        ReflectionTestUtils.setField(service, "accountMapper", accountMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        ReflectionTestUtils.setField(service, "publishPostMapper", postMapper);
+        ReflectionTestUtils.setField(service, "businessLogService", businessLogService);
+
+        TkTiktokAccountDO account = TkTiktokAccountDO.builder()
+                .id(1L)
+                .authStatus("AUTHORIZED")
+                .build();
+        TkTiktokPublishDetailDO detail = TkTiktokPublishDetailDO.builder()
+                .id(3L)
+                .companyId(8L)
+                .publishTaskId(9L)
+                .accountId(1L)
+                .publishId("publish-1")
+                .privacyLevel("PUBLIC_TO_EVERYONE")
+                .status("PROCESSING")
+                .tiktokStatus("PROCESSING")
+                .build();
+        List<String> publicPostIds = Arrays.asList("post-1", "post-2");
+        List<TkTiktokApiClient.VideoInfo> videos = Arrays.asList(
+                new TkTiktokApiClient.VideoInfo("post-1", 1700000000L, "cover-1",
+                        "https://www.tiktok.com/@demo/video/post-1", "First description", 12,
+                        1920, 1080, "First", "<iframe>1</iframe>",
+                        "https://www.tiktok.com/static/profile-video?id=post-1", 1L, 2L, 3L, 4L, false),
+                new TkTiktokApiClient.VideoInfo("post-2", 1700000010L, "cover-2",
+                        "https://www.tiktok.com/@demo/video/post-2", "Second description", 24,
+                        1080, 1920, "Second", "<iframe>2</iframe>",
+                        "https://www.tiktok.com/static/profile-video?id=post-2", 5L, 6L, 7L, 8L, true));
+        when(accountMapper.selectById(1L)).thenReturn(account);
+        when(tokenService.getValidAccessToken(1L)).thenReturn("access-token");
+        when(apiClient.fetchPostStatus("access-token", "publish-1")).thenReturn(
+                new TkTiktokApiClient.PostStatusResult(true, "PUBLISH_COMPLETE", null, null, publicPostIds));
+        when(apiClient.queryVideoShareUrl("access-token", publicPostIds)).thenReturn(
+                new TkTiktokApiClient.VideoQueryResult(true, videos.get(0).getShareUrl(), videos.get(0).getEmbedLink(),
+                        null, null, videos));
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkTiktokPublishDetailDO.class);
+
+        ReflectionTestUtils.invokeMethod(service, "syncProcessingDetail", detail);
+
+        ArgumentCaptor<TkTiktokPublishPostDO> captor = ArgumentCaptor.forClass(TkTiktokPublishPostDO.class);
+        verify(postMapper, times(2)).insert(captor.capture());
+        assertEquals(Arrays.asList("post-1", "post-2"), captor.getAllValues().stream()
+                .map(TkTiktokPublishPostDO::getPublicPostId).collect(java.util.stream.Collectors.toList()));
+        assertEquals("https://www.tiktok.com/@demo/video/post-1", detail.getPublishUrl());
+        assertEquals("SUCCESS", detail.getStatus());
     }
 
     @Test

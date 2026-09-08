@@ -112,6 +112,21 @@ public class TkTiktokPublishController {
         return success(publishService.getDetailPage(reqVO));
     }
 
+    @GetMapping("/post-page")
+    @Operation(summary = "获得 TikTok 公开视频分页")
+    @PreAuthorize("@ss.hasPermission('tk:video-publish-center:query')")
+    public CommonResult<PageResult<TkTiktokPublishPostRespVO>> getPostPage(@Valid TkTiktokPublishPostPageReqVO reqVO) {
+        return success(publishService.getPostPage(reqVO));
+    }
+
+    @PostMapping("/link/sync")
+    @Operation(summary = "重新获取 TikTok 公开视频链接")
+    @Parameter(name = "detailId", description = "发布明细编号", required = true)
+    @PreAuthorize("@ss.hasPermission('tk:video-publish-center:query')")
+    public CommonResult<TkTiktokPublishDetailRespVO> syncPublishLinks(@RequestParam("detailId") Long detailId) {
+        return success(publishService.syncPublishLinks(detailId));
+    }
+
     @PostMapping("/publish-url/register")
     @Operation(summary = "登记 TikTok 发布链接")
     @PreAuthorize("@ss.hasPermission('tk:video-publish-center:query')")

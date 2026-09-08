@@ -191,6 +191,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
         reqVO.setReferenceAnalysisId(300L);
         reqVO.setVoiceCode("system-voice");
+        reqVO.setTitle("  夏季防晒视频  ");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder().id(10L).companyId(20L).name("Demo").build();
         library.setTenantId(8L);
         TkReferenceAnalysisDO analysis = TkReferenceAnalysisDO.builder()
@@ -213,6 +214,7 @@ class TkGenerationTaskServiceImplTest {
         ArgumentCaptor<TkGenerationTaskDO> captor = ArgumentCaptor.forClass(TkGenerationTaskDO.class);
         verify(taskMapper).insert(captor.capture());
         assertEquals("TRACE-ANALYSIS-001", captor.getValue().getBusinessTraceId());
+        assertEquals("夏季防晒视频", captor.getValue().getTitle());
         verify(pipelineService).submit(8L, captor.getValue().getId());
     }
 
@@ -262,6 +264,7 @@ class TkGenerationTaskServiceImplTest {
         verify(taskMapper).insert(captor.capture());
         assertEquals(TkGenerationRouteService.DEFAULT_PRODUCT_CATEGORY_CODE, captor.getValue().getProductCategoryCode());
         assertEquals(TkGenerationRouteService.DEFAULT_ECOMMERCE_ROUTE_CODE, captor.getValue().getGenerationRouteCode());
+        assertEquals("Beauty · 智能混剪任务", captor.getValue().getTitle());
         assertEquals(TkGenerationRouteConfigSupport.ClipPlanMode.SEGMENTED,
                 TkGenerationRouteConfigSupport.resolveClipPlanMode(captor.getValue().getGenerationRouteConfig()));
     }

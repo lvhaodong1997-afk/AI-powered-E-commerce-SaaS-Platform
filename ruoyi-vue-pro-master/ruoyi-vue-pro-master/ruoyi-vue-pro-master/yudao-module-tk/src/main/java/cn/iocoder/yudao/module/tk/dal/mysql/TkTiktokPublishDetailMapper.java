@@ -38,6 +38,12 @@ public interface TkTiktokPublishDetailMapper extends BaseMapperX<TkTiktokPublish
         return selectList(TkTiktokPublishDetailDO::getPublishTaskId, taskId);
     }
 
+    default TkTiktokPublishDetailDO selectByPublishId(String publishId) {
+        return selectOne(new LambdaQueryWrapperX<TkTiktokPublishDetailDO>()
+                .eq(TkTiktokPublishDetailDO::getPublishId, publishId)
+                .last("LIMIT 1"));
+    }
+
     default TkTiktokPublishDetailDO selectLatestRegisteredTargetByGenerationTaskId(Long generationTaskId) {
         return selectOne(new LambdaQueryWrapperX<TkTiktokPublishDetailDO>()
                 .eq(TkTiktokPublishDetailDO::getGenerationTaskId, generationTaskId)
@@ -75,6 +81,10 @@ public interface TkTiktokPublishDetailMapper extends BaseMapperX<TkTiktokPublish
                         .isNull(TkTiktokPublishDetailDO::getLastSyncTime)
                         .or()
                         .le(TkTiktokPublishDetailDO::getLastSyncTime, deadline))
+                .and(wrapper -> wrapper
+                        .isNull(TkTiktokPublishDetailDO::getLinkNextRetryTime)
+                        .or()
+                        .le(TkTiktokPublishDetailDO::getLinkNextRetryTime, deadline))
                 .orderByAsc(TkTiktokPublishDetailDO::getLastSyncTime)
                 .last("LIMIT " + Math.max(1, limit)));
     }

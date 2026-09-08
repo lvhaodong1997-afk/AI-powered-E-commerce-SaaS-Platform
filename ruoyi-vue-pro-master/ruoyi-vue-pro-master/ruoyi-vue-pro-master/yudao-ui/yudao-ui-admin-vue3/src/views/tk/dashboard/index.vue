@@ -643,6 +643,18 @@
               </div>
               <small class="config-relocated-note">{{ copy.analysisSettingsMoved }}</small>
 
+              <div v-if="!batchGenerationEnabled">
+                <label>{{ copy.taskTitleLabel }}</label>
+                <el-input
+                  v-model="createForm.title"
+                  maxlength="128"
+                  show-word-limit
+                  clearable
+                  :placeholder="copy.taskTitlePlaceholder"
+                />
+                <small class="field-hint">{{ copy.taskTitleHint }}</small>
+              </div>
+
               <div v-if="showBatchGenerationControls" class="batch-generate-box">
                 <div class="batch-switch-row">
                   <div>
@@ -1777,6 +1789,9 @@ const copy = computed(() =>
         targetDurationLabel: 'Target video duration',
         targetDurationPlaceholder: '15',
         targetDurationHint: 'Leave empty to use 15 seconds. Supported range: 8-500 seconds.',
+        taskTitleLabel: 'Task name',
+        taskTitlePlaceholder: 'Optional custom name for this video task',
+        taskTitleHint: 'Leave empty to use the material library name.',
         clipPlanModeLabel: 'Video generation mode',
         clipPlanModeSegmented: 'Default structure',
         clipPlanModeFullPoolRandom: 'Random pool',
@@ -2061,6 +2076,9 @@ const copy = computed(() =>
         targetDurationLabel: '目标视频时长',
         targetDurationPlaceholder: '15',
         targetDurationHint: '不填默认 15 秒，支持 8-500 秒',
+        taskTitleLabel: '任务名称',
+        taskTitlePlaceholder: '可自定义本次视频任务名称',
+        taskTitleHint: '不填写则使用素材库名称生成默认任务名称',
         clipPlanModeLabel: '视频生成方式',
         clipPlanModeSegmented: '默认结构拼接',
         clipPlanModeFullPoolRandom: '全素材随机拼接',
@@ -2626,6 +2644,7 @@ let generationPollingTimer: number | undefined
 
 const createForm = reactive<{
   sourceUrl: string
+  title: string
   libraryId?: number
   ttsProvider: string
   voiceCode: string
@@ -2660,6 +2679,7 @@ const createForm = reactive<{
   bgmVolume: number
 }>({
   sourceUrl: '',
+  title: '',
   libraryId: undefined,
   ttsProvider: TTS_PROVIDER_DASHSCOPE,
   voiceCode: defaultVoiceCode,
@@ -3463,6 +3483,9 @@ const createGenerationPayload = (script: DashboardScriptOption): TkGenerationTas
     promptText: resolvePromptTextForGeneration(script),
     ...getBgmPayload(),
     ...getSubtitlePayload()
+  }
+  if (!batchGenerationEnabled.value) {
+    payload.title = createForm.title.trim() || undefined
   }
   if (referenceAnalysis.value?.id) {
     payload.referenceAnalysisId = referenceAnalysis.value.id
@@ -4644,6 +4667,9 @@ const buildOpeningGenerationFormData = (script: DashboardScriptOption) => {
     formData.append('sourceUrl', createForm.sourceUrl.trim())
   }
   formData.append('libraryId', String(createForm.libraryId))
+  if (!batchGenerationEnabled.value && createForm.title.trim()) {
+    formData.append('title', createForm.title.trim())
+  }
   if (selectedLibrary.value?.companyId) {
     formData.append('companyId', String(selectedLibrary.value.companyId))
   }

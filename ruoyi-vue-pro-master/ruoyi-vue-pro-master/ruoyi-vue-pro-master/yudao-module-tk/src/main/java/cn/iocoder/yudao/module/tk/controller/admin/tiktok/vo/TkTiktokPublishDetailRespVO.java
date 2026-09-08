@@ -37,6 +37,11 @@ public class TkTiktokPublishDetailRespVO {
     private Integer retryCount;
     private LocalDateTime publishUrlRegisteredTime;
     private LocalDateTime lastSyncTime;
+    private String linkCaptureStatus;
+    private Integer linkRetryCount;
+    private LocalDateTime linkNextRetryTime;
+    private String linkLastError;
+    private Integer publicPostCount;
     private LocalDateTime createTime;
 
 }

@@ -120,7 +120,67 @@ export interface TkTiktokPublishDetailVO {
   retryCount?: number
   publishUrlRegisteredTime?: string
   lastSyncTime?: string
+  linkCaptureStatus?: string
+  linkRetryCount?: number
+  linkNextRetryTime?: string
+  linkLastError?: string
+  publicPostCount?: number
   createTime?: string
+}
+
+export interface TkTiktokPublishPostVO {
+  id: number
+  publishDetailId: number
+  accountId?: number
+  publishId?: string
+  publicPostId: string
+  shareUrl?: string
+  embedLink?: string
+  embedHtml?: string
+  title?: string
+  videoDescription?: string
+  videoCreateTime?: number
+  duration?: number
+  width?: number
+  height?: number
+  coverUrl?: string
+  status?: string
+  failReason?: string
+  lastSyncTime?: string
+}
+
+export interface TkTiktokContentVideoVO {
+  id: number
+  companyId: number
+  accountId: number
+  openId?: string
+  videoId: string
+  title?: string
+  videoDescription?: string
+  shareUrl?: string
+  embedLink?: string
+  embedHtml?: string
+  coverImageUrl?: string
+  videoCreateTime?: number
+  duration?: number
+  height?: number
+  width?: number
+  likeCount?: number
+  commentCount?: number
+  shareCount?: number
+  viewCount?: number
+  aigc?: boolean
+  status: string
+  failReason?: string
+  lastSyncTime?: string
+  noLongerPublicTime?: string
+}
+
+export interface TkTiktokContentSyncVO {
+  accountId: number
+  syncedCount: number
+  truncated: boolean
+  failReason?: string
 }
 
 export interface TkTiktokPublishUrlVO {
@@ -246,6 +306,24 @@ export const TkTiktokPublishApi = {
     publishUrl: string
   }): Promise<TkTiktokPublishUrlVO> => {
     return await request.post({ url: '/tk/tiktok-publish/publish-url/register', data })
+  },
+  syncPublishLinks: async (detailId: number): Promise<TkTiktokPublishDetailVO> => {
+    return await request.post({ url: '/tk/tiktok-publish/link/sync', params: { detailId } })
+  },
+  getPostPage: async (params: any) => {
+    return await request.get({ url: '/tk/tiktok-publish/post-page', params })
+  }
+}
+
+export const TkTiktokContentDisplayApi = {
+  getPage: async (params: any) => {
+    return await request.get({ url: '/tk/tiktok-content-display/page', params })
+  },
+  sync: async (accountId: number): Promise<TkTiktokContentSyncVO> => {
+    return await request.post({ url: '/tk/tiktok-content-display/sync', params: { accountId } })
+  },
+  refresh: async (accountId: number, videoId: string): Promise<TkTiktokContentVideoVO> => {
+    return await request.post({ url: '/tk/tiktok-content-display/refresh', params: { accountId, videoId } })
   }
 }
 
