@@ -663,6 +663,7 @@ public class TkReferenceAnalysisServiceImpl implements TkReferenceAnalysisServic
                 .selected(index == 0)
                 .build();
         optionDO.setTenantId(tenantId);
+        optionDO.setCreator(analysis.getCreator());
         return optionDO;
     }
 
@@ -683,6 +684,7 @@ public class TkReferenceAnalysisServiceImpl implements TkReferenceAnalysisServic
                 optionDO.setSegmentTimeline(option.getSegmentTimeline());
                 optionDO.setDisplayScriptZh(option.getDisplayScriptZh());
                 optionDO.setSelected(i == 0);
+                optionDO.setCreator(analysis.getCreator());
                 scriptOptionMapper.updateById(optionDO);
                 continue;
             }

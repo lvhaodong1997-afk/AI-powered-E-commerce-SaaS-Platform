@@ -90,6 +90,64 @@ class TkReferenceAnalysisServiceImplTest {
     }
 
     @Test
+    void buildScriptOptionUsesParentAnalysisCreator() throws Exception {
+        TkReferenceAnalysisServiceImpl service = new TkReferenceAnalysisServiceImpl();
+        TkReferenceAnalysisDO analysis = TkReferenceAnalysisDO.builder()
+                .id(263L)
+                .companyId(166L)
+                .libraryId(97L)
+                .build();
+        analysis.setTenantId(166L);
+        analysis.setCreator("246");
+
+        Object scriptOption = newScriptOption("测试脚本");
+        TkReferenceScriptOptionDO result = ReflectionTestUtils.invokeMethod(service, "buildScriptOption",
+                scriptOption, analysis, 166L, 0);
+
+        assertEquals("246", result.getCreator());
+    }
+
+    @Test
+    void saveScriptOptionsRepairsExistingOptionCreatorFromParentAnalysis() throws Exception {
+        TkReferenceAnalysisServiceImpl service = new TkReferenceAnalysisServiceImpl();
+        TkReferenceScriptOptionMapper scriptOptionMapper = mock(TkReferenceScriptOptionMapper.class);
+        ReflectionTestUtils.setField(service, "scriptOptionMapper", scriptOptionMapper);
+
+        TkReferenceAnalysisDO analysis = TkReferenceAnalysisDO.builder()
+                .id(263L)
+                .companyId(166L)
+                .libraryId(97L)
+                .build();
+        analysis.setTenantId(166L);
+        analysis.setCreator("246");
+        TkReferenceScriptOptionDO existing = TkReferenceScriptOptionDO.builder()
+                .id(2263L)
+                .build();
+        existing.setCreator("226");
+        when(scriptOptionMapper.selectListByAnalysisId(263L)).thenReturn(Collections.singletonList(existing));
+
+        ReflectionTestUtils.invokeMethod(service, "saveScriptOptions",
+                Collections.singletonList(newScriptOption("测试脚本")), analysis, 166L);
+
+        ArgumentCaptor<TkReferenceScriptOptionDO> captor = ArgumentCaptor.forClass(TkReferenceScriptOptionDO.class);
+        verify(scriptOptionMapper).updateById(captor.capture());
+        assertEquals("246", captor.getValue().getCreator());
+    }
+
+    private Object newScriptOption(String title) throws Exception {
+        Class<?> scriptOptionClass = Arrays.stream(TkReferenceAnalysisServiceImpl.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("ScriptOption"))
+                .findFirst()
+                .orElseThrow();
+        java.lang.reflect.Constructor<?> constructor = scriptOptionClass.getDeclaredConstructor(
+                String.class, String.class, String.class, String.class, BigDecimal.class, String.class,
+                String.class, String.class, String.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(title, "卖点", title, "卖点", BigDecimal.valueOf(80), "高",
+                "脚本文案", "[]", "脚本文案");
+    }
+
+    @Test
     void analyzeCreatesWaitingAnalysisAndSubmitsAsyncWorker() {
         TkReferenceAnalysisServiceImpl service = new TkReferenceAnalysisServiceImpl();
         TkMaterialLibraryService materialLibraryService = mock(TkMaterialLibraryService.class);
