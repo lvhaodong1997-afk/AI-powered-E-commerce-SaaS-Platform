@@ -141,6 +141,7 @@ export interface TkGenerationTaskSummaryVO {
 
 export interface TkGenerationTaskStatusVO {
   id: number
+  title?: string
   status?: string
   progress?: number
   outputUrl?: string

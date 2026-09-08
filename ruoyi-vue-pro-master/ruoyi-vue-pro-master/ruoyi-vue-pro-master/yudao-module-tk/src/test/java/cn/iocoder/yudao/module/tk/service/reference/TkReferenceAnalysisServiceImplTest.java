@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.reference;
 
 import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalyzeReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.reference.vo.TkReferenceAnalysisRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkMaterialLibraryDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkReferenceAnalysisDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkReferenceScriptOptionDO;
@@ -111,6 +112,7 @@ class TkReferenceAnalysisServiceImplTest {
         TkReferenceAnalyzeReqVO reqVO = new TkReferenceAnalyzeReqVO();
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
+        reqVO.setTitle("夏季防晒视频");
         reqVO.setTargetLanguage("en");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder()
                 .id(10L)
@@ -135,6 +137,7 @@ class TkReferenceAnalysisServiceImplTest {
         verify(analysisMapper).insert(captor.capture());
         assertEquals(100L, captor.getValue().getId());
         assertEquals("WAITING", captor.getValue().getStatus());
+        assertEquals("夏季防晒视频", captor.getValue().getTitle());
         assertEquals("https://www.tiktok.com/@demo/video/1", captor.getValue().getSourceUrl());
         verify(creditService).bindBusiness(900L, 100L);
         assertEquals(1, executorService.getSubmittedCount());
@@ -164,6 +167,7 @@ class TkReferenceAnalysisServiceImplTest {
         TkReferenceAnalyzeReqVO reqVO = new TkReferenceAnalyzeReqVO();
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
+        reqVO.setTitle("新任务名称");
         reqVO.setTargetLanguage("en");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder()
                 .id(10L)
@@ -175,6 +179,7 @@ class TkReferenceAnalysisServiceImplTest {
         TkReferenceAnalysisDO cached = TkReferenceAnalysisDO.builder()
                 .id(100L)
                 .businessTraceId("TRACE-CACHED")
+                .title("历史任务名称")
                 .libraryId(10L)
                 .sourceUrl(reqVO.getSourceUrl())
                 .targetLanguage("en")
@@ -198,7 +203,9 @@ class TkReferenceAnalysisServiceImplTest {
                 TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE, TkReferenceAnalysisProvider.GEMINI, scope)).thenReturn(cached);
         when(scriptOptionMapper.selectListByAnalysisId(100L)).thenReturn(Collections.emptyList());
 
-        assertEquals("SUCCESS", service.analyze(reqVO).getStatus());
+        TkReferenceAnalysisRespVO response = service.analyze(reqVO);
+        assertEquals("SUCCESS", response.getStatus());
+        assertEquals("历史任务名称", response.getTitle());
 
         verify(creditService, never()).freezeForReferenceAnalysis(8L);
         verify(creditService, never()).bindBusiness(anyLong(), anyLong());
@@ -228,6 +235,7 @@ class TkReferenceAnalysisServiceImplTest {
         TkReferenceAnalyzeReqVO reqVO = new TkReferenceAnalyzeReqVO();
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
+        reqVO.setTitle("运行中任务");
         reqVO.setTargetLanguage("en");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder()
                 .id(10L)
@@ -286,6 +294,7 @@ class TkReferenceAnalysisServiceImplTest {
         TkReferenceAnalyzeReqVO reqVO = new TkReferenceAnalyzeReqVO();
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@ccnews66/video/7647901196526587157");
+        reqVO.setTitle("失败任务名称");
         reqVO.setTargetLanguage("en");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder()
                 .id(10L)
@@ -295,6 +304,7 @@ class TkReferenceAnalysisServiceImplTest {
         Exception ex = invokeGenerateDraftExpectException(service, reqVO, library);
         TkReferenceAnalysisDO failed = invokeSaveFailedAnalysis(service, "TRACE-FAILED-001", reqVO, library, 166L, 166L, ex);
 
+        assertEquals("失败任务名称", failed.getTitle());
         assertEquals("https://example.com/reference.mp4", failed.getResolvedVideoUrl());
         assertEquals("https://example.com/reference.jpg", failed.getCoverUrl());
         assertEquals(25, failed.getVideoDuration());
@@ -311,6 +321,7 @@ class TkReferenceAnalysisServiceImplTest {
         TkReferenceAnalyzeReqVO reqVO = new TkReferenceAnalyzeReqVO();
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
+        reqVO.setTitle("分析失败记录");
         reqVO.setTargetLanguage("en");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder()
                 .id(10L)
@@ -321,6 +332,7 @@ class TkReferenceAnalysisServiceImplTest {
                 reqVO, library, 166L, 166L, new IllegalStateException("AI failed"));
 
         assertEquals("TRACE-ANALYSIS-001", failed.getBusinessTraceId());
+        assertEquals("分析失败记录", failed.getTitle());
     }
 
     @Test

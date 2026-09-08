@@ -4,6 +4,7 @@ export type AnalysisProvider = 'GEMINI' | 'DASHSCOPE_VIDEO'
 
 export interface TkReferenceAnalyzeReqVO {
   companyId?: number
+  title?: string
   sourceUrl: string
   libraryId: number
   referenceDuration?: number
@@ -39,6 +40,7 @@ export interface TkReferenceAnalysisVO {
   creator?: string
   creatorName?: string
   businessTraceId?: string
+  title?: string
   companyId?: number
   libraryId?: number
   sourceUrl?: string
@@ -74,6 +76,7 @@ export interface TkReferenceAnalysisVO {
 
 export interface TkReferenceAnalysisStatusVO {
   id?: number
+  title?: string
   status?: string
   failReason?: string
   productName?: string

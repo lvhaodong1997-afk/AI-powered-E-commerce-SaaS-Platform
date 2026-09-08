@@ -15,6 +15,7 @@ public class TkReferenceAnalysisRespVO {
     private String creator;
     private String creatorName;
     private String businessTraceId;
+    private String title;
     private Long companyId;
     private Long libraryId;
     private String sourceUrl;

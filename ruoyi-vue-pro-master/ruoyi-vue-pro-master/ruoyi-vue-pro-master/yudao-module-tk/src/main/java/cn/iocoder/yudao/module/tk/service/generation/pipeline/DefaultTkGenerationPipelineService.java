@@ -199,7 +199,6 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
             finishCurrentStep(task, "SUCCESS", null, null);
             updateOwned(new TkGenerationTaskDO()
                     .setId(taskId)
-                    .setTitle(script.getTitle())
                     .setReferenceDuration(script.getReferenceDuration())
                     .setTargetDuration(script.getTargetDuration())
                     .setScriptText(script.getContent())

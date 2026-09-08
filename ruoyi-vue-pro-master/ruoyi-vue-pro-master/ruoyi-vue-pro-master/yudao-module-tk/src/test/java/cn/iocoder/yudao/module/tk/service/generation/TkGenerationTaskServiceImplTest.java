@@ -48,6 +48,16 @@ import static org.mockito.Mockito.when;
 class TkGenerationTaskServiceImplTest {
 
     @Test
+    void batchTaskTitleIncludesScriptAndVideoIndexes() throws Exception {
+        TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
+        java.lang.reflect.Method method = TkGenerationTaskServiceImpl.class
+                .getDeclaredMethod("resolveTaskTitle", String.class, String.class, Integer.class, Integer.class);
+        method.setAccessible(true);
+
+        assertEquals("夏季防晒视频 - S02-V03", method.invoke(service, "夏季防晒视频", "Demo", 2, 3));
+    }
+
+    @Test
     void createGenerationTaskRejectsReferenceDurationAboveSystemLimit() {
         TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
         TkCreditService creditService = mock(TkCreditService.class);

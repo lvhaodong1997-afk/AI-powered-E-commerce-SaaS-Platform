@@ -12,6 +12,10 @@ public class TkReferenceAnalyzeReqVO {
 
     private Long companyId;
 
+    @Schema(description = "用户自定义分析任务名称", example = "夏季防晒视频")
+    @javax.validation.constraints.Size(max = 128, message = "任务名称不能超过128个字符")
+    private String title;
+
     @NotBlank(message = "TikTok 对标链接不能为空")
     private String sourceUrl;
 

@@ -74,6 +74,7 @@ public class TkReferenceAnalysisServiceImpl implements TkReferenceAnalysisServic
     private static final int SCRIPT_OPTION_COUNT = 12;
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
+    private static final int MAX_TASK_TITLE_LENGTH = 128;
     private static final String STATUS_WAITING = "WAITING";
     private static final String STATUS_RUNNING = "RUNNING";
     private static final int DEFAULT_WORKER_SIZE = 2;
@@ -177,6 +178,7 @@ public class TkReferenceAnalysisServiceImpl implements TkReferenceAnalysisServic
             creditLogId = creditService.freezeForReferenceAnalysis(tenantId);
             TkReferenceAnalysisDO analysis = TkReferenceAnalysisDO.builder()
                     .businessTraceId(businessTraceId)
+                    .title(resolveTaskTitle(reqVO.getTitle(), library.getName()))
                     .companyId(companyId)
                     .libraryId(reqVO.getLibraryId())
                     .sourceUrl(reqVO.getSourceUrl())
@@ -387,6 +389,7 @@ public class TkReferenceAnalysisServiceImpl implements TkReferenceAnalysisServic
     private TkReferenceAnalyzeReqVO buildAnalyzeReq(TkReferenceAnalysisDO analysis) {
         TkReferenceAnalyzeReqVO reqVO = new TkReferenceAnalyzeReqVO();
         reqVO.setCompanyId(analysis.getCompanyId());
+        reqVO.setTitle(analysis.getTitle());
         reqVO.setLibraryId(analysis.getLibraryId());
         reqVO.setSourceUrl(analysis.getSourceUrl());
         reqVO.setTargetLanguage(analysis.getTargetLanguage());
@@ -488,6 +491,7 @@ public class TkReferenceAnalysisServiceImpl implements TkReferenceAnalysisServic
         TkReferenceVideoContent videoContent = extractVideoContent(ex);
         TkReferenceAnalysisDO analysis = TkReferenceAnalysisDO.builder()
                 .businessTraceId(businessTraceId)
+                .title(resolveTaskTitle(reqVO.getTitle(), library.getName()))
                 .companyId(companyId)
                 .libraryId(reqVO.getLibraryId())
                 .sourceUrl(reqVO.getSourceUrl())
@@ -507,6 +511,14 @@ public class TkReferenceAnalysisServiceImpl implements TkReferenceAnalysisServic
         analysis.setTenantId(tenantId);
         analysisMapper.insert(analysis);
         return analysis;
+    }
+
+    private String resolveTaskTitle(String requestedTitle, String libraryName) {
+        String title = StrUtil.trimToEmpty(requestedTitle);
+        if (title.length() > MAX_TASK_TITLE_LENGTH) {
+            throw new IllegalArgumentException("任务名称不能超过" + MAX_TASK_TITLE_LENGTH + "个字符");
+        }
+        return StrUtil.isBlank(title) ? StrUtil.format("{} · 对标分析任务", libraryName) : title;
     }
 
     private TkReferenceVideoContent extractVideoContent(Exception ex) {

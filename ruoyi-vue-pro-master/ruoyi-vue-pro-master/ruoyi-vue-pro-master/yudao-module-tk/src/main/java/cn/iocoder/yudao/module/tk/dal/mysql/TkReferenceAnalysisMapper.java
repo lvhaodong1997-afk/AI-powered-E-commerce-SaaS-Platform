@@ -42,6 +42,8 @@ public interface TkReferenceAnalysisMapper extends BaseMapperX<TkReferenceAnalys
                 .eqIfPresent(TkReferenceAnalysisDO::getBusinessTraceId, reqVO.getBusinessTraceId())
                 .eqIfPresent(TkReferenceAnalysisDO::getStatus, reqVO.getStatus())
                 .and(StrUtil.isNotBlank(reqVO.getKeyword()), wrapper -> wrapper
+                        .like(TkReferenceAnalysisDO::getTitle, reqVO.getKeyword())
+                        .or()
                         .like(TkReferenceAnalysisDO::getSourceUrl, reqVO.getKeyword())
                         .or()
                         .like(TkReferenceAnalysisDO::getProductName, reqVO.getKeyword())
@@ -113,6 +115,7 @@ public interface TkReferenceAnalysisMapper extends BaseMapperX<TkReferenceAnalys
                 TkReferenceAnalysisDO::getTenantId,
                 TkReferenceAnalysisDO::getCompanyId,
                 TkReferenceAnalysisDO::getCreator,
+                TkReferenceAnalysisDO::getTitle,
                 TkReferenceAnalysisDO::getStatus,
                 TkReferenceAnalysisDO::getFailReason,
                 TkReferenceAnalysisDO::getProductName,

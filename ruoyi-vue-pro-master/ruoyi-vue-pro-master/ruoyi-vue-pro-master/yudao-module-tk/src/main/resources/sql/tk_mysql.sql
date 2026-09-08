@@ -155,9 +155,10 @@ CREATE TABLE IF NOT EXISTS `tk_bgm_asset` (
 
 CREATE TABLE IF NOT EXISTS `tk_generation_task` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '生成任务编号',
-  `tenant_id` bigint NOT NULL DEFAULT 0 COMMENT '租户编号',
-  `business_trace_id` varchar(64) DEFAULT NULL COMMENT '业务流水号',
-  `company_id` bigint NOT NULL COMMENT '公司编号',
+    `tenant_id` bigint NOT NULL DEFAULT 0 COMMENT '租户编号',
+    `business_trace_id` varchar(64) DEFAULT NULL COMMENT '业务流水号',
+    `title` varchar(128) DEFAULT NULL COMMENT '用户自定义分析任务名称',
+    `company_id` bigint NOT NULL COMMENT '公司编号',
   `source_url` varchar(512) NOT NULL COMMENT 'TikTok 对标链接',
   `product_id` bigint DEFAULT NULL COMMENT '产品编号',
   `library_id` bigint NOT NULL COMMENT '素材库编号',

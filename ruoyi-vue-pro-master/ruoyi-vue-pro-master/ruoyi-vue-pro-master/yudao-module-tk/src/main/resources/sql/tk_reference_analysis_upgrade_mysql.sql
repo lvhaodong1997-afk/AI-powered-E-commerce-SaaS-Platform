@@ -78,6 +78,17 @@ PREPARE tk_reference_trace_stmt FROM @tk_reference_trace_sql;
 EXECUTE tk_reference_trace_stmt;
 DEALLOCATE PREPARE tk_reference_trace_stmt;
 
+SET @tk_reference_title_column_exists := (
+    SELECT COUNT(1) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'tk_reference_analysis' AND column_name = 'title'
+);
+SET @tk_reference_title_sql := IF(@tk_reference_title_column_exists = 0,
+    'ALTER TABLE `tk_reference_analysis` ADD COLUMN `title` varchar(128) DEFAULT NULL COMMENT ''用户自定义分析任务名称'' AFTER `business_trace_id`',
+    'SELECT 1');
+PREPARE tk_reference_title_stmt FROM @tk_reference_title_sql;
+EXECUTE tk_reference_title_stmt;
+DEALLOCATE PREPARE tk_reference_title_stmt;
+
 SET @tk_reference_trace_index_exists := (
     SELECT COUNT(1) FROM information_schema.statistics
     WHERE table_schema = DATABASE() AND table_name = 'tk_reference_analysis' AND index_name = 'idx_tk_reference_analysis_trace'

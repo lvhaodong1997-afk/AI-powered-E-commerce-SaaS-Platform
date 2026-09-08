@@ -196,6 +196,18 @@
               </div>
             </div>
 
+            <div class="analysis-title-field">
+              <span>{{ copy.taskTitleLabel }}</span>
+              <el-input
+                v-model="createForm.title"
+                maxlength="128"
+                show-word-limit
+                clearable
+                :placeholder="copy.taskTitlePlaceholder"
+              />
+              <small class="field-hint">{{ copy.taskTitleHint }}</small>
+            </div>
+
             <div class="analysis-link-block" :class="{ invalid: analysisValidation.sourceUrl }">
               <div class="link-row">
                 <el-input
@@ -642,18 +654,6 @@
                 </div>
               </div>
               <small class="config-relocated-note">{{ copy.analysisSettingsMoved }}</small>
-
-              <div v-if="!batchGenerationEnabled">
-                <label>{{ copy.taskTitleLabel }}</label>
-                <el-input
-                  v-model="createForm.title"
-                  maxlength="128"
-                  show-word-limit
-                  clearable
-                  :placeholder="copy.taskTitlePlaceholder"
-                />
-                <small class="field-hint">{{ copy.taskTitleHint }}</small>
-              </div>
 
               <div v-if="showBatchGenerationControls" class="batch-generate-box">
                 <div class="batch-switch-row">
@@ -1135,6 +1135,7 @@
                   </span>
                 </div>
                 <div v-if="currentGenerationTask" class="generation-task-detail">
+                  <span v-if="currentGenerationTask.title">{{ currentGenerationTask.title }}</span>
                   <span>{{ copy.taskId }}：{{ currentGenerationTask.id }}</span>
                   <span v-if="currentGenerationTaskStepName">
                     {{ copy.currentStep }}：{{ currentGenerationTaskStepName }}
@@ -1476,6 +1477,7 @@ const DEFAULT_TARGET_DURATION = 15
 const MIN_TARGET_DURATION = 8
 const MAX_TARGET_DURATION = 500
 const ANALYSIS_RECOVERY_TIME_TOLERANCE_MS = 60_000
+const GENERATION_RECOVERY_TIME_TOLERANCE_MS = 60_000
 const ANALYSIS_POLL_INTERVAL_MS = 3000
 const ANALYSIS_POLL_TIMEOUT_MS = 10 * 60 * 1000
 const DEFAULT_OPENING_CLIP_START = 0
@@ -1790,8 +1792,8 @@ const copy = computed(() =>
         targetDurationPlaceholder: '15',
         targetDurationHint: 'Leave empty to use 15 seconds. Supported range: 8-500 seconds.',
         taskTitleLabel: 'Task name',
-        taskTitlePlaceholder: 'Optional custom name for this video task',
-        taskTitleHint: 'Leave empty to use the material library name.',
+        taskTitlePlaceholder: 'Name this analysis and video generation task',
+        taskTitleHint: 'The name is shown in both AI analysis and video generation records.',
         clipPlanModeLabel: 'Video generation mode',
         clipPlanModeSegmented: 'Default structure',
         clipPlanModeFullPoolRandom: 'Random pool',
@@ -1951,6 +1953,8 @@ const copy = computed(() =>
         batchLimitWarning: 'A single batch can create up to 30 videos.',
         batchGenerationQueued: 'Batch tasks have been added to the generation queue.',
         batchGenerationCreated: 'Batch generation completed.',
+        generationRecovered: 'The task was created successfully. The page has resumed tracking it.',
+        generationSubmissionFailed: 'Task submission could not be confirmed. Check the generation records before retrying.',
         batchQueue: 'Generation queue',
         generationSuccess: 'Generation completed. Preview or download the video below.',
         generationRetrying: 'Retry submitted. The AI editing pipeline is running again.',
@@ -2077,8 +2081,8 @@ const copy = computed(() =>
         targetDurationPlaceholder: '15',
         targetDurationHint: '不填默认 15 秒，支持 8-500 秒',
         taskTitleLabel: '任务名称',
-        taskTitlePlaceholder: '可自定义本次视频任务名称',
-        taskTitleHint: '不填写则使用素材库名称生成默认任务名称',
+        taskTitlePlaceholder: '请输入本次分析和视频生成任务名称',
+        taskTitleHint: '名称会同时显示在 AI 分析记录和视频生成记录中。',
         clipPlanModeLabel: '视频生成方式',
         clipPlanModeSegmented: '默认结构拼接',
         clipPlanModeFullPoolRandom: '全素材随机拼接',
@@ -2224,6 +2228,8 @@ const copy = computed(() =>
         batchLimitWarning: '单次批量最多生成 30 个视频',
         batchGenerationQueued: '批量任务已加入生成队列',
         batchGenerationCreated: '批量生成已完成',
+        generationRecovered: '任务已创建成功，页面已恢复跟踪生成进度。',
+        generationSubmissionFailed: '暂未确认任务提交结果，请先到视频生成记录查看，确认没有任务后再重试。',
         batchQueue: '生成队列',
         generationSuccess: '生成完成，可在下方预览或下载视频',
         generationRetrying: '已提交重试，正在重新执行智能混剪流水线',
@@ -2347,7 +2353,7 @@ const precheckingGenerationCount = ref(0)
 const precheckingGeneration = computed(() => precheckingGenerationCount.value > 0)
 const selectedScriptIndex = ref(0)
 const selectedBatchScriptIndexes = ref<number[]>([])
-const showBatchGenerationControls = false
+const showBatchGenerationControls = true
 const batchGenerationEnabled = ref(false)
 const videosPerScript = ref(1)
 const displayScriptIndexes = ref<number[]>([])
@@ -3484,9 +3490,7 @@ const createGenerationPayload = (script: DashboardScriptOption): TkGenerationTas
     ...getBgmPayload(),
     ...getSubtitlePayload()
   }
-  if (!batchGenerationEnabled.value) {
-    payload.title = createForm.title.trim() || undefined
-  }
+  payload.title = createForm.title.trim() || undefined
   if (referenceAnalysis.value?.id) {
     payload.referenceAnalysisId = referenceAnalysis.value.id
   }
@@ -4246,6 +4250,7 @@ async function hydrateReplayFromAnalysis(analysis: TkReferenceAnalysisVO) {
   hydratingReplay.value = true
   try {
     createForm.sourceUrl = analysis.sourceUrl
+    createForm.title = analysis.title || ''
     createForm.libraryId = analysis.libraryId
     createForm.referenceDuration = analysis.referenceDuration || DEFAULT_TARGET_DURATION
     createForm.voiceCode = createForm.voiceCode || defaultVoiceCode
@@ -4290,6 +4295,7 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     }
 
     createForm.sourceUrl = isManualLeadGenerationSource(task.sourceUrl) ? '' : (task.sourceUrl || '')
+    createForm.title = task.title || ''
     createForm.libraryId = task.libraryId
     createForm.targetLanguage = task.targetLanguage || defaultTargetLanguage
     createForm.materialPurpose = materialPurpose
@@ -4435,6 +4441,7 @@ const handleAnalyzeLink = async (forceRefresh = false, silentProgress = false) =
       targetLanguage: createForm.targetLanguage,
       materialPurpose: createForm.materialPurpose,
       analysisProvider: createForm.analysisProvider,
+      title: createForm.title.trim() || undefined,
       forceRefresh
     })
     referenceAnalysis.value = await waitForReferenceAnalysis(submittedAnalysis)
@@ -4661,14 +4668,24 @@ const handleBgmUploadChange = async (file: any) => {
   }
 }
 
-const buildOpeningGenerationFormData = (script: DashboardScriptOption) => {
+const buildIndexedTaskTitle = (scriptIndex: number, videoIndex: number) => {
+  const baseTitle = createForm.title.trim() || `${selectedLibrary.value?.name || '视频'} · 智能混剪任务`
+  const suffix = ` - S${String(scriptIndex).padStart(2, '0')}-V${String(videoIndex).padStart(2, '0')}`
+  const maxBaseLength = 128 - suffix.length
+  return `${baseTitle.slice(0, maxBaseLength)}${suffix}`
+}
+
+const buildOpeningGenerationFormData = (
+  script: DashboardScriptOption,
+  taskTitle = createForm.title.trim()
+) => {
   const formData = new FormData()
   if (createForm.sourceUrl.trim()) {
     formData.append('sourceUrl', createForm.sourceUrl.trim())
   }
   formData.append('libraryId', String(createForm.libraryId))
-  if (!batchGenerationEnabled.value && createForm.title.trim()) {
-    formData.append('title', createForm.title.trim())
+  if (taskTitle) {
+    formData.append('title', taskTitle)
   }
   if (selectedLibrary.value?.companyId) {
     formData.append('companyId', String(selectedLibrary.value.companyId))
@@ -4729,24 +4746,57 @@ const precheckGenerationScripts = async (scripts: DashboardScriptOption[]) => {
   return true
 }
 
-const createBatchGenerationTaskIds = async (scripts: DashboardScriptOption[]) => {
+const createBatchGenerationTaskIds = async (
+  scripts: DashboardScriptOption[],
+  onTaskCreated?: (taskId: number) => void
+) => {
+  const registerCreatedTask = (rawTaskId: unknown) => {
+    const taskId = Number(rawTaskId)
+    if (taskId && !Number.isNaN(taskId)) {
+      onTaskCreated?.(taskId)
+      return taskId
+    }
+    return undefined
+  }
   const count = batchGenerationEnabled.value ? Number(videosPerScript.value || 1) : 1
   if (isLeadGenerationManualMode.value) {
     const ids: number[] = []
     for (let index = 0; index < count; index++) {
       if (openingVideoFile.value) {
-        ids.push(Number(await TkGenerationApi.createGenerationWithOpening(buildOpeningGenerationFormData(scripts[0]))))
+        const taskId = registerCreatedTask(
+          await TkGenerationApi.createGenerationWithOpening(
+            buildOpeningGenerationFormData(
+              scripts[0],
+              count > 1 ? buildIndexedTaskTitle(1, index + 1) : createForm.title.trim()
+            )
+          )
+        )
+        if (taskId) ids.push(taskId)
       } else {
-        ids.push(Number(await TkGenerationApi.createGeneration(createGenerationPayload(scripts[0]))))
+        const taskId = registerCreatedTask(
+          await TkGenerationApi.createGeneration(createGenerationPayload(scripts[0]))
+        )
+        if (taskId) ids.push(taskId)
       }
     }
     return ids
   }
   if (openingVideoFile.value) {
     const ids: number[] = []
-    for (const script of scripts) {
+    for (let scriptIndex = 0; scriptIndex < scripts.length; scriptIndex++) {
+      const script = scripts[scriptIndex]
       for (let index = 0; index < count; index++) {
-        ids.push(Number(await TkGenerationApi.createGenerationWithOpening(buildOpeningGenerationFormData(script))))
+        const taskId = registerCreatedTask(
+          await TkGenerationApi.createGenerationWithOpening(
+            buildOpeningGenerationFormData(
+              script,
+              scripts.length > 1 || count > 1
+                ? buildIndexedTaskTitle(scriptIndex + 1, index + 1)
+                : createForm.title.trim()
+            )
+          )
+        )
+        if (taskId) ids.push(taskId)
       }
     }
     return ids
@@ -4756,9 +4806,17 @@ const createBatchGenerationTaskIds = async (scripts: DashboardScriptOption[]) =>
     payload.scriptOptionId = undefined
     payload.scriptOptionIds = scripts.map((script) => script.id).filter(Boolean) as number[]
     payload.videosPerScript = count
-    return (await TkGenerationApi.createGenerationBatch(payload)).map(Number)
+    const ids: number[] = []
+    for (const rawTaskId of await TkGenerationApi.createGenerationBatch(payload)) {
+      const taskId = registerCreatedTask(rawTaskId)
+      if (taskId) ids.push(taskId)
+    }
+    return ids
   }
-  return [Number(await TkGenerationApi.createGeneration(createGenerationPayload(scripts[0])))]
+  const taskId = registerCreatedTask(
+    await TkGenerationApi.createGeneration(createGenerationPayload(scripts[0]))
+  )
+  return taskId ? [taskId] : []
 }
 
 const getTrackedGenerationTaskIds = () =>
@@ -4774,6 +4832,44 @@ const registerGenerationTasks = (taskIds: number[]) => {
   const trackedTaskIds = getTrackedGenerationTaskIds()
   if (trackedTaskIds.length) {
     startGenerationBatchPolling(trackedTaskIds)
+  }
+}
+
+const parseGenerationCreateTime = (value?: string | number) => {
+  if (typeof value === 'number') {
+    return value < 1_000_000_000_000 ? value * 1000 : value
+  }
+  if (!value) {
+    return 0
+  }
+  const parsed = Date.parse(String(value).replace(' ', 'T'))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const recoverSubmittedGenerationTaskIds = async (startedAt: number, knownTaskIds: number[]) => {
+  const knownIds = new Set(knownTaskIds)
+  try {
+    const page = await TkGenerationApi.getGenerationSummaryPage({
+      pageNo: 1,
+      pageSize: 30,
+      libraryId: createForm.libraryId,
+      title: createForm.title.trim() || undefined
+    })
+    const recoveredIds = (page?.list || [])
+      .filter((task: TkGenerationTaskVO) => {
+        if (!task.id || knownIds.has(Number(task.id))) {
+          return false
+        }
+        if (task.libraryId !== createForm.libraryId) {
+          return false
+        }
+        return parseGenerationCreateTime(task.createTime) >= startedAt - GENERATION_RECOVERY_TIME_TOLERANCE_MS
+      })
+      .map((task: TkGenerationTaskVO) => Number(task.id))
+      .filter((id: number) => id && !Number.isNaN(id))
+    return [...knownIds, ...recoveredIds]
+  } catch (error) {
+    return [...knownIds]
   }
 }
 
@@ -4804,6 +4900,7 @@ const handleCreateGeneration = async () => {
     resetTaskProgress(analysisProgress, 'analysis')
     startGenerationSubmissionProgress()
   }
+  let generationSubmissionStartedAt = 0
   try {
     if (!isLeadGenerationManualMode.value && (!referenceAnalysis.value?.id || !selectedScript.value?.id)) {
       await handleAnalyzeLink(false, true)
@@ -4833,7 +4930,10 @@ const handleCreateGeneration = async () => {
       return
     }
 
-    const taskIds = (await createBatchGenerationTaskIds(scripts)).filter(
+    generationSubmissionStartedAt = Date.now()
+    const taskIds = (await createBatchGenerationTaskIds(scripts, (taskId) => {
+      registerGenerationTasks([taskId])
+    })).filter(
       (id) => id && !Number.isNaN(id)
     )
     if (!taskIds.length) {
@@ -4845,11 +4945,21 @@ const handleCreateGeneration = async () => {
     await refreshCreditBalance()
     activeStep.value = 5
   } catch (error) {
+    const knownTaskIds = getTrackedGenerationTaskIds()
+    const recoveredTaskIds = generationSubmissionStartedAt
+      ? await recoverSubmittedGenerationTaskIds(generationSubmissionStartedAt, knownTaskIds)
+      : knownTaskIds
+    if (recoveredTaskIds.length) {
+      registerGenerationTasks(recoveredTaskIds)
+      activeStep.value = 5
+      message.success(copy.value.generationRecovered)
+      return
+    }
     if (startFreshGenerationSession && !hasActiveGenerationTasks.value) {
       clearGenerationPolling()
       finishTaskProgress(generationProgress, generationPhases.value, 'generation', true)
     }
-    throw error
+    message.error(copy.value.generationSubmissionFailed)
   } finally {
     generationSubmittingCount.value = Math.max(0, generationSubmittingCount.value - 1)
   }
@@ -5546,6 +5656,29 @@ onUnmounted(() => {
 
 .analysis-filter-item.invalid .analysis-filter-control :deep(.el-select__wrapper) {
   box-shadow: 0 0 0 1px #f87171 inset;
+}
+
+.analysis-title-field {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
+  padding: 9px 10px;
+  margin-bottom: 10px;
+  background: #fff;
+  border: 1px solid #e5ebf7;
+  border-radius: 8px;
+}
+
+.analysis-title-field > span {
+  font-size: 11px;
+  font-weight: 800;
+  color: #3b4861;
+}
+
+.analysis-title-field .field-hint {
+  grid-column: 2;
+  margin-top: -3px;
 }
 
 .clip-plan-mode-field {

@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 public class TkGenerationTaskStatusRespVO {
 
     private Long id;
+    private String title;
     private Long batchId;
     private Integer scriptIndex;
     private Integer videoIndex;

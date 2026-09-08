@@ -3,9 +3,14 @@ package cn.iocoder.yudao.module.tk.service.generation.pipeline;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkMaterialLibraryDO;
+import cn.iocoder.yudao.module.tk.dal.mysql.TkGenerationBatchMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.TkGenerationStepLogMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkGenerationTaskMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.TkMaterialLibraryMapper;
 import cn.iocoder.yudao.module.tk.enums.TkGenerationStatusEnum;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
+import cn.iocoder.yudao.module.tk.service.credit.TkCreditService;
+import cn.iocoder.yudao.module.tk.service.log.TkBusinessLogService;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -107,6 +113,46 @@ class DefaultTkGenerationPipelineServiceTest {
         assertEquals(21, script.getReferenceDuration());
         assertEquals(25, script.getTargetDuration());
         verifyNoInteractions(scriptGenerationService);
+    }
+
+    @Test
+    void runKeepsCustomTaskTitleWhenGeneratedScriptHasDifferentTitle() {
+        DefaultTkGenerationPipelineService service = new DefaultTkGenerationPipelineService();
+        TkGenerationTaskMapper taskMapper = mock(TkGenerationTaskMapper.class);
+        TkMaterialLibraryMapper libraryMapper = mock(TkMaterialLibraryMapper.class);
+        TkScriptGenerationService scriptGenerationService = mock(TkScriptGenerationService.class);
+        TkVideoRenderService videoRenderService = mock(TkVideoRenderService.class);
+        TkGenerationTaskDO task = new TkGenerationTaskDO()
+                .setId(1L)
+                .setLibraryId(10L)
+                .setTitle("夏季防晒视频 - S01-V01")
+                .setVoiceEnabled(false)
+                .setTargetDuration(10)
+                .setReferenceDuration(10)
+                .setClipPlan("[]");
+        TkGeneratedScript generatedScript = new TkGeneratedScript(
+                "为什么你的黑头总是洗不掉？", "Generated script", "[]", 10, 10);
+
+        ReflectionTestUtils.setField(service, "taskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "batchMapper", mock(TkGenerationBatchMapper.class));
+        ReflectionTestUtils.setField(service, "stepLogMapper", mock(TkGenerationStepLogMapper.class));
+        ReflectionTestUtils.setField(service, "libraryMapper", libraryMapper);
+        ReflectionTestUtils.setField(service, "scriptGenerationService", scriptGenerationService);
+        ReflectionTestUtils.setField(service, "videoRenderService", videoRenderService);
+        ReflectionTestUtils.setField(service, "creditService", mock(TkCreditService.class));
+        ReflectionTestUtils.setField(service, "businessLogService", mock(TkBusinessLogService.class));
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        when(taskMapper.selectById(1L)).thenReturn(task);
+        when(libraryMapper.selectById(10L)).thenReturn(new TkMaterialLibraryDO());
+        when(scriptGenerationService.generateScript(task, new TkMaterialLibraryDO())).thenReturn(generatedScript);
+
+        ReflectionTestUtils.invokeMethod(service, "run", 1L, null);
+
+        ArgumentCaptor<TkGenerationTaskDO> updates = ArgumentCaptor.forClass(TkGenerationTaskDO.class);
+        verify(taskMapper, atLeastOnce()).updateById(updates.capture());
+        assertTrue(updates.getAllValues().stream()
+                .anyMatch(update -> TkGenerationStatusEnum.SCRIPT_READY.equals(update.getStatus())
+                        && update.getTitle() == null));
     }
 
     @Test

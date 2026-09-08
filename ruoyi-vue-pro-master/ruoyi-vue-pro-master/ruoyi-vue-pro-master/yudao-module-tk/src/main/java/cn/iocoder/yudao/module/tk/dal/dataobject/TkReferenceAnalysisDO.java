@@ -21,6 +21,8 @@ public class TkReferenceAnalysisDO extends TenantBaseDO {
 
     private String businessTraceId;
 
+    private String title;
+
     private Long companyId;
 
     private Long libraryId;

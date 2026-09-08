@@ -23,6 +23,27 @@ class TkGenerationSchemaContractTest {
     }
 
     @Test
+    void referenceAnalysisSchemaContainsTaskTitleColumn() throws IOException {
+        try (InputStream input = getClass().getResourceAsStream("/sql/tk_mysql.sql")) {
+            assertNotNull(input);
+            String sql = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+
+            assertTrue(sql.contains("`title` varchar(128) DEFAULT NULL COMMENT '用户自定义分析任务名称'"));
+        }
+    }
+
+    @Test
+    void referenceAnalysisUpgradeContainsIdempotentTaskTitleMigration() throws IOException {
+        try (InputStream input = getClass().getResourceAsStream("/sql/tk_reference_analysis_upgrade_mysql.sql")) {
+            assertNotNull(input);
+            String sql = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+
+            assertTrue(sql.contains("information_schema.columns"));
+            assertTrue(sql.contains("ADD COLUMN `title` varchar(128)"));
+        }
+    }
+
+    @Test
     void transcriptSchemaContainsVerifiedTextAndTimelineColumns() throws IOException {
         try (InputStream input = getClass().getResourceAsStream("/sql/tk_open_video_transcript_task_mysql.sql")) {
             assertNotNull(input);

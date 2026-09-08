@@ -52,7 +52,7 @@
       <el-form-item label="关键词" prop="keyword">
         <el-input
           v-model="analysisQuery.keyword"
-          placeholder="链接 / 产品 / 卖点"
+          placeholder="任务名称 / 链接 / 产品 / 卖点"
           clearable
           class="!w-260px"
           @keyup.enter="handleAnalysisQuery"
@@ -148,6 +148,7 @@
     <el-table v-loading="analysisLoading" :data="analysisList" stripe>
       <el-table-column label="分析对象" min-width="280">
         <template #default="scope">
+          <div class="record-task-name">任务名称：{{ scope.row.title || '未命名分析任务' }}</div>
           <div class="record-title">{{ scope.row.productName || 'TikTok 对标链接' }}</div>
           <div class="record-link">{{ scope.row.sourceUrl }}</div>
           <div class="creator-line">{{ analysisCreatorLabel(scope.row) }}</div>
@@ -231,7 +232,9 @@
     <el-table v-loading="generationLoading" :data="generationList" stripe>
       <el-table-column label="任务标题" min-width="260">
         <template #default="scope">
-          <div class="record-title">{{ scope.row.title || '-' }}</div>
+          <div class="record-task-name" :title="scope.row.title || '未命名生成任务'">
+            任务名称：{{ scope.row.title || '未命名生成任务' }}
+          </div>
           <div class="record-badges">
             <el-tag size="small" :type="scope.row.materialPurpose === 'LEAD_GENERATION' ? 'warning' : 'success'">
               {{ materialPurposeLabel(scope.row.materialPurpose) }}
@@ -1255,6 +1258,15 @@ onBeforeUnmount(() => {
 .record-title {
   color: var(--el-text-color-primary);
   font-weight: 500;
+}
+
+.record-task-name {
+  margin-bottom: 4px;
+  overflow: hidden;
+  color: var(--el-color-primary);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .record-badges {

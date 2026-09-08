@@ -164,6 +164,18 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         return StrUtil.isBlank(title) ? StrUtil.format("{} · 智能混剪任务", libraryName) : title;
     }
 
+    private String resolveTaskTitle(String requestedTitle, String libraryName, Integer scriptIndex, Integer videoIndex) {
+        String title = resolveTaskTitle(requestedTitle, libraryName);
+        if (scriptIndex == null || videoIndex == null) {
+            return title;
+        }
+        String suffix = String.format(Locale.ROOT, " - S%02d-V%02d", scriptIndex, videoIndex);
+        int maxBaseLength = MAX_TASK_TITLE_LENGTH - suffix.length();
+        return title.length() <= maxBaseLength
+                ? title + suffix
+                : title.substring(0, maxBaseLength) + suffix;
+    }
+
     private int resolveMaxReferenceDuration() {
         if (generationProperties == null || generationProperties.getFfmpeg() == null
                 || generationProperties.getFfmpeg().getMaxTargetDuration() == null
@@ -383,7 +395,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
                     .currentStep("PENDING")
                     .precheckResult(JsonUtils.toJsonString(precheck))
                     .retryCount(0)
-                    .title(resolveTaskTitle(createReqVO.getTitle(), library.getName()))
+                    .title(resolveTaskTitle(createReqVO.getTitle(), library.getName(), scriptIndex, videoIndex))
                     .build();
             task.setTenantId(tenantId);
             taskMapper.insert(task);
