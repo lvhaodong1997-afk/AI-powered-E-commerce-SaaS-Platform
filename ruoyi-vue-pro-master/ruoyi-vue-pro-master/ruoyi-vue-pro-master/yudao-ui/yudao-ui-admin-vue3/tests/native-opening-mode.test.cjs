@@ -4,6 +4,8 @@ const path = require('node:path')
 
 const sourcePath = path.resolve(__dirname, '../src/views/tk/dashboard/index.vue')
 const source = fs.readFileSync(sourcePath, 'utf8')
+const apiSourcePath = path.resolve(__dirname, '../src/api/tk/generation/index.ts')
+const apiSource = fs.readFileSync(apiSourcePath, 'utf8')
 
 assert.match(source, /type OpeningProcessMode = 'NATIVE' \| 'STANDARD'/)
 assert.match(source, /openingProcessMode: 'NATIVE'/)
@@ -17,6 +19,16 @@ assert.match(source, /openingModeNative: '保留原生（推荐）'/)
 assert.match(source, /openingModeStandard: '按普通素材处理'/)
 assert.match(source, /payload\.openingProcessMode = createForm\.openingProcessMode/)
 assert.match(source, /formData\.append\('openingProcessMode', createForm\.openingProcessMode\)/)
+assert.match(
+  apiSource,
+  /const response = await request\.upload<\{ data: number \}>\(\{\s*url: '\/tk\/generation\/create-with-opening',\s*data\s*\}\)/,
+  'opening generation upload must unwrap the CommonResult response before returning the task id'
+)
+assert.match(
+  apiSource,
+  /return response\.data/,
+  'opening generation upload must return the task id from the response data field'
+)
 assert.match(
   source,
   /createForm\.openingProcessMode = task\.openingProcessMode \|\| 'STANDARD'/

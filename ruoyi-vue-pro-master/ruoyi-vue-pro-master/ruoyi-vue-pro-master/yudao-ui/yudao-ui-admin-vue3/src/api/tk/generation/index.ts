@@ -234,8 +234,12 @@ export const TkGenerationApi = {
   createGenerationBatch: async (data: TkGenerationTaskVO): Promise<number[]> => {
     return await request.post({ url: '/tk/generation/create-batch', data })
   },
-  createGenerationWithOpening: async (data: FormData) => {
-    return await request.upload({ url: '/tk/generation/create-with-opening', data })
+  createGenerationWithOpening: async (data: FormData): Promise<number> => {
+    const response = await request.upload<{ data: number }>({
+      url: '/tk/generation/create-with-opening',
+      data
+    })
+    return response.data
   },
   createAudioExport: async (data: TkAudioExportTaskCreateVO): Promise<TkAudioExportTaskVO> => {
     return await request.post({ url: '/tk/generation/audio-export', data })
