@@ -8,8 +8,8 @@ public interface ErrorCodeConstants {
     ErrorCode TK_MATERIAL_LIBRARY_NOT_EMPTY = new ErrorCode(1_060_000_002, "素材库内已有视频，请先清空或迁移视频");
     ErrorCode TK_MATERIAL_VIDEO_NOT_EXISTS = new ErrorCode(1_060_000_003, "素材视频不存在");
     ErrorCode TK_GENERATION_TASK_NOT_EXISTS = new ErrorCode(1_060_000_004, "生成任务不存在");
-    ErrorCode TK_FORBIDDEN_COMPANY_DATA = new ErrorCode(1_060_000_005, "无权访问其他公司的数据");
-    ErrorCode TK_FORBIDDEN_WRITE_COMPANY_DATA = new ErrorCode(1_060_000_006, "无权写入其他公司的数据");
+    ErrorCode TK_FORBIDDEN_COMPANY_DATA = new ErrorCode(1_060_000_005, "无权访问其他租户的数据");
+    ErrorCode TK_FORBIDDEN_WRITE_COMPANY_DATA = new ErrorCode(1_060_000_006, "无权写入其他租户的数据");
     ErrorCode TK_PLATFORM_COMPANY_REQUIRED = new ErrorCode(1_060_000_007, "一级用户创建数据时必须选择公司");
     ErrorCode TK_MATERIAL_LIBRARY_COMPANY_MISMATCH = new ErrorCode(1_060_000_008, "生成任务不能使用其他公司的素材库");
     ErrorCode TK_USER_SCOPE_NOT_CONFIGURED = new ErrorCode(1_060_000_009, "当前用户未配置 TK 用户级别或所属公司");
