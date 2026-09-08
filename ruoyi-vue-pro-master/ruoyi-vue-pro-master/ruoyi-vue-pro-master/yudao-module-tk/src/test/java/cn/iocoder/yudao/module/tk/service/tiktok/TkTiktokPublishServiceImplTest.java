@@ -377,10 +377,11 @@ class TkTiktokPublishServiceImplTest {
                 .tiktokStatus("PROCESSING")
                 .build();
         List<String> publicPostIds = Arrays.asList("post-1", "post-2");
+        String longTitle = String.join("", Collections.nCopies(300, "x"));
         List<TkTiktokApiClient.VideoInfo> videos = Arrays.asList(
                 new TkTiktokApiClient.VideoInfo("post-1", 1700000000L, "cover-1",
                         "https://www.tiktok.com/@demo/video/post-1", "First description", 12,
-                        1920, 1080, "First", "<iframe>1</iframe>",
+                        1920, 1080, longTitle, "<iframe>1</iframe>",
                         "https://www.tiktok.com/static/profile-video?id=post-1", 1L, 2L, 3L, 4L, false),
                 new TkTiktokApiClient.VideoInfo("post-2", 1700000010L, "cover-2",
                         "https://www.tiktok.com/@demo/video/post-2", "Second description", 24,
@@ -402,6 +403,7 @@ class TkTiktokPublishServiceImplTest {
         verify(postMapper, times(2)).insert(captor.capture());
         assertEquals(Arrays.asList("post-1", "post-2"), captor.getAllValues().stream()
                 .map(TkTiktokPublishPostDO::getPublicPostId).collect(java.util.stream.Collectors.toList()));
+        assertEquals(longTitle, captor.getAllValues().get(0).getTitle());
         assertEquals("https://www.tiktok.com/@demo/video/post-1", detail.getPublishUrl());
         assertEquals("SUCCESS", detail.getStatus());
     }

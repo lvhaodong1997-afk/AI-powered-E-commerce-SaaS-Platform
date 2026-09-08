@@ -32,8 +32,9 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_account` (
   `updater` varchar(64) DEFAULT '' COMMENT '鏇存柊鑰?',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '鏇存柊鏃堕棿',
   `deleted` bit(1) NOT NULL DEFAULT b'0' COMMENT '鏄惁鍒犻櫎',
+  `active_open_id` varchar(128) GENERATED ALWAYS AS (IF(`deleted` = b'0', `open_id`, NULL)) STORED,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_tk_tiktok_account_open_id` (`tenant_id`, `open_id`, `deleted`),
+  UNIQUE KEY `uk_tk_tiktok_account_active_open_id` (`tenant_id`, `active_open_id`),
   KEY `idx_tk_tiktok_account_company` (`tenant_id`, `company_id`),
   KEY `idx_tk_tiktok_account_token` (`tenant_id`, `token_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='TK TikTok璐﹀彿';

@@ -2,6 +2,20 @@ SET NAMES utf8mb4;
 
 SET @schema_name := DATABASE();
 
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name AND table_name = 'tk_tiktok_publish_post')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'tk_tiktok_publish_post' AND column_name = 'title' AND column_type <> 'text'),
+    'ALTER TABLE `tk_tiktok_publish_post` MODIFY COLUMN `title` TEXT NULL', 'SELECT 1');
+PREPARE tk_publish_post_title_stmt FROM @sql;
+EXECUTE tk_publish_post_title_stmt;
+DEALLOCATE PREPARE tk_publish_post_title_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name AND table_name = 'tk_tiktok_content_video')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'tk_tiktok_content_video' AND column_name = 'title' AND column_type <> 'text'),
+    'ALTER TABLE `tk_tiktok_content_video` MODIFY COLUMN `title` TEXT NULL', 'SELECT 1');
+PREPARE tk_content_video_title_stmt FROM @sql;
+EXECUTE tk_content_video_title_stmt;
+DEALLOCATE PREPARE tk_content_video_title_stmt;
+
 SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'tk_tiktok_publish_detail' AND column_name = 'link_capture_status'), 'SELECT 1', 'ALTER TABLE `tk_tiktok_publish_detail` ADD COLUMN `link_capture_status` varchar(32) DEFAULT NULL COMMENT ''公开视频链接状态'' AFTER `publish_url`');
 PREPARE tk_publish_detail_link_status_stmt FROM @sql;
 EXECUTE tk_publish_detail_link_status_stmt;
@@ -39,7 +53,7 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_post` (
   `share_url` varchar(512) DEFAULT NULL,
   `embed_link` varchar(512) DEFAULT NULL,
   `embed_html` text,
-  `title` varchar(255) DEFAULT NULL,
+  `title` text,
   `video_description` varchar(2200) DEFAULT NULL,
   `video_create_time` bigint DEFAULT NULL,
   `duration` int DEFAULT NULL,
@@ -70,7 +84,7 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_content_video` (
   `account_id` bigint NOT NULL,
   `open_id` varchar(128) DEFAULT NULL,
   `video_id` varchar(128) NOT NULL,
-  `title` varchar(255) DEFAULT NULL,
+  `title` text,
   `video_description` varchar(2200) DEFAULT NULL,
   `share_url` varchar(512) DEFAULT NULL,
   `embed_link` varchar(512) DEFAULT NULL,
@@ -123,6 +137,26 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_webhook_event` (
   KEY `idx_tk_webhook_event_publish` (`publish_id`, `event_type`),
   KEY `idx_tk_webhook_event_status` (`status`, `received_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='TikTok Webhook 事件';
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name AND table_name = 'tk_tiktok_account')
+        AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'tk_tiktok_account' AND column_name = 'active_open_id'),
+    'ALTER TABLE `tk_tiktok_account` ADD COLUMN `active_open_id` varchar(128) GENERATED ALWAYS AS (IF(`deleted` = 0, `open_id`, NULL)) STORED AFTER `deleted`', 'SELECT 1');
+PREPARE tk_account_active_open_id_column_stmt FROM @sql;
+EXECUTE tk_account_active_open_id_column_stmt;
+DEALLOCATE PREPARE tk_account_active_open_id_column_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = @schema_name AND table_name = 'tk_tiktok_account' AND index_name = 'uk_tk_tiktok_account_open_id'),
+    'ALTER TABLE `tk_tiktok_account` DROP INDEX `uk_tk_tiktok_account_open_id`', 'SELECT 1');
+PREPARE tk_account_legacy_unique_stmt FROM @sql;
+EXECUTE tk_account_legacy_unique_stmt;
+DEALLOCATE PREPARE tk_account_legacy_unique_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name AND table_name = 'tk_tiktok_account')
+        AND NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = @schema_name AND table_name = 'tk_tiktok_account' AND index_name = 'uk_tk_tiktok_account_active_open_id'),
+    'ALTER TABLE `tk_tiktok_account` ADD UNIQUE KEY `uk_tk_tiktok_account_active_open_id` (`tenant_id`, `active_open_id`)', 'SELECT 1');
+PREPARE tk_account_active_unique_stmt FROM @sql;
+EXECUTE tk_account_active_unique_stmt;
+DEALLOCATE PREPARE tk_account_active_unique_stmt;
 
 SET @sql := IF(EXISTS (SELECT 1 FROM tk_api_key_config WHERE provider = 'TIKTOK' AND config_key = 'default-scopes' AND FIND_IN_SET('video.list', config_value) > 0), 'SELECT 1', 'UPDATE tk_api_key_config SET config_value = CONCAT(TRIM(TRAILING '','' FROM config_value), '',video.list'') WHERE provider = ''TIKTOK'' AND config_key = ''default-scopes'' AND config_value <> ''''');
 PREPARE tk_tiktok_video_list_scope_stmt FROM @sql;

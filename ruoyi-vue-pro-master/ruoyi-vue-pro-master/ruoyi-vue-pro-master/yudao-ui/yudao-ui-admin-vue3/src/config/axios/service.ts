@@ -27,6 +27,17 @@ const ignoreMsgs = [
   '无效的刷新令牌', // 刷新令牌被删除时，不用提示
   '刷新令牌已过期' // 使用刷新令牌，刷新获取新的访问令牌时，结果因为过期失败，此时需要忽略。否则，会导致继续 401，无法跳转到登出界面
 ]
+
+const getTkApiErrorMessage = (url: string | undefined, message: string, fallback: string) => {
+  if (message && message !== errorCode['default']) return message
+  if (url?.includes('/tk/tiktok-content-display/')) {
+    return 'TikTok 公开视频同步失败，请检查账号授权和 video.list 权限后重试'
+  }
+  if (url?.includes('/tk/tiktok-publish/')) {
+    return 'TikTok 发布状态同步失败，请稍后重试'
+  }
+  return fallback
+}
 // 是否显示重新登录
 export const isRelogin = { show: false }
 // Axios 无感知刷新令牌，参考 https://www.dashingdog.cn/article/11 与 https://segmentfault.com/a/1190000020210980 实现
@@ -196,8 +207,9 @@ service.interceptors.response.use(
         })
       }
     } else if (code === 500) {
-      ElMessage.error(msg && msg !== errorCode['default'] ? msg : t('sys.api.errMsg500'))
-      return Promise.reject(new Error(msg))
+      const displayMsg = getTkApiErrorMessage(config.url, msg, t('sys.api.errMsg500'))
+      ElMessage.error(displayMsg)
+      return Promise.reject(new Error(displayMsg))
     } else if (code === 901) {
       ElMessage.error({
         offset: 300,
