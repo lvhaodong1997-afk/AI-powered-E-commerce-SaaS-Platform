@@ -103,7 +103,7 @@ public class TkTiktokAccountStatsServiceImpl implements TkTiktokAccountStatsServ
             return Collections.emptyMap();
         }
         Map<Long, List<TkTiktokContentVideoDO>> videosByAccount = videoMapper
-                .selectPublicListByAccountIds(accountIds, scope).stream()
+                .selectRecentPublicListByAccountIds(accountIds, scope, RECENT_VIDEO_LIMIT).stream()
                 .filter(video -> video.getAccountId() != null)
                 .collect(Collectors.groupingBy(TkTiktokContentVideoDO::getAccountId,
                         LinkedHashMap::new, Collectors.toList()));
@@ -130,8 +130,9 @@ public class TkTiktokAccountStatsServiceImpl implements TkTiktokAccountStatsServ
         result.setLikesCount(account.getLikesCount());
         result.setVideoCount(account.getVideoCount());
         result.setStatsUpdatedAt(account.getStatsUpdatedAt());
-        result.setStatsAvailable(account.getFollowerCount() != null || account.getFollowingCount() != null
-                || account.getLikesCount() != null || account.getVideoCount() != null);
+        result.setStatsAvailable(account.getStatsUpdatedAt() != null && (account.getFollowerCount() != null
+                || account.getFollowingCount() != null || account.getLikesCount() != null
+                || account.getVideoCount() != null));
         List<TkTiktokContentVideoDO> videos = limitRecentPublicVideos(recentVideos);
         TkTiktokContentVideoDO latestVideo = videos.isEmpty() ? null : videos.get(0);
         if (latestVideo != null) {

@@ -10,9 +10,9 @@ import cn.iocoder.yudao.module.tk.enums.TkUserLevelEnum;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentMatchers;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -44,6 +44,7 @@ class TkTiktokAccountStatsServiceImplTest {
     void ranksIndividualVideosFromEachAccountsLatestFivePublicVideos() {
         TkTiktokAccountDO first = account(1L, "First", 100L);
         TkTiktokAccountDO second = account(2L, "Second", 200L);
+        first.setStatsUpdatedAt(LocalDateTime.of(2026, 9, 9, 12, 0));
         Map<Long, List<TkTiktokContentVideoDO>> recentVideos = new HashMap<>();
         recentVideos.put(1L, Arrays.asList(
                 video(11L, 500L, 1000L, "PUBLIC"),
@@ -85,20 +86,23 @@ class TkTiktokAccountStatsServiceImplTest {
         TkUserScope scope = new TkUserScope(7L, 100L, TkUserLevelEnum.COMPANY_USER.getCode(), 200L);
         TkTiktokAccountDO first = account(1L, "First", 100L);
         TkTiktokAccountDO second = account(2L, "Second", 200L);
+        first.setStatsUpdatedAt(LocalDateTime.of(2026, 9, 9, 12, 0));
         List<TkTiktokContentVideoDO> videos = Arrays.asList(
                 videoForAccount(12L, 1L, 500L, 1000L),
                 videoForAccount(11L, 1L, 400L, 900L),
                 videoForAccount(21L, 2L, 300L, 800L));
         when(dataScopeService.getCurrentScope()).thenReturn(scope);
         when(accountMapper.selectAuthorizedList(scope)).thenReturn(Arrays.asList(first, second));
-        when(videoMapper.selectPublicListByAccountIds(Arrays.asList(1L, 2L), scope)).thenReturn(videos);
+        when(videoMapper.selectRecentPublicListByAccountIds(Arrays.asList(1L, 2L), scope, 5))
+                .thenReturn(videos);
 
         TkTiktokAccountStatsOverviewRespVO overview = service.getOverview();
 
-        verify(videoMapper).selectPublicListByAccountIds(Arrays.asList(1L, 2L), scope);
-        verify(videoMapper, never()).selectRecentPublicListByAccountId(
-                ArgumentMatchers.anyLong(), ArgumentMatchers.any(), ArgumentMatchers.anyInt());
+        verify(videoMapper).selectRecentPublicListByAccountIds(Arrays.asList(1L, 2L), scope, 5);
+        verify(videoMapper, never()).selectPublicListByAccountIds(Arrays.asList(1L, 2L), scope);
         assertEquals(2, overview.getAccounts().get(0).getRecentVideos().size());
+        assertEquals(true, overview.getAccounts().get(0).getStatsAvailable());
+        assertEquals(false, overview.getAccounts().get(1).getStatsAvailable());
         assertEquals("12", overview.getAccounts().get(0).getRecentVideos().get(0).getVideoId());
         assertEquals("Video 12", overview.getAccounts().get(0).getRecentVideos().get(0).getTitle());
         assertEquals("https://cdn.example.com/12.jpg", overview.getAccounts().get(0).getRecentVideos().get(0).getCoverImageUrl());

@@ -8,6 +8,8 @@ import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokContentVide
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokContentVideoDO;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.Collection;
 import java.util.List;
@@ -54,6 +56,37 @@ public interface TkTiktokContentVideoMapper extends BaseMapperX<TkTiktokContentV
                 .orderByDesc(TkTiktokContentVideoDO::getVideoCreateTime)
                 .orderByDesc(TkTiktokContentVideoDO::getId));
     }
+
+    @Select({
+            "<script>",
+            "SELECT ranked.* FROM (",
+            "SELECT v.*, ROW_NUMBER() OVER (PARTITION BY v.account_id "
+                    + "ORDER BY v.video_create_time DESC, v.id DESC) AS row_num",
+            "FROM tk_tiktok_content_video v",
+            "WHERE v.deleted = 0",
+            "AND v.status = 'PUBLIC'",
+            "<if test='!scope.globalPlatformView'>",
+            "AND v.tenant_id = #{scope.tenantId}",
+            "</if>",
+            "<if test='!scope.platformAdmin and !scope.tenantAdmin'>",
+            "AND v.company_id = #{scope.companyId}",
+            "</if>",
+            "<if test='!scope.canReadAllTenantRecords'>",
+            "AND v.creator = #{scope.userIdString}",
+            "</if>",
+            "AND v.account_id IN",
+            "<foreach collection='accountIds' item='accountId' open='(' separator=',' close=')'>",
+            "#{accountId}",
+            "</foreach>",
+            ") ranked",
+            "WHERE ranked.row_num &lt;= #{limit}",
+            "ORDER BY ranked.video_create_time DESC, ranked.id DESC",
+            "</script>"
+    })
+    List<TkTiktokContentVideoDO> selectRecentPublicListByAccountIds(
+            @Param("accountIds") Collection<Long> accountIds,
+            @Param("scope") TkUserScope scope,
+            @Param("limit") int limit);
 
     default List<TkTiktokContentVideoDO> selectRecentPublicListByAccountId(Long accountId, TkUserScope scope,
                                                                               int limit) {
