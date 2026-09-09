@@ -14,4 +14,7 @@ public class TkTiktokAccountStatsRankRespVO {
     private Long latestVideoViewCount;
     private Long latestVideoCreateTime;
     private String latestVideoId;
+    private String latestVideoTitle;
+    private String latestVideoCoverImageUrl;
+    private String latestVideoShareUrl;
 }

@@ -10,10 +10,16 @@ export interface TkTiktokAccountStatsRankVO {
   latestVideoViewCount?: number
   latestVideoCreateTime?: number
   latestVideoId?: string
+  latestVideoTitle?: string
+  latestVideoCoverImageUrl?: string
+  latestVideoShareUrl?: string
 }
 
 export interface TkTiktokAccountRecentVideoVO {
   videoId?: string
+  title?: string
+  coverImageUrl?: string
+  shareUrl?: string
   viewCount?: number
   createTime?: number
 }

@@ -147,6 +147,9 @@ public class TkTiktokAccountStatsServiceImpl implements TkTiktokAccountStatsServ
     private static TkTiktokAccountRecentVideoRespVO toRecentVideo(TkTiktokContentVideoDO video) {
         TkTiktokAccountRecentVideoRespVO result = new TkTiktokAccountRecentVideoRespVO();
         result.setVideoId(video.getVideoId());
+        result.setTitle(video.getTitle());
+        result.setCoverImageUrl(video.getCoverImageUrl());
+        result.setShareUrl(video.getShareUrl());
         result.setViewCount(video.getViewCount());
         result.setCreateTime(video.getVideoCreateTime());
         return result;
@@ -174,6 +177,9 @@ public class TkTiktokAccountStatsServiceImpl implements TkTiktokAccountStatsServ
             result.setLatestVideoViewCount(video.getViewCount());
             result.setLatestVideoCreateTime(video.getVideoCreateTime());
             result.setLatestVideoId(video.getVideoId());
+            result.setLatestVideoTitle(video.getTitle());
+            result.setLatestVideoCoverImageUrl(video.getCoverImageUrl());
+            result.setLatestVideoShareUrl(video.getShareUrl());
         }
         return result;
     }

@@ -67,6 +67,9 @@ class TkTiktokAccountStatsServiceImplTest {
                 .map(TkTiktokAccountStatsRankRespVO::getAccountId).collect(java.util.stream.Collectors.toList()));
         assertEquals(1_000L, ranking.get(0).getMetricValue());
         assertEquals("21", ranking.get(0).getLatestVideoId());
+        assertEquals("Video 21", ranking.get(0).getLatestVideoTitle());
+        assertEquals("https://cdn.example.com/21.jpg", ranking.get(0).getLatestVideoCoverImageUrl());
+        assertEquals("https://www.tiktok.com/@first/video/21", ranking.get(0).getLatestVideoShareUrl());
     }
 
     @Test
@@ -97,6 +100,9 @@ class TkTiktokAccountStatsServiceImplTest {
                 ArgumentMatchers.anyLong(), ArgumentMatchers.any(), ArgumentMatchers.anyInt());
         assertEquals(2, overview.getAccounts().get(0).getRecentVideos().size());
         assertEquals("12", overview.getAccounts().get(0).getRecentVideos().get(0).getVideoId());
+        assertEquals("Video 12", overview.getAccounts().get(0).getRecentVideos().get(0).getTitle());
+        assertEquals("https://cdn.example.com/12.jpg", overview.getAccounts().get(0).getRecentVideos().get(0).getCoverImageUrl());
+        assertEquals("https://www.tiktok.com/@first/video/12", overview.getAccounts().get(0).getRecentVideos().get(0).getShareUrl());
     }
 
     private static TkTiktokAccountDO account(Long id, String displayName, Long followerCount) {
@@ -105,11 +111,17 @@ class TkTiktokAccountStatsServiceImplTest {
 
     private static TkTiktokContentVideoDO video(Long id, Long viewCount, Long createTime, String status) {
         return TkTiktokContentVideoDO.builder().id(id).viewCount(viewCount)
-                .videoId(String.valueOf(id)).videoCreateTime(createTime).status(status).build();
+                .videoId(String.valueOf(id)).title("Video " + id)
+                .coverImageUrl("https://cdn.example.com/" + id + ".jpg")
+                .shareUrl("https://www.tiktok.com/@first/video/" + id)
+                .videoCreateTime(createTime).status(status).build();
     }
 
     private static TkTiktokContentVideoDO videoForAccount(Long id, Long accountId, Long viewCount, Long createTime) {
         return TkTiktokContentVideoDO.builder().id(id).accountId(accountId).viewCount(viewCount)
-                .videoId(String.valueOf(id)).videoCreateTime(createTime).status("PUBLIC").build();
+                .videoId(String.valueOf(id)).title("Video " + id)
+                .coverImageUrl("https://cdn.example.com/" + id + ".jpg")
+                .shareUrl("https://www.tiktok.com/@first/video/" + id)
+                .videoCreateTime(createTime).status("PUBLIC").build();
     }
 }
