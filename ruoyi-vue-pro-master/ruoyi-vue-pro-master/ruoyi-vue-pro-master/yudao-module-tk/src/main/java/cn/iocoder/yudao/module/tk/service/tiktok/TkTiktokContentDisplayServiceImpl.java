@@ -93,6 +93,16 @@ public class TkTiktokContentDisplayServiceImpl implements TkTiktokContentDisplay
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void refreshAccountStats(Long accountId) {
+        TkTiktokAccountDO account = accountService.validateAccountReadable(accountId);
+        if (!"AUTHORIZED".equals(account.getAuthStatus())) {
+            throw new IllegalArgumentException("TikTok 账号未授权，请先完成授权");
+        }
+        refreshAccountProfile(account);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public TkTiktokContentVideoRespVO refreshVideo(Long accountId, String videoId) {
         TkTiktokAccountDO account = accountService.validateAccountReadable(accountId);
         if (StrUtil.isBlank(videoId)) {

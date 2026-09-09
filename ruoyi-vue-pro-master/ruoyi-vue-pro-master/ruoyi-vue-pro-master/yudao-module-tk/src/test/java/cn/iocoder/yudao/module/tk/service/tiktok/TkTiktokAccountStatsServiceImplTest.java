@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.tk.service.tiktok;
 
 import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokAccountStatsRankRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokAccountStatsOverviewRespVO;
+import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokContentSyncRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokAccountDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokContentVideoDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokAccountMapper;
@@ -107,6 +108,42 @@ class TkTiktokAccountStatsServiceImplTest {
         assertEquals("Video 12", overview.getAccounts().get(0).getRecentVideos().get(0).getTitle());
         assertEquals("https://cdn.example.com/12.jpg", overview.getAccounts().get(0).getRecentVideos().get(0).getCoverImageUrl());
         assertEquals("https://www.tiktok.com/@first/video/12", overview.getAccounts().get(0).getRecentVideos().get(0).getShareUrl());
+    }
+
+    @Test
+    void syncsEveryAuthorizedAccountAndKeepsPerAccountErrors() {
+        TkTiktokAccountMapper accountMapper = mock(TkTiktokAccountMapper.class);
+        TkTiktokContentDisplayService contentDisplayService = mock(TkTiktokContentDisplayService.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        TkTiktokAccountStatsServiceImpl service = new TkTiktokAccountStatsServiceImpl();
+        ReflectionTestUtils.setField(service, "accountMapper", accountMapper);
+        ReflectionTestUtils.setField(service, "contentDisplayService", contentDisplayService);
+        ReflectionTestUtils.setField(service, "dataScopeService", dataScopeService);
+
+        TkUserScope scope = new TkUserScope(7L, 100L, TkUserLevelEnum.COMPANY_USER.getCode(), 200L);
+        TkTiktokAccountDO first = account(1L, "First", 100L);
+        TkTiktokAccountDO second = account(2L, "Second", 200L);
+        when(dataScopeService.getCurrentScope()).thenReturn(scope);
+        when(accountMapper.selectAuthorizedList(scope)).thenReturn(Arrays.asList(first, second));
+
+        TkTiktokContentSyncRespVO firstResult = new TkTiktokContentSyncRespVO();
+        firstResult.setAccountId(1L);
+        firstResult.setSyncedCount(5);
+        firstResult.setTruncated(false);
+        when(contentDisplayService.syncAccount(1L)).thenReturn(firstResult);
+        when(contentDisplayService.syncAccount(2L)).thenThrow(new IllegalArgumentException("缺少 video.list 权限"));
+
+        List<TkTiktokContentSyncRespVO> results = service.syncAllAccounts();
+
+        assertEquals(2, results.size());
+        assertEquals(1L, results.get(0).getAccountId());
+        assertEquals(5, results.get(0).getSyncedCount());
+        assertEquals(2L, results.get(1).getAccountId());
+        assertEquals("缺少 video.list 权限", results.get(1).getFailReason());
+        verify(contentDisplayService).refreshAccountStats(1L);
+        verify(contentDisplayService).refreshAccountStats(2L);
+        verify(contentDisplayService).syncAccount(1L);
+        verify(contentDisplayService).syncAccount(2L);
     }
 
     private static TkTiktokAccountDO account(Long id, String displayName, Long followerCount) {

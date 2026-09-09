@@ -16,7 +16,7 @@
           plain
           :loading="refreshing"
           :disabled="loading"
-          @click="loadOverview"
+          @click="loadOverview()"
         >
           <Icon icon="ep:refresh" class="button-icon" />
           {{ tt('common.refresh') }}
@@ -35,7 +35,7 @@
       <template #default>
         <div class="alert-content">
           <span>{{ tt('accountStats.loadFailed') }}</span>
-          <el-button link type="danger" :loading="refreshing" @click="loadOverview">
+          <el-button link type="danger" :loading="refreshing" @click="loadOverview()">
             {{ tt('accountStats.retryLoad') }}
           </el-button>
         </div>
@@ -319,12 +319,14 @@ import {
 } from '@/api/tk/tiktokAccountStats'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import { formatDate } from '@/utils/formatTime'
+import { checkPermi } from '@/utils/permission'
 
 defineOptions({ name: 'TkTiktokAccountStats' })
 
 const DATA_STALE_AFTER_MS = 24 * 60 * 60 * 1000
 const message = useMessage()
 const { tt } = useTkI18n()
+const canSync = checkPermi(['tk:tiktok-content-display:sync'])
 const loading = ref(true)
 const refreshing = ref(false)
 const loadError = ref(false)
@@ -394,21 +396,31 @@ const clearSearch = () => {
   searchKeyword.value = ''
 }
 
-const loadOverview = async () => {
+const applyOverview = (data: TkTiktokAccountStatsOverviewVO) => {
+  overview.value = {
+    topFollowerAccounts: data.topFollowerAccounts || [],
+    topLatestVideoViewAccounts: data.topLatestVideoViewAccounts || [],
+    accounts: data.accounts || [],
+    dataUpdatedAt: data.dataUpdatedAt,
+    latestVideoSyncedAt: data.latestVideoSyncedAt
+  }
+}
+
+const loadOverview = async (sync = false) => {
   if (!hasLoaded.value) {
     loading.value = true
   }
   refreshing.value = true
   loadError.value = false
   try {
-    const data = await TkTiktokAccountStatsApi.getOverview()
-    overview.value = {
-      topFollowerAccounts: data.topFollowerAccounts || [],
-      topLatestVideoViewAccounts: data.topLatestVideoViewAccounts || [],
-      accounts: data.accounts || [],
-      dataUpdatedAt: data.dataUpdatedAt,
-      latestVideoSyncedAt: data.latestVideoSyncedAt
+    if (sync) {
+      const results = await TkTiktokAccountStatsApi.syncAllAccounts()
+      const failures = results.filter((item) => item.failReason)
+      if (failures.length) {
+        message.warning(`${failures.length} 个账号同步失败：${failures[0].failReason}`)
+      }
     }
+    applyOverview(await TkTiktokAccountStatsApi.getOverview())
     hasLoaded.value = true
   } catch {
     loadError.value = true
@@ -419,7 +431,7 @@ const loadOverview = async () => {
   }
 }
 
-onMounted(loadOverview)
+onMounted(() => loadOverview(canSync))
 </script>
 
 <style scoped>

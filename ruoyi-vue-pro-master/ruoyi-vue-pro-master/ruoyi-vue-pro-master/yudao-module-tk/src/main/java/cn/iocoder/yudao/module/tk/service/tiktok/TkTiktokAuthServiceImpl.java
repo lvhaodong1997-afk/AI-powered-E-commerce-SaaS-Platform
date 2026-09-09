@@ -277,6 +277,7 @@ public class TkTiktokAuthServiceImpl implements TkTiktokAuthService {
         account.setAuthStatus("AUTHORIZED");
         account.setLastAuthTime(LocalDateTime.now());
         account.setFailReason(null);
+        applyAuthorizationOwner(account, session.getUserId());
         applyUserInfo(account, apiClient.queryUserInfo(accessToken));
         if (account.getId() == null) {
             accountMapper.insert(account);
@@ -286,6 +287,12 @@ public class TkTiktokAuthServiceImpl implements TkTiktokAuthService {
         session.setStatus("SUCCESS");
         session.setFailReason(null);
         authSessionMapper.updateById(session);
+    }
+
+    static void applyAuthorizationOwner(TkTiktokAccountDO account, Long userId) {
+        if (account != null && userId != null) {
+            account.setCreator(String.valueOf(userId));
+        }
     }
 
     static void applyUserInfo(TkTiktokAccountDO account, TkTiktokApiClient.UserInfo userInfo) {

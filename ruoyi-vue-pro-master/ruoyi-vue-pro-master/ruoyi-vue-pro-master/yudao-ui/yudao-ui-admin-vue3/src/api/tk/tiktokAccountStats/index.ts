@@ -50,8 +50,18 @@ export interface TkTiktokAccountStatsOverviewVO {
   latestVideoSyncedAt?: string
 }
 
+export interface TkTiktokAccountStatsSyncVO {
+  accountId: number
+  syncedCount?: number
+  truncated?: boolean
+  failReason?: string
+}
+
 export const TkTiktokAccountStatsApi = {
   getOverview: async (): Promise<TkTiktokAccountStatsOverviewVO> => {
     return await request.get({ url: '/tk/tiktok-account-stats/overview' })
+  },
+  syncAllAccounts: async (): Promise<TkTiktokAccountStatsSyncVO[]> => {
+    return await request.post({ url: '/tk/tiktok-account-stats/sync' })
   }
 }

@@ -82,6 +82,33 @@ class TkTiktokContentDisplayServiceImplTest {
     }
 
     @Test
+    void refreshesUserStatsWithoutRequiringVideoList() {
+        TkTiktokAccountMapper accountMapper = mock(TkTiktokAccountMapper.class);
+        TkTiktokAccountService accountService = mock(TkTiktokAccountService.class);
+        TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
+        TkTiktokTokenService tokenService = mock(TkTiktokTokenService.class);
+        TkTiktokContentDisplayServiceImpl service = new TkTiktokContentDisplayServiceImpl();
+        ReflectionTestUtils.setField(service, "accountMapper", accountMapper);
+        ReflectionTestUtils.setField(service, "accountService", accountService);
+        ReflectionTestUtils.setField(service, "apiClient", apiClient);
+        ReflectionTestUtils.setField(service, "tokenService", tokenService);
+
+        TkTiktokAccountDO account = TkTiktokAccountDO.builder().id(10L).authStatus("AUTHORIZED").build();
+        when(accountService.validateAccountReadable(10L)).thenReturn(account);
+        when(tokenService.getValidAccessToken(10L)).thenReturn("access-token");
+        when(apiClient.queryUserInfo("access-token")).thenReturn(new TkTiktokApiClient.UserInfo(
+                true, null, "open-10", null, "Shop Main", "shop_main", "https://cdn.example/avatar.png",
+                1200L, 80L, 45000L, 23L));
+        service.refreshAccountStats(10L);
+
+        assertEquals(1200L, account.getFollowerCount());
+        assertEquals(80L, account.getFollowingCount());
+        assertEquals(45000L, account.getLikesCount());
+        assertEquals(23L, account.getVideoCount());
+        verify(accountMapper).updateById(account);
+    }
+
+    @Test
     void marksPreviouslyPublicVideosMissingFromCompleteSyncAsNoLongerPublic() {
         TkTiktokAccountMapper accountMapper = mock(TkTiktokAccountMapper.class);
         TkTiktokContentVideoMapper videoMapper = mock(TkTiktokContentVideoMapper.class);

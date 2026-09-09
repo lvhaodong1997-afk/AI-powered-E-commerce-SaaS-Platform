@@ -11,6 +11,8 @@ public interface TkTiktokContentDisplayService {
 
     TkTiktokContentSyncRespVO syncAccount(Long accountId);
 
+    void refreshAccountStats(Long accountId);
+
     TkTiktokContentVideoRespVO refreshVideo(Long accountId, String videoId);
 
 }

@@ -4,6 +4,7 @@ import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokAccountStat
 import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokAccountRecentVideoRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokAccountStatsRankRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokAccountStatsRespVO;
+import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokContentSyncRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokAccountDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokContentVideoDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokAccountMapper;
@@ -37,6 +38,8 @@ public class TkTiktokAccountStatsServiceImpl implements TkTiktokAccountStatsServ
     private TkTiktokContentVideoMapper videoMapper;
     @Resource
     private TkDataScopeService dataScopeService;
+    @Resource
+    private TkTiktokContentDisplayService contentDisplayService;
 
     @Override
     public TkTiktokAccountStatsOverviewRespVO getOverview() {
@@ -55,6 +58,30 @@ public class TkTiktokAccountStatsServiceImpl implements TkTiktokAccountStatsServ
                 .map(TkTiktokContentVideoDO::getLastSyncTime)
                 .filter(java.util.Objects::nonNull).max(Comparator.naturalOrder()).orElse(null));
         return overview;
+    }
+
+    @Override
+    public List<TkTiktokContentSyncRespVO> syncAllAccounts() {
+        TkUserScope scope = dataScopeService.getCurrentScope();
+        List<TkTiktokAccountDO> accounts = accountMapper.selectAuthorizedList(scope);
+        List<TkTiktokContentSyncRespVO> results = new ArrayList<>();
+        for (TkTiktokAccountDO account : accounts) {
+            if (account == null || account.getId() == null) {
+                continue;
+            }
+            try {
+                contentDisplayService.refreshAccountStats(account.getId());
+                results.add(contentDisplayService.syncAccount(account.getId()));
+            } catch (Exception ex) {
+                TkTiktokContentSyncRespVO result = new TkTiktokContentSyncRespVO();
+                result.setAccountId(account.getId());
+                result.setSyncedCount(0);
+                result.setTruncated(false);
+                result.setFailReason(ex.getMessage() == null ? "TikTok 账号同步失败" : ex.getMessage());
+                results.add(result);
+            }
+        }
+        return results;
     }
 
     static List<TkTiktokAccountStatsRankRespVO> rankFollowerAccounts(List<TkTiktokAccountDO> accounts) {

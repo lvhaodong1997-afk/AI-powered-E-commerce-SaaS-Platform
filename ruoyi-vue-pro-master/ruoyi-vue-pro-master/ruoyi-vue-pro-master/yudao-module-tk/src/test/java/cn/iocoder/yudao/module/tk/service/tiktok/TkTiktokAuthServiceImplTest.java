@@ -60,4 +60,13 @@ class TkTiktokAuthServiceImplTest {
         assertNotNull(account.getStatsUpdatedAt());
     }
 
+    @Test
+    void bindsAccountToTheUserWhoCompletesAuthorization() {
+        TkTiktokAccountDO account = TkTiktokAccountDO.builder().openId("open-owner").build();
+
+        TkTiktokAuthServiceImpl.applyAuthorizationOwner(account, 226L);
+
+        assertEquals("226", account.getCreator());
+    }
+
 }
