@@ -182,6 +182,26 @@ const remainingRouter: AppRouteRecordRaw[] = [
     ]
   },
   {
+    path: '/tk/tiktok-account-stats',
+    component: Layout,
+    name: 'TkTiktokAccountStatsDirectRoot',
+    meta: { hidden: true, noTagsView: true },
+    children: [
+      {
+        path: '',
+        component: () => import('@/views/tk/tiktok-account-stats/index.vue'),
+        name: 'TkTiktokAccountStatsDirect',
+        meta: {
+          title: 'TikTok Account Stats',
+          hidden: true,
+          noTagsView: false,
+          activeMenu: '/tk/tiktok-account-stats',
+          icon: 'ep:data-analysis'
+        }
+      }
+    ]
+  },
+  {
     path: '/user',
     component: Layout,
     name: 'UserInfo',

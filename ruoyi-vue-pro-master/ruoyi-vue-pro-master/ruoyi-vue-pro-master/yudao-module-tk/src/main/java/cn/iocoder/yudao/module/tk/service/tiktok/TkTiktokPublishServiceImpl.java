@@ -394,6 +394,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                     .brandContent(defaultBool(reqVO.getBrandContent(), account.getBrandContent(), false))
                     .aigcContent(defaultBool(reqVO.getAigcContent(), account.getAigcContent(), true))
                     .retryCount(0)
+                    .linkRetryCount(0)
+                    .publicPostCount(0)
                     .build();
             detail.setTenantId(tenantId);
             publishDetailMapper.insert(detail);
@@ -587,14 +589,16 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             if (isTikTokPublishSuccess(tiktokStatus)) {
                 PublicLinkCaptureResult captureResult = capturePublishUrl(detail, account.getId(), result);
                 if (shouldWaitForPublicPost(detail, result)) {
-                    detail.setStatus(STATUS_PROCESSING);
-                    detail.setLinkCaptureStatus(LINK_WAITING_PUBLIC_REVIEW);
-                    scheduleLinkRetry(detail, null);
-                    detail.setFailReason(null);
-                    publishDetailMapper.updateById(detail);
-                    return;
+                    if (scheduleLinkRetry(detail, null)) {
+                        detail.setStatus(STATUS_PROCESSING);
+                        detail.setFailReason(null);
+                        publishDetailMapper.updateById(detail);
+                        return;
+                    }
                 }
-                if (captureResult.isRetryable() && scheduleLinkRetry(detail, captureResult.getFailReason())) {
+                if (captureResult.isRetryable()
+                        && !LINK_FAILED.equals(detail.getLinkCaptureStatus())
+                        && scheduleLinkRetry(detail, captureResult.getFailReason())) {
                     detail.setStatus(STATUS_PROCESSING);
                     detail.setFailReason(null);
                     publishDetailMapper.updateById(detail);
@@ -869,10 +873,12 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 .set(TkTiktokPublishDetailDO::getRetryCount, detail.getRetryCount())
                 .set(TkTiktokPublishDetailDO::getLastSyncTime, detail.getLastSyncTime())
                 .set(TkTiktokPublishDetailDO::getLinkCaptureStatus, detail.getLinkCaptureStatus())
-                .set(TkTiktokPublishDetailDO::getLinkRetryCount, detail.getLinkRetryCount())
+                .set(TkTiktokPublishDetailDO::getLinkRetryCount,
+                        detail.getLinkRetryCount() == null ? 0 : detail.getLinkRetryCount())
                 .set(TkTiktokPublishDetailDO::getLinkNextRetryTime, detail.getLinkNextRetryTime())
                 .set(TkTiktokPublishDetailDO::getLinkLastError, detail.getLinkLastError())
-                .set(TkTiktokPublishDetailDO::getPublicPostCount, detail.getPublicPostCount())
+                .set(TkTiktokPublishDetailDO::getPublicPostCount,
+                        detail.getPublicPostCount() == null ? 0 : detail.getPublicPostCount())
                 .set(TkTiktokPublishDetailDO::getFailReason, null));
     }
 

@@ -111,7 +111,8 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_content_video` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tk_content_video_account_video` (`tenant_id`, `account_id`, `video_id`, `deleted`),
   KEY `idx_tk_content_video_company_status` (`tenant_id`, `company_id`, `status`),
-  KEY `idx_tk_content_video_create_time` (`tenant_id`, `video_create_time`)
+  KEY `idx_tk_content_video_create_time` (`tenant_id`, `video_create_time`),
+  KEY `idx_tk_content_video_account_status_time` (`tenant_id`, `account_id`, `status`, `video_create_time`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='TikTok 账号公开视频';
 
 CREATE TABLE IF NOT EXISTS `tk_tiktok_webhook_event` (
@@ -158,7 +159,11 @@ PREPARE tk_account_active_unique_stmt FROM @sql;
 EXECUTE tk_account_active_unique_stmt;
 DEALLOCATE PREPARE tk_account_active_unique_stmt;
 
-SET @sql := IF(EXISTS (SELECT 1 FROM tk_api_key_config WHERE provider = 'TIKTOK' AND config_key = 'default-scopes' AND FIND_IN_SET('video.list', config_value) > 0), 'SELECT 1', 'UPDATE tk_api_key_config SET config_value = CONCAT(TRIM(TRAILING '','' FROM config_value), '',video.list'') WHERE provider = ''TIKTOK'' AND config_key = ''default-scopes'' AND config_value <> ''''');
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_schema = @schema_name AND table_name = 'tk_api_key_config'
+                         AND column_name = 'config_value'),
+    'UPDATE `tk_api_key_config` SET `config_value` = CONCAT(TRIM(TRAILING '','' FROM `config_value`), '',video.list'') WHERE `provider` = ''TIKTOK'' AND `config_key` = ''default-scopes'' AND `config_value` <> '''' AND FIND_IN_SET(''video.list'', `config_value`) = 0',
+    'SELECT 1');
 PREPARE tk_tiktok_video_list_scope_stmt FROM @sql;
 EXECUTE tk_tiktok_video_list_scope_stmt;
 DEALLOCATE PREPARE tk_tiktok_video_list_scope_stmt;

@@ -8,6 +8,11 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_account` (
   `display_name` varchar(128) DEFAULT NULL COMMENT '鏄剧ず鍚嶇О',
   `username` varchar(128) DEFAULT NULL COMMENT '鐢ㄦ埛鍚?',
   `avatar_url` varchar(512) DEFAULT NULL COMMENT '澶村儚',
+  `follower_count` bigint DEFAULT NULL COMMENT 'follower count',
+  `following_count` bigint DEFAULT NULL COMMENT 'following count',
+  `likes_count` bigint DEFAULT NULL COMMENT 'likes count',
+  `video_count` bigint DEFAULT NULL COMMENT 'video count',
+  `stats_updated_at` datetime DEFAULT NULL COMMENT 'stats update time',
   `scopes` varchar(512) DEFAULT NULL COMMENT '鎺堟潈鑼冨洿',
   `access_token_cipher` varchar(3000) DEFAULT NULL COMMENT '鍔犲瘑AccessToken',
   `refresh_token_cipher` varchar(3000) DEFAULT NULL COMMENT '鍔犲瘑RefreshToken',
@@ -36,7 +41,8 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_account` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tk_tiktok_account_active_open_id` (`tenant_id`, `active_open_id`),
   KEY `idx_tk_tiktok_account_company` (`tenant_id`, `company_id`),
-  KEY `idx_tk_tiktok_account_token` (`tenant_id`, `token_status`)
+  KEY `idx_tk_tiktok_account_token` (`tenant_id`, `token_status`),
+  KEY `idx_tk_tiktok_account_stats` (`tenant_id`, `auth_status`, `follower_count`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='TK TikTok璐﹀彿';
 
 CREATE TABLE IF NOT EXISTS `tk_tiktok_account_group` (
@@ -178,7 +184,7 @@ VALUES
   (1, 'TIKTOK', 'client-key', '', 'TikTok Login Kit / Content Posting API Client Key', 0),
   (1, 'TIKTOK', 'client-secret', '', 'TikTok Login Kit / Content Posting API Client Secret', 0),
   (1, 'TIKTOK', 'redirect-uri', '', 'TikTok 瀹樻柟鎺堟潈鍥炶皟鍦板潃锛岄渶瑕佷笌寮€鍙戣€呭悗鍙颁竴鑷?', 0),
-  (1, 'TIKTOK', 'default-scopes', 'user.info.basic,video.publish,video.upload,video.list', '榛樿鎺堟潈鑼冨洿', 0),
+  (1, 'TIKTOK', 'default-scopes', 'user.info.basic,user.info.profile,user.info.stats,video.publish,video.upload,video.list', '榛樿鎺堟潈鑼冨洿', 0),
   (1, 'TIKTOK', 'default-post-mode', 'DIRECT_POST', '榛樿鍙戝竷妯″紡锛欴IRECT_POST/UPLOAD_TO_INBOX', 0),
   (1, 'TIKTOK', 'verified-pull-domain', '', 'TikTok 宸查獙璇佺殑瑙嗛鎷夊彇鍩熷悕锛涗负绌烘椂浼樺厛浣跨敤鏂囦欢涓婁紶', 0)
 ON DUPLICATE KEY UPDATE `remark` = VALUES(`remark`);

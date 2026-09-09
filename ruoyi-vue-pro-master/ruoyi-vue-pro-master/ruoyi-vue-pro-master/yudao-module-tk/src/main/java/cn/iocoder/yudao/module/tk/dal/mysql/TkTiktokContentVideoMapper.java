@@ -9,6 +9,7 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokContentVideoDO;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import org.apache.ibatis.annotations.Mapper;
 
+import java.util.Collection;
 import java.util.List;
 
 @Mapper
@@ -39,6 +40,35 @@ public interface TkTiktokContentVideoMapper extends BaseMapperX<TkTiktokContentV
         return selectList(new LambdaQueryWrapperX<TkTiktokContentVideoDO>()
                 .eq(TkTiktokContentVideoDO::getAccountId, accountId)
                 .orderByDesc(TkTiktokContentVideoDO::getVideoCreateTime));
+    }
+
+    default List<TkTiktokContentVideoDO> selectPublicListByAccountIds(Collection<Long> accountIds, TkUserScope scope) {
+        return selectList(new LambdaQueryWrapperX<TkTiktokContentVideoDO>()
+                .eqIfPresent(TkTiktokContentVideoDO::getTenantId, scope.isGlobalPlatformView() ? null : scope.getTenantId())
+                .eqIfPresent(TkTiktokContentVideoDO::getCompanyId,
+                        scope.isPlatformAdmin() || scope.isTenantAdmin() ? null : scope.getCompanyId())
+                .eqIfPresent(TkTiktokContentVideoDO::getCreator,
+                        scope.canReadAllTenantRecords() ? null : scope.getUserIdString())
+                .inIfPresent(TkTiktokContentVideoDO::getAccountId, accountIds)
+                .eq(TkTiktokContentVideoDO::getStatus, "PUBLIC")
+                .orderByDesc(TkTiktokContentVideoDO::getVideoCreateTime)
+                .orderByDesc(TkTiktokContentVideoDO::getId));
+    }
+
+    default List<TkTiktokContentVideoDO> selectRecentPublicListByAccountId(Long accountId, TkUserScope scope,
+                                                                              int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 5));
+        return selectList(new LambdaQueryWrapperX<TkTiktokContentVideoDO>()
+                .eqIfPresent(TkTiktokContentVideoDO::getTenantId, scope.isGlobalPlatformView() ? null : scope.getTenantId())
+                .eqIfPresent(TkTiktokContentVideoDO::getCompanyId,
+                        scope.isPlatformAdmin() || scope.isTenantAdmin() ? null : scope.getCompanyId())
+                .eqIfPresent(TkTiktokContentVideoDO::getCreator,
+                        scope.canReadAllTenantRecords() ? null : scope.getUserIdString())
+                .eq(TkTiktokContentVideoDO::getAccountId, accountId)
+                .eq(TkTiktokContentVideoDO::getStatus, "PUBLIC")
+                .orderByDesc(TkTiktokContentVideoDO::getVideoCreateTime)
+                .orderByDesc(TkTiktokContentVideoDO::getId)
+                .last("LIMIT " + safeLimit));
     }
 
 }

@@ -43,6 +43,7 @@ public class TkTiktokApiClient {
     private static final String VIDEO_LIST_URL = "https://open.tiktokapis.com/v2/video/list/";
     private static final String VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/"
             + "?fields=id,create_time,cover_image_url,share_url,video_description,duration,height,width,title,embed_html,embed_link,like_count,comment_count,share_count,view_count,is_aigc";
+    private static final String USER_INFO_FIELDS = "open_id,union_id,avatar_url,display_name,username,follower_count,following_count,likes_count,video_count";
     private static final int UPLOAD_MAX_ATTEMPTS = 3;
     private static final int UPLOAD_TIMEOUT_MILLIS = 10 * 60 * 1000;
 
@@ -67,7 +68,7 @@ public class TkTiktokApiClient {
 
     public String getDefaultScopes() {
         return configService.getValueOrDefault(PROVIDER, "default-scopes",
-                "user.info.basic,video.publish,video.upload,video.list");
+                "user.info.basic,user.info.profile,user.info.stats,video.publish,video.upload,video.list");
     }
 
     public String getDefaultPostMode() {
@@ -176,15 +177,15 @@ public class TkTiktokApiClient {
 
     public UserInfo queryUserInfo(String accessToken) {
         if (StrUtil.isBlank(accessToken)) {
-            return new UserInfo(false, "账号缺少 Access Token", null, null, null, null, null);
+            return new UserInfo(false, "账号缺少 Access Token", null, null, null, null, null,
+                    null, null, null, null);
         }
         try {
-            JsonNode root = getJson(USER_INFO_URL
-                    + "?fields=open_id,union_id,avatar_url,display_name", accessToken);
+            JsonNode root = getJson(USER_INFO_URL + "?fields=" + userInfoFields(), accessToken);
             return parseUserInfo(root);
         } catch (Exception ex) {
             return new UserInfo(false, "TikTok user_info 查询失败：" + ex.getMessage(),
-                    null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null);
         }
     }
 
@@ -192,7 +193,7 @@ public class TkTiktokApiClient {
         JsonNode error = getErrorNode(root);
         if (!"ok".equals(error.path("code").asText())) {
             return new UserInfo(false, formatApiError(error, "TikTok user_info 查询失败"),
-                    null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null);
         }
         JsonNode user = root.path("data").path("user");
         return new UserInfo(true, null,
@@ -200,7 +201,11 @@ public class TkTiktokApiClient {
                 user.path("union_id").asText(null),
                 user.path("display_name").asText(null),
                 user.path("username").asText(null),
-                user.path("avatar_url").asText(null));
+                user.path("avatar_url").asText(null),
+                numberAsLong(user.path("follower_count")),
+                numberAsLong(user.path("following_count")),
+                numberAsLong(user.path("likes_count")),
+                numberAsLong(user.path("video_count")));
     }
 
     public PublishResult initVideoPost(String accessToken, String postMode, Map<String, Object> payload) {
@@ -409,7 +414,7 @@ public class TkTiktokApiClient {
             payload.put("cursor", cursor);
         }
         payload.put("max_count", maxCount == null ? 20 : Math.min(Math.max(maxCount, 1), 20));
-        String url = VIDEO_LIST_URL + "?fields=id,create_time,cover_image_url,share_url,video_description,duration,height,width,title,embed_html,embed_link";
+        String url = VIDEO_LIST_URL + "?fields=id,create_time,cover_image_url,share_url,video_description,duration,height,width,title,embed_html,embed_link,view_count";
         return parseVideoListResult(postJson(url, accessToken, payload));
     }
 
@@ -572,6 +577,20 @@ public class TkTiktokApiClient {
         private String displayName;
         private String username;
         private String avatarUrl;
+        private Long followerCount;
+        private Long followingCount;
+        private Long likesCount;
+        private Long videoCount;
+
+        public UserInfo(boolean success, String failReason, String openId, String unionId,
+                        String displayName, String username, String avatarUrl) {
+            this(success, failReason, openId, unionId, displayName, username, avatarUrl,
+                    null, null, null, null);
+        }
+    }
+
+    static String userInfoFields() {
+        return USER_INFO_FIELDS;
     }
 
     @Data
@@ -666,6 +685,14 @@ public class TkTiktokApiClient {
         private Long shareCount;
         private Long viewCount;
         private Boolean aigc;
+
+        public VideoInfo(String id, Long createTime, String coverImageUrl, String shareUrl,
+                         String videoDescription, Integer duration, Integer height, Integer width,
+                         String title, String embedHtml, String embedLink, Long likeCount,
+                         Long commentCount, Long shareCount, Boolean aigc) {
+            this(id, createTime, coverImageUrl, shareUrl, videoDescription, duration, height, width,
+                    title, embedHtml, embedLink, likeCount, commentCount, shareCount, null, aigc);
+        }
     }
 
     @Data

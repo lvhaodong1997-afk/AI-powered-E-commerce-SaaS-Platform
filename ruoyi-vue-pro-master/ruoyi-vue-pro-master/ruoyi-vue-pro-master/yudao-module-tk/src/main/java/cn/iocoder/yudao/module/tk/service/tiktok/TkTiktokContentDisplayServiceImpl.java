@@ -21,6 +21,8 @@ import org.springframework.validation.annotation.Validated;
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 @Service
 @Validated
@@ -57,6 +59,7 @@ public class TkTiktokContentDisplayServiceImpl implements TkTiktokContentDisplay
         int syncedCount = 0;
         Long cursor = null;
         boolean truncated = false;
+        Set<String> syncedVideoIds = new HashSet<>();
         for (int page = 0; page < MAX_SYNC_PAGES; page++) {
             VideoListResult result = listVideosWithRetry(accountId, cursor);
             if (!result.isSuccess()) {
@@ -64,6 +67,7 @@ public class TkTiktokContentDisplayServiceImpl implements TkTiktokContentDisplay
             }
             for (VideoInfo video : result.getVideos()) {
                 if (StrUtil.isNotBlank(video.getId())) {
+                    syncedVideoIds.add(video.getId());
                     upsertVideo(account, video);
                     syncedCount++;
                 }
@@ -75,6 +79,9 @@ public class TkTiktokContentDisplayServiceImpl implements TkTiktokContentDisplay
             if (page == MAX_SYNC_PAGES - 1) {
                 truncated = true;
             }
+        }
+        if (!truncated) {
+            markMissingVideosNotPublic(accountId, syncedVideoIds);
         }
         refreshAccountProfile(account);
         TkTiktokContentSyncRespVO response = new TkTiktokContentSyncRespVO();
@@ -148,6 +155,18 @@ public class TkTiktokContentDisplayServiceImpl implements TkTiktokContentDisplay
         return target;
     }
 
+    private void markMissingVideosNotPublic(Long accountId, Set<String> syncedVideoIds) {
+        for (TkTiktokContentVideoDO existing : videoMapper.selectListByAccountId(accountId)) {
+            if (!"PUBLIC".equals(existing.getStatus()) || syncedVideoIds.contains(existing.getVideoId())) {
+                continue;
+            }
+            existing.setStatus("NO_LONGER_PUBLIC");
+            existing.setNoLongerPublicTime(LocalDateTime.now());
+            existing.setLastSyncTime(LocalDateTime.now());
+            videoMapper.updateById(existing);
+        }
+    }
+
     private void refreshAccountProfile(TkTiktokAccountDO account) {
         TkTiktokApiClient.UserInfo info = apiClient.queryUserInfo(tokenService.getValidAccessToken(account.getId()));
         if (!info.isSuccess()) {
@@ -156,6 +175,14 @@ public class TkTiktokContentDisplayServiceImpl implements TkTiktokContentDisplay
         if (StrUtil.isNotBlank(info.getDisplayName())) account.setDisplayName(info.getDisplayName().trim());
         if (StrUtil.isNotBlank(info.getUsername())) account.setUsername(info.getUsername().trim());
         if (StrUtil.isNotBlank(info.getAvatarUrl())) account.setAvatarUrl(info.getAvatarUrl().trim());
+        if (info.getFollowerCount() != null) account.setFollowerCount(info.getFollowerCount());
+        if (info.getFollowingCount() != null) account.setFollowingCount(info.getFollowingCount());
+        if (info.getLikesCount() != null) account.setLikesCount(info.getLikesCount());
+        if (info.getVideoCount() != null) account.setVideoCount(info.getVideoCount());
+        if (info.getFollowerCount() != null || info.getFollowingCount() != null
+                || info.getLikesCount() != null || info.getVideoCount() != null) {
+            account.setStatsUpdatedAt(LocalDateTime.now());
+        }
         accountMapper.updateById(account);
     }
 

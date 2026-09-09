@@ -5,6 +5,7 @@ import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class TkTiktokAuthServiceImplTest {
 
@@ -40,6 +41,23 @@ class TkTiktokAuthServiceImplTest {
 
         assertEquals("客户A主账号", manual.getDisplayName());
         assertEquals("real_shop", manual.getUsername());
+    }
+
+    @Test
+    void applyUserInfoPersistsAccountStats() {
+        TkTiktokAccountDO account = TkTiktokAccountDO.builder()
+                .openId("open-stats")
+                .build();
+
+        TkTiktokAuthServiceImpl.applyUserInfo(account, new TkTiktokApiClient.UserInfo(
+                true, null, "open-stats", "union-stats", "Stats Shop", "stats_shop", null,
+                1200L, 80L, 45000L, 23L));
+
+        assertEquals(1200L, account.getFollowerCount());
+        assertEquals(80L, account.getFollowingCount());
+        assertEquals(45000L, account.getLikesCount());
+        assertEquals(23L, account.getVideoCount());
+        assertNotNull(account.getStatsUpdatedAt());
     }
 
 }

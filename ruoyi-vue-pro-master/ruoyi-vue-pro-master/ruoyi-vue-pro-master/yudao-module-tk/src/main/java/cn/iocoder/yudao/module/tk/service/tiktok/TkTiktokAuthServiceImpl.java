@@ -303,6 +303,22 @@ public class TkTiktokAuthServiceImpl implements TkTiktokAuthService {
         if (StrUtil.isNotBlank(userInfo.getAvatarUrl())) {
             account.setAvatarUrl(userInfo.getAvatarUrl().trim());
         }
+        if (userInfo.getFollowerCount() != null) {
+            account.setFollowerCount(userInfo.getFollowerCount());
+        }
+        if (userInfo.getFollowingCount() != null) {
+            account.setFollowingCount(userInfo.getFollowingCount());
+        }
+        if (userInfo.getLikesCount() != null) {
+            account.setLikesCount(userInfo.getLikesCount());
+        }
+        if (userInfo.getVideoCount() != null) {
+            account.setVideoCount(userInfo.getVideoCount());
+        }
+        if (userInfo.getFollowerCount() != null || userInfo.getFollowingCount() != null
+                || userInfo.getLikesCount() != null || userInfo.getVideoCount() != null) {
+            account.setStatsUpdatedAt(LocalDateTime.now());
+        }
     }
 
     private static boolean isGeneratedDisplayName(String displayName, String openId) {

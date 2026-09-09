@@ -26,6 +26,11 @@ public class TkTiktokAccountDO extends TenantBaseDO {
     private String displayName;
     private String username;
     private String avatarUrl;
+    private Long followerCount;
+    private Long followingCount;
+    private Long likesCount;
+    private Long videoCount;
+    private LocalDateTime statsUpdatedAt;
     private String scopes;
     private String accessTokenCipher;
     private String refreshTokenCipher;

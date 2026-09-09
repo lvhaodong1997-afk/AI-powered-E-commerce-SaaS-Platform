@@ -16,6 +16,11 @@ public class TkTiktokAccountRespVO {
     private String displayName;
     private String username;
     private String avatarUrl;
+    private Long followerCount;
+    private Long followingCount;
+    private Long likesCount;
+    private Long videoCount;
+    private LocalDateTime statsUpdatedAt;
     private String scopes;
     private LocalDateTime accessTokenExpireTime;
     private LocalDateTime refreshTokenExpireTime;

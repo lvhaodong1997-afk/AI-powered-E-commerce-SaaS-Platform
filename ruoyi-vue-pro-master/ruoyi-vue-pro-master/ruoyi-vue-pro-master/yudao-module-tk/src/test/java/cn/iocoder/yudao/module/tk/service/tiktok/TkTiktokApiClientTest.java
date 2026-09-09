@@ -72,7 +72,7 @@ class TkTiktokApiClientTest {
     @Test
     void parseUserInfoExtractsBasicProfile() {
         TkTiktokApiClient.UserInfo userInfo = TkTiktokApiClient.parseUserInfo(JsonUtils.parseTree(
-                "{\"data\":{\"user\":{\"open_id\":\"open-1\",\"union_id\":\"union-1\",\"display_name\":\"Shop Main\",\"username\":\"shop_main\",\"avatar_url\":\"https://cdn.example/avatar.png\"}},\"error\":{\"code\":\"ok\"}}"
+                "{\"data\":{\"user\":{\"open_id\":\"open-1\",\"union_id\":\"union-1\",\"display_name\":\"Shop Main\",\"username\":\"shop_main\",\"avatar_url\":\"https://cdn.example/avatar.png\",\"follower_count\":1200,\"following_count\":80,\"likes_count\":45000,\"video_count\":23}},\"error\":{\"code\":\"ok\"}}"
         ));
 
         assertTrue(userInfo.isSuccess());
@@ -81,6 +81,25 @@ class TkTiktokApiClientTest {
         assertEquals("Shop Main", userInfo.getDisplayName());
         assertEquals("shop_main", userInfo.getUsername());
         assertEquals("https://cdn.example/avatar.png", userInfo.getAvatarUrl());
+        assertEquals(1200L, userInfo.getFollowerCount());
+        assertEquals(80L, userInfo.getFollowingCount());
+        assertEquals(45000L, userInfo.getLikesCount());
+        assertEquals(23L, userInfo.getVideoCount());
+    }
+
+    @Test
+    void userInfoFieldsRequestIncludesUsernameForAccountDisplay() {
+        assertTrue(TkTiktokApiClient.userInfoFields().contains("username"));
+    }
+
+    @Test
+    void legacyVideoInfoConstructorKeepsViewCountUnset() {
+        TkTiktokApiClient.VideoInfo video = new TkTiktokApiClient.VideoInfo(
+                "legacy-video", 1700000000L, null, null, null, 10,
+                1080, 1920, "Legacy", null, null, 1L, 2L, 3L, false);
+
+        assertNull(video.getViewCount());
+        assertEquals(false, video.getAigc());
     }
 
     @Test
@@ -139,6 +158,17 @@ class TkTiktokApiClientTest {
                 result.getVideos().get(0).getEmbedLink());
         assertEquals("Second", result.getVideos().get(1).getTitle());
         assertEquals(24, result.getVideos().get(1).getDuration());
+    }
+
+    @Test
+    void parseVideoListExtractsLatestVideoViewCount() {
+        TkTiktokApiClient.VideoListResult result = TkTiktokApiClient.parseVideoListResult(JsonUtils.parseTree(
+                "{\"data\":{\"videos\":[{\"id\":\"latest\",\"create_time\":1700000100,\"view_count\":98765}],\"has_more\":false},"
+                        + "\"error\":{\"code\":\"ok\"}}"
+        ));
+
+        assertTrue(result.isSuccess());
+        assertEquals(98765L, result.getVideos().get(0).getViewCount());
     }
 
     @Test

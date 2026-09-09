@@ -38,6 +38,18 @@ public interface TkTiktokAccountMapper extends BaseMapperX<TkTiktokAccountDO> {
                 .orderByDesc(TkTiktokAccountDO::getId));
     }
 
+    default List<TkTiktokAccountDO> selectAuthorizedList(TkUserScope scope) {
+        return selectList(new LambdaQueryWrapperX<TkTiktokAccountDO>()
+                .eqIfPresent(TkTiktokAccountDO::getTenantId, scope.isGlobalPlatformView() ? null : scope.getTenantId())
+                .eqIfPresent(TkTiktokAccountDO::getCompanyId,
+                        scope.isPlatformAdmin() || scope.isTenantAdmin() ? null : scope.getCompanyId())
+                .eqIfPresent(TkTiktokAccountDO::getCreator,
+                        scope.canReadAllTenantRecords() ? null : scope.getUserIdString())
+                .eq(TkTiktokAccountDO::getStatus, 0)
+                .eq(TkTiktokAccountDO::getAuthStatus, "AUTHORIZED")
+                .orderByAsc(TkTiktokAccountDO::getId));
+    }
+
     default List<TkTiktokAccountDO> selectListByIds(Collection<Long> ids, TkUserScope scope) {
         return selectList(new LambdaQueryWrapperX<TkTiktokAccountDO>()
                 .eqIfPresent(TkTiktokAccountDO::getTenantId, scope.isGlobalPlatformView() ? null : scope.getTenantId())
