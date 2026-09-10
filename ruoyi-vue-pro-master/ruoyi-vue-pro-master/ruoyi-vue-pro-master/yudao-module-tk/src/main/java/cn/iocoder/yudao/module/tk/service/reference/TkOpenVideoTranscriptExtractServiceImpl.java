@@ -53,7 +53,7 @@ public class TkOpenVideoTranscriptExtractServiceImpl implements TkOpenVideoTrans
     private static final String VERIFY_STATUS_FAILED = "FAILED";
     private static final String VERIFY_STATUS_SKIPPED = "SKIPPED";
     private static final String ASR_PROVIDER = "FASTER_WHISPER";
-    private static final int MAX_VIDEO_DURATION_SECONDS = 600;
+    private static final int MAX_VIDEO_DURATION_SECONDS = 900;
 
     private final ExecutorService executorService = Executors.newFixedThreadPool(1);
     private long syncWaitTimeoutMillis = TimeUnit.MINUTES.toMillis(5);

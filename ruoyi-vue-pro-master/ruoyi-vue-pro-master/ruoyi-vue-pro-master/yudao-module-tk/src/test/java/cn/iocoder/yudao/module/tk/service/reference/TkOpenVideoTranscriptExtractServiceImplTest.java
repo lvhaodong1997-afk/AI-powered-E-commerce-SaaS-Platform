@@ -143,6 +143,60 @@ class TkOpenVideoTranscriptExtractServiceImplTest {
     }
 
     @Test
+    void runExtractTaskAllowsNineHundredSecondVideoThroughDurationCheck() {
+        TkOpenVideoTranscriptTaskMapper mapper = mock(TkOpenVideoTranscriptTaskMapper.class);
+        TkOpenVideoTranscriptTaskDO task = TkOpenVideoTranscriptTaskDO.builder()
+                .id(109L)
+                .sourceUrl("https://example.com/video")
+                .build();
+        AtomicReference<TkOpenVideoTranscriptTaskDO> lastUpdate = new AtomicReference<>();
+        when(mapper.selectById(109L)).thenReturn(task);
+        when(mapper.updateById(any(TkOpenVideoTranscriptTaskDO.class))).thenAnswer(invocation -> {
+            lastUpdate.set(invocation.getArgument(0));
+            return 1;
+        });
+
+        TkReferenceVideoContentService contentService = mock(TkReferenceVideoContentService.class);
+        when(contentService.analyze(task.getSourceUrl())).thenReturn(new TkReferenceVideoContent(
+                task.getSourceUrl(), null, null, 900L, "720x1280", new ArrayList<>()));
+
+        TkOpenVideoTranscriptExtractServiceImpl service = service(mapper, new NoopExecutorService());
+        ReflectionTestUtils.setField(service, "referenceVideoContentService", contentService);
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+
+        ReflectionTestUtils.invokeMethod(service, "runExtractTask", 109L);
+
+        assertEquals("文件 URL 不是可下载的 HTTP 地址：null", lastUpdate.get().getFailReason());
+    }
+
+    @Test
+    void runExtractTaskRejectsVideoAboveNineHundredSeconds() {
+        TkOpenVideoTranscriptTaskMapper mapper = mock(TkOpenVideoTranscriptTaskMapper.class);
+        TkOpenVideoTranscriptTaskDO task = TkOpenVideoTranscriptTaskDO.builder()
+                .id(110L)
+                .sourceUrl("https://example.com/video")
+                .build();
+        AtomicReference<TkOpenVideoTranscriptTaskDO> lastUpdate = new AtomicReference<>();
+        when(mapper.selectById(110L)).thenReturn(task);
+        when(mapper.updateById(any(TkOpenVideoTranscriptTaskDO.class))).thenAnswer(invocation -> {
+            lastUpdate.set(invocation.getArgument(0));
+            return 1;
+        });
+
+        TkReferenceVideoContentService contentService = mock(TkReferenceVideoContentService.class);
+        when(contentService.analyze(task.getSourceUrl())).thenReturn(new TkReferenceVideoContent(
+                task.getSourceUrl(), "https://example.com/video.mp4", null, 901L, "720x1280", new ArrayList<>()));
+
+        TkOpenVideoTranscriptExtractServiceImpl service = service(mapper, new NoopExecutorService());
+        ReflectionTestUtils.setField(service, "referenceVideoContentService", contentService);
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+
+        ReflectionTestUtils.invokeMethod(service, "runExtractTask", 110L);
+
+        assertEquals("视频时长超过 900 秒，已拒绝提取", lastUpdate.get().getFailReason());
+    }
+
+    @Test
     void getExtractTaskPrefersVerifiedTranscriptAndTimelineWithoutChangingTiming() {
         TkOpenVideoTranscriptTaskMapper mapper = mock(TkOpenVideoTranscriptTaskMapper.class);
         when(mapper.selectById(104L)).thenReturn(TkOpenVideoTranscriptTaskDO.builder()
