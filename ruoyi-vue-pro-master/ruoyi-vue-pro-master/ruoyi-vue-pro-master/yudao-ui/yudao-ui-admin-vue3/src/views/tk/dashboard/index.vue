@@ -123,6 +123,12 @@
                 <el-select
                   v-model="createForm.libraryId"
                   :placeholder="copy.materialPlaceholder"
+                  filterable
+                  clearable
+                  default-first-option
+                  :filter-placeholder="copy.materialSearchPlaceholder"
+                  :no-match-text="copy.materialNoMatch"
+                  :no-data-text="copy.materialNoData"
                   class="analysis-filter-control"
                 >
                   <el-option
@@ -1785,7 +1791,10 @@ const copy = computed(() =>
         finishAnalysisFirst: 'Finish real reference analysis to choose a script.',
         configTitle: 'Configure video settings',
         materialRequired: 'Material library (required)',
-        materialPlaceholder: 'Select a material library',
+        materialPlaceholder: 'Select or search a material library',
+        materialSearchPlaceholder: 'Type a material library name',
+        materialNoMatch: 'No matching material libraries',
+        materialNoData: 'No material libraries available',
         languageRequired: 'Script/voiceover language (required)',
         languagePlaceholder: 'Select script and voiceover language',
         targetDurationLabel: 'Target video duration',
@@ -2074,7 +2083,10 @@ const copy = computed(() =>
         finishAnalysisFirst: '完成真实对标分析后选择文案',
         configTitle: '配置视频设置',
         materialRequired: '素材库（必选）',
-        materialPlaceholder: '请选择素材库',
+        materialPlaceholder: '请选择或输入素材库名称搜索',
+        materialSearchPlaceholder: '输入素材库名称进行搜索',
+        materialNoMatch: '没有匹配的素材库',
+        materialNoData: '暂无可用素材库',
         languageRequired: '文案/配音语言（必选）',
         languagePlaceholder: '请选择文案和配音语言',
         targetDurationLabel: '目标视频时长',

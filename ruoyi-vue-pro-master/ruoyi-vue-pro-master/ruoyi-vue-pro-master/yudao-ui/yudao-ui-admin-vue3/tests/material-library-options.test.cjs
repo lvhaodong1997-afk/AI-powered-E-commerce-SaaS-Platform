@@ -16,6 +16,22 @@ const dashboardService = read(
   '../../../yudao-module-tk/src/main/java/cn/iocoder/yudao/module/tk/service/dashboard/TkDashboardServiceImpl.java'
 )
 
+assert.match(dashboard, /filterable/, 'material library selector must support manual search')
+assert.match(dashboard, /default-first-option/, 'manual search must support keyboard selection')
+assert.match(
+  dashboard,
+  /:filter-placeholder="copy\.materialSearchPlaceholder"/,
+  'material search must explain the input behavior'
+)
+assert.match(dashboard, /:no-match-text="copy\.materialNoMatch"/)
+assert.match(dashboard, /:no-data-text="copy\.materialNoData"/)
+assert.doesNotMatch(
+  dashboard,
+  /allow-create/,
+  'manual input must not submit an arbitrary library name'
+)
+assert.match(dashboard, /createForm\.libraryId/, 'selected material library must remain ID-based')
+
 assert.match(mapper, /default List<TkMaterialLibraryDO> selectAll\(TkUserScope scope\)/)
 assert.doesNotMatch(
   mapper,
