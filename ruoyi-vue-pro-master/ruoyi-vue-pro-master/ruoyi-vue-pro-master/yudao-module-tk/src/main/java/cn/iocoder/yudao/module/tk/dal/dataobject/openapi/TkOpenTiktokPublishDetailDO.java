@@ -31,6 +31,14 @@ public class TkOpenTiktokPublishDetailDO extends BaseDO {
     private String tiktokStatus;
     private String publishId;
     private String publishUrl;
+    private String publicPostId;
+    private Long viewCount;
+    private Long likeCount;
+    private Long commentCount;
+    private Long shareCount;
+    private String metricsStatus;
+    private String metricsFailReason;
+    private LocalDateTime metricsLastSyncTime;
     private String failReason;
     private Integer retryCount;
     private LocalDateTime lastSyncTime;

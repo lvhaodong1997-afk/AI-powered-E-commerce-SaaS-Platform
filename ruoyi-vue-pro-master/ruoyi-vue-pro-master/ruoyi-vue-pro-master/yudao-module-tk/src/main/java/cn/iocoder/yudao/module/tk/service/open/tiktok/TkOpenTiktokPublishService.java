@@ -198,7 +198,8 @@ public class TkOpenTiktokPublishService {
                     .detailId(TkOpenApiIds.next("detail"))
                     .taskId(task.getTaskId()).clientId(clientId).connectionId(connection.getConnectionId())
                     .accountName(StrUtil.blankToDefault(connection.getDisplayName(), connection.getUsername()))
-                    .status("PENDING").tiktokStatus("LOCAL_PENDING").retryCount(0).build());
+                    .status("PENDING").tiktokStatus("LOCAL_PENDING").metricsStatus("WAITING_PUBLISH")
+                    .retryCount(0).build());
         }
         record.setStatus("COMPLETED");
         idempotencyMapper.updateById(record);
@@ -215,6 +216,62 @@ public class TkOpenTiktokPublishService {
         requireTask(clientId, taskId);
         return detailMapper.selectListByClientAndTaskId(clientId, taskId).stream()
                 .map(this::toDetailResp).collect(Collectors.toList());
+    }
+
+    public TkOpenTiktokPublishVO.MetricsResp getMetrics(String taskId) {
+        String clientId = currentClient();
+        requireTask(clientId, taskId);
+        List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectListByClientAndTaskId(clientId, taskId);
+        if (details.isEmpty()) {
+            throw TkOpenApiException.notFound("PUBLISH_DETAIL_NOT_FOUND", "publish detail does not exist");
+        }
+        if (details.size() > 1) {
+            throw TkOpenApiException.badRequest("PUBLISH_METRICS_MULTI_DETAIL_UNSUPPORTED",
+                    "metrics query supports one published TikTok account per task");
+        }
+        TkOpenTiktokPublishDetailDO detail = details.get(0);
+        if (StrUtil.isBlank(detail.getPublicPostId()) && StrUtil.isNotBlank(detail.getPublishId())) {
+            syncDetail(detail);
+            detail = detailMapper.selectByClientAndDetailId(clientId, detail.getDetailId());
+        }
+        if (detail == null) {
+            throw TkOpenApiException.notFound("PUBLISH_DETAIL_NOT_FOUND", "publish detail does not exist");
+        }
+        TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(
+                clientId, detail.getConnectionId());
+        if (connection == null) {
+            return toMetricsResp(detail, "FAILED", "TikTok connection does not exist");
+        }
+        if (!"AUTHORIZED".equals(connection.getAuthStatus())) {
+            return toMetricsResp(detail, "REAUTH_REQUIRED",
+                    StrUtil.blankToDefault(connection.getFailReason(), "TikTok authorization is required"));
+        }
+        if (StrUtil.isBlank(detail.getPublicPostId())) {
+            return toMetricsResp(detail, metricsStateBeforePublicPost(detail), detail.getMetricsFailReason());
+        }
+
+        try {
+            TkOpenPublishPlatformAdapter adapter = platform();
+            String token = validAccessToken(connection, adapter, false);
+            TkOpenPublishPlatformAdapter.VideoMetricsResult result = adapter.queryVideoMetrics(
+                    token, detail.getPublicPostId());
+            if (result.isAccessTokenInvalid()) {
+                token = validAccessToken(connection, adapter, true);
+                result = adapter.queryVideoMetrics(token, detail.getPublicPostId());
+            }
+            if (result.isAccessTokenInvalid()) {
+                return persistMetricsFailure(detail, "REAUTH_REQUIRED", "TikTok access token is invalid");
+            }
+            if (!result.isSuccess()) {
+                return persistMetricsFailure(detail, "UNAVAILABLE",
+                        StrUtil.blankToDefault(result.getFailReason(), "TikTok video metrics are unavailable"));
+            }
+            return persistMetrics(detail, result);
+        } catch (Exception ex) {
+            String reason = StrUtil.maxLength(StrUtil.blankToDefault(ex.getMessage(), "TikTok video metrics query failed"), 1000);
+            String status = "AUTHORIZED".equals(connection.getAuthStatus()) ? "FAILED" : "REAUTH_REQUIRED";
+            return persistMetricsFailure(detail, status, reason);
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -356,6 +413,15 @@ public class TkOpenTiktokPublishService {
             if (!status.isSuccess()) throw new IllegalStateException(status.getFailReason());
             detail.setTiktokStatus(status.getStatus());
             detail.setLastSyncTime(LocalDateTime.now());
+            List<String> publicPostIds = status.getPublicPostIds() == null
+                    ? Collections.emptyList() : status.getPublicPostIds();
+            if (StrUtil.isNotBlank(publicPostIds.isEmpty() ? null : publicPostIds.get(0))) {
+                detail.setPublicPostId(publicPostIds.get(0));
+                detail.setMetricsStatus("SYNCING");
+                detail.setMetricsFailReason(null);
+            } else if (isSuccess(status.getStatus())) {
+                detail.setMetricsStatus("WAITING_PUBLIC");
+            }
             if (isSuccess(status.getStatus())) {
                 detail.setStatus("SUCCESS");
                 detail.setFailReason(null);
@@ -411,9 +477,11 @@ public class TkOpenTiktokPublishService {
         String refresh = secretCipher.decrypt(connection.getRefreshTokenCipher());
         TkOpenPublishPlatformAdapter.OAuthTokenResult result = adapter.refreshAccessToken(refresh);
         if (!result.isSuccess()) {
+            String reason = StrUtil.blankToDefault(result.getFailReason(), "token refresh failed");
+            connection.setTokenStatus("INVALID").setAuthStatus("REAUTH_REQUIRED").setFailReason(reason);
             connectionMapper.updateById(new TkOpenTiktokConnectionDO().setId(connection.getId())
-                    .setTokenStatus("INVALID").setAuthStatus("REAUTH_REQUIRED").setFailReason(result.getFailReason()));
-            throw new IllegalStateException(StrUtil.blankToDefault(result.getFailReason(), "token refresh failed"));
+                    .setTokenStatus("INVALID").setAuthStatus("REAUTH_REQUIRED").setFailReason(reason));
+            throw new IllegalStateException(reason);
         }
         connection.setAccessTokenCipher(secretCipher.encrypt(result.getAccessToken()));
         if (StrUtil.isNotBlank(result.getRefreshToken())) connection.setRefreshTokenCipher(secretCipher.encrypt(result.getRefreshToken()));
@@ -492,6 +560,7 @@ public class TkOpenTiktokPublishService {
         payload.put("taskId", task.getTaskId()); payload.put("detailId", detail.getDetailId());
         payload.put("connectionId", detail.getConnectionId()); payload.put("externalRequestId", task.getExternalRequestId());
         payload.put("status", detail.getStatus()); payload.put("publishId", detail.getPublishId());
+        payload.put("publicPostId", detail.getPublicPostId());
         payload.put("publishUrl", detail.getPublishUrl()); payload.put("failReason", detail.getFailReason());
         callbackService.enqueue(detail.getClientId(), type, "PUBLISH_DETAIL", detail.getDetailId(), payload);
     }
@@ -580,6 +649,72 @@ public class TkOpenTiktokPublishService {
         response.setAccountName(detail.getAccountName()); response.setStatus(detail.getStatus()); response.setTiktokStatus(detail.getTiktokStatus());
         response.setPublishId(detail.getPublishId()); response.setPublishUrl(detail.getPublishUrl()); response.setFailReason(detail.getFailReason());
         response.setRetryCount(detail.getRetryCount()); response.setUpdateTime(detail.getUpdateTime()); return response;
+    }
+
+    private String metricsStateBeforePublicPost(TkOpenTiktokPublishDetailDO detail) {
+        if ("FAILED".equals(detail.getStatus())) return "FAILED";
+        if ("SEND_TO_USER_INBOX".equalsIgnoreCase(detail.getTiktokStatus())) return "UNAVAILABLE";
+        if ("PENDING".equals(detail.getStatus())) return "WAITING_PUBLISH";
+        return StrUtil.blankToDefault(detail.getMetricsStatus(), "WAITING_PUBLIC");
+    }
+
+    private TkOpenTiktokPublishVO.MetricsResp persistMetrics(TkOpenTiktokPublishDetailDO detail,
+                                                              TkOpenPublishPlatformAdapter.VideoMetricsResult result) {
+        LocalDateTime now = LocalDateTime.now();
+        detail.setPublicPostId(StrUtil.blankToDefault(result.getPublicPostId(), detail.getPublicPostId()));
+        detail.setPublishUrl(StrUtil.blankToDefault(result.getShareUrl(), detail.getPublishUrl()));
+        detail.setViewCount(result.getViewCount());
+        detail.setLikeCount(result.getLikeCount());
+        detail.setCommentCount(result.getCommentCount());
+        detail.setShareCount(result.getShareCount());
+        detail.setMetricsStatus("AVAILABLE");
+        detail.setMetricsFailReason(null);
+        detail.setMetricsLastSyncTime(now);
+        detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
+                .set(TkOpenTiktokPublishDetailDO::getPublicPostId, detail.getPublicPostId())
+                .set(TkOpenTiktokPublishDetailDO::getPublishUrl, detail.getPublishUrl())
+                .set(TkOpenTiktokPublishDetailDO::getViewCount, detail.getViewCount())
+                .set(TkOpenTiktokPublishDetailDO::getLikeCount, detail.getLikeCount())
+                .set(TkOpenTiktokPublishDetailDO::getCommentCount, detail.getCommentCount())
+                .set(TkOpenTiktokPublishDetailDO::getShareCount, detail.getShareCount())
+                .set(TkOpenTiktokPublishDetailDO::getMetricsStatus, detail.getMetricsStatus())
+                .set(TkOpenTiktokPublishDetailDO::getMetricsFailReason, (String) null)
+                .set(TkOpenTiktokPublishDetailDO::getMetricsLastSyncTime, now));
+        return toMetricsResp(detail, "AVAILABLE", null);
+    }
+
+    private TkOpenTiktokPublishVO.MetricsResp persistMetricsFailure(TkOpenTiktokPublishDetailDO detail,
+                                                                      String status, String reason) {
+        String safeReason = StrUtil.maxLength(StrUtil.blankToDefault(reason, "TikTok video metrics query failed"), 1000);
+        detail.setMetricsStatus(status);
+        detail.setMetricsFailReason(safeReason);
+        detail.setMetricsLastSyncTime(LocalDateTime.now());
+        detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
+                .set(TkOpenTiktokPublishDetailDO::getMetricsStatus, status)
+                .set(TkOpenTiktokPublishDetailDO::getMetricsFailReason, safeReason)
+                .set(TkOpenTiktokPublishDetailDO::getMetricsLastSyncTime, detail.getMetricsLastSyncTime()));
+        return toMetricsResp(detail, status, safeReason);
+    }
+
+    private TkOpenTiktokPublishVO.MetricsResp toMetricsResp(TkOpenTiktokPublishDetailDO detail,
+                                                              String status, String reason) {
+        TkOpenTiktokPublishVO.MetricsResp response = new TkOpenTiktokPublishVO.MetricsResp();
+        response.setTaskId(detail.getTaskId());
+        response.setDetailId(detail.getDetailId());
+        response.setConnectionId(detail.getConnectionId());
+        response.setPublishId(detail.getPublishId());
+        response.setPublicPostId(detail.getPublicPostId());
+        response.setPublishUrl(detail.getPublishUrl());
+        response.setMetricsStatus(status);
+        response.setViewCount(detail.getViewCount());
+        response.setLikeCount(detail.getLikeCount());
+        response.setCommentCount(detail.getCommentCount());
+        response.setShareCount(detail.getShareCount());
+        response.setMetricsLastSyncTime(detail.getMetricsLastSyncTime());
+        response.setMetricsFailReason(reason);
+        return response;
     }
 
     @PreDestroy public void destroy() { executor.shutdown(); }

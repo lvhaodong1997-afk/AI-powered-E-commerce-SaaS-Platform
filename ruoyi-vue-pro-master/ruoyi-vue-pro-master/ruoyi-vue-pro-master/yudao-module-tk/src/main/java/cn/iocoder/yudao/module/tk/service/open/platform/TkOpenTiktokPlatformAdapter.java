@@ -9,6 +9,7 @@ import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.Map;
 
 @Component
@@ -105,7 +106,33 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
     @Override
     public PublishStatusResult fetchPostStatus(String accessToken, String publishId) {
         TkTiktokApiClient.PostStatusResult result = apiClient.fetchPostStatus(accessToken, publishId);
-        return new PublishStatusResult(result.isSuccess(), result.getStatus(), result.getFailReason(), result.getErrorCode());
+        return new PublishStatusResult(result.isSuccess(), result.getStatus(), result.getFailReason(), result.getErrorCode(),
+                result.getPublicPostIds());
+    }
+
+    @Override
+    public VideoMetricsResult queryVideoMetrics(String accessToken, String publicPostId) {
+        if (StrUtil.isBlank(publicPostId)) {
+            return new VideoMetricsResult(false, null, null, null, null, null, null,
+                    "公开视频编号为空", null);
+        }
+        TkTiktokApiClient.VideoQueryResult result = apiClient.queryVideoShareUrl(accessToken,
+                Collections.singletonList(publicPostId));
+        if (!result.isSuccess()) {
+            return new VideoMetricsResult(false, publicPostId, null, null, null, null, null,
+                    result.getFailReason(), result.getErrorCode());
+        }
+        TkTiktokApiClient.VideoInfo video = result.getVideos().stream()
+                .filter(item -> publicPostId.equals(item.getId()))
+                .findFirst()
+                .orElse(result.getVideos().isEmpty() ? null : result.getVideos().get(0));
+        if (video == null) {
+            return new VideoMetricsResult(false, publicPostId, null, null, null, null, null,
+                    "TikTok 视频不存在或暂不可见", null);
+        }
+        return new VideoMetricsResult(true, StrUtil.blankToDefault(video.getId(), publicPostId),
+                video.getShareUrl(), video.getViewCount(), video.getLikeCount(), video.getCommentCount(),
+                video.getShareCount(), null, null);
     }
 
     @Override

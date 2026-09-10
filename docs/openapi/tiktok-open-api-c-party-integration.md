@@ -2,10 +2,10 @@
 
 ## C 方授权发布最终联调文档
 
-**文档版本：** v1.3
+**文档版本：** v1.4
 **适用对象：** C 方后端、前端和联调人员
 **A 方生产服务：** `https://tkassetplant.fnn.net.cn`
-**更新时间：** 2026-09-07
+**更新时间：** 2026-09-10
 
 本文是交付给 C 方的唯一主联调文档，用于指导 C 方调用 A 方的 TikTok 授权、视频上传、视频发布和状态查询接口。C 方不需要访问 A 方数据库，也不需要了解 A 方内部实现。
 
@@ -29,6 +29,7 @@ https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok
 | 4 | `GET` | `/connections` | C 方服务端 | 是 |
 | 5 | `POST` | `/publish/quick-tasks` | C 方服务端 | 是 |
 | 6 | `GET` | `/publish/tasks/{taskId}`、`/publish/tasks/{taskId}/details` | C 方服务端 | 是 |
+| 7 | `GET` | `/publish/tasks/{taskId}/metrics` | C 方服务端 | 是 |
 
 推荐调用链：
 
@@ -40,6 +41,7 @@ POST /auth/sessions (authMode=AUTO)
   -> 保存 data.connectionId
   -> POST /publish/quick-tasks
   -> 轮询任务和明细
+  -> 使用 taskId 查询视频指标
 ```
 
 使用该最小流程，C 方不需要生成二维码、不需要接收 TikTok OAuth 回调、不需要实现 A 方授权页，也不需要实现 OSS 或 LOCAL 上传。视频必须是 A 方能够访问的公网 HTTPS 地址。
@@ -199,6 +201,7 @@ POST https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions
 | 发布 | `POST` | `/publish/quick-tasks` | 使用 HTTPS 视频地址直接创建异步发布任务 |
 | 发布 | `GET` | `/publish/tasks/{taskId}` | 查询任务汇总状态 |
 | 发布 | `GET` | `/publish/tasks/{taskId}/details` | 查询每个账号的发布明细 |
+| 发布 | `GET` | `/publish/tasks/{taskId}/metrics` | 只传 taskId 查询播放、点赞、评论、分享 |
 | 发布 | `POST` | `/publish/details/{detailId}/retry` | 重试失败明细 |
 
 除 `/auth/callback`、`/auth/sessions/{authSessionId}/launch` 和 `/auth/sessions/{authSessionId}/launch/status` 外，所有接口都必须带 A 方请求签名。
@@ -214,6 +217,7 @@ C 方只实现服务端签名调用和一个业务页面即可：
 4. C 方服务端查询 /connections，确认 connectionId
 5. C 方服务端 POST /publish/quick-tasks，传入 externalAccountId 和 videoUrl
 6. C 方轮询 /publish/tasks/{taskId} 和 /publish/tasks/{taskId}/details
+7. 发布成功后调用 /publish/tasks/{taskId}/metrics 获取四项视频指标
 ```
 
 该方式下，C 方不需要：
@@ -926,7 +930,60 @@ GET /publish/tasks/{taskId}/details
 
 C 方业务判断优先使用明细 `status`，`tiktokStatus` 仅作为 TikTok 或 A 方内部状态补充信息。`publishUrl` 可能为空，不能把 `publishId` 当作公开视频地址。
 
-### 8.7 重试失败明细
+### 8.7 按 `taskId` 查询视频指标
+
+C 方只需要提交已保存的 `taskId`，不需要提交 `publishId`、`publicPostId`、`connectionId` 或账号 Token。A 方会按当前 `clientId + taskId` 查找发布明细，从明细中读取 TikTok 公开视频编号，并使用已授权连接调用 TikTok `video.query` 获取最新指标。
+
+```http
+GET /publish/tasks/{taskId}/metrics
+```
+
+该请求仍按第 4 节规则进行 HMAC 签名。`REQUEST_TARGET` 必须包含完整的 `/admin-api/tk/open/v1/tiktok` 前缀和实际 `taskId`，请求体为空，因此 `BODY_SHA256` 使用空字节 SHA-256。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "msg": "OK",
+  "data": {
+    "taskId": "task_example",
+    "detailId": "detail_example",
+    "connectionId": "conn_example",
+    "publishId": "publish_example",
+    "publicPostId": "1234567890123456789",
+    "publishUrl": "https://www.tiktok.com/@demo/video/1234567890123456789",
+    "metricsStatus": "AVAILABLE",
+    "viewCount": 12345,
+    "likeCount": 678,
+    "commentCount": 90,
+    "shareCount": 12,
+    "metricsLastSyncTime": "2026-09-10T15:00:00",
+    "metricsFailReason": null
+  },
+  "requestId": "c-request-202609100001"
+}
+```
+
+只返回四项指标：`viewCount`、`likeCount`、`commentCount`、`shareCount`，不返回收藏数。指标暂不可用时，计数字段返回 `null`，不能把缺失值当成 `0`。
+
+指标状态：
+
+| `metricsStatus` | 含义 | C 方处理 |
+| --- | --- | --- |
+| `WAITING_PUBLISH` | A 方尚未完成发布 | 延迟后重试 |
+| `WAITING_PUBLIC` | TikTok 尚未返回公开视频编号 | 延迟后重试 |
+| `SYNCING` | 已拿到公开视频编号，正在同步指标 | 延迟后重试 |
+| `AVAILABLE` | 四项指标已成功同步 | 读取四个计数字段 |
+| `REAUTH_REQUIRED` | 授权或 Token 已失效 | 引导用户重新授权同一个 `externalAccountId` |
+| `UNAVAILABLE` | 视频暂不可查询，例如草稿箱或尚未公开 | 延迟后重试或提示暂不可用 |
+| `FAILED` | 任务、连接或指标查询发生不可恢复错误 | 记录 `metricsFailReason` 并人工处理 |
+
+P0 约束：一个 `taskId` 只能对应一个发布明细。若任务包含多个发布账号，接口返回 `PUBLISH_METRICS_MULTI_DETAIL_UNSUPPORTED`；C 方应按单账号创建任务，当前不支持在一次指标查询中混合多账号结果。
+
+建议在任务进入 `SUCCESS` 后首次调用，之后每 5 至 15 分钟查询一次；不要高频轮询。A 方每次成功调用都会刷新最新快照并更新 `metricsLastSyncTime`。
+
+### 8.8 重试失败明细
 
 ```http
 POST /publish/details/{detailId}/retry
@@ -1125,7 +1182,8 @@ A 方当前回调行为：
 4. C 方服务端调用 GET /connections?externalAccountId=...，展示已授权账号
 5. C 方服务端调用 POST /publish/quick-tasks，传入 externalAccountId、videoUrl 和发布参数
 6. C 方服务端轮询 GET /publish/tasks/{taskId}，需要单账号结果时再查询 details
-7. C 方不配置回调时，按 task.status 和 detail.status 更新自己的业务状态
+7. task.status=SUCCESS 后调用 GET /publish/tasks/{taskId}/metrics
+8. C 方不配置回调时，按 task.status、detail.status 和 metricsStatus 更新自己的业务状态
 ```
 
 `launchUrl` 是浏览器地址，不需要签名；`POST /auth/sessions`、`GET /auth/sessions/{authSessionId}`、`GET /connections` 和 `POST /publish/quick-tasks` 仍必须由 C 方服务端签名调用。
@@ -1155,6 +1213,7 @@ A 方当前回调行为：
 20. SUCCESS：更新 C 方订单为成功
 21. FAILED：展示失败原因，必要时调用 retry
 22. PARTIAL_SUCCESS：按 detailId 分别处理账号结果
+23. 单账号发布成功后按 taskId 调用 /publish/tasks/{taskId}/metrics
 ```
 
 ## 11. 错误码处理建议
@@ -1163,6 +1222,7 @@ A 方当前回调行为：
 | --- | --- | --- |
 | `400` | `OPEN_API_PARAMETER_INVALID`、`MEDIA_NOT_READY` | 修正请求或等待资源状态 |
 | `400` | `MEDIA_FILE_INVALID` | 重新检查文件名、大小、SHA-256、分片大小 |
+| `400` | `PUBLISH_METRICS_MULTI_DETAIL_UNSUPPORTED` | 当前 P0 只支持单账号任务；按单账号重新创建发布任务 |
 | `401` | `OPEN_API_AUTH_HEADER_MISSING` | 检查请求头和签名生成 |
 | `401` | `OPEN_API_SIGNATURE_INVALID` | 检查原始 URL、body 字节、时间戳和密钥 |
 | `401` | `OPEN_API_TIMESTAMP_EXPIRED` | 校准 C 方服务器时间 |
@@ -1222,6 +1282,9 @@ A 方当前回调行为：
 - [ ] 如使用快速发布，`quick-tasks` 能够接受公网 HTTPS 视频地址并返回 `taskId`
 - [ ] 能够创建 `DIRECT_POST` 或 `UPLOAD_TO_INBOX` 任务
 - [ ] 能够查询任务和明细状态
+- [ ] 能够只使用 taskId 查询视频播放、点赞、评论和分享数
+- [ ] 指标未就绪时能够处理 `WAITING_PUBLIC`、`SYNCING` 和 `UNAVAILABLE`
+- [ ] 指标字段为 `null` 时不会当作 `0` 展示或入账
 - [ ] 能够接收并校验授权回调签名
 - [ ] 能够接收并校验发布回调签名
 - [ ] 重复回调不会重复处理

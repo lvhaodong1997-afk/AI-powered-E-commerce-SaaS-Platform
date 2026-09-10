@@ -128,6 +128,16 @@ class TkTiktokApiClientTest {
     }
 
     @Test
+    void parsePostStatusReturnsEmptyPublicPostIdsWhenTikTokOmitsField() {
+        TkTiktokApiClient.PostStatusResult result = TkTiktokApiClient.parsePostStatusResult(JsonUtils.parseTree(
+                "{\"data\":{\"status\":\"PROCESSING\"},\"error\":{\"code\":\"ok\"}}"
+        ));
+
+        assertTrue(result.isSuccess());
+        assertTrue(result.getPublicPostIds().isEmpty());
+    }
+
+    @Test
     void parseVideoQueryExtractsFirstAvailableShareUrl() {
         TkTiktokApiClient.VideoQueryResult result = TkTiktokApiClient.parseVideoQueryResult(JsonUtils.parseTree(
                 "{\"data\":{\"videos\":["

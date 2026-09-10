@@ -21,6 +21,7 @@ public interface TkOpenPublishPlatformAdapter {
     PublishInitResult initVideoPost(String accessToken, String postMode, Map<String, Object> payload);
     void uploadVideo(String uploadUrl, Path videoFile, String contentType);
     PublishStatusResult fetchPostStatus(String accessToken, String publishId);
+    VideoMetricsResult queryVideoMetrics(String accessToken, String publicPostId);
     String defaultPostMode();
     String verifiedPullDomain();
 
@@ -103,6 +104,29 @@ public interface TkOpenPublishPlatformAdapter {
     class PublishStatusResult {
         private boolean success;
         private String status;
+        private String failReason;
+        private String errorCode;
+        private List<String> publicPostIds;
+
+        public PublishStatusResult(boolean success, String status, String failReason, String errorCode) {
+            this(success, status, failReason, errorCode, java.util.Collections.emptyList());
+        }
+
+        public boolean isAccessTokenInvalid() {
+            return "access_token_invalid".equals(errorCode);
+        }
+    }
+
+    @Data
+    @AllArgsConstructor
+    class VideoMetricsResult {
+        private boolean success;
+        private String publicPostId;
+        private String shareUrl;
+        private Long viewCount;
+        private Long likeCount;
+        private Long commentCount;
+        private Long shareCount;
         private String failReason;
         private String errorCode;
 

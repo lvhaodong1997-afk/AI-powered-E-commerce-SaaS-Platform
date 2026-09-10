@@ -155,6 +155,14 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_detail` (
   `tiktok_status` varchar(64) DEFAULT NULL,
   `publish_id` varchar(128) DEFAULT NULL,
   `publish_url` varchar(1024) DEFAULT NULL,
+  `public_post_id` varchar(128) DEFAULT NULL,
+  `view_count` bigint DEFAULT NULL,
+  `like_count` bigint DEFAULT NULL,
+  `comment_count` bigint DEFAULT NULL,
+  `share_count` bigint DEFAULT NULL,
+  `metrics_status` varchar(32) DEFAULT NULL,
+  `metrics_fail_reason` varchar(1024) DEFAULT NULL,
+  `metrics_last_sync_time` datetime DEFAULT NULL,
   `fail_reason` varchar(1024) DEFAULT NULL,
   `retry_count` int NOT NULL DEFAULT 0,
   `last_sync_time` datetime DEFAULT NULL,
@@ -166,7 +174,8 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_detail` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tk_open_publish_detail_id` (`detail_id`),
   KEY `idx_tk_open_publish_detail_task` (`client_id`, `task_id`),
-  KEY `idx_tk_open_publish_detail_sync` (`status`, `last_sync_time`)
+  KEY `idx_tk_open_publish_detail_sync` (`status`, `last_sync_time`),
+  KEY `idx_tk_open_publish_detail_metrics` (`metrics_status`, `metrics_last_sync_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `tk_open_api_idempotency` (

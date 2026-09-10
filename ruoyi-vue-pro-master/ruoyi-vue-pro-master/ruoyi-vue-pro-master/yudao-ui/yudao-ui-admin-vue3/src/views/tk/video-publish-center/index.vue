@@ -144,7 +144,7 @@
         </el-table-column>
         <el-table-column label="标签" prop="labels" min-width="150" show-overflow-tooltip />
         <el-table-column label="失败原因" min-width="200" show-overflow-tooltip>
-          <template #default="scope">{{ failReasonLabel(scope.row) }}</template>
+          <template #default="scope">{{ accountFailReasonLabel(scope.row) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="210" fixed="right">
           <template #default="scope">
@@ -1278,6 +1278,10 @@ const failReasonLabel = (row: { failReasonCode?: string; failReason?: string }) 
     if (translated !== key) return translated
   }
   return tText(row.failReason) || '-'
+}
+const accountFailReasonLabel = (row: TkTiktokAccountVO) => {
+  if (row.authStatus === 'AUTHORIZED' && row.tokenStatus === 'VALID' && row.status === 0) return '-'
+  return failReasonLabel(row)
 }
 const detailFailureLabel = (row: TkTiktokPublishDetailVO) => {
   if (row.failReasonCode) return failReasonLabel(row)

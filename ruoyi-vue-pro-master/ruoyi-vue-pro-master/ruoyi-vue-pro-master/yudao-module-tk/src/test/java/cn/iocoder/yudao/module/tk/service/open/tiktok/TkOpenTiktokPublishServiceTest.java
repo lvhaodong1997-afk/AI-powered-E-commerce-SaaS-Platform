@@ -24,6 +24,8 @@ import org.springframework.dao.DuplicateKeyException;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -188,6 +190,214 @@ class TkOpenTiktokPublishServiceTest {
 
         assertEquals("PUBLISH_TASK_NOT_FOUND", error.getCode());
         verify(taskMapper).selectByClientAndTaskId("client_b", "task_from_client_c");
+    }
+
+    @Test
+    void shouldExposeClientScopedMetricsLookupWithFourCounters() throws Exception {
+        Method method = TkOpenTiktokPublishService.class.getMethod("getMetrics", String.class);
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task_metrics").clientId("client_b").status("SUCCESS").build();
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder()
+                .id(21L).detailId("detail_metrics").taskId("task_metrics").clientId("client_b")
+                .connectionId("connection_metrics").status("SUCCESS").tiktokStatus("PUBLISH_COMPLETE")
+                .publishId("publish_metrics").build();
+        setProperty(detail, "publicPostId", "public_metrics");
+        setProperty(detail, "viewCount", 123L);
+        setProperty(detail, "likeCount", 45L);
+        setProperty(detail, "commentCount", 6L);
+        setProperty(detail, "shareCount", 7L);
+        when(taskMapper.selectByClientAndTaskId("client_b", "task_metrics")).thenReturn(task);
+        when(detailMapper.selectListByClientAndTaskId("client_b", "task_metrics"))
+                .thenReturn(Collections.singletonList(detail));
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenPublishPlatformRegistry platformRegistry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        TkOpenApiSecretCipher secretCipher = mock(TkOpenApiSecretCipher.class);
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
+                .id(22L).connectionId("connection_metrics").clientId("client_b")
+                .authStatus("AUTHORIZED").accessTokenCipher("access-cipher")
+                .accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build();
+        when(detailMapper.selectByClientAndDetailId("client_b", "detail_metrics")).thenReturn(detail);
+        when(connectionMapper.selectByClientAndConnectionId("client_b", "connection_metrics"))
+                .thenReturn(connection);
+        when(secretCipher.decrypt("access-cipher")).thenReturn("access-token");
+        when(platformRegistry.getRequired("TIKTOK")).thenReturn(adapter);
+        when(adapter.queryVideoMetrics("access-token", "public_metrics"))
+                .thenReturn(new TkOpenPublishPlatformAdapter.VideoMetricsResult(true, "public_metrics",
+                        "https://www.tiktok.com/@demo/video/public_metrics", 123L, 45L, 6L, 7L, null, null));
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+                mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
+                platformRegistry, null, secretCipher, null);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "metrics"), "req-metrics");
+
+        Object response = method.invoke(service, "task_metrics");
+
+        assertEquals("AVAILABLE", property(response, "metricsStatus"));
+        assertEquals("task_metrics", property(response, "taskId"));
+        assertEquals("public_metrics", property(response, "publicPostId"));
+        assertEquals(123L, property(response, "viewCount"));
+        assertEquals(45L, property(response, "likeCount"));
+        assertEquals(6L, property(response, "commentCount"));
+        assertEquals(7L, property(response, "shareCount"));
+        verify(taskMapper).selectByClientAndTaskId("client_b", "task_metrics");
+    }
+
+    @Test
+    void shouldKeepPublicPostIdSeparateFromTikTokPublishId() throws Exception {
+        assertNotNull(TkOpenTiktokPublishDetailDO.class.getDeclaredField("publicPostId"));
+        assertNotNull(TkOpenTiktokPublishDetailDO.class.getDeclaredField("viewCount"));
+        assertNotNull(TkOpenTiktokPublishDetailDO.class.getDeclaredField("likeCount"));
+        assertNotNull(TkOpenTiktokPublishDetailDO.class.getDeclaredField("commentCount"));
+        assertNotNull(TkOpenTiktokPublishDetailDO.class.getDeclaredField("shareCount"));
+    }
+
+    @Test
+    void shouldReturnWaitingPublicWhenTikTokStatusOmitsPublicPostIds() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenPublishPlatformRegistry platformRegistry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        TkOpenApiSecretCipher secretCipher = mock(TkOpenApiSecretCipher.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task_public_pending").clientId("client_b").status("PROCESSING").build();
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder()
+                .id(31L).detailId("detail_public_pending").taskId("task_public_pending")
+                .clientId("client_b").connectionId("connection_public_pending").status("PROCESSING")
+                .tiktokStatus("PROCESSING").publishId("publish_pending").build();
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
+                .id(32L).connectionId("connection_public_pending").clientId("client_b")
+                .authStatus("AUTHORIZED").accessTokenCipher("access-cipher")
+                .accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build();
+        when(taskMapper.selectByClientAndTaskId("client_b", "task_public_pending")).thenReturn(task);
+        when(detailMapper.selectListByClientAndTaskId("client_b", "task_public_pending"))
+                .thenReturn(Collections.singletonList(detail));
+        when(detailMapper.selectByClientAndDetailId("client_b", "detail_public_pending")).thenReturn(detail);
+        when(connectionMapper.selectByClientAndConnectionId("client_b", "connection_public_pending"))
+                .thenReturn(connection);
+        when(secretCipher.decrypt("access-cipher")).thenReturn("access-token");
+        when(platformRegistry.getRequired("TIKTOK")).thenReturn(adapter);
+        when(adapter.fetchPostStatus("access-token", "publish_pending"))
+                .thenReturn(new TkOpenPublishPlatformAdapter.PublishStatusResult(
+                        true, "PUBLISH_COMPLETE", null, null, null));
+
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+                mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
+                platformRegistry, null, secretCipher, null);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "metrics"), "req-public-pending");
+
+        TkOpenTiktokPublishVO.MetricsResp response = service.getMetrics("task_public_pending");
+
+        assertEquals("WAITING_PUBLIC", response.getMetricsStatus());
+        assertNull(response.getViewCount());
+        verify(adapter, never()).queryVideoMetrics(anyString(), anyString());
+    }
+
+    @Test
+    void shouldReturnReauthRequiredWhenPublicPostLookupRefreshFails() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkOpenTiktokPublishDetailDO.class);
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenPublishPlatformRegistry platformRegistry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        TkOpenApiSecretCipher secretCipher = mock(TkOpenApiSecretCipher.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task_public_reauth").clientId("client_b").status("SUCCESS").build();
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder()
+                .id(51L).detailId("detail_public_reauth").taskId("task_public_reauth")
+                .clientId("client_b").connectionId("connection_public_reauth").status("SUCCESS")
+                .tiktokStatus("PUBLISH_COMPLETE").publishId("publish_public_reauth").build();
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
+                .id(52L).connectionId("connection_public_reauth").clientId("client_b")
+                .authStatus("AUTHORIZED").accessTokenCipher("expired-cipher")
+                .refreshTokenCipher("refresh-cipher").accessTokenExpireTime(LocalDateTime.now().minusMinutes(1))
+                .build();
+        when(taskMapper.selectByClientAndTaskId("client_b", "task_public_reauth")).thenReturn(task);
+        when(detailMapper.selectListByClientAndTaskId("client_b", "task_public_reauth"))
+                .thenReturn(Collections.singletonList(detail));
+        when(detailMapper.selectByClientAndDetailId("client_b", "detail_public_reauth")).thenReturn(detail);
+        when(connectionMapper.selectByClientAndConnectionId("client_b", "connection_public_reauth"))
+                .thenReturn(connection);
+        when(secretCipher.decrypt("refresh-cipher")).thenReturn("refresh-token");
+        when(platformRegistry.getRequired("TIKTOK")).thenReturn(adapter);
+        when(adapter.refreshAccessToken("refresh-token"))
+                .thenReturn(new TkOpenPublishPlatformAdapter.OAuthTokenResult(
+                        false, null, null, null, null, null, null, "invalid_grant", "refresh token expired"));
+
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+                mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
+                platformRegistry, null, secretCipher, null);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "metrics"), "req-public-reauth");
+
+        TkOpenTiktokPublishVO.MetricsResp response = service.getMetrics("task_public_reauth");
+
+        assertEquals("REAUTH_REQUIRED", response.getMetricsStatus());
+        assertEquals("refresh token expired", response.getMetricsFailReason());
+    }
+
+    @Test
+    void shouldReturnReauthRequiredWhenMetricsTokenRefreshFails() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkOpenTiktokPublishDetailDO.class);
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenPublishPlatformRegistry platformRegistry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        TkOpenApiSecretCipher secretCipher = mock(TkOpenApiSecretCipher.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task_metrics_reauth").clientId("client_b").status("SUCCESS").build();
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder()
+                .id(41L).detailId("detail_metrics_reauth").taskId("task_metrics_reauth")
+                .clientId("client_b").connectionId("connection_metrics_reauth").status("SUCCESS")
+                .tiktokStatus("PUBLISH_COMPLETE").publishId("publish_reauth").publicPostId("public_reauth")
+                .build();
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
+                .id(42L).connectionId("connection_metrics_reauth").clientId("client_b")
+                .authStatus("AUTHORIZED").accessTokenCipher("expired-cipher")
+                .refreshTokenCipher("refresh-cipher").accessTokenExpireTime(LocalDateTime.now().minusMinutes(1))
+                .build();
+        when(taskMapper.selectByClientAndTaskId("client_b", "task_metrics_reauth")).thenReturn(task);
+        when(detailMapper.selectListByClientAndTaskId("client_b", "task_metrics_reauth"))
+                .thenReturn(Collections.singletonList(detail));
+        when(connectionMapper.selectByClientAndConnectionId("client_b", "connection_metrics_reauth"))
+                .thenReturn(connection);
+        when(secretCipher.decrypt("refresh-cipher")).thenReturn("refresh-token");
+        when(platformRegistry.getRequired("TIKTOK")).thenReturn(adapter);
+        when(adapter.refreshAccessToken("refresh-token"))
+                .thenReturn(new TkOpenPublishPlatformAdapter.OAuthTokenResult(
+                        false, null, null, null, null, null, null, "invalid_grant", "refresh token expired"));
+
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+                mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
+                platformRegistry, null, secretCipher, null);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "metrics"), "req-metrics-reauth");
+
+        TkOpenTiktokPublishVO.MetricsResp response = service.getMetrics("task_metrics_reauth");
+
+        assertEquals("REAUTH_REQUIRED", response.getMetricsStatus());
+        assertEquals("refresh token expired", response.getMetricsFailReason());
+        ArgumentCaptor<TkOpenTiktokConnectionDO> connectionCaptor = ArgumentCaptor.forClass(TkOpenTiktokConnectionDO.class);
+        verify(connectionMapper).updateById(connectionCaptor.capture());
+        assertEquals("REAUTH_REQUIRED", connectionCaptor.getValue().getAuthStatus());
+        assertEquals("INVALID", connectionCaptor.getValue().getTokenStatus());
+        verify(adapter, never()).queryVideoMetrics(anyString(), anyString());
+    }
+
+    private static Object property(Object bean, String name) throws Exception {
+        Field field = bean.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(bean);
+    }
+
+    private static void setProperty(Object bean, String name, Object value) throws Exception {
+        Field field = bean.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(bean, value);
     }
 
     @Test

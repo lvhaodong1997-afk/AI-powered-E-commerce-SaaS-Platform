@@ -98,4 +98,21 @@ public final class TkOpenTiktokPublishVO {
         private Integer retryCount;
         private LocalDateTime updateTime;
     }
+
+    @Data
+    public static class MetricsResp {
+        private String taskId;
+        private String detailId;
+        private String connectionId;
+        private String publishId;
+        private String publicPostId;
+        private String publishUrl;
+        private String metricsStatus;
+        private Long viewCount;
+        private Long likeCount;
+        private Long commentCount;
+        private Long shareCount;
+        private LocalDateTime metricsLastSyncTime;
+        private String metricsFailReason;
+    }
 }

@@ -275,6 +275,7 @@ public class TkTiktokAuthServiceImpl implements TkTiktokAuthService {
         account.setRefreshTokenExpireTime(LocalDateTime.now().plusSeconds(firstLong(data, 31_536_000, "refresh_expires_in", "refreshExpiresIn")));
         account.setTokenStatus("VALID");
         account.setAuthStatus("AUTHORIZED");
+        account.setStatus(0);
         account.setLastAuthTime(LocalDateTime.now());
         account.setFailReason(null);
         applyAuthorizationOwner(account, session.getUserId());
