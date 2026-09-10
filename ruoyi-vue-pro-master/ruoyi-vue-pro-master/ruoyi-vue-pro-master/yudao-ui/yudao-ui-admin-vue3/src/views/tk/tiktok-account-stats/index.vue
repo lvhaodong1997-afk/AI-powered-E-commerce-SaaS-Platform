@@ -48,16 +48,26 @@
         <el-col :xs="24" :lg="12">
           <el-card shadow="never" class="ranking-panel">
             <template #header>
-              <div class="panel-title">
-                <span>{{ tt('accountStats.followerTop10') }}</span>
-                <Icon icon="ep:trophy" class="panel-icon" />
+              <div class="ranking-panel-header">
+                <div class="ranking-panel-heading">
+                  <span class="panel-kicker">{{ tt('accountStats.rankingLabel') }}</span>
+                  <div class="panel-title">
+                    <span>{{ tt('accountStats.followerTop10') }}</span>
+                    <Icon icon="ep:trophy" class="panel-icon" />
+                  </div>
+                  <span class="ranking-rule">{{ tt('accountStats.followerTopRule') }}</span>
+                </div>
+                <el-tag type="info" effect="plain" size="small">
+                  {{ Math.min(overview.topFollowerAccounts.length, 10) }} / 10
+                </el-tag>
               </div>
             </template>
             <div v-if="overview.topFollowerAccounts.length" class="ranking-list">
               <div
-                v-for="item in overview.topFollowerAccounts"
+                v-for="item in visibleFollowerAccounts"
                 :key="`follower-${item.accountId}`"
                 class="ranking-item"
+                :class="rankClass(item.rank)"
               >
                 <span class="ranking-number" :class="rankClass(item.rank)">{{ item.rank }}</span>
                 <el-avatar :size="36" :src="item.avatarUrl">
@@ -72,49 +82,73 @@
                 <strong class="ranking-value">{{ formatCount(item.metricValue) }}</strong>
               </div>
             </div>
-            <el-empty v-else :description="tt('accountStats.noFollowerData')" :image-size="72" />
+            <el-button
+              v-if="overview.topFollowerAccounts.length > 3"
+              link
+              type="primary"
+              class="ranking-expand-button"
+              :aria-expanded="expandedRankings.followers"
+              @click="toggleRanking('followers')"
+            >
+              <Icon
+                :icon="expandedRankings.followers ? 'ep:arrow-up' : 'ep:arrow-down'"
+                class="button-icon"
+              />
+              {{
+                expandedRankings.followers
+                  ? tt('accountStats.collapseTop10')
+                  : tt('accountStats.viewTop10')
+              }}
+            </el-button>
+            <el-empty
+              v-if="!overview.topFollowerAccounts.length"
+              :description="tt('accountStats.noFollowerData')"
+              :image-size="72"
+            />
           </el-card>
         </el-col>
 
         <el-col :xs="24" :lg="12">
           <el-card shadow="never" class="ranking-panel">
             <template #header>
-              <div class="panel-title">
-                <span>{{ tt('accountStats.recentVideoTop10') }}</span>
-                <Icon icon="ep:trend-charts" class="panel-icon" />
+              <div class="ranking-panel-header">
+                <div class="ranking-panel-heading">
+                  <span class="panel-kicker">{{ tt('accountStats.rankingLabel') }}</span>
+                  <div class="panel-title">
+                    <span>{{ tt('accountStats.recentVideoTop10') }}</span>
+                    <Icon icon="ep:trend-charts" class="panel-icon" />
+                  </div>
+                  <span class="ranking-rule">{{ tt('accountStats.videoTopRule') }}</span>
+                </div>
+                <el-tag type="info" effect="plain" size="small">
+                  {{ Math.min(overview.topLatestVideoViewAccounts.length, 10) }} / 10
+                </el-tag>
               </div>
             </template>
             <div v-if="overview.topLatestVideoViewAccounts.length" class="ranking-list">
               <div
-                v-for="item in overview.topLatestVideoViewAccounts"
+                v-for="item in visibleVideoAccounts"
                 :key="`view-${item.accountId}-${item.latestVideoId || item.rank}`"
                 class="ranking-item"
+                :class="rankClass(item.rank)"
               >
                 <span class="ranking-number" :class="rankClass(item.rank)">{{ item.rank }}</span>
-                <el-avatar :size="36" :src="item.avatarUrl">
-                  <Icon icon="ep:user" />
-                </el-avatar>
-                <el-image
-                  v-if="item.latestVideoCoverImageUrl"
-                  class="ranking-video-cover"
-                  :src="item.latestVideoCoverImageUrl"
-                  fit="cover"
-                  :alt="rankVideoTitle(item)"
-                >
-                  <template #error><Icon icon="ep:video-camera" /></template>
-                </el-image>
+                <div class="ranking-video-cover">
+                  <el-image
+                    v-if="item.latestVideoCoverImageUrl"
+                    :src="item.latestVideoCoverImageUrl"
+                    fit="cover"
+                    :alt="rankVideoTitle(item)"
+                  >
+                    <template #error><Icon icon="ep:video-camera" /></template>
+                  </el-image>
+                  <Icon v-else icon="ep:video-camera" />
+                </div>
                 <div class="ranking-account">
                   <strong>{{ accountName(item) }}</strong>
-                  <span>{{
-                    item.username ? `@${item.username}` : tt('accountStats.recentPublicVideos')
-                  }}</span>
                   <span class="ranking-video-title" :title="rankVideoTitle(item)">{{
                     rankVideoTitle(item)
                   }}</span>
-                  <span v-if="item.latestVideoCreateTime"
-                    >{{ tt('accountStats.publishedAt')
-                    }}{{ formatVideoTime(item.latestVideoCreateTime) }}</span
-                  >
                 </div>
                 <div class="ranking-value-wrap">
                   <strong class="ranking-value">{{ formatCount(item.metricValue) }}</strong>
@@ -133,7 +167,29 @@
                 </div>
               </div>
             </div>
-            <el-empty v-else :description="tt('accountStats.noVideoViewData')" :image-size="72" />
+            <el-button
+              v-if="overview.topLatestVideoViewAccounts.length > 3"
+              link
+              type="primary"
+              class="ranking-expand-button"
+              :aria-expanded="expandedRankings.videos"
+              @click="toggleRanking('videos')"
+            >
+              <Icon
+                :icon="expandedRankings.videos ? 'ep:arrow-up' : 'ep:arrow-down'"
+                class="button-icon"
+              />
+              {{
+                expandedRankings.videos
+                  ? tt('accountStats.collapseTop10')
+                  : tt('accountStats.viewTop10')
+              }}
+            </el-button>
+            <el-empty
+              v-if="!overview.topLatestVideoViewAccounts.length"
+              :description="tt('accountStats.noVideoViewData')"
+              :image-size="72"
+            />
           </el-card>
         </el-col>
       </el-row>
@@ -333,6 +389,7 @@ const loadError = ref(false)
 const hasLoaded = ref(false)
 const searchKeyword = ref('')
 const expandedAccounts = reactive<Record<number, boolean>>({})
+const expandedRankings = reactive({ followers: false, videos: false })
 const overview = ref<TkTiktokAccountStatsOverviewVO>({
   topFollowerAccounts: [],
   topLatestVideoViewAccounts: [],
@@ -357,6 +414,16 @@ const hasStaleAccountData = computed(() =>
   )
 )
 
+const visibleFollowerAccounts = computed(() => {
+  const items = overview.value.topFollowerAccounts
+  return expandedRankings.followers ? items : items.slice(0, 3)
+})
+
+const visibleVideoAccounts = computed(() => {
+  const items = overview.value.topLatestVideoViewAccounts
+  return expandedRankings.videos ? items : items.slice(0, 3)
+})
+
 const accountName = (account: TkTiktokAccountStatsRankVO | TkTiktokAccountStatsVO) =>
   account.displayName || account.username || `${tt('accountStats.account')} #${account.accountId}`
 
@@ -377,6 +444,9 @@ const formatCount = (value?: number | null) =>
 const formatDateTime = (value?: string | null) => (value ? formatDate(value) : '--')
 const formatVideoTime = (value?: number | null) => (value == null ? '--' : formatDate(value * 1000))
 const rankClass = (rank: number) => (rank <= 3 ? `rank-${rank}` : '')
+const toggleRanking = (ranking: keyof typeof expandedRankings) => {
+  expandedRankings[ranking] = !expandedRankings[ranking]
+}
 const isStatsStale = (value?: string | null) => {
   if (!value) {
     return false
@@ -446,7 +516,9 @@ onMounted(() => loadOverview(canSync))
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  padding: 4px 4px 18px;
   gap: 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .page-heading {
@@ -456,6 +528,7 @@ onMounted(() => loadOverview(canSync))
 .page-title {
   margin: 0;
   font-size: 24px;
+  font-weight: 650;
   line-height: 32px;
   color: var(--el-text-color-primary);
 }
@@ -487,43 +560,111 @@ onMounted(() => loadOverview(canSync))
 }
 
 .ranking-row {
+  align-items: flex-start;
   row-gap: 16px;
 }
 
 .ranking-panel {
-  height: 100%;
   border-color: var(--el-border-color-light);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(31 42 55 / 6%);
+}
+
+.ranking-panel :deep(.el-card__header) {
+  padding: 16px 18px 14px;
+  border-bottom-color: var(--el-border-color-lighter);
+}
+
+.ranking-panel :deep(.el-card__body) {
+  padding: 12px 18px 16px;
+}
+
+.ranking-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ranking-panel-heading {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.panel-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--el-text-color-placeholder);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .panel-title {
   display: flex;
-  font-size: 17px;
+  margin-top: 2px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--el-text-color-primary);
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
+}
+
+.panel-title > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel-icon {
   font-size: 18px;
-  color: var(--el-color-primary);
+  color: #b4874c;
+}
+
+.ranking-rule {
+  max-width: 100%;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--el-text-color-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ranking-list {
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 
 .ranking-item {
   display: flex;
   align-items: center;
-  min-height: 64px;
+  min-height: 58px;
+  padding: 6px 4px;
   gap: 10px;
   border-bottom: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  transition: background-color 0.2s ease;
 }
 
 .ranking-item:last-child {
   border-bottom: 0;
+}
+
+.ranking-item.rank-1 {
+  background: #fffaf0;
+}
+
+.ranking-item.rank-2 {
+  background: #f7f9fb;
+}
+
+.ranking-item.rank-3 {
+  background: #fff8f3;
 }
 
 .ranking-number {
@@ -557,12 +698,21 @@ onMounted(() => loadOverview(canSync))
 }
 
 .ranking-video-cover {
+  display: inline-flex;
   width: 38px;
   height: 50px;
   color: var(--el-text-color-placeholder);
   background: var(--el-fill-color-light);
   border-radius: 4px;
   flex: 0 0 38px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.ranking-video-cover :deep(.el-image) {
+  width: 100%;
+  height: 100%;
 }
 
 .ranking-account {
@@ -601,9 +751,18 @@ onMounted(() => loadOverview(canSync))
 }
 
 .ranking-value {
-  font-size: 14px;
-  color: var(--el-color-primary);
+  font-size: 15px;
+  font-weight: 650;
+  color: #36536f;
   white-space: nowrap;
+}
+
+.ranking-expand-button {
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 0 2px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  border-radius: 0;
 }
 
 .video-link {
@@ -859,6 +1018,14 @@ onMounted(() => loadOverview(canSync))
 
   .page-actions {
     justify-content: flex-start;
+  }
+
+  .ranking-panel-header {
+    align-items: stretch;
+  }
+
+  .ranking-panel-header > .el-tag {
+    align-self: flex-start;
   }
 
   .section-heading > div:first-child {

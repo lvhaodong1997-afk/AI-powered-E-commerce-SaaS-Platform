@@ -1,0 +1,25 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+
+const read = (relativePath) => fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8')
+
+const page = read('../src/views/tk/tiktok-account-stats/index.vue')
+const zh = read('../src/locales/tk/zh-CN.ts')
+const en = read('../src/locales/tk/en.ts')
+
+assert.match(page, /const expandedRankings = reactive\(\{ followers: false, videos: false \}\)/)
+assert.match(page, /v-for="item in visibleFollowerAccounts"/)
+assert.match(page, /v-for="item in visibleVideoAccounts"/)
+assert.match(page, /const visibleFollowerAccounts = computed\(\(\) =>/)
+assert.match(page, /const visibleVideoAccounts = computed\(\(\) =>/)
+assert.match(page, /expandedRankings\.followers \? items : items\.slice\(0, 3\)/)
+assert.match(page, /expandedRankings\.videos \? items : items\.slice\(0, 3\)/)
+assert.match(page, /class="ranking-rule"/)
+assert.match(page, /v-if="!overview\.topFollowerAccounts\.length"/)
+assert.match(page, /v-if="!overview\.topLatestVideoViewAccounts\.length"/)
+assert.doesNotMatch(page, /\.ranking-panel\s*\{[^}]*height:\s*100%/s)
+assert.match(zh, /'accountStats\.videoTopRule'/)
+assert.match(en, /'accountStats\.videoTopRule'/)
+
+console.log('TikTok account stats UI density tests passed')

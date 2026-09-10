@@ -321,9 +321,15 @@ export const tkEn: Record<string, string> = {
   'accountStats.videoData': 'Video Data: ',
   'accountStats.dataExpired':
     'Some account data has not been updated for over 24 hours. Refresh to check the latest data.',
+  'accountStats.rankingLabel': 'Rankings',
   'accountStats.followerTop10': 'Top 10 by Followers',
+  'accountStats.followerTopRule': 'Sorted by follower count, highest first',
   'accountStats.noFollowerData': 'No follower data',
   'accountStats.recentVideoTop10': 'Top 10 by Individual Views Across Latest Five Videos',
+  'accountStats.videoTopRule':
+    'Each account contributes its latest 5 videos; each video ranks by individual views',
+  'accountStats.viewTop10': 'View TOP10',
+  'accountStats.collapseTop10': 'Collapse ranking',
   'accountStats.account': 'TikTok Account',
   'accountStats.recentPublicVideos': 'Latest Five Public Videos',
   'accountStats.video': 'Video',
