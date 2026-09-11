@@ -59,6 +59,31 @@ class TkGenerationOpeningUploadServiceImplTest {
     }
 
     @Test
+    void platformAdminCanCompleteSessionForSelectedTenantLibrary() throws Exception {
+        TkMaterialLibraryService libraryService = mock(TkMaterialLibraryService.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        StubUploadSessionService uploadSessionService = new StubUploadSessionService();
+        uploadSessionService.creator = "1";
+        TkGenerationOpeningUploadServiceImpl service = createService(libraryService, dataScopeService,
+                uploadSessionService);
+        TkMaterialLibraryDO library = library();
+        when(libraryService.validateMaterialLibraryReadable(10L)).thenReturn(library);
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(1L, 100L,
+                "PLATFORM_ADMIN", null));
+
+        byte[] content = validMp4Bytes("opening".getBytes(StandardCharsets.UTF_8));
+        TkUploadSessionRespVO created = service.createSession(10L, "opening.mp4", (long) content.length, "video/mp4");
+        service.uploadChunk(created.getUploadId(), 0, new MockMultipartFile("chunk", "0.part",
+                "application/octet-stream", java.util.Arrays.copyOfRange(content, 0, 32)));
+        service.uploadChunk(created.getUploadId(), 1, new MockMultipartFile("chunk", "1.part",
+                "application/octet-stream", java.util.Arrays.copyOfRange(content, 32, content.length)));
+
+        TkGenerationOpeningUploadCompleteRespVO completed = service.complete(created.getUploadId());
+
+        assertEquals("COMPLETED", completed.getStatus());
+    }
+
+    @Test
     void rejectsCompletedOpeningUploadOwnedByAnotherUser() {
         TkMaterialLibraryService libraryService = mock(TkMaterialLibraryService.class);
         TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
@@ -132,6 +157,7 @@ class TkGenerationOpeningUploadServiceImplTest {
 
         private TkUploadSessionDO session;
         private String storageMode;
+        private String creator = "7";
 
         @Override
         public void create(String uploadId, TkMaterialLibraryDO library, String fileName, Long fileSize,
@@ -147,7 +173,7 @@ class TkGenerationOpeningUploadServiceImplTest {
                     .setStorageMode(storageMode)
                     .setStatus("UPLOADING");
             this.session.setTenantId(library.getTenantId());
-            this.session.setCreator("7");
+            this.session.setCreator(creator);
         }
 
         @Override
