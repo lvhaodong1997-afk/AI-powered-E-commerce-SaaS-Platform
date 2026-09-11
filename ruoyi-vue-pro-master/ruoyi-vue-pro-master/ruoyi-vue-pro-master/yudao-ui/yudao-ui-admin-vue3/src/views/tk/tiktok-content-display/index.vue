@@ -48,8 +48,12 @@
         <el-table-column label="视频 ID" prop="videoId" min-width="180" show-overflow-tooltip />
         <el-table-column label="数据" width="210">
           <template #default="scope">
-            <span>播放 {{ scope.row.viewCount ?? '-' }}</span>
-            <span class="metric-separator">赞 {{ scope.row.likeCount ?? '-' }}</span>
+            <div class="video-metrics">
+              <span>播放 {{ scope.row.viewCount ?? '-' }}</span>
+              <span>点赞 {{ scope.row.likeCount ?? '-' }}</span>
+              <span>评论 {{ scope.row.commentCount ?? '-' }}</span>
+              <span>分享 {{ scope.row.shareCount ?? '-' }}</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="130">
@@ -170,7 +174,8 @@ onMounted(async () => {
 .account-select { width: 190px; }
 .status-select { width: 150px; }
 .video-cover { width: 56px; height: 76px; border-radius: 4px; }
-.metric-separator { margin-left: 12px; }
+.video-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
+.video-metrics > span { overflow-wrap: anywhere; }
 .preview-frame-wrap { display: flex; justify-content: center; min-height: 420px; }
 .preview-frame { width: 100%; min-height: 420px; border: 0; }
 @media (max-width: 960px) { .toolbar { flex-direction: column; } }

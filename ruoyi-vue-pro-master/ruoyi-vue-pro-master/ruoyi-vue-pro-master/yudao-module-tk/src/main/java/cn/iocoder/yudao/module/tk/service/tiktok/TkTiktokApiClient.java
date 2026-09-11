@@ -414,7 +414,7 @@ public class TkTiktokApiClient {
             payload.put("cursor", cursor);
         }
         payload.put("max_count", maxCount == null ? 20 : Math.min(Math.max(maxCount, 1), 20));
-        String url = VIDEO_LIST_URL + "?fields=id,create_time,cover_image_url,share_url,video_description,duration,height,width,title,embed_html,embed_link,view_count";
+        String url = VIDEO_LIST_URL + "?fields=id,create_time,cover_image_url,share_url,video_description,duration,height,width,title,embed_html,embed_link,like_count,comment_count,share_count,view_count";
         return parseVideoListResult(postJson(url, accessToken, payload));
     }
 

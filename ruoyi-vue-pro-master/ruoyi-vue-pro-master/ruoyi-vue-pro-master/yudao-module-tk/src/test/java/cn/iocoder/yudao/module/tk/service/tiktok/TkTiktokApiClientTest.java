@@ -1,10 +1,15 @@
 package cn.iocoder.yudao.module.tk.service.tiktok;
 
+import cn.hutool.http.HttpRequest;
+import cn.hutool.http.HttpResponse;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
 
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -14,6 +19,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 class TkTiktokApiClientTest {
 
@@ -171,14 +181,48 @@ class TkTiktokApiClientTest {
     }
 
     @Test
-    void parseVideoListExtractsLatestVideoViewCount() {
+    void listVideosRequestsAndParsesAllEngagementCounts() {
+        HttpRequest request = mock(HttpRequest.class, RETURNS_SELF);
+        HttpResponse response = mock(HttpResponse.class);
+        when(request.execute()).thenReturn(response);
+        when(response.body()).thenReturn("{\"data\":{\"videos\":[{\"id\":\"latest\","
+                + "\"view_count\":98765,\"like_count\":1234,\"comment_count\":56,\"share_count\":78}],"
+                + "\"has_more\":false},\"error\":{\"code\":\"ok\"}}");
+
+        try (MockedStatic<HttpRequest> http = mockStatic(HttpRequest.class)) {
+            http.when(() -> HttpRequest.post(anyString())).thenReturn(request);
+
+            TkTiktokApiClient.VideoListResult result = new TkTiktokApiClient().listVideos("test-token", null, 20);
+
+            ArgumentCaptor<String> url = ArgumentCaptor.forClass(String.class);
+            http.verify(() -> HttpRequest.post(url.capture()));
+            String fields = URI.create(url.getValue()).getQuery().substring("fields=".length());
+            for (String field : Arrays.asList("view_count", "like_count", "comment_count", "share_count")) {
+                assertTrue(Arrays.asList(fields.split(",")).contains(field), "Missing requested field: " + field);
+            }
+            assertTrue(result.isSuccess());
+            TkTiktokApiClient.VideoInfo video = result.getVideos().get(0);
+            assertEquals(98765L, video.getViewCount());
+            assertEquals(1234L, video.getLikeCount());
+            assertEquals(56L, video.getCommentCount());
+            assertEquals(78L, video.getShareCount());
+        }
+    }
+
+    @Test
+    void parseVideoListDistinguishesMissingCountsFromZero() {
         TkTiktokApiClient.VideoListResult result = TkTiktokApiClient.parseVideoListResult(JsonUtils.parseTree(
-                "{\"data\":{\"videos\":[{\"id\":\"latest\",\"create_time\":1700000100,\"view_count\":98765}],\"has_more\":false},"
+                "{\"data\":{\"videos\":[{\"id\":\"latest\",\"view_count\":98765,\"comment_count\":0,\"share_count\":0},"
+                        + "{\"id\":\"missing\"}],\"has_more\":false},"
                         + "\"error\":{\"code\":\"ok\"}}"
         ));
 
         assertTrue(result.isSuccess());
         assertEquals(98765L, result.getVideos().get(0).getViewCount());
+        assertEquals(0L, result.getVideos().get(0).getCommentCount());
+        assertEquals(0L, result.getVideos().get(0).getShareCount());
+        assertNull(result.getVideos().get(1).getCommentCount());
+        assertNull(result.getVideos().get(1).getShareCount());
     }
 
     @Test

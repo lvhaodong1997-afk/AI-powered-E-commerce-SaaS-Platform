@@ -1,5 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.tiktok;
 
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokContentVideoRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokAccountDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokContentVideoDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokAccountMapper;
@@ -27,6 +29,59 @@ class TkTiktokContentDisplayServiceImplTest {
 
         assertEquals("TikTok 账号缺少 video.list 权限，请重新授权后再同步",
                 TkTiktokContentDisplayServiceImpl.contentSyncError(result));
+    }
+
+    @Test
+    void syncAndRefreshPersistEngagementCountsIncludingZero() {
+        TkTiktokContentVideoMapper videoMapper = mock(TkTiktokContentVideoMapper.class);
+        TkTiktokAccountService accountService = mock(TkTiktokAccountService.class);
+        TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
+        TkTiktokTokenService tokenService = mock(TkTiktokTokenService.class);
+        TkTiktokContentDisplayServiceImpl service = new TkTiktokContentDisplayServiceImpl();
+        ReflectionTestUtils.setField(service, "videoMapper", videoMapper);
+        ReflectionTestUtils.setField(service, "accountService", accountService);
+        ReflectionTestUtils.setField(service, "apiClient", apiClient);
+        ReflectionTestUtils.setField(service, "tokenService", tokenService);
+
+        TkTiktokAccountDO account = TkTiktokAccountDO.builder()
+                .id(10L).companyId(20L).openId("open-10").authStatus("AUTHORIZED").build();
+        account.setTenantId(30L);
+        when(accountService.validateAccountReadable(10L)).thenReturn(account);
+        when(tokenService.getValidAccessToken(10L)).thenReturn("test-token");
+        when(apiClient.listVideos("test-token", null, 20)).thenReturn(
+                TkTiktokApiClient.parseVideoListResult(JsonUtils.parseTree(
+                        "{\"data\":{\"videos\":[{\"id\":\"video-10\",\"view_count\":1000,\"like_count\":100,"
+                                + "\"comment_count\":12,\"share_count\":34}],\"has_more\":false},\"error\":{\"code\":\"ok\"}}")));
+        when(apiClient.queryUserInfo("test-token")).thenReturn(
+                new TkTiktokApiClient.UserInfo(false, "profile unavailable", null, null, null, null, null));
+        when(videoMapper.selectListByAccountId(10L)).thenReturn(Collections.emptyList());
+
+        assertEquals(1, service.syncAccount(10L).getSyncedCount());
+
+        ArgumentCaptor<TkTiktokContentVideoDO> inserted = ArgumentCaptor.forClass(TkTiktokContentVideoDO.class);
+        verify(videoMapper).insert(inserted.capture());
+        TkTiktokContentVideoDO record = inserted.getValue();
+        assertEquals(1000L, record.getViewCount());
+        assertEquals(100L, record.getLikeCount());
+        assertEquals(12L, record.getCommentCount());
+        assertEquals(34L, record.getShareCount());
+
+        record.setId(50L);
+        when(videoMapper.selectByAccountIdAndVideoId(10L, "video-10")).thenReturn(record);
+        when(apiClient.queryVideoShareUrl("test-token", Collections.singletonList("video-10"))).thenReturn(
+                TkTiktokApiClient.parseVideoQueryResult(JsonUtils.parseTree(
+                        "{\"data\":{\"videos\":[{\"id\":\"video-10\",\"view_count\":2000,\"like_count\":150,"
+                                + "\"comment_count\":0,\"share_count\":0}]},\"error\":{\"code\":\"ok\"}}")));
+
+        TkTiktokContentVideoRespVO refreshed = service.refreshVideo(10L, "video-10");
+
+        verify(videoMapper).updateById(record);
+        assertEquals(2000L, record.getViewCount());
+        assertEquals(150L, record.getLikeCount());
+        assertEquals(0L, record.getCommentCount());
+        assertEquals(0L, record.getShareCount());
+        assertEquals(0L, refreshed.getCommentCount());
+        assertEquals(0L, refreshed.getShareCount());
     }
 
     @Test
