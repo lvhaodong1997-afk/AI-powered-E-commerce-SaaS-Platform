@@ -11,6 +11,7 @@ import cn.iocoder.yudao.module.tk.dal.mysql.TkGenerationStepLogMapper;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.framework.ffmpeg.TkFfmpegExecutableResolver;
 import cn.iocoder.yudao.module.tk.service.upload.TkGenerationOutputStorageService;
+import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -55,6 +56,8 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
     private TkSubtitleLayoutService subtitleLayoutService;
     @Resource
     private TkAssSubtitleRenderService assSubtitleRenderService;
+    @Resource
+    private TkOssObjectStorageService ossObjectStorageService;
 
     @Override
     public TkRenderResult render(TkGenerationTaskDO task, List<TkClipPlanItem> clipPlan) {
@@ -737,7 +740,8 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
             throw new IllegalStateException("文件 URL 不是可下载的 HTTP 地址：" + url);
         }
         TkGenerationProperties.RenderDownload renderDownload = generationProperties.getRenderDownload();
-        String requestUrl = resolveDownloadUrl(url, renderDownload.getPublicBaseUrl(), renderDownload.getInternalBaseUrl());
+        String requestUrl = resolveDownloadUrl(resolveReadUrl(url), renderDownload.getPublicBaseUrl(),
+                renderDownload.getInternalBaseUrl());
         int timeoutMillis = Math.max(10, defaultInt(renderDownload.getTimeoutSeconds(), 180)) * 1000;
         int maxAttempts = Math.max(1, defaultInt(renderDownload.getMaxAttempts(), 3));
         RuntimeException lastException = null;
@@ -905,6 +909,10 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
 
     private String ffprobe() {
         return TkFfmpegExecutableResolver.ffprobe(generationProperties.getFfmpeg().getFfprobePath());
+    }
+
+    private String resolveReadUrl(String url) {
+        return ossObjectStorageService == null ? url : ossObjectStorageService.resolveReadUrl(url);
     }
 
     private String ffmpegPreset() {

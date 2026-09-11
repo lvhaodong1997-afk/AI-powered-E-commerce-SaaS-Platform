@@ -123,7 +123,7 @@ public class TkGenerationOpeningUploadServiceImpl implements TkGenerationOpening
         validateSessionOwner(session, libraryId);
         if ("oss".equalsIgnoreCase(session.getStorageMode())) {
             String objectKey = buildOssObjectKey(session);
-            return buildCompleteResponse(uploadId, session, toOssPublicUrl(objectKey));
+            return buildCompleteResponse(uploadId, session, toOssReadUrl(objectKey));
         }
         String relativePath = buildRelativePath(session);
         try {
@@ -215,7 +215,7 @@ public class TkGenerationOpeningUploadServiceImpl implements TkGenerationOpening
         response.setUploadedSize(0L);
         response.setUploadedChunks(Collections.emptySet());
         response.setUploadUrl(buildOssUploadUrl(oss));
-        response.setPublicUrl(toOssPublicUrl(buildOssObjectKey(uploadId, library, fileName)));
+        response.setPublicUrl(toOssReadUrl(buildOssObjectKey(uploadId, library, fileName)));
         response.setObjectKey(buildOssObjectKey(uploadId, library, fileName));
         response.setAccessKeyId(policy.getAccessKeyId());
         response.setPolicy(policy.getPolicy());
@@ -246,7 +246,7 @@ public class TkGenerationOpeningUploadServiceImpl implements TkGenerationOpening
             throw exception(TK_UPLOAD_FILE_INVALID);
         }
         uploadSessionService.markCompleted(uploadId);
-        return buildCompleteResponse(uploadId, session, toOssPublicUrl(buildOssObjectKey(session)));
+        return buildCompleteResponse(uploadId, session, toOssReadUrl(buildOssObjectKey(session)));
     }
 
     private TkGenerationOpeningUploadCompleteRespVO buildCompleteResponse(String uploadId, TkUploadSessionDO session,
@@ -291,6 +291,11 @@ public class TkGenerationOpeningUploadServiceImpl implements TkGenerationOpening
 
     private String toOssPublicUrl(String objectKey) {
         return StrUtil.removeSuffix(generationProperties.getUpload().getOss().getPublicBaseUrl(), "/") + "/" + objectKey;
+    }
+
+    private String toOssReadUrl(String objectKey) {
+        String publicUrl = toOssPublicUrl(objectKey);
+        return ossObjectStorageService == null ? publicUrl : ossObjectStorageService.resolveReadUrl(publicUrl);
     }
 
     private boolean isOssUploadEnabled() {

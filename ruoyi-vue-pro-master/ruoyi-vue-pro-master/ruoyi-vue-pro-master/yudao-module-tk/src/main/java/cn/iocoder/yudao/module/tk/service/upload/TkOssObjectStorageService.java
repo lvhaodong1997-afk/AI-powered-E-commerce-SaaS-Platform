@@ -9,6 +9,8 @@ import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.net.URI;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -85,6 +87,18 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
         }
     }
 
+    /**
+     * Rebuilds a GET URL for an OSS object stored as a public-base URL.
+     * Historical records contain the unsigned URL, so callers resolve it at read time.
+     */
+    public String resolveReadUrl(String url) {
+        if (StrUtil.isBlank(url) || !isConfigured()) {
+            return url;
+        }
+        String objectKey = toObjectKey(url);
+        return StrUtil.isBlank(objectKey) ? url : toReadUrl(objectKey);
+    }
+
     public String buildTiktokObjectKey(TkUploadSessionDO session) {
         TkGenerationProperties.Oss oss = getOss();
         String prefix = StrUtil.removeSuffix(StrUtil.blankToDefault(oss == null ? null : oss.getUploadPathPrefix(), "tk"), "/");
@@ -112,6 +126,46 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
                 .map(this::encodeQuery)
                 .reduce((left, right) -> left + "/" + right)
                 .orElse("");
+    }
+
+    private String toReadUrl(String objectKey) {
+        TkGenerationProperties.Oss oss = getOss();
+        String publicUrl = StrUtil.removeSuffix(oss.getPublicBaseUrl(), "/") + "/" + encodePath(objectKey);
+        Integer expireSeconds = oss.getReadUrlExpireSeconds();
+        if (expireSeconds == null || expireSeconds <= 0) {
+            return publicUrl;
+        }
+        long expires = Instant.now().getEpochSecond() + expireSeconds;
+        String resource = "/" + oss.getBucket() + "/" + objectKey;
+        String signature = TkOssRestSigner.sign("GET", "", "", String.valueOf(expires), resource,
+                oss.getAccessKeySecret());
+        return publicUrl + "?OSSAccessKeyId=" + encodeQuery(oss.getAccessKeyId())
+                + "&Expires=" + expires
+                + "&Signature=" + encodeQuery(signature);
+    }
+
+    private String toObjectKey(String url) {
+        TkGenerationProperties.Oss oss = getOss();
+        if (oss == null || StrUtil.isBlank(oss.getPublicBaseUrl())) {
+            return null;
+        }
+        String publicBaseUrl = StrUtil.removeSuffix(oss.getPublicBaseUrl(), "/");
+        String normalizedUrl = StrUtil.subBefore(url, "?", false);
+        if (!StrUtil.startWithIgnoreCase(normalizedUrl, publicBaseUrl + "/")) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(normalizedUrl);
+            String objectPath = uri.getRawPath();
+            String basePath = URI.create(publicBaseUrl).getRawPath();
+            if (StrUtil.isNotBlank(basePath) && !"/".equals(basePath)) {
+                objectPath = StrUtil.removePrefix(objectPath, basePath);
+            }
+            objectPath = StrUtil.removePrefix(objectPath, "/");
+            return StrUtil.isBlank(objectPath) ? null : URLDecoder.decode(objectPath, StandardCharsets.UTF_8.name());
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private String encodeQuery(String value) {

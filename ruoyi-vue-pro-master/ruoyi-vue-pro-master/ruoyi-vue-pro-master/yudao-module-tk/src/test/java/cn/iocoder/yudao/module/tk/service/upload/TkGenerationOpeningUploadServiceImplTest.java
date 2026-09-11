@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TkGenerationOpeningUploadServiceImplTest {
@@ -97,6 +98,43 @@ class TkGenerationOpeningUploadServiceImplTest {
 
         assertThrows(RuntimeException.class,
                 () -> service.validateCompletedUpload("upload-opening-2", 10L));
+    }
+
+    @Test
+    void completedOssOpeningUploadReturnsSignedReadUrl() {
+        TkMaterialLibraryService libraryService = mock(TkMaterialLibraryService.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        StubUploadSessionService uploadSessionService = new StubUploadSessionService();
+        TkGenerationOpeningUploadServiceImpl service = createService(libraryService, dataScopeService,
+                uploadSessionService);
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getUpload().setStorageType("oss");
+        properties.getUpload().getOss().setEnabled(true);
+        properties.getUpload().getOss().setBucket("bucket");
+        properties.getUpload().getOss().setEndpoint("oss-cn-example.aliyuncs.com");
+        properties.getUpload().getOss().setPublicBaseUrl("https://cdn.example.com");
+        properties.getUpload().getOss().setAccessKeyId("access-key");
+        properties.getUpload().getOss().setAccessKeySecret("access-secret");
+        properties.getUpload().getOss().setReadUrlExpireSeconds(3600);
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        TkOssObjectStorageService ossObjectStorageService = mock(TkOssObjectStorageService.class);
+        ReflectionTestUtils.setField(service, "ossObjectStorageService", ossObjectStorageService);
+        when(ossObjectStorageService.isConfigured()).thenReturn(true);
+        when(ossObjectStorageService.headObject("tk/100/200/generation-openings/upload-opening-oss.mp4"))
+                .thenReturn(new TkOssObjectStorageClient.ObjectMetadata(39L, null));
+        when(ossObjectStorageService.resolveReadUrl(
+                "https://cdn.example.com/tk/100/200/generation-openings/upload-opening-oss.mp4"))
+                .thenReturn("https://cdn.example.com/tk/100/200/generation-openings/upload-opening-oss.mp4?Signature=signed");
+        when(libraryService.validateMaterialLibraryReadable(10L)).thenReturn(library());
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L, "USER", 200L));
+        uploadSessionService.session = session("upload-opening-oss").setStorageMode("oss");
+
+        TkGenerationOpeningUploadCompleteRespVO completed = service.complete("upload-opening-oss");
+
+        assertEquals("https://cdn.example.com/tk/100/200/generation-openings/upload-opening-oss.mp4?Signature=signed",
+                completed.getFileUrl());
+        verify(ossObjectStorageService).resolveReadUrl(
+                "https://cdn.example.com/tk/100/200/generation-openings/upload-opening-oss.mp4");
     }
 
     private TkGenerationOpeningUploadServiceImpl createService(TkMaterialLibraryService libraryService,

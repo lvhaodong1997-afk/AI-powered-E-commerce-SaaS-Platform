@@ -24,6 +24,7 @@ import cn.iocoder.yudao.module.tk.service.credit.TkCreditService;
 import cn.iocoder.yudao.module.tk.service.generation.TkGenerationBatchProgressSupport;
 import cn.iocoder.yudao.module.tk.service.log.TkBusinessLogService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
+import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.context.SecurityContext;
@@ -88,6 +89,8 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
     private TkBusinessLogService businessLogService;
     @Resource
     private TkGenerationProperties generationProperties;
+    @Resource
+    private TkOssObjectStorageService ossObjectStorageService;
     @Resource
     private TkGenerationTaskLeaseService taskLeaseService;
     @Resource
@@ -429,7 +432,7 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
 
     private Double probeMediaDuration(String mediaUrl) {
         try {
-            Double directDuration = probeMediaDurationByFfprobe(mediaUrl);
+            Double directDuration = probeMediaDurationByFfprobe(resolveReadUrl(mediaUrl));
             if (directDuration != null && directDuration > 0D) {
                 return directDuration;
             }
@@ -448,7 +451,7 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
         try {
             tempFile = File.createTempFile("tk-audio-duration-", ".media");
             TkGenerationProperties.RenderDownload renderDownload = generationProperties.getRenderDownload();
-            String requestUrl = DefaultTkVideoRenderService.resolveDownloadUrl(mediaUrl,
+            String requestUrl = DefaultTkVideoRenderService.resolveDownloadUrl(resolveReadUrl(mediaUrl),
                     renderDownload.getPublicBaseUrl(), renderDownload.getInternalBaseUrl());
             int timeoutMillis = Math.max(10, renderDownload.getTimeoutSeconds() == null
                     ? 180 : renderDownload.getTimeoutSeconds()) * 1000;
@@ -504,6 +507,10 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
 
     private String ffprobe() {
         return TkFfmpegExecutableResolver.ffprobe(generationProperties.getFfmpeg().getFfprobePath());
+    }
+
+    private String resolveReadUrl(String mediaUrl) {
+        return ossObjectStorageService == null ? mediaUrl : ossObjectStorageService.resolveReadUrl(mediaUrl);
     }
 
     private void update(Long taskId, String status, Integer progress, String currentStep, String failCode, String failReason) {
