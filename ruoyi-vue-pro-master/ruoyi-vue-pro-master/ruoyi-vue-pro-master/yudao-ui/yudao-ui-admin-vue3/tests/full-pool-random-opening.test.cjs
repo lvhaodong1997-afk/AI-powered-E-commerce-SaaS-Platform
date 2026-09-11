@@ -7,8 +7,8 @@ const source = fs.readFileSync(sourcePath, 'utf8')
 
 assert.match(
   source,
-  /if \(openingVideoFile\.value\) \{\s*payload\.openingVideoName = openingVideoFile\.value\.name\s*\}/,
-  'local opening file must be represented in the JSON precheck payload'
+  /if \(snapshot\.openingUploadId\) \{\s*payload\.openingUploadId = snapshot\.openingUploadId/,
+  'completed opening upload must be represented in the JSON precheck payload'
 )
 assert.match(source, /openingFullPoolRandomHint:/)
 assert.match(source, /v-if="createForm\.openingVideoUrl \|\| openingVideoFile"/)

@@ -17,8 +17,8 @@ assert.match(source, /v-model="createForm\.openingProcessMode"/)
 assert.match(source, /:options="openingProcessModeOptions"/)
 assert.match(source, /openingModeNative: '保留原生（推荐）'/)
 assert.match(source, /openingModeStandard: '按普通素材处理'/)
-assert.match(source, /payload\.openingProcessMode = createForm\.openingProcessMode/)
-assert.match(source, /formData\.append\('openingProcessMode', createForm\.openingProcessMode\)/)
+assert.match(source, /payload\.openingProcessMode = snapshot\.openingProcessMode/)
+assert.match(source, /openingProcessMode:\s*openingUploadCompleted \|\| openingVideoUrl \? createForm\.openingProcessMode/)
 assert.match(
   apiSource,
   /const response = await request\.upload<\{ data: number \}>\(\{\s*url: '\/tk\/generation\/create-with-opening',\s*data\s*\}\)/,

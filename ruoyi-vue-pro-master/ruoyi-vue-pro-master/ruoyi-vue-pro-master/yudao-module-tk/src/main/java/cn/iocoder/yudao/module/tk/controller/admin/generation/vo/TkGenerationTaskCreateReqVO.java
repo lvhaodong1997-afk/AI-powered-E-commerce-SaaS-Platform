@@ -51,6 +51,7 @@ public class TkGenerationTaskCreateReqVO {
     private Long scriptOptionId;
     private List<Long> scriptOptionIds;
     private Integer videosPerScript;
+    private String openingUploadId;
     private String openingVideoUrl;
     private String openingVideoName;
     private String openingProcessMode;

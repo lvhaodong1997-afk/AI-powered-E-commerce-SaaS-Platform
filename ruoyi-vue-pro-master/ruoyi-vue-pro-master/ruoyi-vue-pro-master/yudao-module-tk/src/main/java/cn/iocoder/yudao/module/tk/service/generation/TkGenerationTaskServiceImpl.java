@@ -36,6 +36,7 @@ import cn.iocoder.yudao.module.tk.service.material.TkMaterialLibraryService;
 import cn.iocoder.yudao.module.tk.service.reference.TkReferenceAnalysisService;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
+import cn.iocoder.yudao.module.tk.service.upload.TkGenerationOpeningUploadService;
 import cn.iocoder.yudao.module.tk.service.voice.TkMimoVoiceSelection;
 import cn.iocoder.yudao.module.tk.service.voice.TkVoiceProfileService;
 import org.springframework.stereotype.Service;
@@ -105,6 +106,8 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     private TkVoiceProfileService voiceProfileService;
     @Resource
     private TkBgmAssetService bgmAssetService;
+    @Resource
+    private TkGenerationOpeningUploadService generationOpeningUploadService;
 
     @Override
     public Long createGenerationTask(TkGenerationTaskCreateReqVO createReqVO) {
@@ -230,6 +233,9 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         target.setClipPlanMode(source.getClipPlanMode());
         target.setReferenceAnalysisId(source.getReferenceAnalysisId());
         target.setScriptOptionId(source.getScriptOptionId());
+        target.setScriptOptionIds(source.getScriptOptionIds());
+        target.setVideosPerScript(source.getVideosPerScript());
+        target.setOpeningUploadId(source.getOpeningUploadId());
         target.setOpeningVideoUrl(source.getOpeningVideoUrl());
         target.setOpeningVideoName(source.getOpeningVideoName());
         target.setOpeningProcessMode(source.getOpeningProcessMode());
@@ -263,7 +269,8 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         if (openingVideoFile != null && StrUtil.isBlank(createReqVO.getOpeningVideoName())) {
             createReqVO.setOpeningVideoName(StrUtil.blankToDefault(openingVideoFile.getOriginalFilename(), "opening.mp4"));
         }
-        if (openingVideoFile == null && StrUtil.isBlank(createReqVO.getOpeningVideoUrl())) {
+        if (openingVideoFile == null && StrUtil.isBlank(createReqVO.getOpeningVideoUrl())
+                && StrUtil.isBlank(createReqVO.getOpeningUploadId())) {
             createReqVO.setOpeningVideoName(null);
             createReqVO.setOpeningProcessMode(null);
             createReqVO.setOpeningClipStartSecond(null);
@@ -291,7 +298,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         }
         Long creditLogId = creditService.freezeForGenerationTask(tenantId);
         try {
-            OpeningVideo openingVideo = uploadOpeningVideoIfPresent(openingVideoFile, tenantId, companyId);
+            OpeningVideo openingVideo = resolveOpeningVideo(createReqVO, openingVideoFile, tenantId, companyId);
             if (openingVideo == null && StrUtil.isNotBlank(createReqVO.getOpeningVideoUrl())) {
                 openingVideo = createOpeningVideoFromLink(createReqVO);
             }
@@ -585,6 +592,24 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         } catch (IOException ex) {
             throw exception(TK_UPLOAD_FILE_EMPTY);
         }
+    }
+
+    private OpeningVideo resolveOpeningVideo(TkGenerationTaskCreateReqVO createReqVO,
+                                             MultipartFile openingVideoFile, Long tenantId, Long companyId) {
+        if (openingVideoFile != null) {
+            return uploadOpeningVideoIfPresent(openingVideoFile,
+                    tenantId, companyId);
+        }
+        if (StrUtil.isNotBlank(createReqVO.getOpeningUploadId())) {
+            if (generationOpeningUploadService == null) {
+                throw exception(TK_UPLOAD_SESSION_INVALID);
+            }
+            cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationOpeningUploadCompleteRespVO upload =
+                    generationOpeningUploadService.validateCompletedUpload(createReqVO.getOpeningUploadId(),
+                            createReqVO.getLibraryId());
+            return new OpeningVideo(upload.getFileUrl(), upload.getFileName());
+        }
+        return null;
     }
 
     private OpeningVideo createOpeningVideoFromLink(TkGenerationTaskCreateReqVO createReqVO) {

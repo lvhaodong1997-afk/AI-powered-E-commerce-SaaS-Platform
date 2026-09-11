@@ -89,6 +89,20 @@ public class TkUploadSessionService {
         return session;
     }
 
+    public TkUploadSessionDO validateCompletedAccessible(String uploadId) {
+        TkUploadSessionDO session = TenantUtils.executeIgnore(() -> sessionMapper.selectByUploadId(uploadId));
+        if (session == null) {
+            throw exception(TK_UPLOAD_SESSION_INVALID);
+        }
+        TkUserScope scope = dataScopeService.getCurrentScope();
+        dataScopeService.validateReadable(session.getTenantId(), session.getCompanyId(), session.getCreator());
+        if (!TkUploadSessionAccessPolicy.canAccessCompleted(session, LocalDateTime.now())
+                || !scope.getUserIdString().equals(session.getCreator())) {
+            throw exception(TK_UPLOAD_SESSION_INVALID);
+        }
+        return session;
+    }
+
     private TkUploadSessionDO findAccessible(String uploadId) {
         TkUploadSessionDO session = TenantUtils.executeIgnore(() -> sessionMapper.selectByUploadId(uploadId));
         if (session == null) {

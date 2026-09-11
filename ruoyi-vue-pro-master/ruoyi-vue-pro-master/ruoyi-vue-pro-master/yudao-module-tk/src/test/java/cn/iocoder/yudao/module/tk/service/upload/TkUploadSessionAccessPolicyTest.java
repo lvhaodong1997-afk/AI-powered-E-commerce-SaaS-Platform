@@ -35,4 +35,16 @@ class TkUploadSessionAccessPolicyTest {
 
         assertFalse(TkUploadSessionAccessPolicy.canAccess(session, LocalDateTime.now()));
     }
+
+    @Test
+    void allowsCompletedSessionForGenerationBinding() {
+        TkUploadSessionDO session = new TkUploadSessionDO()
+                .setCompanyId(20L)
+                .setStatus("COMPLETED")
+                .setExpiresAt(LocalDateTime.now().minusMinutes(1));
+        session.setTenantId(10L);
+        session.setCreator("30");
+
+        assertTrue(TkUploadSessionAccessPolicy.canAccessCompleted(session, LocalDateTime.now()));
+    }
 }

@@ -8,6 +8,9 @@ import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationPre
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkAudioExportTaskCreateReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkAudioExportTaskRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskCreateReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationOpeningUploadCompleteRespVO;
+import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationOpeningUploadSessionCompleteReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationOpeningUploadSessionCreateReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskPageReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskStatusRespVO;
@@ -25,6 +28,7 @@ import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkVoiceSynthesisRe
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkVoiceTtsClient;
 import cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokPublishService;
 import cn.iocoder.yudao.module.tk.service.upload.TkGenerationOutputStorageService;
+import cn.iocoder.yudao.module.tk.service.upload.TkGenerationOpeningUploadService;
 import cn.iocoder.yudao.module.tk.service.voice.TkMimoVoiceSelection;
 import cn.iocoder.yudao.module.tk.service.voice.TkVoiceProfileService;
 import cn.iocoder.yudao.module.system.api.user.AdminUserApi;
@@ -82,6 +86,8 @@ public class TkGenerationTaskController {
     private AdminUserApi adminUserApi;
     @Resource
     private TkGenerationOutputStorageService generationOutputStorageService;
+    @Resource
+    private TkGenerationOpeningUploadService generationOpeningUploadService;
 
     @PostMapping("/precheck")
     @Operation(summary = "生成任务预检")
@@ -117,6 +123,50 @@ public class TkGenerationTaskController {
     public CommonResult<Long> createGenerationTaskWithOpening(@Valid TkGenerationTaskCreateReqVO createReqVO,
                                                               @RequestParam(value = "openingVideoFile", required = false) MultipartFile openingVideoFile) {
         return success(generationTaskService.createGenerationTask(createReqVO, openingVideoFile));
+    }
+
+    @PostMapping("/opening/session/create")
+    @Operation(summary = "创建黄金开头视频分片上传会话")
+    @PreAuthorize("@ss.hasPermission('tk:generation:create')")
+    public CommonResult<cn.iocoder.yudao.module.tk.controller.admin.upload.vo.TkUploadSessionRespVO> createOpeningUploadSession(
+            @Valid @RequestBody TkGenerationOpeningUploadSessionCreateReqVO reqVO) {
+        return success(generationOpeningUploadService.createSession(reqVO.getLibraryId(), reqVO.getFileName(),
+                reqVO.getFileSize(), reqVO.getContentType()));
+    }
+
+    @GetMapping("/opening/session/{uploadId}")
+    @Operation(summary = "查询黄金开头视频分片上传进度")
+    @PreAuthorize("@ss.hasPermission('tk:generation:create')")
+    public CommonResult<cn.iocoder.yudao.module.tk.controller.admin.upload.vo.TkUploadSessionStatusRespVO> getOpeningUploadSession(
+            @PathVariable("uploadId") String uploadId) {
+        return success(generationOpeningUploadService.getSessionStatus(uploadId));
+    }
+
+    @PostMapping("/opening/chunk")
+    @Operation(summary = "上传黄金开头视频分片")
+    @PreAuthorize("@ss.hasPermission('tk:generation:create')")
+    public CommonResult<Boolean> uploadOpeningChunk(
+            @RequestParam("uploadId") String uploadId,
+            @RequestParam("chunkIndex") Integer chunkIndex,
+            @RequestParam("chunk") MultipartFile chunk) {
+        generationOpeningUploadService.uploadChunk(uploadId, chunkIndex, chunk);
+        return success(true);
+    }
+
+    @PostMapping("/opening/session/complete")
+    @Operation(summary = "完成黄金开头视频分片上传")
+    @PreAuthorize("@ss.hasPermission('tk:generation:create')")
+    public CommonResult<TkGenerationOpeningUploadCompleteRespVO> completeOpeningUpload(
+            @Valid @RequestBody TkGenerationOpeningUploadSessionCompleteReqVO reqVO) {
+        return success(generationOpeningUploadService.complete(reqVO.getUploadId()));
+    }
+
+    @DeleteMapping("/opening/session/{uploadId}")
+    @Operation(summary = "取消黄金开头视频分片上传")
+    @PreAuthorize("@ss.hasPermission('tk:generation:create')")
+    public CommonResult<Boolean> cancelOpeningUpload(@PathVariable("uploadId") String uploadId) {
+        generationOpeningUploadService.cancel(uploadId);
+        return success(true);
     }
 
     @PostMapping("/retry")

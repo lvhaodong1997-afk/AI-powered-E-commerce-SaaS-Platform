@@ -34,6 +34,7 @@ export interface TkGenerationTaskVO {
   videosPerScript?: number
   openingVideoUrl?: string
   openingVideoName?: string
+  openingUploadId?: string
   openingProcessMode?: 'NATIVE' | 'STANDARD'
   openingDurationMs?: number
   openingClipStartSecond?: number
@@ -141,6 +142,41 @@ export interface TkGenerationTaskSummaryVO {
   createTime?: string | number
 }
 
+export interface TkGenerationOpeningUploadSessionVO {
+  uploadId: string
+  uploadMode?: 'local' | 'oss'
+  chunkSize?: number
+  totalChunks?: number
+  uploadedSize?: number
+  uploadedChunks?: number[]
+  uploadUrl?: string
+  publicUrl?: string
+  objectKey?: string
+  accessKeyId?: string
+  policy?: string
+  signature?: string
+  successActionStatus?: string
+  expiration?: string
+}
+
+export interface TkGenerationOpeningUploadStatusVO {
+  uploadId: string
+  chunkSize?: number
+  totalChunks?: number
+  fileSize?: number
+  uploadedSize?: number
+  uploadedChunks?: number[]
+  status?: string
+}
+
+export interface TkGenerationOpeningUploadCompleteVO {
+  uploadId: string
+  fileName: string
+  fileUrl: string
+  fileSize?: number
+  status?: string
+}
+
 export interface TkGenerationTaskStatusVO {
   id: number
   title?: string
@@ -228,6 +264,46 @@ export interface TkGenerationPrecheckRespVO {
 }
 
 export const TkGenerationApi = {
+  createOpeningUploadSession: async (data: {
+    libraryId: number
+    fileName: string
+    fileSize: number
+    contentType?: string
+  }): Promise<TkGenerationOpeningUploadSessionVO> => {
+    return await request.post({
+      url: '/tk/generation/opening/session/create',
+      data,
+      timeout: 15 * 60 * 1000
+    })
+  },
+  getOpeningUploadSession: async (uploadId: string): Promise<TkGenerationOpeningUploadStatusVO> => {
+    return await request.get({
+      url: `/tk/generation/opening/session/${uploadId}`,
+      timeout: 15 * 60 * 1000
+    })
+  },
+  uploadOpeningChunk: async (data: FormData, uploadId: string, chunkIndex: number, option: any = {}) => {
+    return await request.upload({
+      url: '/tk/generation/opening/chunk',
+      data,
+      params: { uploadId, chunkIndex },
+      timeout: 15 * 60 * 1000,
+      ...option
+    })
+  },
+  completeOpeningUpload: async (uploadId: string): Promise<TkGenerationOpeningUploadCompleteVO> => {
+    return await request.post({
+      url: '/tk/generation/opening/session/complete',
+      data: { uploadId },
+      timeout: 15 * 60 * 1000
+    })
+  },
+  cancelOpeningUpload: async (uploadId: string) => {
+    return await request.delete({
+      url: `/tk/generation/opening/session/${uploadId}`,
+      timeout: 15 * 60 * 1000
+    })
+  },
   precheckGeneration: async (data: TkGenerationTaskVO): Promise<TkGenerationPrecheckRespVO> => {
     return await request.post({ url: '/tk/generation/precheck', data })
   },

@@ -15,4 +15,8 @@ public final class TkUploadSessionAccessPolicy {
                 && session.getExpiresAt().isAfter(now)
                 && "UPLOADING".equalsIgnoreCase(session.getStatus());
     }
+
+    public static boolean canAccessCompleted(TkUploadSessionDO session, LocalDateTime now) {
+        return session != null && "COMPLETED".equalsIgnoreCase(session.getStatus());
+    }
 }

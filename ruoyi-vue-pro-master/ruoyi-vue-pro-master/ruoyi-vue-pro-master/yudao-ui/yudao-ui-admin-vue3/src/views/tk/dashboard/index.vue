@@ -946,6 +946,7 @@
                     :auto-upload="false"
                     :limit="1"
                     :on-change="handleOpeningVideoChange"
+                    :on-exceed="handleOpeningVideoExceed"
                     :on-remove="handleOpeningVideoRemove"
                     accept=".mp4,.mov,.webm"
                   >
@@ -953,6 +954,13 @@
                     <strong>{{ copy.uploadLocalVideo }}</strong>
                     <small>{{ copy.uploadHint }}</small>
                   </el-upload>
+                  <div v-if="openingUpload.status === 'uploading'" class="opening-upload-status">
+                    <span>{{ copy.openingUploading }} {{ openingUpload.percent }}%</span>
+                    <el-progress :percentage="openingUpload.percent" :show-text="false" />
+                  </div>
+                  <small v-else-if="openingUpload.status === 'failed'" class="field-hint error">
+                    {{ openingUpload.error || copy.openingUploadFailed }}
+                  </small>
                   <div class="or-line">{{ copy.or }}</div>
                   <label>{{ copy.inputVideoLink }}</label>
                   <el-input
@@ -1388,11 +1396,15 @@ import { TkBgmAssetApi, type TkBgmAssetVO } from '@/api/tk/bgm'
 import { TkGenerationApi } from '@/api/tk/generation'
 import type {
   TkAudioExportTaskVO,
+  TkGenerationOpeningUploadCompleteVO,
+  TkGenerationOpeningUploadSessionVO,
   TkGenerationPrecheckIssueVO,
   TkGenerationPrecheckRespVO,
   TkGenerationTaskStatusVO,
   TkGenerationTaskVO
 } from '@/api/tk/generation'
+import { getTkUploadErrorMessage, uploadFileInChunks } from '@/utils/tkChunkUpload'
+import axios from 'axios'
 import type { TkMaterialLibraryVO } from '@/api/tk/material'
 import { TkReferenceApi } from '@/api/tk/reference'
 import type { TkReferenceAnalysisVO, TkReferenceScriptOptionVO } from '@/api/tk/reference'
@@ -1430,6 +1442,33 @@ interface DashboardScriptOption {
   levelType: 'high' | 'mid' | 'low'
   scriptText: string
   displayScriptZh: string
+}
+
+interface GenerationSubmissionSnapshot {
+  companyId?: number
+  libraryId: number
+  libraryName?: string
+  sourceUrl?: string
+  title: string
+  voicePayload: Partial<TkGenerationTaskVO>
+  voiceEnabled: boolean
+  targetLanguage: string
+  materialPurpose: MaterialPurpose
+  clipPlanMode?: ClipPlanMode
+  referenceDuration: number
+  referenceAnalysisId?: number
+  openingUploadId?: string
+  openingVideoUrl?: string
+  openingVideoName?: string
+  openingProcessMode?: OpeningProcessMode
+  bgmEnabled: boolean
+  bgmAssetId?: number
+  bgmVolume: number
+  subtitlePayload: Partial<TkGenerationTaskVO>
+  isLeadGenerationManualMode: boolean
+  manualLeadScriptText: string
+  batchGenerationEnabled: boolean
+  videosPerScript: number
 }
 
 interface DisplayScriptOption extends DashboardScriptOption {
@@ -1869,6 +1908,10 @@ const copy = computed(() =>
         openingDrawerHint: 'Expand only when you need a fixed opening hook.',
         openingNotConfigured: 'Not configured',
         openingUploaded: 'Local video selected',
+        openingUploading: 'Uploading opening video',
+        openingUploadSuccess: 'Opening video uploaded',
+        openingUploadFailed: 'Opening video upload failed',
+        openingUploadPending: 'Wait for the opening video upload to finish before generating.',
         openingLinked: 'Video link set',
         subtitleEnabledSummary: 'On',
         subtitleDisabledSummary: 'Off',
@@ -2158,6 +2201,10 @@ const copy = computed(() =>
         openingDrawerHint: '需要固定开头素材时再展开配置。',
         openingNotConfigured: '未配置',
         openingUploaded: '已选择本地视频',
+        openingUploading: '黄金开头上传中',
+        openingUploadSuccess: '黄金开头上传完成',
+        openingUploadFailed: '黄金开头上传失败',
+        openingUploadPending: '请等待黄金开头上传完成后再生成视频',
         openingLinked: '已填写视频链接',
         subtitleEnabledSummary: '已开启',
         subtitleDisabledSummary: '已关闭',
@@ -2376,6 +2423,19 @@ const activeStep = ref(0)
 type FlowStepStatus = 'completed' | 'current' | 'pending'
 const openingVideoFile = ref<File>()
 const openingUploadRef = ref()
+type OpeningUploadStatus = 'idle' | 'uploading' | 'completed' | 'failed'
+const openingUpload = reactive<{
+  status: OpeningUploadStatus
+  uploadId?: string
+  fileName?: string
+  fileUrl?: string
+  percent: number
+  error?: string
+}>({
+  status: 'idle',
+  percent: 0
+})
+let openingUploadToken = 0
 const referenceAnalysis = ref<TkReferenceAnalysisVO>()
 const hydratingReplay = ref(false)
 const creditBalance = ref<TkCreditBalanceVO>({})
@@ -2885,7 +2945,10 @@ const openingConfigSummary = computed(() => {
     createForm.openingProcessMode === 'NATIVE'
       ? copy.value.openingModeNative
       : copy.value.openingModeStandard
-  if (openingVideoFile.value) {
+  if (openingUpload.status === 'uploading') {
+    return `${copy.value.openingUploading} · ${openingUpload.percent}%`
+  }
+  if (openingVideoFile.value && openingUpload.status !== 'failed') {
     return `${copy.value.openingUploaded} · ${modeLabel}`
   }
   if (createForm.openingVideoUrl.trim()) {
@@ -3484,40 +3547,94 @@ const startGenerationBatchPolling = (taskIds: number[]) => {
   pollGenerationTaskBatch(taskIds).catch(() => undefined)
 }
 
-const resolvePromptTextForGeneration = (script: DashboardScriptOption) =>
-  isLeadGenerationManualMode.value ? manualLeadScriptText.value.trim() : script.scriptText || script.title
+const resolvePromptTextForGeneration = (
+  script: DashboardScriptOption,
+  snapshot?: GenerationSubmissionSnapshot
+) =>
+  snapshot?.isLeadGenerationManualMode
+    ? snapshot.manualLeadScriptText
+    : isLeadGenerationManualMode.value
+      ? manualLeadScriptText.value.trim()
+      : script.scriptText || script.title
 
-const createGenerationPayload = (script: DashboardScriptOption): TkGenerationTaskVO => {
-  const payload: TkGenerationTaskVO = {
+const createGenerationSubmissionSnapshot = (): GenerationSubmissionSnapshot => {
+  const openingUploadCompleted =
+    openingUpload.status === 'completed' && Boolean(openingUpload.uploadId)
+  const openingVideoUrl = openingUploadCompleted ? undefined : createForm.openingVideoUrl.trim() || undefined
+  return {
     companyId: selectedLibrary.value?.companyId,
-    sourceUrl: createForm.sourceUrl.trim() || undefined,
     libraryId: createForm.libraryId!,
-    ...selectedVoicePayload(),
+    libraryName: selectedLibrary.value?.name,
+    sourceUrl: createForm.sourceUrl.trim() || undefined,
+    title: createForm.title.trim(),
+    voicePayload: { ...selectedVoicePayload() },
     voiceEnabled: isLeadGenerationFlow.value ? isVoiceoverEnabled.value : true,
     targetLanguage: createForm.targetLanguage,
     materialPurpose: createForm.materialPurpose,
-    productCategoryCode: DEFAULT_PRODUCT_CATEGORY_CODE,
     clipPlanMode: supportsClipPlanMode.value ? createForm.clipPlanMode : undefined,
     referenceDuration: getTargetDuration(),
-    promptText: resolvePromptTextForGeneration(script),
-    ...getBgmPayload(),
-    ...getSubtitlePayload()
+    referenceAnalysisId: referenceAnalysis.value?.id,
+    openingUploadId: openingUploadCompleted ? openingUpload.uploadId : undefined,
+    openingVideoUrl,
+    openingVideoName: openingUploadCompleted
+      ? openingUpload.fileName || openingVideoFile.value?.name
+      : openingVideoUrl
+        ? copy.value.remoteHookVideo
+        : undefined,
+    openingProcessMode:
+      openingUploadCompleted || openingVideoUrl ? createForm.openingProcessMode : undefined,
+    bgmEnabled: isLeadGenerationFlow.value && createForm.bgmEnabled,
+    bgmAssetId: createForm.bgmAssetId,
+    bgmVolume: createForm.bgmVolume,
+    subtitlePayload: { ...getSubtitlePayload() },
+    isLeadGenerationManualMode: isLeadGenerationManualMode.value,
+    manualLeadScriptText: manualLeadScriptText.value.trim(),
+    batchGenerationEnabled: batchGenerationEnabled.value,
+    videosPerScript: Number(videosPerScript.value || 1)
   }
-  payload.title = createForm.title.trim() || undefined
-  if (referenceAnalysis.value?.id) {
-    payload.referenceAnalysisId = referenceAnalysis.value.id
+}
+
+const createGenerationPayload = (
+  script: DashboardScriptOption,
+  snapshot: GenerationSubmissionSnapshot = createGenerationSubmissionSnapshot()
+): TkGenerationTaskVO => {
+  const payload: TkGenerationTaskVO = {
+    companyId: snapshot.companyId,
+    sourceUrl: snapshot.sourceUrl,
+    libraryId: snapshot.libraryId,
+    ...snapshot.voicePayload,
+    voiceEnabled: snapshot.voiceEnabled,
+    targetLanguage: snapshot.targetLanguage,
+    materialPurpose: snapshot.materialPurpose,
+    productCategoryCode: DEFAULT_PRODUCT_CATEGORY_CODE,
+    clipPlanMode: snapshot.clipPlanMode,
+    referenceDuration: snapshot.referenceDuration,
+    promptText: resolvePromptTextForGeneration(script, snapshot),
+    ...(snapshot.bgmEnabled && snapshot.bgmAssetId
+      ? {
+          bgmEnabled: true,
+          bgmAssetId: snapshot.bgmAssetId,
+          bgmVolume: snapshot.bgmVolume
+        }
+      : {}),
+    ...snapshot.subtitlePayload
+  }
+  payload.title = snapshot.title || undefined
+  if (snapshot.referenceAnalysisId) {
+    payload.referenceAnalysisId = snapshot.referenceAnalysisId
   }
   if (script.id) {
     payload.scriptOptionId = script.id
   }
-  if (openingVideoFile.value) {
-    payload.openingVideoName = openingVideoFile.value.name
-  } else if (createForm.openingVideoUrl) {
-    payload.openingVideoUrl = createForm.openingVideoUrl
-    payload.openingVideoName = copy.value.remoteHookVideo
+  if (snapshot.openingUploadId) {
+    payload.openingUploadId = snapshot.openingUploadId
+    payload.openingVideoName = snapshot.openingVideoName
+  } else if (snapshot.openingVideoUrl) {
+    payload.openingVideoUrl = snapshot.openingVideoUrl
+    payload.openingVideoName = snapshot.openingVideoName
   }
-  if (openingVideoFile.value || createForm.openingVideoUrl) {
-    payload.openingProcessMode = createForm.openingProcessMode
+  if (snapshot.openingUploadId || snapshot.openingVideoUrl) {
+    payload.openingProcessMode = snapshot.openingProcessMode
   }
   return payload
 }
@@ -3571,11 +3688,14 @@ const buildPrecheckFailureState = (result: TkGenerationPrecheckRespVO): Precheck
   }
 }
 
-const precheckGeneration = async (script: DashboardScriptOption) => {
+const precheckGeneration = async (
+  script: DashboardScriptOption,
+  snapshot?: GenerationSubmissionSnapshot
+) => {
   precheckingGenerationCount.value += 1
   precheckFailure.value = undefined
   try {
-    const result = await TkGenerationApi.precheckGeneration(createGenerationPayload(script))
+    const result = await TkGenerationApi.precheckGeneration(createGenerationPayload(script, snapshot))
     if (!result.passed) {
       precheckFailure.value = buildPrecheckFailureState(result)
       if (!hasActiveGenerationTasks.value) {
@@ -4047,33 +4167,12 @@ function getSubtitlePayload() {
   }
 }
 
-function appendSubtitleConfig(formData: FormData) {
-  const payload = getSubtitlePayload()
-  Object.entries(payload).forEach(([key, value]) => {
-    formData.append(key, String(value ?? ''))
-  })
-}
-
-function getBgmPayload() {
-  if (!isLeadGenerationFlow.value || !createForm.bgmEnabled || !createForm.bgmAssetId) {
-    return {}
-  }
-  return {
-    bgmEnabled: true,
-    bgmAssetId: createForm.bgmAssetId,
-    bgmVolume: createForm.bgmVolume
-  }
-}
-
-function appendBgmConfig(formData: FormData) {
-  const payload = getBgmPayload()
-  Object.entries(payload).forEach(([key, value]) => {
-    formData.append(key, String(value ?? ''))
-  })
-}
-
-async function ensureBgmReadyForGeneration() {
-  if (!isLeadGenerationFlow.value || !createForm.bgmEnabled) {
+async function ensureBgmReadyForGeneration(snapshot?: GenerationSubmissionSnapshot) {
+  const leadGeneration = snapshot
+    ? snapshot.materialPurpose === MATERIAL_PURPOSE_LEAD_GENERATION
+    : isLeadGenerationFlow.value
+  const bgmEnabled = snapshot ? snapshot.bgmEnabled : createForm.bgmEnabled
+  if (!leadGeneration || !bgmEnabled) {
     return true
   }
   if (!bgmAssets.value.length) {
@@ -4081,7 +4180,13 @@ async function ensureBgmReadyForGeneration() {
   } else {
     ensureDefaultBgmSelection()
   }
-  if (createForm.bgmAssetId) {
+  if (
+    snapshot &&
+    (!snapshot.bgmAssetId || !bgmAssets.value.some((item) => item.id === snapshot.bgmAssetId))
+  ) {
+    snapshot.bgmAssetId = bgmAssets.value[0]?.id
+  }
+  if (snapshot ? snapshot.bgmAssetId : createForm.bgmAssetId) {
     return true
   }
   bgmConfigExpanded.value = true
@@ -4681,77 +4786,23 @@ const handleBgmUploadChange = async (file: any) => {
   }
 }
 
-const buildIndexedTaskTitle = (scriptIndex: number, videoIndex: number) => {
-  const baseTitle = createForm.title.trim() || `${selectedLibrary.value?.name || '视频'} · 智能混剪任务`
+const buildIndexedTaskTitle = (
+  scriptIndex: number,
+  videoIndex: number,
+  snapshot: GenerationSubmissionSnapshot
+) => {
+  const baseTitle = snapshot.title || `${snapshot.libraryName || '视频'} · 智能混剪任务`
   const suffix = ` - S${String(scriptIndex).padStart(2, '0')}-V${String(videoIndex).padStart(2, '0')}`
   const maxBaseLength = 128 - suffix.length
   return `${baseTitle.slice(0, maxBaseLength)}${suffix}`
 }
 
-const buildOpeningGenerationFormData = (
-  script: DashboardScriptOption,
-  taskTitle = createForm.title.trim()
+const precheckGenerationScripts = async (
+  scripts: DashboardScriptOption[],
+  snapshot: GenerationSubmissionSnapshot
 ) => {
-  const formData = new FormData()
-  if (createForm.sourceUrl.trim()) {
-    formData.append('sourceUrl', createForm.sourceUrl.trim())
-  }
-  formData.append('libraryId', String(createForm.libraryId))
-  if (taskTitle) {
-    formData.append('title', taskTitle)
-  }
-  if (selectedLibrary.value?.companyId) {
-    formData.append('companyId', String(selectedLibrary.value.companyId))
-  }
-  formData.append('voiceEnabled', String(isLeadGenerationFlow.value ? isVoiceoverEnabled.value : true))
-  const voiceSelection = selectedVoicePayload()
-  if ('ttsProvider' in voiceSelection && voiceSelection.ttsProvider) {
-    formData.append('ttsProvider', voiceSelection.ttsProvider)
-  }
-  if ('voiceProfileId' in voiceSelection && voiceSelection.voiceProfileId) {
-    formData.append('voiceProfileId', String(voiceSelection.voiceProfileId))
-  } else if ('voiceCode' in voiceSelection && voiceSelection.voiceCode) {
-    formData.append('voiceCode', voiceSelection.voiceCode)
-  }
-  if ('mimoVoiceMode' in voiceSelection && voiceSelection.mimoVoiceMode) {
-    formData.append('mimoVoiceMode', voiceSelection.mimoVoiceMode)
-  }
-  if ('mimoVoiceCode' in voiceSelection && voiceSelection.mimoVoiceCode) {
-    formData.append('mimoVoiceCode', voiceSelection.mimoVoiceCode)
-  }
-  if ('mimoVoicePrompt' in voiceSelection && voiceSelection.mimoVoicePrompt) {
-    formData.append('mimoVoicePrompt', voiceSelection.mimoVoicePrompt)
-  }
-  if ('mimoVoiceSampleUrl' in voiceSelection && voiceSelection.mimoVoiceSampleUrl) {
-    formData.append('mimoVoiceSampleUrl', voiceSelection.mimoVoiceSampleUrl)
-  }
-  formData.append('targetLanguage', createForm.targetLanguage)
-  formData.append('materialPurpose', createForm.materialPurpose)
-  formData.append('productCategoryCode', DEFAULT_PRODUCT_CATEGORY_CODE)
-  if (supportsClipPlanMode.value) {
-    formData.append('clipPlanMode', createForm.clipPlanMode)
-  }
-  if (referenceAnalysis.value?.id) {
-    formData.append('referenceAnalysisId', String(referenceAnalysis.value.id))
-  }
-  if (script.id) {
-    formData.append('scriptOptionId', String(script.id))
-  }
-  formData.append('referenceDuration', String(getTargetDuration()))
-  formData.append('promptText', resolvePromptTextForGeneration(script))
-  formData.append('openingVideoName', openingVideoFile.value?.name || 'opening.mp4')
-  formData.append('openingProcessMode', createForm.openingProcessMode)
-  appendBgmConfig(formData)
-  appendSubtitleConfig(formData)
-  if (openingVideoFile.value) {
-    formData.append('openingVideoFile', openingVideoFile.value)
-  }
-  return formData
-}
-
-const precheckGenerationScripts = async (scripts: DashboardScriptOption[]) => {
   for (const script of scripts) {
-    const passed = await precheckGeneration(script)
+    const passed = await precheckGeneration(script, snapshot)
     if (!passed) {
       return false
     }
@@ -4761,7 +4812,8 @@ const precheckGenerationScripts = async (scripts: DashboardScriptOption[]) => {
 
 const createBatchGenerationTaskIds = async (
   scripts: DashboardScriptOption[],
-  onTaskCreated?: (taskId: number) => void
+  onTaskCreated: ((taskId: number) => void) | undefined,
+  snapshot: GenerationSubmissionSnapshot
 ) => {
   const registerCreatedTask = (rawTaskId: unknown) => {
     const taskId = Number(rawTaskId)
@@ -4771,51 +4823,28 @@ const createBatchGenerationTaskIds = async (
     }
     return undefined
   }
-  const count = batchGenerationEnabled.value ? Number(videosPerScript.value || 1) : 1
-  if (isLeadGenerationManualMode.value) {
-    const ids: number[] = []
-    for (let index = 0; index < count; index++) {
-      if (openingVideoFile.value) {
-        const taskId = registerCreatedTask(
-          await TkGenerationApi.createGenerationWithOpening(
-            buildOpeningGenerationFormData(
-              scripts[0],
-              count > 1 ? buildIndexedTaskTitle(1, index + 1) : createForm.title.trim()
-            )
-          )
-        )
-        if (taskId) ids.push(taskId)
-      } else {
-        const taskId = registerCreatedTask(
-          await TkGenerationApi.createGeneration(createGenerationPayload(scripts[0]))
-        )
-        if (taskId) ids.push(taskId)
-      }
-    }
-    return ids
-  }
-  if (openingVideoFile.value) {
+  const count = snapshot.batchGenerationEnabled ? snapshot.videosPerScript : 1
+  const createIndividualTasks =
+    snapshot.isLeadGenerationManualMode || Boolean(snapshot.openingUploadId || snapshot.openingVideoUrl)
+  if (createIndividualTasks) {
     const ids: number[] = []
     for (let scriptIndex = 0; scriptIndex < scripts.length; scriptIndex++) {
       const script = scripts[scriptIndex]
       for (let index = 0; index < count; index++) {
+        const payload = createGenerationPayload(script, snapshot)
+        if (scripts.length > 1 || count > 1) {
+          payload.title = buildIndexedTaskTitle(scriptIndex + 1, index + 1, snapshot)
+        }
         const taskId = registerCreatedTask(
-          await TkGenerationApi.createGenerationWithOpening(
-            buildOpeningGenerationFormData(
-              script,
-              scripts.length > 1 || count > 1
-                ? buildIndexedTaskTitle(scriptIndex + 1, index + 1)
-                : createForm.title.trim()
-            )
-          )
+          await TkGenerationApi.createGeneration(payload)
         )
         if (taskId) ids.push(taskId)
       }
     }
     return ids
   }
-  if (batchGenerationEnabled.value) {
-    const payload = createGenerationPayload(scripts[0])
+  if (snapshot.batchGenerationEnabled) {
+    const payload = createGenerationPayload(scripts[0], snapshot)
     payload.scriptOptionId = undefined
     payload.scriptOptionIds = scripts.map((script) => script.id).filter(Boolean) as number[]
     payload.videosPerScript = count
@@ -4827,7 +4856,7 @@ const createBatchGenerationTaskIds = async (
     return ids
   }
   const taskId = registerCreatedTask(
-    await TkGenerationApi.createGeneration(createGenerationPayload(scripts[0]))
+    await TkGenerationApi.createGeneration(createGenerationPayload(scripts[0], snapshot))
   )
   return taskId ? [taskId] : []
 }
@@ -4859,21 +4888,25 @@ const parseGenerationCreateTime = (value?: string | number) => {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-const recoverSubmittedGenerationTaskIds = async (startedAt: number, knownTaskIds: number[]) => {
+const recoverSubmittedGenerationTaskIds = async (
+  startedAt: number,
+  knownTaskIds: number[],
+  snapshot: GenerationSubmissionSnapshot
+) => {
   const knownIds = new Set(knownTaskIds)
   try {
     const page = await TkGenerationApi.getGenerationSummaryPage({
       pageNo: 1,
       pageSize: 30,
-      libraryId: createForm.libraryId,
-      title: createForm.title.trim() || undefined
+      libraryId: snapshot.libraryId,
+      title: snapshot.title || undefined
     })
     const recoveredIds = (page?.list || [])
       .filter((task: TkGenerationTaskVO) => {
         if (!task.id || knownIds.has(Number(task.id))) {
           return false
         }
-        if (task.libraryId !== createForm.libraryId) {
+        if (task.libraryId !== snapshot.libraryId) {
           return false
         }
         return parseGenerationCreateTime(task.createTime) >= startedAt - GENERATION_RECOVERY_TIME_TOLERANCE_MS
@@ -4887,6 +4920,9 @@ const recoverSubmittedGenerationTaskIds = async (startedAt: number, knownTaskIds
 }
 
 const handleCreateGeneration = async () => {
+  if (generationSubmittingCount.value > 0) {
+    return
+  }
   if (!createForm.libraryId || (!isLeadGenerationManualMode.value && !createForm.sourceUrl.trim())) {
     message.warning(
       isLeadGenerationManualMode.value
@@ -4899,15 +4935,21 @@ const handleCreateGeneration = async () => {
     message.warning(copy.value.voiceConfigIncompleteWarning)
     return
   }
-  const startFreshGenerationSession = !hasActiveGenerationTasks.value
+  if (openingVideoFile.value && openingUpload.status !== 'completed') {
+    message.warning(copy.value.openingUploadPending)
+    return
+  }
+  const submissionSnapshot = createGenerationSubmissionSnapshot()
+  const submittedScripts = selectedScriptsForGeneration.value.map((script) => ({ ...script }))
+  const resetGenerationView = !hasActiveGenerationTasks.value
   const finishFreshGenerationProgress = (failed = true) => {
-    if (startFreshGenerationSession && !hasActiveGenerationTasks.value) {
+    if (resetGenerationView) {
       finishTaskProgress(generationProgress, generationPhases.value, 'generation', failed)
     }
   }
   generationSubmittingCount.value += 1
   precheckFailure.value = undefined
-  if (startFreshGenerationSession) {
+  if (resetGenerationView) {
     currentGenerationTask.value = undefined
     batchGenerationTasks.value = []
     resetTaskProgress(analysisProgress, 'analysis')
@@ -4915,29 +4957,32 @@ const handleCreateGeneration = async () => {
   }
   let generationSubmissionStartedAt = 0
   try {
-    if (!isLeadGenerationManualMode.value && (!referenceAnalysis.value?.id || !selectedScript.value?.id)) {
-      await handleAnalyzeLink(false, true)
+    if (!submissionSnapshot.isLeadGenerationManualMode && !submissionSnapshot.referenceAnalysisId) {
+      const analysis = await handleAnalyzeLink(false, true)
+      submissionSnapshot.referenceAnalysisId = analysis?.id
     }
-    const scripts = selectedScriptsForGeneration.value
+    const scripts = submittedScripts.length
+      ? submittedScripts
+      : selectedScriptsForGeneration.value.map((script) => ({ ...script }))
     if (
       !scripts.length ||
-      (!isLeadGenerationManualMode.value &&
-        (!referenceAnalysis.value?.id || scripts.some((script) => !script?.id)))
+      (!submissionSnapshot.isLeadGenerationManualMode &&
+        (!submissionSnapshot.referenceAnalysisId || scripts.some((script) => !script?.id)))
     ) {
       message.warning(copy.value.selectScriptWarning)
       finishFreshGenerationProgress()
       return
     }
-    if (plannedGenerationCount.value > 30) {
+    if (scripts.length * submissionSnapshot.videosPerScript > 30) {
       message.warning(copy.value.batchLimitWarning)
       finishFreshGenerationProgress()
       return
     }
-    if (!(await ensureBgmReadyForGeneration())) {
+    if (!(await ensureBgmReadyForGeneration(submissionSnapshot))) {
       finishFreshGenerationProgress()
       return
     }
-    const precheckPassed = await precheckGenerationScripts(scripts)
+    const precheckPassed = await precheckGenerationScripts(scripts, submissionSnapshot)
     if (!precheckPassed) {
       finishFreshGenerationProgress()
       return
@@ -4946,7 +4991,7 @@ const handleCreateGeneration = async () => {
     generationSubmissionStartedAt = Date.now()
     const taskIds = (await createBatchGenerationTaskIds(scripts, (taskId) => {
       registerGenerationTasks([taskId])
-    })).filter(
+    }, submissionSnapshot)).filter(
       (id) => id && !Number.isNaN(id)
     )
     if (!taskIds.length) {
@@ -4960,7 +5005,7 @@ const handleCreateGeneration = async () => {
   } catch (error) {
     const knownTaskIds = getTrackedGenerationTaskIds()
     const recoveredTaskIds = generationSubmissionStartedAt
-      ? await recoverSubmittedGenerationTaskIds(generationSubmissionStartedAt, knownTaskIds)
+      ? await recoverSubmittedGenerationTaskIds(generationSubmissionStartedAt, knownTaskIds, submissionSnapshot)
       : knownTaskIds
     if (recoveredTaskIds.length) {
       registerGenerationTasks(recoveredTaskIds)
@@ -4968,7 +5013,7 @@ const handleCreateGeneration = async () => {
       message.success(copy.value.generationRecovered)
       return
     }
-    if (startFreshGenerationSession && !hasActiveGenerationTasks.value) {
+    if (resetGenerationView && !recoveredTaskIds.length) {
       clearGenerationPolling()
       finishTaskProgress(generationProgress, generationPhases.value, 'generation', true)
     }
@@ -5086,11 +5131,112 @@ watch(
 )
 
 const handleOpeningVideoChange = (file: any) => {
-  openingVideoFile.value = file.raw
+  const rawFile = file?.raw as File | undefined
+  if (!rawFile || !createForm.libraryId) {
+    return
+  }
+  const previousUploadId = openingUpload.uploadId
+  const token = ++openingUploadToken
+  if (previousUploadId && openingUpload.status === 'uploading') {
+    TkGenerationApi.cancelOpeningUpload(previousUploadId).catch(() => undefined)
+  }
+  openingVideoFile.value = rawFile
+  createForm.openingVideoUrl = ''
+  openingUpload.status = 'uploading'
+  openingUpload.uploadId = undefined
+  openingUpload.fileName = rawFile.name
+  openingUpload.fileUrl = undefined
+  openingUpload.percent = 0
+  openingUpload.error = undefined
+  uploadOpeningVideo(rawFile, token).catch(() => undefined)
+}
+
+const uploadOpeningVideo = async (file: File, token: number) => {
+  try {
+    const upload = await uploadFileInChunks<TkGenerationOpeningUploadSessionVO, TkGenerationOpeningUploadCompleteVO>(
+      file,
+      {
+        createSession: () =>
+          TkGenerationApi.createOpeningUploadSession({
+            libraryId: createForm.libraryId!,
+            fileName: file.name,
+            fileSize: file.size,
+            contentType: file.type
+          }),
+        uploadChunk: async (uploadId, chunkIndex, chunk, onProgress) => {
+          const formData = new FormData()
+          formData.append('uploadId', uploadId)
+          formData.append('chunkIndex', String(chunkIndex))
+          formData.append('chunk', chunk)
+          return TkGenerationApi.uploadOpeningChunk(formData, uploadId, chunkIndex, {
+            onUploadProgress: (event: ProgressEvent) => onProgress?.(event.loaded, event.total || chunk.size)
+          })
+        },
+        complete: (uploadId) => TkGenerationApi.completeOpeningUpload(uploadId),
+        cancel: TkGenerationApi.cancelOpeningUpload,
+        uploadOss: async (ossFile, session, onProgress) => {
+          if (!session.uploadUrl || !session.objectKey || !session.policy || !session.signature || !session.accessKeyId) {
+            throw new Error('OSS upload session is incomplete')
+          }
+          const formData = new FormData()
+          formData.append('key', session.objectKey)
+          formData.append('policy', session.policy)
+          formData.append('OSSAccessKeyId', session.accessKeyId)
+          formData.append('signature', session.signature)
+          formData.append('success_action_status', session.successActionStatus || '200')
+          if (ossFile.type) formData.append('Content-Type', ossFile.type)
+          formData.append('file', ossFile)
+          await axios.post(session.uploadUrl, formData, {
+            onUploadProgress: (event) => onProgress?.(event.loaded, event.total || ossFile.size)
+          })
+        },
+        chunkSize: 1 * 1024 * 1024,
+        retryCount: 2,
+        onProgress: (progress) => {
+          if (token === openingUploadToken) {
+            openingUpload.percent = progress.percent
+          }
+        }
+      }
+    )
+    if (token !== openingUploadToken) {
+      await TkGenerationApi.cancelOpeningUpload(upload.uploadId).catch(() => undefined)
+      return
+    }
+    openingUpload.status = 'completed'
+    openingUpload.uploadId = upload.uploadId
+    openingUpload.fileUrl = upload.result.fileUrl
+    openingUpload.percent = 100
+    message.success(copy.value.openingUploadSuccess)
+  } catch (error) {
+    if (token !== openingUploadToken) {
+      return
+    }
+    openingUpload.status = 'failed'
+    openingUpload.error = getTkUploadErrorMessage(error)
+    message.error(openingUpload.error || copy.value.openingUploadFailed)
+  }
+}
+
+const handleOpeningVideoExceed = (files: any[]) => {
+  openingUploadRef.value?.clearFiles()
+  handleOpeningVideoChange({ raw: files?.[0] })
 }
 
 const handleOpeningVideoRemove = () => {
+  const token = ++openingUploadToken
+  const uploadId = openingUpload.uploadId
+  if (uploadId && openingUpload.status === 'uploading') {
+    TkGenerationApi.cancelOpeningUpload(uploadId).catch(() => undefined)
+  }
   openingVideoFile.value = undefined
+  openingUpload.status = 'idle'
+  openingUpload.uploadId = undefined
+  openingUpload.fileName = undefined
+  openingUpload.fileUrl = undefined
+  openingUpload.percent = 0
+  openingUpload.error = undefined
+  void token
   if (!createForm.openingVideoUrl) {
     createForm.openingProcessMode = 'NATIVE'
   }
