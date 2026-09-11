@@ -17,8 +17,10 @@ public class SecurityConfiguration {
             public void customize(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry registry) {
                 registry.requestMatchers(buildAdminApi("/tk/open/video/**")).permitAll()
                         .requestMatchers(buildAdminApi("/tk/open/copywriting/**")).permitAll()
+                        .requestMatchers(buildAdminApi("/tk/open/v1/ocr/**")).permitAll()
                         .requestMatchers(buildAdminApi("/tk/open/v1/tiktok/**")).permitAll()
                         .requestMatchers("/tk/open/v1/tiktok/**").permitAll()
+                        .requestMatchers("/tk/open/v1/ocr/**").permitAll()
                         .requestMatchers("/tk/open/copywriting/**").permitAll()
                         .requestMatchers("/tk/open/video/**").permitAll();
             }
