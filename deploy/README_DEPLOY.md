@@ -2,6 +2,10 @@
 
 本目录是部署模板，实际发布包位于 `.codex-build/tk-auto-mix-release-*`。
 
+每个发布包必须包含 `tools/reference-video-download/` 和
+`tools/subtitle/asr_faster_whisper.py`。安装前会运行
+`scripts/validate-release.sh`；缺少脚本、Python 依赖或 faster-whisper 模型时，发布会直接失败，不会切换不完整版本。
+
 ## 服务器依赖
 
 - Linux x86_64
@@ -19,9 +23,30 @@
   backend/yudao-server.jar
   frontend/
   worker/
+  tools/reference-video-download/
+  tools/subtitle/
   sql/
   logs/
 ```
+
+## 发布前校验
+
+下载器和 ASR 的 Python 环境、模型缓存建议放在 release 之外的稳定目录，避免切换 release 时丢失：
+
+```bash
+export TK_RELEASE_RUNTIME_ROOT=/data/Tk/shared
+bash deploy/scripts/validate-release.sh --write-manifest /path/to/release
+```
+
+校验通过后再执行安装脚本：
+
+```bash
+APP_DIR=/data/Tk/releases/release-<id> \
+TK_RELEASE_RUNTIME_ROOT=/data/Tk/shared \
+bash deploy/scripts/install-release.sh /path/to/release
+```
+
+生产 systemd 模板还会在启动前检查下载脚本、ASR 脚本、虚拟环境和模型目录。校验失败时保留原有 `/data/Tk/current`，不要强行切换。
 
 ## 数据库初始化
 

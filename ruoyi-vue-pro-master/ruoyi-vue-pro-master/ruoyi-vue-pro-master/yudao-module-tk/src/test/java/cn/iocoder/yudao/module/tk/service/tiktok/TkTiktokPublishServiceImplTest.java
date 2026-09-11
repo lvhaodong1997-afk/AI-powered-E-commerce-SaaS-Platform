@@ -12,6 +12,7 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishTaskDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishDetailMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishPostMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishTaskMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokAccountMapper;
 import cn.iocoder.yudao.module.tk.service.generation.TkGenerationTaskService;
 import cn.iocoder.yudao.module.tk.service.log.TkBusinessLogService;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
@@ -45,10 +46,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -93,6 +97,101 @@ class TkTiktokPublishServiceImplTest {
         assertEquals("scope_not_authorized", result.getErrorCode());
         verify(tokenService, never()).forceRefreshAccessToken(11L);
         verify(apiClient, times(1)).queryCreatorInfo("access-current");
+    }
+
+    @Test
+    void creatingPublishTaskOnlyPersistsQueueRecordsWithoutProcessingDetailsInline() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkTiktokAccountMapper accountMapper = mock(TkTiktokAccountMapper.class);
+        TkBusinessLogService businessLogService = mock(TkBusinessLogService.class);
+        TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
+        TkGenerationTaskDO generationTask = TkGenerationTaskDO.builder()
+                .id(100L)
+                .companyId(20L)
+                .businessTraceId("TRACE-001")
+                .title("Demo video")
+                .outputUrl("https://oss.example.com/video.mp4")
+                .build();
+        generationTask.setTenantId(8L);
+        TkTiktokAccountDO account = TkTiktokAccountDO.builder()
+                .id(10L)
+                .displayName("demo")
+                .authStatus("AUTHORIZED")
+                .build();
+
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "publishTaskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        ReflectionTestUtils.setField(service, "accountMapper", accountMapper);
+        ReflectionTestUtils.setField(service, "businessLogService", businessLogService);
+        ReflectionTestUtils.setField(service, "apiClient", apiClient);
+        when(taskMapper.selectById(200L)).thenReturn(TkTiktokPublishTaskDO.builder().id(200L).build());
+        when(detailMapper.selectListByTaskId(200L)).thenReturn(Collections.emptyList());
+        doAnswer(invocation -> {
+            TkTiktokPublishTaskDO task = invocation.getArgument(0);
+            task.setId(200L);
+            return 1;
+        }).when(taskMapper).insert(any(TkTiktokPublishTaskDO.class));
+        doAnswer(invocation -> {
+            TkTiktokPublishDetailDO detail = invocation.getArgument(0);
+            detail.setId(300L);
+            return 1;
+        }).when(detailMapper).insert(any(TkTiktokPublishDetailDO.class));
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkTiktokPublishDetailDO.class);
+
+        TkTiktokPublishCreateReqVO reqVO = new TkTiktokPublishCreateReqVO();
+        reqVO.setTitle("Queued video");
+        reqVO.setPostMode("DIRECT_POST");
+        reqVO.setAccountIds(Collections.singletonList(10L));
+
+        try {
+            TransactionSynchronizationManager.setActualTransactionActive(true);
+            TransactionSynchronizationManager.initSynchronization();
+            ReflectionTestUtils.invokeMethod(service, "createPublishTaskWithinTenant",
+                    reqVO, generationTask, null, Collections.singletonList(account));
+        } finally {
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.clearSynchronization();
+            }
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+
+        ArgumentCaptor<TkTiktokPublishTaskDO> taskCaptor = ArgumentCaptor.forClass(TkTiktokPublishTaskDO.class);
+        verify(taskMapper).insert(taskCaptor.capture());
+        assertEquals("PENDING", taskCaptor.getValue().getStatus());
+        verify(detailMapper, never()).update(any(), any());
+        verify(accountMapper, never()).selectById(10L);
+        verify(apiClient, never()).queryCreatorInfo(anyString());
+    }
+
+    @Test
+    void resumesStalePendingPublishTasksAndSubmitsEachTaskOnce() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "publishTaskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        TkTiktokPublishDetailDO firstDetail = TkTiktokPublishDetailDO.builder()
+                .id(301L).publishTaskId(200L).status("PENDING").build();
+        firstDetail.setTenantId(8L);
+        TkTiktokPublishDetailDO secondDetail = TkTiktokPublishDetailDO.builder()
+                .id(302L).publishTaskId(200L).status("PENDING").build();
+        secondDetail.setTenantId(8L);
+        when(detailMapper.selectStalePendingList(any(java.time.LocalDateTime.class), eq(100)))
+                .thenReturn(Arrays.asList(firstDetail, secondDetail));
+        when(detailMapper.selectListByTaskId(200L)).thenReturn(Collections.emptyList());
+        when(taskMapper.selectById(200L)).thenReturn(null);
+
+        try {
+            assertEquals(1, service.resumePendingPublishTasks(100));
+            verify(detailMapper, timeout(2000).times(1)).selectListByTaskId(200L);
+        } finally {
+            service.destroy();
+        }
+
+        verify(detailMapper).selectStalePendingList(any(java.time.LocalDateTime.class), eq(100));
     }
 
     @Test

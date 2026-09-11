@@ -7,6 +7,12 @@ After=network-online.target docker.service
 Type=simple
 User=linux
 WorkingDirectory=/data/Tk/current/app
+ExecStartPre=/usr/bin/test -f /data/Tk/current/tools/reference-video-download/douyin_tiktok_bilibili_tool.py
+ExecStartPre=/usr/bin/test -d /data/Tk/current/tools/reference-video-download/Douyin_TikTok_Download_API
+ExecStartPre=/usr/bin/test -x /data/Tk/current/tools/reference-video-download/.venv/bin/python
+ExecStartPre=/usr/bin/test -f /data/Tk/current/tools/subtitle/asr_faster_whisper.py
+ExecStartPre=/usr/bin/test -x /data/Tk/current/.venv-asr/bin/python
+ExecStartPre=/usr/bin/test -d /data/Tk/current/models/faster-whisper
 ExecStart=/usr/bin/java -Xms512m -Xmx1024m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai -jar /data/Tk/current/app/yudao-server.jar --spring.config.additional-location=file:/data/Tk/current/app/application-prod.yaml --spring.profiles.active=prod
 SuccessExitStatus=143
 Restart=always

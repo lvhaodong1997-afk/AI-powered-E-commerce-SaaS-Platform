@@ -987,9 +987,8 @@ const submitPublish = async () => {
   publishLoading.value = true
   try {
     await TkTiktokPublishApi.create(publishForm)
-    message.success('Publish task created')
+    message.success('发布任务已加入队列')
     publishDrawerVisible.value = false
-    activeTab.value = 'tasks'
     await refreshAll()
   } finally {
     publishLoading.value = false

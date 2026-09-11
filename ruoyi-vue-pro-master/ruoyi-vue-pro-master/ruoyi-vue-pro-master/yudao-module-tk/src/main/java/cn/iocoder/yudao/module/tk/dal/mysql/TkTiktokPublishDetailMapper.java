@@ -89,5 +89,13 @@ public interface TkTiktokPublishDetailMapper extends BaseMapperX<TkTiktokPublish
                 .last("LIMIT " + Math.max(1, limit)));
     }
 
+    default List<TkTiktokPublishDetailDO> selectStalePendingList(LocalDateTime deadline, int limit) {
+        return selectList(new LambdaQueryWrapperX<TkTiktokPublishDetailDO>()
+                .eq(TkTiktokPublishDetailDO::getStatus, "PENDING")
+                .le(TkTiktokPublishDetailDO::getUpdateTime, deadline)
+                .orderByAsc(TkTiktokPublishDetailDO::getUpdateTime)
+                .last("LIMIT " + Math.max(1, limit)));
+    }
+
 }
 

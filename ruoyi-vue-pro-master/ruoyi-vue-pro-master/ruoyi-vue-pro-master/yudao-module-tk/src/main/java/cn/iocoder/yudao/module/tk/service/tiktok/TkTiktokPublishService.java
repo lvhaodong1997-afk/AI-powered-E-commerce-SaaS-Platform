@@ -30,4 +30,6 @@ public interface TkTiktokPublishService {
 
     int syncStaleProcessingStatus(int limit);
 
+    int resumePendingPublishTasks(int limit);
+
 }

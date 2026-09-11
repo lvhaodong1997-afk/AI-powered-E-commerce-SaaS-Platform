@@ -32,6 +32,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -61,8 +62,10 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     private static final String SOURCE_UPLOADED = "UPLOADED";
     private static final int DOWNLOAD_TIMEOUT_MILLIS = 10 * 60 * 1000;
     private static final long STATUS_SYNC_INTERVAL_MINUTES = 2L;
+    private static final long PENDING_RECOVERY_DELAY_MINUTES = 1L;
 
     private final ExecutorService retryExecutorService = Executors.newFixedThreadPool(2);
+    private final Set<Long> queuedPublishTaskIds = ConcurrentHashMap.newKeySet();
 
     @Resource
     private TkTiktokAccountMapper accountMapper;
@@ -336,6 +339,25 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         return syncProcessingDetails(details).size();
     }
 
+    @Override
+    public int resumePendingPublishTasks(int limit) {
+        List<TkTiktokPublishDetailDO> details = publishDetailMapper.selectStalePendingList(
+                LocalDateTime.now().minusMinutes(PENDING_RECOVERY_DELAY_MINUTES), limit);
+        Map<Long, Long> taskTenants = new LinkedHashMap<>();
+        for (TkTiktokPublishDetailDO detail : details) {
+            if (detail.getPublishTaskId() != null && detail.getTenantId() != null) {
+                taskTenants.putIfAbsent(detail.getPublishTaskId(), detail.getTenantId());
+            }
+        }
+        int submitted = 0;
+        for (Map.Entry<Long, Long> entry : taskTenants.entrySet()) {
+            if (submitPublishTask(entry.getValue(), entry.getKey())) {
+                submitted++;
+            }
+        }
+        return submitted;
+    }
+
     private Long createPublishTaskWithinTenant(TkTiktokPublishCreateReqVO reqVO, TkGenerationTaskDO generationTask,
                                                TkTiktokPublishMediaDO uploadedVideo, List<TkTiktokAccountDO> accounts) {
         String postMode = StrUtil.blankToDefault(reqVO.getPostMode(), apiClient.getDefaultPostMode());
@@ -399,9 +421,9 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                     .build();
             detail.setTenantId(tenantId);
             publishDetailMapper.insert(detail);
-            processDetail(detail);
         }
         refreshTaskSummary(publishTask.getId());
+        submitPublishTaskAfterCommit(tenantId, publishTask.getId());
         return publishTask.getId();
     }
 
@@ -817,6 +839,51 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         return taskIds;
     }
 
+    private void submitPublishTaskAfterCommit(Long tenantId, Long publishTaskId) {
+        Runnable submitTask = () -> submitPublishTask(tenantId, publishTaskId);
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    submitTask.run();
+                }
+            });
+            return;
+        }
+        submitTask.run();
+    }
+
+    private boolean submitPublishTask(Long tenantId, Long publishTaskId) {
+        if (!queuedPublishTaskIds.add(publishTaskId)) {
+            return false;
+        }
+        try {
+            retryExecutorService.submit(() -> TenantUtils.execute(tenantId,
+                    () -> processPublishTask(publishTaskId)));
+            return true;
+        } catch (RuntimeException ex) {
+            queuedPublishTaskIds.remove(publishTaskId);
+            throw ex;
+        }
+    }
+
+    private void processPublishTask(Long publishTaskId) {
+        try {
+            List<TkTiktokPublishDetailDO> details = publishDetailMapper.selectListByTaskId(publishTaskId);
+            for (TkTiktokPublishDetailDO detail : details) {
+                if (STATUS_PENDING.equals(detail.getStatus())) {
+                    processDetail(detail);
+                }
+            }
+        } finally {
+            try {
+                refreshTaskSummary(publishTaskId);
+            } finally {
+                queuedPublishTaskIds.remove(publishTaskId);
+            }
+        }
+    }
+
     private void submitRetryAfterCommit(Long tenantId, Long detailId, Long publishTaskId) {
         Runnable submitTask = () -> retryExecutorService.submit(
                 () -> TenantUtils.execute(tenantId, () -> processRetryDetail(detailId, publishTaskId)));
@@ -958,6 +1025,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             task.setStatus(STATUS_PARTIAL_SUCCESS);
         } else if (failed > 0 && pending == 0) {
             task.setStatus(STATUS_FAILED);
+        } else if (success == 0 && failed == 0 && pending == details.size()) {
+            task.setStatus(STATUS_PENDING);
         } else {
             task.setStatus(STATUS_PROCESSING);
         }

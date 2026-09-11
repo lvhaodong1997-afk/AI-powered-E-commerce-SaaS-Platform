@@ -20,9 +20,10 @@ public class TkTiktokPublishStatusSyncJob {
     @Scheduled(fixedDelay = 2 * 60 * 1000L, initialDelay = 60 * 1000L)
     public void syncProcessingStatus() {
         try {
+            int pendingCount = publishService.resumePendingPublishTasks(SCAN_LIMIT);
             int count = publishService.syncStaleProcessingStatus(SCAN_LIMIT);
-            if (count > 0) {
-                log.info("[syncProcessingStatus][count({})]", count);
+            if (pendingCount > 0 || count > 0) {
+                log.info("[syncProcessingStatus][pendingCount({}), processingCount({})]", pendingCount, count);
             }
         } catch (Exception ex) {
             log.warn("[syncProcessingStatus][TikTok 发布状态自动同步失败]", ex);
