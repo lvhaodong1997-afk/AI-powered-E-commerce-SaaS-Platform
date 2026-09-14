@@ -27,6 +27,22 @@ class TkFileCleanupPathPolicyTest {
     }
 
     @Test
+    void generationOpeningPathSupportsInfraFileUrl() {
+        String url = "https://tkassetplant.fnn.net.cn/admin-api/infra/file/29/get/"
+                + "tk/1/2/generation-openings/opening%20one.mp4";
+
+        assertTrue(TkFileCleanupPathPolicy.isGenerationOpeningPath(url));
+        assertEquals("tk/1/2/generation-openings/opening one.mp4",
+                TkFileCleanupPathPolicy.normalizePath(url));
+    }
+
+    @Test
+    void generationOpeningPathRejectsMaterialVideoPath() {
+        assertFalse(TkFileCleanupPathPolicy.isGenerationOpeningPath(
+                "tk/1/2/material-videos/source.mp4"));
+    }
+
+    @Test
     void extractTranscriptAudioPathSupportsFileUrl() {
         String url = "https://tkassetplant.fnn.net.cn/admin-api/infra/file/29/get/"
                 + "tk/open-video-transcripts/112/20260905/transcript-audio-112.wav";

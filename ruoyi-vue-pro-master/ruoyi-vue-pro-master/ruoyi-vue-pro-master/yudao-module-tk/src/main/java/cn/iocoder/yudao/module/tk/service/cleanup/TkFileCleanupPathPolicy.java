@@ -12,6 +12,7 @@ final class TkFileCleanupPathPolicy {
 
     private static final String TK_PREFIX = "tk/";
     private static final String GENERATION_TASK_SEGMENT = "/generation-tasks/";
+    private static final String GENERATION_OPENING_SEGMENT = "/generation-openings/";
     private static final String TRANSCRIPT_AUDIO_PREFIX = "tk/open-video-transcripts/";
     private static final String REFERENCE_VIDEO_PREFIX = "tk/reference-videos/";
     private static final String REFERENCE_COVER_PREFIX = "tk/reference-covers/";
@@ -43,6 +44,15 @@ final class TkFileCleanupPathPolicy {
             return Optional.empty();
         }
         return Optional.of(path);
+    }
+
+    static boolean isGenerationOpeningPath(String value) {
+        String path = normalizeToPath(value);
+        return isSafeTkPath(path) && path.contains(GENERATION_OPENING_SEGMENT);
+    }
+
+    static String normalizePath(String value) {
+        return normalizeToPath(value);
     }
 
     static boolean isReferencePreviewPath(String path) {

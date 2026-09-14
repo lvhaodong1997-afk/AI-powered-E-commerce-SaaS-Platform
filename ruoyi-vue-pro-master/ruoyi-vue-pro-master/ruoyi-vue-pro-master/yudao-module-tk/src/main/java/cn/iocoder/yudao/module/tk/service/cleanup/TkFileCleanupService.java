@@ -74,13 +74,14 @@ public class TkFileCleanupService {
     public CleanupResult cleanupExpiredFiles() {
         TkGenerationProperties.Cleanup cleanup = generationProperties.getCleanup();
         if (!Boolean.TRUE.equals(cleanup.getEnabled())) {
-            return new CleanupResult(0, 0);
+            return new CleanupResult(0, 0, 0);
         }
         LocalDateTime now = LocalDateTime.now();
         int generatedCount = cleanupExpiredGeneratedTaskFiles(now, cleanup);
         generatedCount += cleanupExpiredGenerationTaskUrlColumns(now, cleanup);
+        int generationOpeningCount = cleanupExpiredGenerationOpeningFiles(now, cleanup);
         int referenceCount = cleanupExpiredReferencePreviewFiles(now, cleanup);
-        return new CleanupResult(generatedCount, referenceCount);
+        return new CleanupResult(generatedCount, generationOpeningCount, referenceCount);
     }
 
     public int cleanupExpiredPublishMedia() {
@@ -228,29 +229,54 @@ public class TkFileCleanupService {
         }
 
         List<TkGenerationTaskDO> tasks = generationTaskMapper.selectByIds(filesByTaskId.keySet());
-        Set<Long> cleanableTaskIds = tasks.stream()
-                .filter(this::isCleanableGenerationTask)
-                .map(TkGenerationTaskDO::getId)
-                .collect(Collectors.toCollection(HashSet::new));
-        if (cleanableTaskIds.isEmpty()) {
-            return 0;
-        }
-
+        Map<Long, TkGenerationTaskDO> tasksById = tasks == null ? Collections.emptyMap() : tasks.stream()
+                .filter(task -> task != null && task.getId() != null)
+                .collect(Collectors.toMap(TkGenerationTaskDO::getId, task -> task, (left, right) -> left));
         List<FileDO> expiredFiles = filesByTaskId.entrySet().stream()
-                .filter(entry -> cleanableTaskIds.contains(entry.getKey()))
+                .filter(entry -> isCleanableGenerationTask(tasksById.get(entry.getKey())))
                 .flatMap(entry -> entry.getValue().stream())
                 .collect(Collectors.toList());
         if (CollUtil.isEmpty(expiredFiles)) {
             return 0;
         }
         if (Boolean.TRUE.equals(cleanup.getDryRun())) {
-            log.info("[cleanupExpiredGeneratedTaskFiles][dryRun taskIds({}) fileCount({})]", cleanableTaskIds, expiredFiles.size());
+            log.info("[cleanupExpiredGeneratedTaskFiles][dryRun taskIds({}) fileCount({})]",
+                    filesByTaskId.keySet(), expiredFiles.size());
             return expiredFiles.size();
         }
 
         List<FileDO> deletedFiles = deleteFiles(expiredFiles);
         clearGenerationTaskFileUrls(deletedFiles);
         return deletedFiles.size();
+    }
+
+    private int cleanupExpiredGenerationOpeningFiles(LocalDateTime now, TkGenerationProperties.Cleanup cleanup) {
+        LocalDateTime deadline = now.minusHours(normalizeHours(cleanup.getGeneratedVideoRetentionHours()));
+        List<FileDO> candidates = cleanupFileMapper.selectExpiredGenerationOpeningCandidates(
+                deadline, normalizeBatchSize(cleanup.getBatchSize()));
+        if (CollUtil.isEmpty(candidates)) {
+            return 0;
+        }
+        List<TkGenerationTaskDO> openingTasks = generationTaskMapper.selectTasksWithOpeningVideoUrls();
+        Set<String> referencedPaths = (openingTasks == null ? Collections.<TkGenerationTaskDO>emptyList()
+                : openingTasks).stream()
+                .map(TkGenerationTaskDO::getOpeningVideoUrl)
+                .filter(StrUtil::isNotBlank)
+                .map(TkFileCleanupPathPolicy::normalizePath)
+                .filter(TkFileCleanupPathPolicy::isGenerationOpeningPath)
+                .collect(Collectors.toCollection(HashSet::new));
+        List<FileDO> expiredFiles = candidates.stream()
+                .filter(file -> TkFileCleanupPathPolicy.isGenerationOpeningPath(file.getPath()))
+                .filter(file -> !referencedPaths.contains(TkFileCleanupPathPolicy.normalizePath(file.getPath())))
+                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(expiredFiles)) {
+            return 0;
+        }
+        if (Boolean.TRUE.equals(cleanup.getDryRun())) {
+            log.info("[cleanupExpiredGenerationOpeningFiles][dryRun fileCount({})]", expiredFiles.size());
+            return expiredFiles.size();
+        }
+        return deleteFiles(expiredFiles).size();
     }
 
     private int cleanupExpiredGenerationTaskUrlColumns(LocalDateTime now, TkGenerationProperties.Cleanup cleanup) {
@@ -272,8 +298,8 @@ public class TkFileCleanupService {
                 cleanedCount++;
                 continue;
             }
-            deleteManagedOssGenerationUrls(generationUrls);
-            if (clearGenerationTaskColumnsByPaths(task.getId(), generationUrls)) {
+            Set<String> deletedUrls = deleteManagedOssGenerationUrls(generationUrls);
+            if (clearGenerationTaskColumnsByPaths(task.getId(), deletedUrls)) {
                 cleanedCount++;
             }
         }
@@ -310,7 +336,7 @@ public class TkFileCleanupService {
 
     private boolean isCleanableGenerationTask(TkGenerationTaskDO task) {
         if (task == null) {
-            return false;
+            return true;
         }
         return TkGenerationStatusEnum.SUCCESS.equals(task.getStatus())
                 || TkGenerationStatusEnum.FAILED.equals(task.getStatus());
@@ -385,9 +411,10 @@ public class TkFileCleanupService {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
-    private void deleteManagedOssGenerationUrls(Set<String> urls) {
+    private Set<String> deleteManagedOssGenerationUrls(Set<String> urls) {
+        Set<String> deletedUrls = new LinkedHashSet<>();
         if (ossUploadService == null || !ossUploadService.isEnabled()) {
-            return;
+            return deletedUrls;
         }
         for (String url : urls) {
             if (!ossUploadService.isManagedUrl(url)) {
@@ -395,10 +422,12 @@ public class TkFileCleanupService {
             }
             try {
                 ossUploadService.deleteByUrl(url);
+                deletedUrls.add(url);
             } catch (Exception ex) {
                 log.warn("[deleteManagedOssGenerationUrls][url({}) TK 过期生成文件 OSS 删除失败]", url, ex);
             }
         }
+        return deletedUrls;
     }
 
     private void clearReferencePreviewUrls(List<FileDO> files) {
@@ -444,6 +473,7 @@ public class TkFileCleanupService {
     @AllArgsConstructor
     public static class CleanupResult {
         private int generatedFileCount;
+        private int generationOpeningFileCount;
         private int referenceFileCount;
     }
 

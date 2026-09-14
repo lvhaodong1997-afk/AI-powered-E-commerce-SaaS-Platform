@@ -58,7 +58,8 @@ class TkFileCleanupServiceTest {
                 .thenReturn(Arrays.asList(
                         file(1L, "tk/1/2/generation-tasks/10/20260706/generated-10.mp4", "https://host/generated-10.mp4"),
                         file(2L, "tk/1/2/material-videos/20260706/source.mp4", "https://host/source.mp4"),
-                        file(3L, "tk/1/2/generation-tasks/11/20260706/generated-11.mp4", "https://host/generated-11.mp4")));
+                        file(3L, "tk/1/2/generation-tasks/11/20260706/generated-11.mp4", "https://host/generated-11.mp4"),
+                        file(6L, "tk/1/2/generation-tasks/12/20260706/generated-12.mp4", "https://host/generated-12.mp4")));
         when(generationTaskMapper.selectByIds(anySet()))
                 .thenReturn(Arrays.asList(
                         task(10L, TkGenerationStatusEnum.SUCCESS),
@@ -70,15 +71,49 @@ class TkFileCleanupServiceTest {
 
         TkFileCleanupService.CleanupResult result = service.cleanupExpiredFiles();
 
-        assertEquals(1, result.getGeneratedFileCount());
+        assertEquals(2, result.getGeneratedFileCount());
         assertEquals(1, result.getReferenceFileCount());
         verify(fileService).deleteFile(1L);
+        verify(fileService).deleteFile(6L);
         verify(fileService).deleteFile(4L);
         verify(fileService, never()).deleteFile(2L);
         verify(fileService, never()).deleteFile(3L);
         verify(fileService, never()).deleteFile(5L);
         verify(generationTaskMapper, atLeastOnce()).update(isNull(), any());
         verify(referenceAnalysisMapper).update(isNull(), any());
+    }
+
+    @Test
+    void cleanupExpiredFilesDeletesUnreferencedGenerationOpeningsOnly() throws Exception {
+        TkFileCleanupService service = createService();
+        TkCleanupFileMapper cleanupFileMapper = (TkCleanupFileMapper)
+                ReflectionTestUtils.getField(service, "cleanupFileMapper");
+        TkGenerationTaskMapper generationTaskMapper = (TkGenerationTaskMapper)
+                ReflectionTestUtils.getField(service, "generationTaskMapper");
+        FileService fileService = (FileService) ReflectionTestUtils.getField(service, "fileService");
+        String referencedUrl = "https://tkassetplant.fnn.net.cn/admin-api/infra/file/29/get/"
+                + "tk/1/2/generation-openings/referenced.mp4";
+        FileDO orphanFile = file(41L, "tk/1/2/generation-openings/orphan.mp4",
+                "https://host/orphan.mp4");
+        FileDO referencedFile = file(42L, "tk/1/2/generation-openings/referenced.mp4", referencedUrl);
+
+        when(cleanupFileMapper.selectExpiredGenerationTaskCandidates(any(LocalDateTime.class), anyInt()))
+                .thenReturn(Collections.emptyList());
+        when(cleanupFileMapper.selectExpiredGenerationOpeningCandidates(any(LocalDateTime.class), anyInt()))
+                .thenReturn(Arrays.asList(orphanFile, referencedFile));
+        when(cleanupFileMapper.selectExpiredReferencePreviewCandidates(any(LocalDateTime.class), anyInt()))
+                .thenReturn(Collections.emptyList());
+        when(generationTaskMapper.selectTasksWithOpeningVideoUrls())
+                .thenReturn(Collections.singletonList(task(99L, TkGenerationStatusEnum.SUCCESS)
+                        .setOpeningVideoUrl(referencedUrl)));
+        when(generationTaskMapper.selectExpiredTasksWithGenerationUrls(any(LocalDateTime.class), anyInt()))
+                .thenReturn(Collections.emptyList());
+
+        TkFileCleanupService.CleanupResult result = service.cleanupExpiredFiles();
+
+        assertEquals(1, result.getGenerationOpeningFileCount());
+        verify(fileService).deleteFile(41L);
+        verify(fileService, never()).deleteFile(42L);
     }
 
     @Test
@@ -137,6 +172,44 @@ class TkFileCleanupServiceTest {
         assertEquals(1, result.getGeneratedFileCount());
         verify(ossUploadService).deleteByUrl(signedGeneratedUrl);
         verify(generationTaskMapper, atLeastOnce()).update(isNull(), any());
+    }
+
+    @Test
+    void cleanupExpiredFilesKeepsGenerationTaskUrlsWhenOssDeleteFails() {
+        TkFileCleanupService service = new TkFileCleanupService();
+        TkGenerationProperties properties = new TkGenerationProperties();
+        TkCleanupFileMapper cleanupFileMapper = mock(TkCleanupFileMapper.class);
+        TkGenerationTaskMapper generationTaskMapper = mock(TkGenerationTaskMapper.class);
+        TkReferenceAnalysisMapper referenceAnalysisMapper = mock(TkReferenceAnalysisMapper.class);
+        FileService fileService = mock(FileService.class);
+        TkMaterialOssUploadService ossUploadService = mock(TkMaterialOssUploadService.class);
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        ReflectionTestUtils.setField(service, "cleanupFileMapper", cleanupFileMapper);
+        ReflectionTestUtils.setField(service, "generationTaskMapper", generationTaskMapper);
+        ReflectionTestUtils.setField(service, "referenceAnalysisMapper", referenceAnalysisMapper);
+        ReflectionTestUtils.setField(service, "fileService", fileService);
+        ReflectionTestUtils.setField(service, "ossUploadService", ossUploadService);
+        String signedGeneratedUrl = "https://tk-material-factory.oss-cn-beijing.aliyuncs.com/"
+                + "tk/174/174/generation-tasks/143/20260801/generated-143.mp4"
+                + "?OSSAccessKeyId=demo&Expires=2101103749&Signature=abc";
+        TkGenerationTaskDO expiredTask = task(143L, TkGenerationStatusEnum.SUCCESS)
+                .setOutputUrl(signedGeneratedUrl);
+
+        when(cleanupFileMapper.selectExpiredGenerationTaskCandidates(any(LocalDateTime.class), anyInt()))
+                .thenReturn(Collections.emptyList());
+        when(cleanupFileMapper.selectExpiredReferencePreviewCandidates(any(LocalDateTime.class), anyInt()))
+                .thenReturn(Collections.emptyList());
+        when(generationTaskMapper.selectExpiredTasksWithGenerationUrls(any(LocalDateTime.class), anyInt()))
+                .thenReturn(Collections.singletonList(expiredTask));
+        when(ossUploadService.isEnabled()).thenReturn(true);
+        when(ossUploadService.isManagedUrl(signedGeneratedUrl)).thenReturn(true);
+        doThrow(new IllegalStateException("oss unavailable"))
+                .when(ossUploadService).deleteByUrl(signedGeneratedUrl);
+
+        int result = service.cleanupExpiredFiles().getGeneratedFileCount();
+
+        assertEquals(0, result);
+        verify(generationTaskMapper, never()).update(isNull(), any());
     }
 
     @Test
@@ -338,9 +411,12 @@ class TkFileCleanupServiceTest {
     private TkFileCleanupService createService(TkGenerationProperties properties) {
         TkFileCleanupService service = new TkFileCleanupService();
         TkTiktokPublishMediaMapper mediaMapper = mock(TkTiktokPublishMediaMapper.class);
+        TkGenerationTaskMapper generationTaskMapper = mock(TkGenerationTaskMapper.class);
         TkMaterialOssUploadService ossUploadService = mock(TkMaterialOssUploadService.class);
         ReflectionTestUtils.setField(service, "generationProperties", properties);
         ReflectionTestUtils.setField(service, "cleanupFileMapper", mock(TkCleanupFileMapper.class));
+        ReflectionTestUtils.setField(service, "generationTaskMapper", generationTaskMapper);
+        ReflectionTestUtils.setField(service, "referenceAnalysisMapper", mock(TkReferenceAnalysisMapper.class));
         ReflectionTestUtils.setField(service, "publishMediaMapper", mediaMapper);
         ReflectionTestUtils.setField(service, "ossUploadService", ossUploadService);
         ReflectionTestUtils.setField(service, "transcriptTaskMapper", mock(TkOpenVideoTranscriptTaskMapper.class));

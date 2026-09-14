@@ -25,6 +25,7 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
     private static final DateTimeFormatter OSS_GMT_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).withZone(ZoneOffset.UTC);
     private static final int OSS_HTTP_TIMEOUT_MILLIS = 30_000;
+    private static final int OSS_DELETE_MAX_ATTEMPTS = 2;
 
     @Resource
     private TkGenerationProperties generationProperties;
@@ -43,19 +44,30 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
         if (!isConfigured()) {
             throw new IllegalStateException("OSS 删除配置不完整");
         }
-        String resource = "/" + oss.getBucket() + "/" + objectKey;
-        String date = OSS_GMT_DATE_FORMATTER.format(Instant.now());
-        String signature = TkOssRestSigner.sign("DELETE", "", "", date, resource, oss.getAccessKeySecret());
-        try (HttpResponse response = HttpRequest.delete(uploadUrl(oss) + "/" + encodePath(objectKey))
-                .header("Date", date)
-                .header("Authorization", "OSS " + oss.getAccessKeyId() + ":" + signature)
-                .timeout(OSS_HTTP_TIMEOUT_MILLIS)
-                .execute()) {
-            if (response.getStatus() != 204 && response.getStatus() != 404) {
-                throw new IllegalStateException(StrUtil.format("删除 OSS 文件失败，HTTP {}：{}",
-                        response.getStatus(), objectKey));
+        for (int attempt = 1; attempt <= OSS_DELETE_MAX_ATTEMPTS; attempt++) {
+            String resource = "/" + oss.getBucket() + "/" + objectKey;
+            String date = OSS_GMT_DATE_FORMATTER.format(Instant.now());
+            String signature = TkOssRestSigner.sign("DELETE", "", "", date, resource, oss.getAccessKeySecret());
+            try (HttpResponse response = HttpRequest.delete(uploadUrl(oss) + "/" + encodePath(objectKey))
+                    .header("Date", date)
+                    .header("Authorization", "OSS " + oss.getAccessKeyId() + ":" + signature)
+                    .timeout(OSS_HTTP_TIMEOUT_MILLIS)
+                    .execute()) {
+                int status = response.getStatus();
+                if (status == 204 || status == 404) {
+                    return;
+                }
+                String body = StrUtil.trim(response.body());
+                if (attempt == OSS_DELETE_MAX_ATTEMPTS || !isRetryableDeleteStatus(status)) {
+                    throw new IllegalStateException(StrUtil.format("删除 OSS 文件失败，HTTP {}：{}，响应：{}",
+                            status, objectKey, StrUtil.sub(body, 0, 500)));
+                }
             }
         }
+    }
+
+    private boolean isRetryableDeleteStatus(int status) {
+        return status == 403 || status == 408 || status == 429 || status >= 500;
     }
 
     public ObjectMetadata headObject(String objectKey) {

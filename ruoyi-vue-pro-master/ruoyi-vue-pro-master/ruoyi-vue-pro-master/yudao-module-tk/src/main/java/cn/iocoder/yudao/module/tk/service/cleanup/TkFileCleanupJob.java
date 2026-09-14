@@ -19,9 +19,12 @@ public class TkFileCleanupJob {
     public void cleanupExpiredFiles() {
         try {
             TkFileCleanupService.CleanupResult result = cleanupService.cleanupExpiredFiles();
-            if (result.getGeneratedFileCount() > 0 || result.getReferenceFileCount() > 0) {
-                log.info("[cleanupExpiredFiles][generatedFileCount({}) referenceFileCount({})]",
-                        result.getGeneratedFileCount(), result.getReferenceFileCount());
+            if (result.getGeneratedFileCount() > 0 || result.getGenerationOpeningFileCount() > 0
+                    || result.getReferenceFileCount() > 0) {
+                log.info("[cleanupExpiredFiles][generatedFileCount({}) generationOpeningFileCount({}) "
+                                + "referenceFileCount({})]",
+                        result.getGeneratedFileCount(), result.getGenerationOpeningFileCount(),
+                        result.getReferenceFileCount());
             }
         } catch (Exception ex) {
             log.warn("[cleanupExpiredFiles][TK 过期文件自动清理失败]", ex);

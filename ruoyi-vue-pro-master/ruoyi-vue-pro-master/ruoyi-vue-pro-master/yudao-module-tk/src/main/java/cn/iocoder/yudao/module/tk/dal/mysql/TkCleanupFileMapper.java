@@ -20,6 +20,15 @@ public interface TkCleanupFileMapper extends BaseMapperX<FileDO> {
                 .last("LIMIT " + limit));
     }
 
+    default List<FileDO> selectExpiredGenerationOpeningCandidates(LocalDateTime deadline, int limit) {
+        return selectList(new LambdaQueryWrapper<FileDO>()
+                .lt(FileDO::getCreateTime, deadline)
+                .likeRight(FileDO::getPath, "tk/")
+                .like(FileDO::getPath, "/generation-openings/")
+                .orderByAsc(FileDO::getId)
+                .last("LIMIT " + Math.max(1, limit)));
+    }
+
     default List<FileDO> selectExpiredReferencePreviewCandidates(LocalDateTime deadline, int limit) {
         return selectList(new LambdaQueryWrapper<FileDO>()
                 .lt(FileDO::getCreateTime, deadline)

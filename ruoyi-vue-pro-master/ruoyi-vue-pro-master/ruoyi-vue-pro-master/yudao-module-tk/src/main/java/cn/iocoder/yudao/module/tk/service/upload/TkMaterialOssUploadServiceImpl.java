@@ -22,7 +22,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
 
 import javax.annotation.Resource;
+import java.net.URI;
 import java.net.URLEncoder;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
@@ -58,6 +60,8 @@ public class TkMaterialOssUploadServiceImpl implements TkMaterialOssUploadServic
     private TkGenerationProperties generationProperties;
     @Resource
     private TkUploadSessionService uploadSessionService;
+    @Resource
+    private TkOssObjectStorageClient ossObjectStorageService;
 
     @Override
     public TkUploadSessionRespVO createMaterialVideoSession(Long libraryId, String fileName, Long fileSize, String contentType) {
@@ -158,18 +162,10 @@ public class TkMaterialOssUploadServiceImpl implements TkMaterialOssUploadServic
         if (StrUtil.isBlank(objectKey)) {
             return;
         }
-        String resource = "/" + getOss().getBucket() + "/" + objectKey;
-        String date = gmtDate();
-        String signature = TkOssRestSigner.sign("DELETE", "", "", date, resource, getOss().getAccessKeySecret());
-        try (HttpResponse response = HttpRequest.delete(uploadUrl() + "/" + encodePath(objectKey))
-                .header("Date", date)
-                .header("Authorization", "OSS " + getOss().getAccessKeyId() + ":" + signature)
-                .timeout(OSS_HTTP_TIMEOUT_MILLIS)
-                .execute()) {
-            if (response.getStatus() != 204 && response.getStatus() != 404) {
-                throw new IllegalStateException(StrUtil.format("删除 OSS 文件失败，HTTP {}：{}", response.getStatus(), url));
-            }
+        if (ossObjectStorageService == null || !ossObjectStorageService.isConfigured()) {
+            throw new IllegalStateException("OSS 删除配置不完整");
         }
+        ossObjectStorageService.deleteObject(objectKey);
     }
 
     private void assertOssObjectReady(String objectKey, Long expectedSize) {
@@ -283,13 +279,27 @@ public class TkMaterialOssUploadServiceImpl implements TkMaterialOssUploadServic
     }
 
     private String toObjectKey(String url) {
-        String baseUrl = StrUtil.removeSuffix(getOss().getPublicBaseUrl(), "/") + "/";
-        if (!StrUtil.startWith(url, baseUrl)) {
+        if (StrUtil.isBlank(url) || getOss() == null || StrUtil.isBlank(getOss().getPublicBaseUrl())) {
             return null;
         }
-        String objectKey = StrUtil.removePrefix(url, baseUrl);
-        int queryIndex = objectKey.indexOf('?');
-        return queryIndex >= 0 ? objectKey.substring(0, queryIndex) : objectKey;
+        String publicBaseUrl = StrUtil.removeSuffix(getOss().getPublicBaseUrl(), "/");
+        String normalizedUrl = StrUtil.subBefore(url, "?", false);
+        if (!StrUtil.startWithIgnoreCase(normalizedUrl, publicBaseUrl + "/")) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(normalizedUrl);
+            String objectPath = uri.getRawPath();
+            String basePath = URI.create(publicBaseUrl).getRawPath();
+            if (StrUtil.isNotBlank(basePath) && !"/".equals(basePath)) {
+                objectPath = StrUtil.removePrefix(objectPath, basePath);
+            }
+            objectPath = StrUtil.removePrefix(objectPath, "/");
+            return StrUtil.isBlank(objectPath) ? null
+                    : URLDecoder.decode(objectPath, StandardCharsets.UTF_8.name());
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private String encodePath(String objectKey) {

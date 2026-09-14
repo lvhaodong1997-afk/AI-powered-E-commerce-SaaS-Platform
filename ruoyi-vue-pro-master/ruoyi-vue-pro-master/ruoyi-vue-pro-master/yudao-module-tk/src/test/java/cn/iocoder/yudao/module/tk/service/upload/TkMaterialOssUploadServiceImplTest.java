@@ -15,6 +15,7 @@ import java.time.Instant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TkMaterialOssUploadServiceImplTest {
@@ -55,6 +56,20 @@ class TkMaterialOssUploadServiceImplTest {
         assertTrue(service.isManagedUrl("https://cdn.example.com/tk/1/100/material-libraries/23/material-videos/20260805/new.mp4"));
     }
 
+    @Test
+    void deleteByUrlDelegatesToSharedOssObjectStorage() {
+        TkMaterialOssUploadServiceImpl service = createService();
+        TkOssObjectStorageClient storageService = mock(TkOssObjectStorageClient.class);
+        ReflectionTestUtils.setField(service, "ossObjectStorageService", storageService);
+        String url = "https://cdn.example.com/tk/1/100/material-videos/20260805/video%20one.mp4"
+                + "?OSSAccessKeyId=access-key&Expires=2101103749&Signature=signed";
+        when(storageService.isConfigured()).thenReturn(true);
+
+        service.deleteByUrl(url);
+
+        verify(storageService).deleteObject("tk/1/100/material-videos/20260805/video one.mp4");
+    }
+
     private TkMaterialOssUploadServiceImpl createService() {
         TkMaterialOssUploadServiceImpl service = new TkMaterialOssUploadServiceImpl();
         TkGenerationProperties properties = new TkGenerationProperties();
@@ -69,6 +84,7 @@ class TkMaterialOssUploadServiceImplTest {
         ReflectionTestUtils.setField(service, "videoMapper", mock(TkMaterialVideoMapper.class));
         ReflectionTestUtils.setField(service, "dataScopeService", mock(TkDataScopeService.class));
         ReflectionTestUtils.setField(service, "materialVideoParseService", mock(TkMaterialVideoParseService.class));
+        ReflectionTestUtils.setField(service, "ossObjectStorageService", mock(TkOssObjectStorageClient.class));
         return service;
     }
 }

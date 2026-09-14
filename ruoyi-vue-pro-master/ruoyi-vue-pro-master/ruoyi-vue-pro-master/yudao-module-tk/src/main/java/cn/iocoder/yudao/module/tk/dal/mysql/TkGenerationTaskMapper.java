@@ -85,6 +85,14 @@ public interface TkGenerationTaskMapper extends BaseMapperX<TkGenerationTaskDO> 
                 .last("LIMIT " + limit));
     }
 
+    default List<TkGenerationTaskDO> selectTasksWithOpeningVideoUrls() {
+        LambdaQueryWrapperX<TkGenerationTaskDO> wrapper = new LambdaQueryWrapperX<>();
+        wrapper.select(TkGenerationTaskDO::getId, TkGenerationTaskDO::getOpeningVideoUrl)
+                .isNotNull(TkGenerationTaskDO::getOpeningVideoUrl)
+                .ne(TkGenerationTaskDO::getOpeningVideoUrl, "");
+        return selectList(wrapper);
+    }
+
     default PageResult<TkGenerationTaskDO> selectPage(TkGenerationTaskPageReqVO reqVO, TkUserScope scope) {
         return selectPage(reqVO, new LambdaQueryWrapperX<TkGenerationTaskDO>()
                 .eqIfPresent(TkGenerationTaskDO::getId, reqVO.getId())
