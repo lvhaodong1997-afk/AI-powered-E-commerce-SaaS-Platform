@@ -9,6 +9,9 @@ import cn.iocoder.yudao.module.system.service.dict.DictDataService;
 import cn.iocoder.yudao.module.tk.controller.admin.voice.vo.TkMiniMaxVoiceOptionRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkVoiceFavoriteDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkVoiceFavoriteMapper;
+import cn.iocoder.yudao.module.tk.enums.TkUserLevelEnum;
+import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
+import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
@@ -27,8 +30,9 @@ class TkMiniMaxVoiceDictionaryServiceTest {
 
     private final DictDataService dictDataService = mock(DictDataService.class);
     private final TkVoiceFavoriteMapper favoriteMapper = mock(TkVoiceFavoriteMapper.class);
+    private final TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
     private final TkMiniMaxVoiceDictionaryService service =
-            new TkMiniMaxVoiceDictionaryService(dictDataService, favoriteMapper);
+            new TkMiniMaxVoiceDictionaryService(dictDataService, favoriteMapper, dataScopeService);
 
     @AfterEach
     void clearTenant() {
@@ -66,6 +70,8 @@ class TkMiniMaxVoiceDictionaryServiceTest {
         when(dictDataService.getDictDataList(0, "ai_tts_voice")).thenReturn(Arrays.asList(invalid, valid));
         when(favoriteMapper.selectListByScope(22L, 33L, "MINIMAX"))
                 .thenReturn(Collections.singletonList(new TkVoiceFavoriteDO().setVoiceCode("French_Female_News Anchor")));
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(33L, 22L,
+                TkUserLevelEnum.TENANT_USER.getCode(), null));
         TenantContextHolder.setTenantId(22L);
 
         try (MockedStatic<SecurityFrameworkUtils> security = mockStatic(SecurityFrameworkUtils.class)) {
@@ -78,6 +84,39 @@ class TkMiniMaxVoiceDictionaryServiceTest {
                     + "French_Female_News%20Anchor.mp3", options.get(0).getPreviewUrl());
             assertTrue(options.get(0).getFavorite());
         }
+    }
+
+    @Test
+    void getOptionsUsesTenantResolvedForPlatformAdminVisit() {
+        when(dictDataService.getDictDataList(0, "ai_tts_voice"))
+                .thenReturn(Collections.singletonList(voice(11L, "alias", "Voice",
+                        "{\"voiceId\":\"ActualVoice\",\"language\":\"en-US\","
+                                + "\"country\":\"美国\"}")));
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(33L, 77L,
+                TkUserLevelEnum.PLATFORM_ADMIN.getCode(), null));
+        when(favoriteMapper.selectListByScope(77L, 33L, "MINIMAX"))
+                .thenReturn(Collections.emptyList());
+
+        try (MockedStatic<SecurityFrameworkUtils> security = mockStatic(SecurityFrameworkUtils.class)) {
+            security.when(SecurityFrameworkUtils::getLoginUserId).thenReturn(33L);
+            assertEquals(1, service.getOptions().size());
+        }
+
+        verify(favoriteMapper).selectListByScope(77L, 33L, "MINIMAX");
+    }
+
+    @Test
+    void getOptionsRejectsUnresolvedTenantFromDataScope() {
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(33L, null,
+                TkUserLevelEnum.PLATFORM_ADMIN.getCode(), null));
+
+        try (MockedStatic<SecurityFrameworkUtils> security = mockStatic(SecurityFrameworkUtils.class)) {
+            security.when(SecurityFrameworkUtils::getLoginUserId).thenReturn(33L);
+            ServiceException exception = assertThrows(ServiceException.class, service::getOptions);
+            assertEquals("当前请求缺少租户上下文", exception.getMessage());
+        }
+
+        verifyNoInteractions(dictDataService, favoriteMapper);
     }
 
     @Test
@@ -119,6 +158,8 @@ class TkMiniMaxVoiceDictionaryServiceTest {
         when(dictDataService.getDictDataList(0, "ai_tts_voice")).thenReturn(Collections.singletonList(
                 voice(10L, "alias", "Voice", "{\"voiceId\":\"ActualVoice\",\"language\":\"en-US\","
                         + "\"country\":\"美国\"}")));
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(55L, 44L,
+                TkUserLevelEnum.TENANT_USER.getCode(), null));
         TenantContextHolder.setTenantId(44L);
 
         try (MockedStatic<SecurityFrameworkUtils> security = mockStatic(SecurityFrameworkUtils.class)) {

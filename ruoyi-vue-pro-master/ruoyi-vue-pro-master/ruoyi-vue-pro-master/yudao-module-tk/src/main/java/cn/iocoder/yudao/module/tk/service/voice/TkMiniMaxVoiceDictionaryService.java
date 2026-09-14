@@ -5,12 +5,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import cn.iocoder.yudao.framework.common.exception.ServiceException;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
-import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.system.dal.dataobject.dict.DictDataDO;
 import cn.iocoder.yudao.module.system.service.dict.DictDataService;
 import cn.iocoder.yudao.module.tk.controller.admin.voice.vo.TkMiniMaxVoiceOptionRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkVoiceFavoriteDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkVoiceFavoriteMapper;
+import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
+import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +42,7 @@ public class TkMiniMaxVoiceDictionaryService {
 
     private final DictDataService dictDataService;
     private final TkVoiceFavoriteMapper favoriteMapper;
+    private final TkDataScopeService dataScopeService;
 
     public String resolveVoiceCode(Long profileId, String code) {
         if (profileId != null) {
@@ -178,8 +180,9 @@ public class TkMiniMaxVoiceDictionaryService {
         }
     }
 
-    private static Long requireTenantId() {
-        Long tenantId = TenantContextHolder.getTenantId();
+    private Long requireTenantId() {
+        TkUserScope currentScope = dataScopeService.getCurrentScope();
+        Long tenantId = currentScope == null ? null : currentScope.getTenantId();
         if (tenantId == null) {
             throw serviceException("当前请求缺少租户上下文");
         }
