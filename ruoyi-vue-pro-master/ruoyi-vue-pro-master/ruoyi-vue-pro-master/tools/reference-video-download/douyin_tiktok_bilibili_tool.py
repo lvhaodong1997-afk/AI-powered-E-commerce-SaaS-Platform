@@ -433,6 +433,15 @@ async def parse_one_url(url: str, include_raw: bool = False) -> dict[str, Any]:
             "Platform parsing timed out. Check that the URL is a real public video "
             "and that TK_REFERENCE_DOWNLOAD_PROXY can access TikTok/Douyin."
         ) from exc
+    except asyncio.CancelledError as exc:
+        if "tiktok.com" in url.lower():
+            try:
+                return await parse_tiktok_web_page(url, include_raw=include_raw)
+            except asyncio.CancelledError:
+                raise
+            except Exception as fallback_error:
+                raise ToolError(f"TikTok 主解析任务被取消；网页兜底失败：{fallback_error}") from exc
+        raise
     except Exception as exc:
         if "tiktok.com" in url.lower():
             return await parse_tiktok_web_page(url, include_raw=include_raw)

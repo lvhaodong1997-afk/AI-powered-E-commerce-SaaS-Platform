@@ -268,6 +268,34 @@ class CandidateVideoDownloadTest(unittest.TestCase):
 
         self.assertEqual("tiktok", result["platform"])
 
+    def test_tiktok_parse_uses_web_fallback_when_upstream_is_cancelled(self):
+        source_url = "https://www.tiktok.com/@demo/video/123"
+        original_parse_one_url_once = tool.parse_one_url_once
+        original_tiktok_fallback = tool.parse_tiktok_web_page
+
+        async def fail_with_cancellation(url, include_raw=False):
+            raise asyncio.CancelledError()
+
+        async def fake_tiktok_fallback(url, include_raw=False):
+            return {
+                "source_url": url,
+                "platform": "tiktok",
+                "type": "video",
+                "video_id": "123",
+            }
+
+        try:
+            tool.parse_one_url_once = fail_with_cancellation
+            tool.parse_tiktok_web_page = fake_tiktok_fallback
+
+            result = asyncio.run(tool.parse_one_url(source_url))
+        finally:
+            tool.parse_one_url_once = original_parse_one_url_once
+            tool.parse_tiktok_web_page = original_tiktok_fallback
+
+        self.assertEqual("tiktok", result["platform"])
+        self.assertEqual("123", result["video_id"])
+
     def test_ytdlp_proxy_argument_follows_python_module_command(self):
         source_url = "https://v.douyin.com/OGkURN-2Hxs/"
         proxy_url = "http://127.0.0.1:7890"
