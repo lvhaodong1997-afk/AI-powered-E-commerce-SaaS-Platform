@@ -39,6 +39,7 @@ import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import cn.iocoder.yudao.module.tk.service.upload.TkGenerationOpeningUploadService;
 import cn.iocoder.yudao.module.tk.service.voice.TkMimoVoiceSelection;
 import cn.iocoder.yudao.module.tk.service.voice.TkVoiceProfileService;
+import cn.iocoder.yudao.module.tk.service.voice.TkMiniMaxVoiceDictionaryService;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.multipart.MultipartFile;
@@ -104,6 +105,8 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     private TkGenerationPrecheckService precheckService;
     @Resource
     private TkVoiceProfileService voiceProfileService;
+    @Resource
+    private TkMiniMaxVoiceDictionaryService miniMaxVoiceDictionaryService;
     @Resource
     private TkBgmAssetService bgmAssetService;
     @Resource
@@ -325,6 +328,10 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
             String resolvedVoiceCode = voiceEnabled && TkTtsProviderEnum.DASHSCOPE.equals(ttsProvider)
                     ? voiceProfileService.resolveVoiceSelection(createReqVO.getVoiceProfileId(), createReqVO.getVoiceCode())
                     : null;
+            if (voiceEnabled && TkTtsProviderEnum.MINIMAX.equals(ttsProvider)) {
+                resolvedVoiceCode = miniMaxVoiceDictionaryService.resolveVoiceCode(
+                        createReqVO.getVoiceProfileId(), createReqVO.getVoiceCode());
+            }
             TkMimoVoiceSelection mimoVoiceSelection = voiceEnabled && TkTtsProviderEnum.MIMO.equals(ttsProvider)
                     ? resolveMimoVoiceSelection(createReqVO)
                     : null;
@@ -465,7 +472,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     }
 
     private String resolveTtsProvider(TkGenerationTaskCreateReqVO createReqVO) {
-        return TkTtsProviderEnum.normalize(createReqVO.getTtsProvider());
+        return TkTtsProviderEnum.forNewTask(createReqVO.getTtsProvider());
     }
 
     private String resolveMimoVoiceMode(TkGenerationTaskCreateReqVO createReqVO) {

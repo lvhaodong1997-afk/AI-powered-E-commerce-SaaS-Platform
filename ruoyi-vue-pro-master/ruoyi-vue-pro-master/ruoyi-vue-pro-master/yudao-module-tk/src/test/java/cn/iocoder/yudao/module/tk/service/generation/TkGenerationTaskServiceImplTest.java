@@ -201,6 +201,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
         reqVO.setReferenceAnalysisId(300L);
         reqVO.setScriptOptionId(101L);
+        reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         reqVO.setTitle("  夏季防晒视频  ");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder().id(10L).companyId(20L).name("Demo").build();
@@ -263,6 +264,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
         reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE);
+        reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         reqVO.setClipPlanMode("SEGMENTED");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder().id(10L).companyId(20L).name("Beauty").build();
@@ -314,6 +316,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setLibraryId(10L);
         reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
         reqVO.setPromptText("lead script");
+        reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         reqVO.setClipPlanMode("FULL_POOL_RANDOM");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder().id(10L).companyId(20L).name("Lead").build();
@@ -364,6 +367,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
         reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE);
+        reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         reqVO.setClipPlanMode("FULL_POOL_RANDOM");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder().id(10L).companyId(20L).name("Fashion").build();
@@ -412,6 +416,7 @@ class TkGenerationTaskServiceImplTest {
         TkGenerationTaskCreateReqVO reqVO = new TkGenerationTaskCreateReqVO();
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
+        reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         reqVO.setScriptOptionIds(Arrays.asList(101L, 102L));
         reqVO.setVideosPerScript(2);
@@ -497,6 +502,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setLibraryId(10L);
         reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
         reqVO.setPromptText("请私信我领取完整方案。");
+        reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder().id(10L).companyId(20L).name("Lead").build();
         library.setTenantId(8L);
@@ -548,6 +554,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setLibraryId(10L);
         reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
         reqVO.setPromptText("   ");
+        reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         reqVO.setVoiceEnabled(true);
         reqVO.setSubtitleEnabled(true);
@@ -606,6 +613,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setLibraryId(10L);
         reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
         reqVO.setPromptText("lead script");
+        reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         reqVO.setBgmEnabled(true);
         reqVO.setBgmAssetId(88L);
@@ -719,6 +727,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
         reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE);
+        reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         reqVO.setVoiceEnabled(false);
         reqVO.setSubtitleEnabled(false);
@@ -773,6 +782,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setLibraryId(10L);
         reqVO.setSourceUrl("https://www.tiktok.com/@demo/video/1");
         reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE);
+        reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         reqVO.setBgmEnabled(true);
         reqVO.setBgmAssetId(88L);

@@ -717,11 +717,21 @@
                       :key="item.value"
                       :label="item.value"
                     >
-                      {{ item.value === TTS_PROVIDER_MIMO ? copy.ttsProviderMimo : copy.ttsProviderDashscope }}
+                      {{ getTtsProviderLabel(item.value) }}
                     </el-radio-button>
                   </el-radio-group>
 
-                  <div v-if="createForm.ttsProvider === TTS_PROVIDER_DASHSCOPE" class="voice-select-row">
+                  <MiniMaxVoiceSelector
+                    v-if="createForm.ttsProvider === TTS_PROVIDER_MINIMAX"
+                    v-model="createForm.voiceCode"
+                    :options="miniMaxVoiceOptions"
+                    :loading="miniMaxVoiceLoading"
+                    :disabled="!isVoiceoverEnabled"
+                    :is-en="isEn"
+                    @refresh="loadMiniMaxVoices"
+                  />
+
+                  <div v-else-if="createForm.ttsProvider === TTS_PROVIDER_DASHSCOPE" class="voice-select-row">
                     <el-select
                       v-model="createForm.voiceCode"
                       :placeholder="copy.voicePlaceholder"
@@ -743,7 +753,7 @@
                     </el-tooltip>
                   </div>
 
-                  <div v-else class="mimo-voice-grid">
+                  <div v-else-if="createForm.ttsProvider === TTS_PROVIDER_MIMO" class="mimo-voice-grid">
                     <label>{{ copy.mimoSavedVoiceLabel }}</label>
                     <el-select
                       v-model="createForm.mimoVoiceProfileId"
@@ -812,7 +822,7 @@
                     <small class="field-hint">{{ copy.mimoHint }}</small>
                   </div>
 
-                  <div class="voice-preview-row">
+                  <div v-if="createForm.ttsProvider !== TTS_PROVIDER_MINIMAX" class="voice-preview-row">
                     <el-button
                       class="voice-preview-button"
                       plain
@@ -1414,8 +1424,14 @@ import aiCopyOptimizeImage from '@/assets/imgs/tk-dashboard/ai-copy-optimize.web
 import aiEfficiencyImage from '@/assets/imgs/tk-dashboard/ai-efficiency.webp'
 import aiMaterialMatchImage from '@/assets/imgs/tk-dashboard/ai-material-match.webp'
 import aiVoiceoverImage from '@/assets/imgs/tk-dashboard/ai-voiceover.webp'
-import { TkVoiceProfileApi, type TkVoiceProfileVO } from '@/api/tk/voice'
+import {
+  TkMiniMaxVoiceApi,
+  TkVoiceProfileApi,
+  type TkMiniMaxVoiceOptionVO,
+  type TkVoiceProfileVO
+} from '@/api/tk/voice'
 import VoiceProfileDialog from '@/views/tk/voice/components/VoiceProfileDialog.vue'
+import MiniMaxVoiceSelector from './components/MiniMaxVoiceSelector.vue'
 import {
   getGenerationFocusTask,
   isTerminalGenerationStatus,
@@ -1558,6 +1574,7 @@ const productCategoryItems: Array<{ zh: string; en: string; value: ProductCatego
   { zh: '10 汽车用品', en: '10 Auto Supplies', value: '10' }
 ]
 const defaultTargetLanguage = targetLanguageOptions[0].value
+const TTS_PROVIDER_MINIMAX = 'MINIMAX'
 const TTS_PROVIDER_DASHSCOPE = 'DASHSCOPE'
 const TTS_PROVIDER_MIMO = 'MIMO'
 const MIMO_VOICE_MODE_PRESET = 'PRESET'
@@ -1607,9 +1624,15 @@ const mimoPresetVoiceOptions = [
   { label: 'Dean', value: 'Dean' }
 ]
 const voiceProviderOptions = [
+  { label: 'MiniMax', value: TTS_PROVIDER_MINIMAX },
   { label: 'DashScope', value: TTS_PROVIDER_DASHSCOPE },
   { label: 'MiMo', value: TTS_PROVIDER_MIMO }
 ]
+const getTtsProviderLabel = (provider: string) => {
+  if (provider === TTS_PROVIDER_MINIMAX) return copy.value.ttsProviderMinimax
+  if (provider === TTS_PROVIDER_MIMO) return copy.value.ttsProviderMimo
+  return copy.value.ttsProviderDashscope
+}
 const mimoVoiceModeOptions = [
   { label: '预置音色', value: MIMO_VOICE_MODE_PRESET },
   { label: '音色设计', value: MIMO_VOICE_MODE_DESIGN },
@@ -1848,6 +1871,7 @@ const copy = computed(() =>
         analysisSettingsMoved: 'Material, language, and duration are set before analysis.',
         voiceRequired: 'AI voice',
         ttsProviderLabel: 'Voice provider',
+        ttsProviderMinimax: 'MiniMax',
         ttsProviderDashscope: 'DashScope',
         ttsProviderMimo: 'MiMo',
         voicePlaceholder: 'Default: Lisa',
@@ -1988,6 +2012,7 @@ const copy = computed(() =>
           'Paste a real public video link, e.g. https://www.tiktok.com/@username/video/real-video-id',
         selectVoiceWarning: 'Using the default AI voice',
         voicePlayError: 'Failed to play preview audio',
+        minimaxVoiceLoadError: 'Failed to load MiniMax voices',
         voiceConfigIncompleteWarning: 'Complete the voice settings first',
         generationMissingWarning: 'Enter a TikTok link and select a material library.',
         leadGenerationMissingWarning: 'Select a lead-gen material library and enter a script.',
@@ -2144,6 +2169,7 @@ const copy = computed(() =>
         analysisSettingsMoved: '素材库、语言、时长已在分析前设置',
         voiceRequired: 'AI配音音色',
         ttsProviderLabel: '音色提供方',
+        ttsProviderMinimax: 'MiniMax',
         ttsProviderDashscope: 'DashScope',
         ttsProviderMimo: 'MiMo',
         voicePlaceholder: '默认使用丽莎音色',
@@ -2270,6 +2296,7 @@ const copy = computed(() =>
           '请粘贴真实公开视频链接，例如：https://www.tiktok.com/@username/video/真实视频ID',
         selectVoiceWarning: '将使用默认 AI 配音音色',
         voicePlayError: '试听音频播放失败',
+        minimaxVoiceLoadError: 'MiniMax 音色加载失败',
         voiceConfigIncompleteWarning: '请先补完整配音配置',
         generationMissingWarning: '请填写 TikTok 链接并选择素材库',
         leadGenerationMissingWarning: '请选择引流素材库并输入引流文案',
@@ -2486,6 +2513,8 @@ const voicePreviewAudio = ref<HTMLAudioElement>()
 const voicePreviewUrl = ref('')
 const voiceManagerVisible = ref(false)
 const customVoiceProfiles = ref<TkVoiceProfileVO[]>([])
+const miniMaxVoiceOptions = ref<TkMiniMaxVoiceOptionVO[]>([])
+const miniMaxVoiceLoading = ref(false)
 const bgmAssets = ref<TkBgmAssetVO[]>([])
 const bgmLoading = ref(false)
 const bgmUploading = ref(false)
@@ -2531,6 +2560,21 @@ const bgmConfigSummary = computed(() => {
 const loadCustomVoices = async () => {
   customVoiceProfiles.value = await TkVoiceProfileApi.getList()
 }
+const getDefaultMiniMaxVoiceCode = () =>
+  (miniMaxVoiceOptions.value.find((item) => item.isDefault) || miniMaxVoiceOptions.value[0])?.voiceId || ''
+const loadMiniMaxVoices = async () => {
+  miniMaxVoiceLoading.value = true
+  try {
+    miniMaxVoiceOptions.value = await TkMiniMaxVoiceApi.getOptions()
+    if (createForm.ttsProvider === TTS_PROVIDER_MINIMAX && !createForm.voiceCode) {
+      createForm.voiceCode = getDefaultMiniMaxVoiceCode()
+    }
+  } catch {
+    message.error(copy.value.minimaxVoiceLoadError)
+  } finally {
+    miniMaxVoiceLoading.value = false
+  }
+}
 const ensureDefaultBgmSelection = () => {
   if (!bgmAssets.value.length) {
     createForm.bgmAssetId = undefined
@@ -2553,7 +2597,18 @@ const loadBgmAssets = async () => {
 }
 const selectedVoicePayload = () => {
   if (!isVoiceoverEnabled.value) {
-    return { ttsProvider: TTS_PROVIDER_DASHSCOPE }
+    return { ttsProvider: createForm.ttsProvider }
+  }
+  if (createForm.ttsProvider === TTS_PROVIDER_MINIMAX) {
+    return {
+      ttsProvider: TTS_PROVIDER_MINIMAX,
+      voiceCode: createForm.voiceCode,
+      voiceProfileId: undefined,
+      mimoVoiceMode: undefined,
+      mimoVoiceCode: undefined,
+      mimoVoicePrompt: undefined,
+      mimoVoiceSampleUrl: undefined
+    }
   }
   if (createForm.ttsProvider === TTS_PROVIDER_MIMO) {
     if (createForm.mimoVoiceProfileId) {
@@ -2639,6 +2694,10 @@ const restoreVoiceSelection = async (task: TkGenerationTaskVO) => {
   createForm.mimoVoicePrompt = task.mimoVoicePrompt || ''
   createForm.mimoVoiceSampleUrl = task.mimoVoiceSampleUrl || ''
   createForm.mimoVoiceProfileId = undefined
+  if (createForm.ttsProvider === TTS_PROVIDER_MINIMAX) {
+    createForm.voiceCode = task.voiceCode || getDefaultMiniMaxVoiceCode()
+    return
+  }
   if (createForm.ttsProvider === TTS_PROVIDER_MIMO) {
     createForm.voiceCode = defaultVoiceCode
     if (task.voiceProfileId) {
@@ -2760,8 +2819,8 @@ const createForm = reactive<{
   sourceUrl: '',
   title: '',
   libraryId: undefined,
-  ttsProvider: TTS_PROVIDER_DASHSCOPE,
-  voiceCode: defaultVoiceCode,
+  ttsProvider: TTS_PROVIDER_MINIMAX,
+  voiceCode: '',
   voiceEnabled: true,
   mimoVoiceProfileId: undefined,
   mimoVoiceMode: MIMO_VOICE_MODE_PRESET,
@@ -2899,6 +2958,10 @@ const voiceConfigSummary = computed(() => {
       return `${copy.value.ttsProviderMimo} · ${copy.value.mimoVoiceDesignMode}`
     }
     return `${copy.value.ttsProviderMimo} · ${copy.value.mimoVoiceCloneMode}`
+  }
+  if (createForm.ttsProvider === TTS_PROVIDER_MINIMAX) {
+    const voice = miniMaxVoiceOptions.value.find((item) => item.voiceId === createForm.voiceCode)
+    return `${copy.value.ttsProviderMinimax} · ${voice?.label || copy.value.historicalVoice}`
   }
   return `${copy.value.ttsProviderDashscope} · ${currentVoiceLabel.value}`
 })
@@ -4371,7 +4434,8 @@ async function hydrateReplayFromAnalysis(analysis: TkReferenceAnalysisVO) {
     createForm.title = analysis.title || ''
     createForm.libraryId = analysis.libraryId
     createForm.referenceDuration = analysis.referenceDuration || DEFAULT_TARGET_DURATION
-    createForm.voiceCode = createForm.voiceCode || defaultVoiceCode
+    createForm.voiceCode = createForm.voiceCode ||
+      (createForm.ttsProvider === TTS_PROVIDER_MINIMAX ? getDefaultMiniMaxVoiceCode() : defaultVoiceCode)
     createForm.targetLanguage = analysis.targetLanguage || defaultTargetLanguage
     createForm.materialPurpose = normalizeMaterialPurpose(analysis.materialPurpose)
     createForm.productCategoryCode = DEFAULT_PRODUCT_CATEGORY_CODE
@@ -4720,6 +4784,9 @@ const handleSaveMimoVoice = async () => {
 }
 
 const handlePreviewVoice = async () => {
+  if (createForm.ttsProvider === TTS_PROVIDER_MINIMAX) {
+    return
+  }
   if (!isVoiceoverEnabled.value) {
     message.info(copy.value.voiceDisabledSummary)
     return
@@ -5275,6 +5342,28 @@ watch(
 )
 
 watch(
+  () => createForm.ttsProvider,
+  (provider) => {
+    stopVoicePreview()
+    if (hydratingReplay.value) {
+      return
+    }
+    if (provider !== TTS_PROVIDER_MIMO) {
+      createForm.mimoVoiceProfileId = undefined
+    }
+    if (provider === TTS_PROVIDER_MINIMAX) {
+      createForm.voiceCode = getDefaultMiniMaxVoiceCode()
+      return
+    }
+    if (provider === TTS_PROVIDER_DASHSCOPE) {
+      createForm.voiceCode = defaultVoiceCode
+      return
+    }
+    createForm.voiceCode = ''
+  }
+)
+
+watch(
   () => [createForm.voiceCode, createForm.targetLanguage] as const,
   () => stopVoicePreview()
 )
@@ -5297,6 +5386,7 @@ watch(
 
 onMounted(() => {
   getData()
+  loadMiniMaxVoices().catch(() => undefined)
   loadCustomVoices().catch(() => undefined)
   if (isLeadGenerationFlow.value) {
     loadBgmAssets().catch(() => undefined)

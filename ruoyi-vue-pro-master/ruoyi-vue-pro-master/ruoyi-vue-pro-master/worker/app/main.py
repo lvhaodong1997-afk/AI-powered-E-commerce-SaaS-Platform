@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from pythonjsonlogger import jsonlogger
 
+from app.minimax_tts import router as minimax_tts_router
+
 
 class TkJsonFormatter(jsonlogger.JsonFormatter):
 
@@ -45,6 +47,7 @@ logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
 app = FastAPI(title="TK素材工厂 AI Worker", version="0.1.0")
+app.include_router(minimax_tts_router)
 
 
 @app.get("/health")

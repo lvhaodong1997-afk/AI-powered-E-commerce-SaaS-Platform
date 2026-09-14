@@ -11,6 +11,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class TkVoiceProviderRouterTest {
 
     @Test
+    void newTasksDefaultToMiniMaxWhileHistoricalNullStillUsesDashScope() {
+        TkVoiceTtsClient minimax = new FakeClient("MINIMAX");
+        TkVoiceProviderRouter router = new TkVoiceProviderRouter(Collections.singletonList(minimax));
+        assertEquals(minimax, router.resolve("minimax"));
+        assertEquals("MINIMAX", TkTtsProviderEnum.forNewTask(null));
+        assertEquals("MINIMAX", TkTtsProviderEnum.forNewTask(" "));
+        assertEquals("MIMO", TkTtsProviderEnum.forNewTask("mimo"));
+        assertEquals("DASHSCOPE", TkTtsProviderEnum.normalize(null));
+    }
+
+    @Test
     void resolveDefaultsToDashScopeWhenProviderMissing() {
         TkVoiceTtsClient dashScope = new FakeClient("DASHSCOPE");
         TkVoiceTtsClient mimo = new FakeClient("MIMO");

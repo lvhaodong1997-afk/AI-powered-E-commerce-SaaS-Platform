@@ -2,6 +2,8 @@
 
 本目录是部署模板，实际发布包位于 `.codex-build/tk-auto-mix-release-*`。
 
+MiniMax 百度 BCE 配音的进程配置、增量迁移及验收要求见 [MINIMAX_BCE.md](MINIMAX_BCE.md)。仅操作 TK 自有服务和数据；不能影响服务器其它项目。
+
 每个发布包必须包含 `tools/reference-video-download/` 和
 `tools/subtitle/asr_faster_whisper.py`。安装前会运行
 `scripts/validate-release.sh`；缺少脚本、Python 依赖或 faster-whisper 模型时，发布会直接失败，不会切换不完整版本。

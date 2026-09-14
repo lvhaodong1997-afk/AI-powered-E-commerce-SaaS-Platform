@@ -22,6 +22,32 @@ export interface TkVoiceProfileVO {
   createTime?: string
 }
 
+export interface TkMiniMaxVoiceOptionVO {
+  value: string
+  label: string
+  voiceId: string
+  model: string
+  language: string
+  country: string
+  gender: string
+  description: string
+  previewUrl: string
+  favorite: boolean
+  isDefault: boolean
+}
+
+export const TkMiniMaxVoiceApi = {
+  getOptions: async (): Promise<TkMiniMaxVoiceOptionVO[]> => {
+    return await request.get({ url: '/tk/voice/minimax/options' })
+  },
+  favorite: async (voiceCode: string) => {
+    return await request.post({ url: '/tk/voice/minimax/favorite', data: { voiceCode } })
+  },
+  unfavorite: async (voiceCode: string) => {
+    return await request.delete({ url: '/tk/voice/minimax/favorite', params: { voiceCode } })
+  }
+}
+
 export const TkVoiceProfileApi = {
   getList: async (): Promise<TkVoiceProfileVO[]> => {
     return await request.get({ url: '/tk/voice-profile/list' })

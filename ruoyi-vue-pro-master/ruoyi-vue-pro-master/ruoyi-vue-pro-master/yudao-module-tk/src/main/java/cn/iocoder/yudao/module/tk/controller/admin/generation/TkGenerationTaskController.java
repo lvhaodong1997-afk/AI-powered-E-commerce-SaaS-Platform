@@ -359,6 +359,8 @@ public class TkGenerationTaskController {
         if (TkTtsProviderEnum.DASHSCOPE.equals(provider)) {
             previewReqVO.setVoiceCode(voiceProfileService.resolveVoiceSelection(
                     previewReqVO.getVoiceProfileId(), previewReqVO.getVoiceCode()));
+        } else if (TkTtsProviderEnum.MINIMAX.equals(provider)) {
+            throw new IllegalArgumentException("MiniMax 系统音色请使用音色目录中的 OSS 试听地址");
         } else if (TkTtsProviderEnum.MIMO.equals(provider)) {
             TkMimoVoiceSelection selection = voiceProfileService.resolveMimoVoiceSelection(
                     previewReqVO.getVoiceProfileId(), previewReqVO.getMimoVoiceMode(), previewReqVO.getMimoVoiceCode(),

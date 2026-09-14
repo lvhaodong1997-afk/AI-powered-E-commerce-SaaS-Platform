@@ -8,10 +8,10 @@ import lombok.Data;
 @Data
 public class TkVoicePreviewReqVO {
 
-    @Schema(description = "音色供应商：DASHSCOPE / MIMO")
+    @Schema(description = "音色供应商：MINIMAX / DASHSCOPE / MIMO")
     private String ttsProvider;
 
-    @Schema(description = "DashScope 系统音色编码")
+    @Schema(description = "系统音色编码；MiniMax 使用 voiceId")
     @JsonAlias({"voice_code", "video_id"})
     private String voiceCode;
 

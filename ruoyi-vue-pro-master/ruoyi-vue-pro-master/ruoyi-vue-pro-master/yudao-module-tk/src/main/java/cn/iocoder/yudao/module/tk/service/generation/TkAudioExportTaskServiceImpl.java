@@ -17,6 +17,7 @@ import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import cn.iocoder.yudao.module.tk.service.voice.TkMimoVoiceSelection;
 import cn.iocoder.yudao.module.tk.service.voice.TkVoiceProfileService;
+import cn.iocoder.yudao.module.tk.service.voice.TkMiniMaxVoiceDictionaryService;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -36,6 +37,8 @@ public class TkAudioExportTaskServiceImpl implements TkAudioExportTaskService {
     private FileApi fileApi;
     @Resource
     private TkVoiceProfileService voiceProfileService;
+    @Resource
+    private TkMiniMaxVoiceDictionaryService miniMaxVoiceDictionaryService;
     @Resource
     private TkDataScopeService dataScopeService;
     @Resource
@@ -79,7 +82,7 @@ public class TkAudioExportTaskServiceImpl implements TkAudioExportTaskService {
 
     private TkAudioExportTaskDO createProcessingTask(TkAudioExportTaskCreateReqVO reqVO, Long tenantId,
                                                      Long companyId, String requestId, Long creditLogId) {
-        String provider = TkTtsProviderEnum.normalize(reqVO.getTtsProvider());
+        String provider = TkTtsProviderEnum.forNewTask(reqVO.getTtsProvider());
         TkAudioExportTaskDO task = TkAudioExportTaskDO.builder()
                 .requestId(requestId)
                 .companyId(companyId)
@@ -92,6 +95,8 @@ public class TkAudioExportTaskServiceImpl implements TkAudioExportTaskService {
                 .build();
         if (TkTtsProviderEnum.DASHSCOPE.equals(provider)) {
             task.setVoiceCode(voiceProfileService.resolveVoiceSelection(reqVO.getVoiceProfileId(), reqVO.getVoiceCode()));
+        } else if (TkTtsProviderEnum.MINIMAX.equals(provider)) {
+            task.setVoiceCode(miniMaxVoiceDictionaryService.resolveVoiceCode(reqVO.getVoiceProfileId(), reqVO.getVoiceCode()));
         } else {
             TkMimoVoiceSelection selection = voiceProfileService.resolveMimoVoiceSelection(reqVO.getVoiceProfileId(),
                     reqVO.getMimoVoiceMode(), reqVO.getMimoVoiceCode(), reqVO.getMimoVoicePrompt(), reqVO.getMimoVoiceSampleUrl());
@@ -121,7 +126,7 @@ public class TkAudioExportTaskServiceImpl implements TkAudioExportTaskService {
         String companySegment = task.getCompanyId() == null ? "tenant" : String.valueOf(task.getCompanyId());
         String directory = StrUtil.format("tk/{}/{}/audio-exports/{}", task.getTenantId(), companySegment, task.getId());
         task.setAudioUrl(fileApi.createFile(audioBytes, StrUtil.format("audio-{}.{}", task.getId(), format),
-                directory, "audio/" + format));
+                directory, "mp3".equalsIgnoreCase(format) ? "audio/mpeg" : "audio/" + format));
     }
 
     private Long resolveCompanyId(Long requestedCompanyId, TkUserScope scope) {

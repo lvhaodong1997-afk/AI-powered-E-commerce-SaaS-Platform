@@ -161,3 +161,12 @@ yudao:
     begin-code: 9999 # 这里配置 9999 的原因是，测试方便。
     end-code: 9999 # 这里配置 9999 的原因是，测试方便。
 debug: false
+
+tk:
+  generation:
+    minimax:
+      worker-url: ${MINIMAX_WORKER_URL:http://127.0.0.1:8001}
+      internal-token: ${TTS_INTERNAL_TOKEN:}
+      timeout-seconds: ${MINIMAX_WORKER_TIMEOUT_SECONDS:200}
+      download-timeout-seconds: ${MINIMAX_AUDIO_DOWNLOAD_TIMEOUT_SECONDS:60}
+      max-download-bytes: ${MINIMAX_AUDIO_MAX_DOWNLOAD_BYTES:52428800}

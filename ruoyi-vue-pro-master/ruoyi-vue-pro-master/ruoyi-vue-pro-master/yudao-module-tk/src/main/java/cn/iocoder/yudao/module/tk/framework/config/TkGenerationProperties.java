@@ -13,6 +13,7 @@ public class TkGenerationProperties {
     private Gemini gemini = new Gemini();
     private DashScope dashscope = new DashScope();
     private Mimo mimo = new Mimo();
+    private MiniMax minimax = new MiniMax();
     private DeepSeek deepseek = new DeepSeek();
     private TranscriptVerify transcriptVerify = new TranscriptVerify();
     private Ffmpeg ffmpeg = new Ffmpeg();
@@ -65,6 +66,16 @@ public class TkGenerationProperties {
         private String defaultVoice = "Mia";
         private Integer timeoutSeconds = 120;
 
+    }
+
+    @Data
+    public static class MiniMax {
+        private String workerUrl = "http://127.0.0.1:8001";
+        @lombok.ToString.Exclude
+        private String internalToken;
+        private Integer timeoutSeconds = 200;
+        private Integer downloadTimeoutSeconds = 60;
+        private Long maxDownloadBytes = 50L * 1024 * 1024;
     }
 
     @Data

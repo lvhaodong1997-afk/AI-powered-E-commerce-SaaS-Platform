@@ -32,7 +32,8 @@ public class DefaultTkVoiceSynthesisService implements TkVoiceSynthesisService {
                 .finalSynthesis(true)
                 .build());
         String audioUrl = fileApi.createFile(audioBytes,
-                StrUtil.format("voice-{}.{}", task.getId(), format), directory, "audio/" + format);
+                StrUtil.format("voice-{}.{}", task.getId(), format), directory,
+                "mp3".equalsIgnoreCase(format) ? "audio/mpeg" : "audio/" + format);
         return new TkAudioAsset(audioUrl, null);
     }
 
