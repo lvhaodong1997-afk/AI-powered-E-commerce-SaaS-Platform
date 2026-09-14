@@ -163,10 +163,7 @@ public class TkGenerationOpeningUploadServiceImpl implements TkGenerationOpening
             throw exception(TK_UPLOAD_SESSION_INVALID);
         }
         TkUserScope scope = dataScopeService.getCurrentScope();
-        boolean companyMatches = scope != null && (scope.isPlatformAdmin()
-                || Objects.equals(scope.getCompanyId(), session.getCompanyId()));
         if (scope == null || !Objects.equals(scope.getTenantId(), session.getTenantId())
-                || !companyMatches
                 || !Objects.equals(scope.getUserIdString(), session.getCreator())) {
             throw exception(TK_UPLOAD_SESSION_INVALID);
         }

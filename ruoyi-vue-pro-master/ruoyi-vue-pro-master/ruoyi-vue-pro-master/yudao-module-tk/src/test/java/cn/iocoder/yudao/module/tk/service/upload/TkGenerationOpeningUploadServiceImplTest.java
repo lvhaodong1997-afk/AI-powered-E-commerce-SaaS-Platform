@@ -37,7 +37,7 @@ class TkGenerationOpeningUploadServiceImplTest {
                 uploadSessionService);
         TkMaterialLibraryDO library = library();
         when(libraryService.validateMaterialLibraryReadable(10L)).thenReturn(library);
-        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L, "USER", 200L));
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L, "USER", null));
 
         byte[] content = validMp4Bytes("opening".getBytes(StandardCharsets.UTF_8));
         TkUploadSessionRespVO created = service.createSession(10L, "opening.mp4", (long) content.length, "video/mp4");
@@ -98,6 +98,22 @@ class TkGenerationOpeningUploadServiceImplTest {
 
         assertThrows(RuntimeException.class,
                 () -> service.validateCompletedUpload("upload-opening-2", 10L));
+    }
+
+    @Test
+    void rejectsOpeningUploadFromAnotherTenant() {
+        TkMaterialLibraryService libraryService = mock(TkMaterialLibraryService.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        StubUploadSessionService uploadSessionService = new StubUploadSessionService();
+        TkGenerationOpeningUploadServiceImpl service = createService(libraryService, dataScopeService,
+                uploadSessionService);
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L, "USER", null));
+        TkUploadSessionDO otherTenantSession = session("upload-opening-3");
+        otherTenantSession.setTenantId(999L);
+        uploadSessionService.session = otherTenantSession;
+
+        assertThrows(RuntimeException.class,
+                () -> service.validateCompletedUpload("upload-opening-3", 10L));
     }
 
     @Test
