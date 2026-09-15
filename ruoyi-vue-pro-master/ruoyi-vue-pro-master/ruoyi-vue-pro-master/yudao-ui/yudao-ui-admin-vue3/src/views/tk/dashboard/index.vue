@@ -1625,8 +1625,7 @@ const mimoPresetVoiceOptions = [
 ]
 const voiceProviderOptions = [
   { label: 'MiniMax', value: TTS_PROVIDER_MINIMAX },
-  { label: 'DashScope', value: TTS_PROVIDER_DASHSCOPE },
-  { label: 'MiMo', value: TTS_PROVIDER_MIMO }
+  { label: 'DashScope', value: TTS_PROVIDER_DASHSCOPE }
 ]
 const getTtsProviderLabel = (provider: string) => {
   if (provider === TTS_PROVIDER_MINIMAX) return copy.value.ttsProviderMinimax

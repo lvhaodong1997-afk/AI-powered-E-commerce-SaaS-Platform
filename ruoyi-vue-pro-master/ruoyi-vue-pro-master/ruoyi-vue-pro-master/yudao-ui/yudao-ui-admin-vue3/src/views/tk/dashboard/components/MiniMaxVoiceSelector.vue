@@ -52,6 +52,15 @@
             <el-button
               circle
               text
+              :aria-label="
+                playingVoiceId === option.voiceId
+                  ? isEn
+                    ? 'Stop preview'
+                    : '停止试听'
+                  : isEn
+                    ? 'Preview voice'
+                    : '试听音色'
+              "
               :disabled="disabled || !option.previewUrl"
               @click="togglePreview(option)"
             >
@@ -68,6 +77,15 @@
             <el-button
               circle
               text
+              :aria-label="
+                option.favorite
+                  ? isEn
+                    ? 'Remove favorite'
+                    : '取消收藏'
+                  : isEn
+                    ? 'Favorite'
+                    : '收藏音色'
+              "
               :loading="favoriteVoiceId === option.voiceId"
               :disabled="disabled || Boolean(favoriteVoiceId)"
               @click="toggleFavorite(option)"
@@ -205,34 +223,37 @@ onBeforeUnmount(stopPreview)
 <style scoped>
 .minimax-voice-selector {
   display: grid;
+  min-width: 0;
   gap: 10px;
 }
 
 .minimax-voice-filters {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(110px, 1fr));
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
 .minimax-voice-list {
   display: grid;
-  max-height: 280px;
-  overflow: auto;
+  height: clamp(180px, 30vh, 280px);
+  min-width: 0;
+  overflow: hidden auto;
   border: 1px solid var(--el-border-color-light);
 }
 
 .minimax-voice-option {
   display: flex;
-  min-height: 64px;
+  min-height: 54px;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 7px 10px;
   color: var(--el-text-color-primary);
   text-align: left;
+  cursor: pointer;
   background: var(--el-bg-color);
   border: 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
-  cursor: pointer;
 }
 
 .minimax-voice-option:last-child {
@@ -251,6 +272,7 @@ onBeforeUnmount(stopPreview)
 
 .minimax-voice-main {
   display: grid;
+  flex: 1 1 auto;
   min-width: 0;
   gap: 3px;
 }
@@ -264,10 +286,17 @@ onBeforeUnmount(stopPreview)
 
 .minimax-voice-actions {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 0 56px;
+  justify-content: flex-end;
 }
 
-@media (max-width: 720px) {
+.minimax-voice-actions :deep(.el-button) {
+  width: 28px;
+  height: 28px;
+  margin-left: 4px;
+}
+
+@media (width <= 720px) {
   .minimax-voice-filters {
     grid-template-columns: 1fr 1fr;
   }

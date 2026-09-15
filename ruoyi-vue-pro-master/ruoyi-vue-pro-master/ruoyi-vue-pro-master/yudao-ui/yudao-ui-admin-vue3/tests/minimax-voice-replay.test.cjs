@@ -4,6 +4,10 @@ const path = require('node:path')
 const vm = require('node:vm')
 
 const source = fs.readFileSync(path.resolve(__dirname, '../src/views/tk/dashboard/index.vue'), 'utf8')
+const selectorSource = fs.readFileSync(
+  path.resolve(__dirname, '../src/views/tk/dashboard/components/MiniMaxVoiceSelector.vue'),
+  'utf8'
+)
 const section = (start, end) => {
   const offset = source.indexOf(start)
   assert.ok(offset >= 0, `Missing function ${start}`)
@@ -48,6 +52,18 @@ function harness(provider = 'MINIMAX') {
 }
 
 async function main() {
+  const providerOptions = section('const voiceProviderOptions = [', 'const getTtsProviderLabel')
+  assert.doesNotMatch(providerOptions, /TTS_PROVIDER_MIMO/, 'New tasks must hide the MiMo provider')
+  assert.match(
+    selectorSource,
+    /height:\s*clamp\(180px,\s*30vh,\s*280px\);/,
+    'MiniMax voice list must use responsive height'
+  )
+  assert.match(
+    selectorSource,
+    /grid-template-columns:\s*minmax\(0,\s*1\.4fr\)\s+repeat\(3,\s*minmax\(0,\s*1fr\)\);/,
+    'MiniMax filters must allow columns to shrink without overflow'
+  )
   const { context } = harness()
   let resolveOptions
   context.TkMiniMaxVoiceApi.getOptions = () => new Promise((resolve) => { resolveOptions = resolve })
