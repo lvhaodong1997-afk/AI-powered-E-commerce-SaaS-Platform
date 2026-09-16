@@ -49,6 +49,8 @@ Run the three focused test classes, then package `yudao-module-tk` and dependenc
 
 Verification result: the three focused classes passed 36/36. The complete TK module run passed 658/659; the sole failure is the pre-existing `TkGenerationSchemaContractTest.referenceAnalysisSchemaContainsTaskTitleColumn` assertion in unchanged schema-test/SQL files. A clean `yudao-server` reactor package completed successfully with tests skipped.
 
-- [ ] **Step 5: Review and deploy**
+- [x] **Step 5: Review and deploy**
 
 Inspect the focused diff for secrets, commit and push `main`, build a production JAR, perform backup and hash checks, switch the release atomically, restart `tk-yudao-prod`, and verify PID, ports, HTTP, and recent logs.
+
+Deployment result: commit `e6e63ff` was pushed to `main`; release `release-20260916-meta-oauth-e6e63ff` was validated and switched atomically with rollback link `meta-oauth-e6e63ff-20260916-110919`. The deployed JAR SHA-256 matched the local artifact, `tk-yudao-prod` remained active with `NRestarts=0`, ports 48080/18080 were listening, and backend, Nginx, and both public entry points returned HTTP 200.
