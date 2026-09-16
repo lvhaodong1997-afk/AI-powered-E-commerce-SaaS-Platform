@@ -689,7 +689,6 @@
                 >
                   <span class="config-drawer-title">
                     <strong>{{ copy.voiceRequired }}</strong>
-                    <small>{{ voiceConfigSummary }}</small>
                   </span>
                   <span class="config-drawer-meta">
                     <el-switch
@@ -2168,8 +2167,8 @@ const copy = computed(() =>
         analysisSettingsMoved: '素材库、语言、时长已在分析前设置',
         voiceRequired: 'AI配音音色',
         ttsProviderLabel: '音色提供方',
-        ttsProviderMinimax: 'MiniMax',
-        ttsProviderDashscope: 'DashScope',
+        ttsProviderMinimax: '音色提供方1',
+        ttsProviderDashscope: '音色提供方2',
         ttsProviderMimo: 'MiMo',
         voicePlaceholder: '默认使用丽莎音色',
         voiceEnabledSummary: '已开启',
@@ -2850,30 +2849,11 @@ const createForm = reactive<{
   bgmAssetId: undefined,
   bgmVolume: 0.1
 })
-const selectedMimoSavedVoice = computed(() =>
-  createForm.mimoVoiceProfileId
-    ? customVoiceProfiles.value.find((item) => item.id === createForm.mimoVoiceProfileId)
-    : undefined
-)
 const openingConfigExpanded = ref(false)
 const subtitleConfigExpanded = ref(false)
 const voiceConfigExpanded = ref(false)
 const bgmConfigExpanded = ref(false)
 const analysisResultExpanded = ref(false)
-const currentVoiceLabel = computed(() => {
-  const systemVoice = systemVoiceOptions.find((item) => item.value === createForm.voiceCode)
-  if (systemVoice) {
-    return systemVoice.label
-  }
-  const customVoice = customVoiceOptions.value.find((item) => item.value === createForm.voiceCode)
-  if (customVoice) {
-    return customVoice.label
-  }
-  const historicalVoice = historicalVoiceOptions.value.find(
-    (item) => item.value === createForm.voiceCode
-  )
-  return historicalVoice?.label || copy.value.historicalVoice
-})
 const currentSubtitlePositionOption = computed(
   () =>
     subtitlePositionOptions.find((item) => item.value === createForm.subtitlePositionMode) ||
@@ -2940,30 +2920,6 @@ const isLeadBlankScriptMode = computed(
 const isVoiceoverEnabled = computed(
   () => !isLeadGenerationFlow.value || (createForm.voiceEnabled && !isLeadBlankScriptMode.value)
 )
-const voiceConfigSummary = computed(() => {
-  if (!isVoiceoverEnabled.value) {
-    return copy.value.voiceDisabledSummary
-  }
-  if (createForm.ttsProvider === TTS_PROVIDER_MIMO) {
-    if (selectedMimoSavedVoice.value) {
-      return `${copy.value.ttsProviderMimo} · ${selectedMimoSavedVoice.value.name}`
-    }
-    if (createForm.mimoVoiceMode === MIMO_VOICE_MODE_PRESET) {
-      return `${copy.value.ttsProviderMimo} · ${copy.value.mimoPresetMode} · ${
-        createForm.mimoVoiceCode || defaultMimoVoiceCode
-      }`
-    }
-    if (createForm.mimoVoiceMode === MIMO_VOICE_MODE_DESIGN) {
-      return `${copy.value.ttsProviderMimo} · ${copy.value.mimoVoiceDesignMode}`
-    }
-    return `${copy.value.ttsProviderMimo} · ${copy.value.mimoVoiceCloneMode}`
-  }
-  if (createForm.ttsProvider === TTS_PROVIDER_MINIMAX) {
-    const voice = miniMaxVoiceOptions.value.find((item) => item.voiceId === createForm.voiceCode)
-    return `${copy.value.ttsProviderMinimax} · ${voice?.label || copy.value.historicalVoice}`
-  }
-  return `${copy.value.ttsProviderDashscope} · ${currentVoiceLabel.value}`
-})
 const isMimoPresetReady = computed(
   () => Boolean(createForm.mimoVoiceProfileId) || createForm.ttsProvider !== TTS_PROVIDER_MIMO || createForm.mimoVoiceMode !== MIMO_VOICE_MODE_PRESET || Boolean(createForm.mimoVoiceCode.trim())
 )

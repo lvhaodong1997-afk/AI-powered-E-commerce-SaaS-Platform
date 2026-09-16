@@ -54,6 +54,15 @@ function harness(provider = 'MINIMAX') {
 async function main() {
   const providerOptions = section('const voiceProviderOptions = [', 'const getTtsProviderLabel')
   assert.doesNotMatch(providerOptions, /TTS_PROVIDER_MIMO/, 'New tasks must hide the MiMo provider')
+  const chineseCopy = source.slice(source.indexOf("analysisSettingsMoved: '素材库、语言、时长已在分析前设置'"))
+  assert.match(chineseCopy, /ttsProviderMinimax:\s*'音色提供方1'/, 'MiniMax must use the neutral provider label')
+  assert.match(chineseCopy, /ttsProviderDashscope:\s*'音色提供方2'/, 'DashScope must use the neutral provider label')
+  assert.doesNotMatch(
+    source.slice(source.indexOf('<strong>{{ copy.voiceRequired }}</strong>'), source.indexOf('<strong>{{ copy.voiceRequired }}</strong>') + 500),
+    /voiceConfigSummary/,
+    'The voice heading must not render the provider summary text'
+  )
+  assert.doesNotMatch(source, /selectedMimoSavedVoice|currentVoiceLabel/, 'Removed voice summary must not leave unused computed state')
   assert.match(
     selectorSource,
     /height:\s*clamp\(180px,\s*30vh,\s*280px\);/,

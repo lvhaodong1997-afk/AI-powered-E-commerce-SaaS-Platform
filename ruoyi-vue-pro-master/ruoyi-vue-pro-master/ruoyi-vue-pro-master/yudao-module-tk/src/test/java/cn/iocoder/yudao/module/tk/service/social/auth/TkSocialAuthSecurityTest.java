@@ -1,0 +1,204 @@
+package cn.iocoder.yudao.module.tk.service.social.auth;
+
+import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+import cn.iocoder.yudao.module.tk.dal.dataobject.social.*;
+import cn.iocoder.yudao.module.tk.dal.mysql.social.*;
+import cn.iocoder.yudao.module.tk.service.scope.*;
+import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformClient;
+import org.junit.jupiter.api.*;
+import java.time.LocalDateTime;
+import java.util.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class TkSocialAuthSecurityTest {
+    private final TkSocialProperties properties = new TkSocialProperties();
+    private final TkSocialAuthSessionMapper sessions = mock(TkSocialAuthSessionMapper.class);
+    private final TkSocialAccountMapper accounts = mock(TkSocialAccountMapper.class);
+    private final TkDataScopeService scope = mock(TkDataScopeService.class);
+    private final TkSocialPlatformClient platform = mock(TkSocialPlatformClient.class);
+    private TkSocialTokenCipher cipher;
+
+    @BeforeEach void setup() {
+        properties.setEnabled(true);
+        properties.setEncryptionKey(Base64.getEncoder().encodeToString(new byte[32]));
+        cipher = new TkSocialTokenCipher(properties);
+        TenantContextHolder.setTenantId(9L);
+        when(scope.getCurrentScope()).thenReturn(new TkUserScope(7L, 9L, "TENANT_ADMIN", 9L));
+    }
+    @AfterEach void cleanup() { TenantContextHolder.clear(); }
+
+    @Test void cipherAuthenticatesOwnerContextAndUsesFreshNonce() {
+        String a = cipher.encrypt("secret", "tenant:9");
+        String b = cipher.encrypt("secret", "tenant:9");
+        assertNotEquals(a, b); assertEquals("secret", cipher.decrypt(a, "tenant:9"));
+        assertThrows(RuntimeException.class, () -> cipher.decrypt(a, "tenant:10"));
+        assertThrows(RuntimeException.class, () -> cipher.decrypt(a.substring(0, a.length()-3) + "abc", "tenant:9"));
+    }
+
+    @Test void callbackRejectsReplayBeforeAnyTokenExchange() {
+        TkSocialAuthService auth = new TkSocialAuthService(properties, sessions, scope, platform, cipher, mock(TkSocialAccountService.class));
+        TkSocialAuthSessionDO session = session();
+        when(sessions.findByStateHash(anyString())).thenReturn(session);
+        when(sessions.claim(eq(session.getId()), eq("PENDING"), eq("PROCESSING"), any())).thenReturn(0);
+        assertFalse(auth.callback("INSTAGRAM", "code", "state", null));
+        verifyNoInteractions(platform);
+    }
+
+    @Test void sessionIsUnreadableByDifferentUserEvenWithinTenant() {
+        TkSocialAuthService auth = new TkSocialAuthService(properties, sessions, scope, platform, cipher, mock(TkSocialAccountService.class));
+        TkSocialAuthSessionDO session = session(); session.setCreator("8");
+        when(sessions.findBySessionId("s")).thenReturn(session);
+        assertThrows(RuntimeException.class, () -> auth.session("s"));
+    }
+
+    @Test void sessionExpiredOrWrongPlatformCannotExchangeCode() {
+        TkSocialAuthService auth = new TkSocialAuthService(properties, sessions, scope, platform, cipher, mock(TkSocialAccountService.class));
+        TkSocialAuthSessionDO session = session(); session.setExpireTime(LocalDateTime.now().minusSeconds(1));
+        when(sessions.findByStateHash(anyString())).thenReturn(session);
+        assertFalse(auth.callback("INSTAGRAM", "code", "state", null));
+        session.setExpireTime(LocalDateTime.now().plusMinutes(1));
+        assertFalse(auth.callback("FACEBOOK_PAGE", "code", "state", null));
+        verifyNoInteractions(platform);
+    }
+
+    @Test void reauthorizationCannotTakeOverAnExistingAccount() {
+        TkSocialAccountService service = new TkSocialAccountService(properties, accounts, scope, platform, cipher);
+        TkSocialAccountDO existing = new TkSocialAccountDO();
+        existing.setTenantId(9L); existing.setCompanyId(9L); existing.setCreator("8");
+        assertThrows(RuntimeException.class, () -> service.checkBindingOwner(existing, session()));
+    }
+
+    @Test void backgroundTokenUseRequiresExplicitMatchingTenant() {
+        TkSocialAccountService service = new TkSocialAccountService(properties, accounts, scope, platform, cipher);
+        TkSocialAccountDO account = new TkSocialAccountDO();
+        account.setTenantId(10L); account.setStatus("AUTHORIZED");
+        assertThrows(RuntimeException.class, () -> service.getValidToken(account));
+        verifyNoInteractions(platform);
+    }
+
+    @Test void disabledFeatureNeverQueriesMissingTables() {
+        properties.setEnabled(false);
+        TkSocialAccountService service = new TkSocialAccountService(properties, accounts, scope, platform, cipher);
+        assertThrows(RuntimeException.class, () -> service.requireReadable(1L));
+        verifyNoInteractions(accounts);
+    }
+
+    @Test void safeAccountResponseCannotSerializeTokenOrProviderUser() throws Exception {
+        TkSocialAccountDO account=new TkSocialAccountDO();
+        account.setAccessTokenCiphertext("private-cipher"); account.setProviderUserId("private-provider");
+        String encoded=new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(TkSocialAccountService.safeAccount(account));
+        assertFalse(encoded.contains("private-cipher")); assertFalse(encoded.contains("private-provider"));
+        assertFalse(encoded.contains("accessToken")); assertFalse(encoded.contains("providerUser"));
+    }
+
+    @Test void facebookBindingRejectsForgedPageIdBeforeAnyPersistence() throws Exception {
+        TkSocialAuthService auth=new TkSocialAuthService(properties,sessions,scope,platform,cipher,mock(TkSocialAccountService.class));
+        TkSocialAuthSessionDO session=session(); session.setPlatform("FACEBOOK_PAGE"); session.setStatus("PAGES_READY");
+        TkSocialPlatformClient.Authorization authorization=new TkSocialPlatformClient.Authorization();
+        TkSocialPlatformClient.PageCandidate page=new TkSocialPlatformClient.PageCandidate();
+        page.setId("1"); page.setName("allowed"); page.setTasks(Arrays.asList("CREATE_CONTENT")); page.setAccessToken("private");
+        authorization.setPages(Arrays.asList(page));
+        session.setPayloadCiphertext(cipher.encrypt(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(authorization),
+                TkSocialAuthService.sessionContext(session)));
+        when(sessions.findBySessionId("s")).thenReturn(session);
+        assertThrows(IllegalArgumentException.class,()->auth.bindFacebookPages("s",Arrays.asList("2")));
+        verify(sessions,never()).claim(any(),anyString(),anyString(),any());
+        assertFalse(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(auth.facebookPages("s")).contains("private"));
+    }
+
+    @Test void deletedAccountRebindReusesOriginalRowWithoutChangingOwner() {
+        TkSocialAccountService service=new TkSocialAccountService(properties,accounts,scope,platform,cipher);
+        TkSocialAccountDO existing=new TkSocialAccountDO();
+        existing.setId(30L); existing.setTenantId(9L); existing.setCompanyId(9L); existing.setCreator("7");
+        existing.setPlatform("INSTAGRAM"); existing.setExternalAccountId("42"); existing.setStatus("DELETED");
+        when(accounts.findExternal(9L,"INSTAGRAM","42")).thenReturn(existing);
+        TkSocialPlatformClient.Authorization authorization=new TkSocialPlatformClient.Authorization();
+        authorization.setExternalId("42"); authorization.setAccessToken("new-token");
+        authorization.setExpiresAt(LocalDateTime.now().plusDays(60));
+        service.bind(session(),authorization,Collections.emptyList());
+        assertEquals(30L,existing.getId()); assertEquals("7",existing.getCreator());
+        assertEquals("AUTHORIZED",existing.getStatus());
+        assertEquals("new-token",cipher.decrypt(existing.getAccessTokenCiphertext(),TkSocialAccountService.accountContext(existing)));
+        verify(accounts,never()).insert(any(TkSocialAccountDO.class)); verify(accounts).updateById(existing);
+    }
+
+    @Test void expiredInstagramTokenDoesNotAttemptRefresh() {
+        TkSocialAccountService service=new TkSocialAccountService(properties,accounts,scope,platform,cipher);
+        TkSocialAccountDO account=new TkSocialAccountDO();
+        account.setId(1L); account.setTenantId(9L); account.setExternalAccountId("42"); account.setPlatform("INSTAGRAM");
+        account.setStatus("AUTHORIZED"); account.setTokenExpiresAt(LocalDateTime.now().minusSeconds(1));
+        when(accounts.selectById(1L)).thenReturn(account);
+        assertThrows(RuntimeException.class,()->service.getValidToken(account));
+        verifyNoInteractions(platform);
+    }
+
+    @Test void refreshLosingToUnbindCannotReturnOrRestoreNewToken() {
+        TkSocialAccountService service=new TkSocialAccountService(properties,accounts,scope,platform,cipher);
+        TkSocialAccountDO account=new TkSocialAccountDO();
+        account.setId(1L); account.setTenantId(9L); account.setExternalAccountId("42"); account.setPlatform("INSTAGRAM");
+        account.setStatus("AUTHORIZED"); account.setLastAuthTime(LocalDateTime.now().minusDays(55));
+        account.setTokenExpiresAt(LocalDateTime.now().plusDays(5));
+        account.setAccessTokenCiphertext(cipher.encrypt("old-token",TkSocialAccountService.accountContext(account)));
+        when(accounts.selectById(1L)).thenReturn(account);
+        TkSocialPlatformClient.Authorization refreshed=new TkSocialPlatformClient.Authorization();
+        refreshed.setAccessToken("renewed"); refreshed.setExpiresAt(LocalDateTime.now().plusDays(60));
+        when(platform.refreshInstagram("old-token")).thenReturn(refreshed);
+        when(accounts.replaceToken(eq(1L),eq(9L),eq(account.getAccessTokenCiphertext()),anyString(),any(),any())).thenReturn(0);
+        assertThrows(IllegalStateException.class,()->service.getValidToken(account));
+        verify(accounts,never()).updateById(any(TkSocialAccountDO.class));
+        assertEquals("old-token",cipher.decrypt(account.getAccessTokenCiphertext(),TkSocialAccountService.accountContext(account)));
+    }
+
+    @Test void rejectionOfOldTokenCannotInvalidateConcurrentReauthorization() {
+        TkSocialAccountService service=new TkSocialAccountService(properties,accounts,scope,platform,cipher);
+        TkSocialAccountDO latest=authorizedAccount("new-token");
+        when(accounts.selectById(1L)).thenReturn(latest);
+        service.reportRejectedToken(1L,"old-token");
+        verify(accounts,never()).markReauth(any(),any(),anyString(),anyString(),any());
+        assertEquals("AUTHORIZED",latest.getStatus());
+    }
+
+    @Test void rejectionOfCurrentTokenUsesTenantAndCipherCompareAndSet() {
+        TkSocialAccountService service=new TkSocialAccountService(properties,accounts,scope,platform,cipher);
+        TkSocialAccountDO current=authorizedAccount("rejected-token");
+        when(accounts.selectById(1L)).thenReturn(current);
+        service.reportRejectedToken(1L,"rejected-token");
+        verify(accounts).markReauth(eq(1L),eq(9L),eq(current.getAccessTokenCiphertext()),anyString(),any());
+        verify(accounts,never()).updateById(any(TkSocialAccountDO.class));
+    }
+
+    @Test void tokenRejectionRequiresExplicitNonIgnoredTenant() {
+        TkSocialAccountService service=new TkSocialAccountService(properties,accounts,scope,platform,cipher);
+        TenantContextHolder.clear();
+        assertThrows(IllegalStateException.class,()->service.reportRejectedToken(1L,"token"));
+        TenantContextHolder.setTenantId(9L); TenantContextHolder.setIgnore(true);
+        assertThrows(IllegalStateException.class,()->service.reportRejectedToken(1L,"token"));
+        verifyNoInteractions(accounts);
+    }
+
+    @Test void rejectedTokenDoesNotTouchDifferentTenantOrUnboundAccount() {
+        TkSocialAccountService service=new TkSocialAccountService(properties,accounts,scope,platform,cipher);
+        TkSocialAccountDO current=authorizedAccount("token");
+        current.setTenantId(10L); when(accounts.selectById(1L)).thenReturn(current);
+        service.reportRejectedToken(1L,"token");
+        current.setTenantId(9L); current.setStatus("UNBOUND");
+        service.reportRejectedToken(1L,"token");
+        verify(accounts,never()).markReauth(any(),any(),anyString(),anyString(),any());
+    }
+
+    private TkSocialAccountDO authorizedAccount(String token) {
+        TkSocialAccountDO account=new TkSocialAccountDO();
+        account.setId(1L); account.setTenantId(9L); account.setExternalAccountId("42"); account.setPlatform("INSTAGRAM");
+        account.setStatus("AUTHORIZED");
+        account.setAccessTokenCiphertext(cipher.encrypt(token,TkSocialAccountService.accountContext(account)));
+        return account;
+    }
+
+    private TkSocialAuthSessionDO session() {
+        TkSocialAuthSessionDO s = new TkSocialAuthSessionDO();
+        s.setId(1L); s.setTenantId(9L); s.setCompanyId(9L); s.setCreator("7");
+        s.setSessionId("s"); s.setPlatform("INSTAGRAM"); s.setStatus("PENDING");
+        s.setExpireTime(LocalDateTime.now().plusMinutes(10)); return s;
+    }
+}

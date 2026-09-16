@@ -19,8 +19,9 @@
           <el-tab-pane label="账号矩阵" name="accounts" />
           <el-tab-pane label="发布任务" name="tasks" />
           <el-tab-pane label="发布明细" name="details" />
+          <el-tab-pane v-if="hasPermission(['tk:social-publish:query'])" label="Instagram / Facebook" name="meta" />
         </el-tabs>
-        <div class="toolbar-actions">
+        <div v-if="activeTab !== 'meta'" class="toolbar-actions">
           <el-button @click="refreshAll"><Icon icon="ep:refresh" class="mr-5px" /> 刷新</el-button>
           <el-button type="primary" plain @click="startRedirectAuth" v-hasPermi="['tk:tiktok-account:authorize']">
             <Icon icon="ep:link" class="mr-5px" /> 官方授权
@@ -35,6 +36,8 @@
       </div>
     </ContentWrap>
 
+
+    <MetaPublishPanel v-if="activeTab === 'meta' && hasPermission(['tk:social-publish:query'])" />
 
     <ContentWrap v-if="activeTab === 'videos'">
       <el-form :model="videoQuery" ref="videoQueryFormRef" :inline="true" label-width="90px" class="-mb-15px">
@@ -586,6 +589,8 @@
 </template>
 
 <script setup lang="ts">
+import MetaPublishPanel from './components/MetaPublishPanel.vue'
+import { hasPermission } from '@/directives/permission/hasPermi'
 import { Qrcode } from '@/components/Qrcode'
 import { TkGenerationApi } from '@/api/tk/generation'
 import type { TkGenerationTaskVO } from '@/api/tk/generation'
@@ -622,7 +627,7 @@ type TkTiktokAuthMessage = {
   message?: string
 }
 
-const activeTab = ref<'videos' | 'accounts' | 'tasks' | 'details'>('videos')
+const activeTab = ref<'videos' | 'accounts' | 'tasks' | 'details' | 'meta'>('videos')
 const overview = reactive({
   authorizedAccountCount: 0,
   pendingPublishCount: 0,
