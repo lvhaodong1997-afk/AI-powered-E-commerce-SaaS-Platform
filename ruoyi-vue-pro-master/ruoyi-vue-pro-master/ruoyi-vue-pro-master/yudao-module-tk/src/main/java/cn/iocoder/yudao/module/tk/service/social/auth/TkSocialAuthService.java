@@ -135,13 +135,15 @@ public class TkSocialAuthService {
                 throw new IllegalArgumentException("只能绑定本次授权且具有内容发布任务权限的 Page");
             selected.add(candidate);
         }
-        new TransactionTemplate(transactionManager).execute(status->{
-            if (sessions.claim(session.getId(),"PAGES_READY","PROCESSING",LocalDateTime.now())!=1)
-                throw new IllegalStateException("授权会话已使用或已过期");
-            accounts.bind(session,authorization,selected);
-            if (sessions.finish(session.getId(),"PROCESSING","SUCCESS",null,null,LocalDateTime.now())!=1)
-                throw new IllegalStateException("授权会话已过期");
-            return null;
+        TenantUtils.execute(session.getTenantId(), () -> {
+            new TransactionTemplate(transactionManager).execute(status->{
+                if (sessions.claim(session.getId(),"PAGES_READY","PROCESSING",LocalDateTime.now())!=1)
+                    throw new IllegalStateException("授权会话已使用或已过期");
+                accounts.bind(session,authorization,selected);
+                if (sessions.finish(session.getId(),"PROCESSING","SUCCESS",null,null,LocalDateTime.now())!=1)
+                    throw new IllegalStateException("授权会话已过期");
+                return null;
+            });
         });
     }
 

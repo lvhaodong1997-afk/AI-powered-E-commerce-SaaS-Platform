@@ -7,6 +7,10 @@ import cn.iocoder.yudao.module.tk.service.scope.*;
 import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformClient;
 import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformException;
 import org.junit.jupiter.api.*;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 import java.time.LocalDateTime;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -137,6 +141,34 @@ class TkSocialAuthSecurityTest {
         assertThrows(IllegalArgumentException.class,()->auth.bindFacebookPages("s",Arrays.asList("2")));
         verify(sessions,never()).claim(any(),anyString(),anyString(),any());
         assertFalse(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(auth.facebookPages("s")).contains("private"));
+    }
+
+    @Test void facebookPageBindingUsesAuthorizationTenantInsideTransaction() throws Exception {
+        TkSocialAuthSessionDO session=session(); session.setPlatform("FACEBOOK_PAGE"); session.setStatus("PAGES_READY");
+        TkSocialPlatformClient.Authorization authorization=new TkSocialPlatformClient.Authorization();
+        authorization.setExternalId("fb-user"); authorization.setScopes("pages_manage_posts");
+        TkSocialPlatformClient.PageCandidate page=new TkSocialPlatformClient.PageCandidate();
+        page.setId("1"); page.setName("page"); page.setTasks(Arrays.asList("CREATE_CONTENT")); page.setAccessToken("page-token");
+        authorization.setPages(Arrays.asList(page));
+        session.setPayloadCiphertext(cipher.encrypt(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(authorization),
+                TkSocialAuthService.sessionContext(session)));
+        when(sessions.findBySessionId("s")).thenReturn(session);
+        when(sessions.claim(eq(session.getId()),eq("PAGES_READY"),eq("PROCESSING"),any())).thenReturn(1);
+        when(sessions.finish(eq(session.getId()),eq("PROCESSING"),eq("SUCCESS"),isNull(),isNull(),any())).thenReturn(1);
+        when(accounts.findExternal(9L,"FACEBOOK_PAGE","1")).thenReturn(null);
+
+        PlatformTransactionManager transactionManager=mock(PlatformTransactionManager.class);
+        TransactionStatus transactionStatus=mock(TransactionStatus.class);
+        when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(transactionStatus);
+        TkSocialAuthService auth=new TkSocialAuthService(properties,sessions,scope,platform,cipher,
+                new TkSocialAccountService(properties,accounts,scope,platform,cipher));
+        ReflectionTestUtils.setField(auth,"transactionManager",transactionManager);
+
+        TenantContextHolder.clear();
+        assertDoesNotThrow(() -> auth.bindFacebookPages("s",Arrays.asList("1")));
+        verify(accounts).insert(any(TkSocialAccountDO.class));
+        verify(transactionManager).commit(transactionStatus);
+        assertNull(TenantContextHolder.getTenantId());
     }
 
     @Test void deletedAccountRebindReusesOriginalRowWithoutChangingOwner() {
