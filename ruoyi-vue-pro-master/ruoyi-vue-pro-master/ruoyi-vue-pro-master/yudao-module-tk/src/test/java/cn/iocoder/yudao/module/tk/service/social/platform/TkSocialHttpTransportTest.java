@@ -53,6 +53,18 @@ class TkSocialHttpTransportTest {
         }
     }
 
+    @Test void instagramTopLevelOAuthErrorRetainsSafeMetaCode() throws Exception {
+        response(400,"{\"error_type\":\"OAuthException\",\"code\":190,\"error_message\":\"access_token=sentinel-secret\"}");
+
+        TkSocialPlatformException error=assertThrows(TkSocialPlatformException.class,
+                ()->transport().request("POST","https://api.instagram.com/oauth/access_token",
+                        TkSocialPlatformClient.map("client_secret","sentinel-secret"),null,false));
+
+        assertEquals("META_190",error.getCode());
+        assertTrue(error.isReauthRequired());
+        assertFalse(error.getMessage().contains("sentinel"));
+    }
+
     @Test void unexpectedMutationResponseIsUncertain() throws Exception {
         response(200,"<html>proxy failure</html>");
         TkSocialPlatformException e=assertThrows(TkSocialPlatformException.class,

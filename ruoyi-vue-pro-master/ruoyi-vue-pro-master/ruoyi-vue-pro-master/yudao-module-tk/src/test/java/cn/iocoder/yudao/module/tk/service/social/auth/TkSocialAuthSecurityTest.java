@@ -5,6 +5,7 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.social.*;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.*;
 import cn.iocoder.yudao.module.tk.service.scope.*;
 import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformClient;
+import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformException;
 import org.junit.jupiter.api.*;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -22,6 +23,9 @@ class TkSocialAuthSecurityTest {
     @BeforeEach void setup() {
         properties.setEnabled(true);
         properties.setEncryptionKey(Base64.getEncoder().encodeToString(new byte[32]));
+        properties.getInstagram().setAppId("ig-app");
+        properties.getInstagram().setAppSecret("configured-app-secret");
+        properties.getInstagram().setRedirectUri("https://app.example/instagram/callback");
         cipher = new TkSocialTokenCipher(properties);
         TenantContextHolder.setTenantId(9L);
         when(scope.getCurrentScope()).thenReturn(new TkUserScope(7L, 9L, "TENANT_ADMIN", 9L));
@@ -43,6 +47,34 @@ class TkSocialAuthSecurityTest {
         when(sessions.claim(eq(session.getId()), eq("PENDING"), eq("PROCESSING"), any())).thenReturn(0);
         assertFalse(auth.callback("INSTAGRAM", "code", "state", null));
         verifyNoInteractions(platform);
+    }
+
+    @Test void callbackPersistsActionableReasonAndLogsOnlySafeDiagnosticFields() {
+        TkSocialAuthService auth = new TkSocialAuthService(properties, sessions, scope, platform, cipher,
+                mock(TkSocialAccountService.class));
+        TkSocialAuthSessionDO session = session();
+        when(sessions.findByStateHash(anyString())).thenReturn(session);
+        when(sessions.claim(eq(session.getId()), eq("PENDING"), eq("PROCESSING"), any())).thenReturn(1);
+        TkSocialPlatformException failure=new TkSocialPlatformException("HTTP_400","provider-response-secret",
+                false,false,false).withStage("INSTAGRAM_LONG_TOKEN");
+        when(platform.authorizeInstagram(eq("callback-code-secret"),anyString())).thenThrow(failure);
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(TkSocialAuthService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> captured=
+                new ch.qos.logback.core.read.ListAppender<>();
+        captured.start(); logger.addAppender(captured);
+        try {
+            assertFalse(auth.callback("INSTAGRAM","callback-code-secret","state",null));
+            verify(sessions).finish(eq(session.getId()),eq("PROCESSING"),eq("FAILED"),isNull(),
+                    eq("Instagram 长效令牌获取失败，请重新授权"),any());
+            String logs=captured.list.toString();
+            assertTrue(logs.contains("INSTAGRAM_LONG_TOKEN"));
+            assertTrue(logs.contains("HTTP_400"));
+            assertTrue(logs.contains("TkSocialPlatformException"));
+            assertFalse(logs.contains("callback-code-secret"));
+            assertFalse(logs.contains("provider-response-secret"));
+            assertFalse(logs.contains("configured-app-secret"));
+        } finally { logger.detachAppender(captured); captured.stop(); }
     }
 
     @Test void sessionIsUnreadableByDifferentUserEvenWithinTenant() {

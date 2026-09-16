@@ -5,7 +5,9 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialAuthSessionDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialAuthSessionMapper;
 import cn.iocoder.yudao.module.tk.service.scope.*;
 import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformClient;
+import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -17,6 +19,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 @Service
+@Slf4j
 public class TkSocialAuthService {
     private final TkSocialProperties properties;
     private final TkSocialAuthSessionMapper sessions;
@@ -61,12 +64,14 @@ public class TkSocialAuthService {
                 sessions.finish(session.getId(),"PROCESSING","FAILED",null,"用户取消授权或授权码缺失",LocalDateTime.now());
                 return false;
             }
+            String callbackStage="PROVIDER_AUTH";
             try {
                 TkSocialProperties.Credentials config=properties.credentials(target);
                 // Remote token exchange outside DB transactions.
                 TkSocialPlatformClient.Authorization authorization="INSTAGRAM".equals(target)
                         ? platform.authorizeInstagram(code,config.getRedirectUri())
                         : platform.authorizeFacebook(code,config.getRedirectUri());
+                callbackStage="ACCOUNT_BIND";
                 if ("FACEBOOK_PAGE".equals(target)) {
                     if (authorization.getPages()==null || authorization.getPages().isEmpty())
                         throw new IllegalArgumentException("没有可发布内容的 Facebook Page");
@@ -83,8 +88,16 @@ public class TkSocialAuthService {
                 });
                 return true;
             } catch (Exception e) {
-                // No provider exception/authorization response is exposed to clients or logs.
-                sessions.finish(session.getId(),"PROCESSING","FAILED",null,"授权未完成，请检查账号权限或绑定归属后重试",LocalDateTime.now());
+                String stage=callbackStage;
+                String diagnosticCode="UNEXPECTED";
+                if (e instanceof TkSocialPlatformException) {
+                    TkSocialPlatformException platformError=(TkSocialPlatformException)e;
+                    if (platformError.getStage()!=null) stage=platformError.getStage();
+                    diagnosticCode=diagnostic(platformError.getCode());
+                }
+                log.warn("Meta OAuth callback failed: platform={}, authSessionId={}, stage={}, diagnosticCode={}, exceptionType={}",
+                        diagnostic(target),session.getId(),diagnostic(stage),diagnosticCode,e.getClass().getSimpleName());
+                sessions.finish(session.getId(),"PROCESSING","FAILED",null,authFailureReason(e),LocalDateTime.now());
                 return false;
             }
         });
@@ -179,5 +192,18 @@ public class TkSocialAuthService {
         if ("PAGES_READY".equals(status)) return "请选择需要绑定的 Facebook Page";
         if ("EXPIRED".equals(status)) return "授权会话已过期";
         return "等待授权处理";
+    }
+    private static String authFailureReason(Exception error) {
+        if (error instanceof TkSocialPlatformException) {
+            String stage=((TkSocialPlatformException)error).getStage();
+            if ("INSTAGRAM_SHORT_TOKEN".equals(stage)) return "Instagram 授权码交换失败，请重新授权";
+            if ("INSTAGRAM_LONG_TOKEN".equals(stage)) return "Instagram 长效令牌获取失败，请重新授权";
+            if ("INSTAGRAM_PROFILE".equals(stage)) return "无法读取 Instagram 专业账号信息，请检查账号类型后重试";
+            if ("INSTAGRAM_PERMISSIONS".equals(stage)) return "Instagram 发布权限校验未通过，请重新授权";
+        }
+        return "授权未完成，请检查账号权限或绑定归属后重试";
+    }
+    private static String diagnostic(String value) {
+        return value!=null && value.matches("[A-Z0-9_:-]{1,80}") ? value : "UNKNOWN";
     }
 }

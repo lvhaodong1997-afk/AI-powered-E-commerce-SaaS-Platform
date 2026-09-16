@@ -11,7 +11,7 @@ class TkSocialPlatformClientTest {
     private final ObjectMapper json = new ObjectMapper();
     private final List<String> urls = new ArrayList<>();
     private final List<Map<String, String>> parameters = new ArrayList<>();
-    private final Deque<String> responses = new ArrayDeque<>();
+    private final Deque<Object> responses = new ArrayDeque<>();
     private TkSocialPlatformClient client() {
         TkSocialProperties p = new TkSocialProperties();
         p.setEnabled(true);
@@ -19,7 +19,9 @@ class TkSocialPlatformClientTest {
         p.getFacebook().setAppId("fb-app"); p.getFacebook().setAppSecret("fb-secret");
         return new TkSocialPlatformClient(p, (method, url, params, token, mutation) -> {
             urls.add(method + " " + url); parameters.add(new HashMap<>(params));
-            try { return json.readTree(responses.removeFirst()); } catch (Exception e) { throw new AssertionError(e); }
+            Object response=responses.removeFirst();
+            if (response instanceof RuntimeException) throw (RuntimeException)response;
+            try { return json.readTree((String)response); } catch (Exception e) { throw new AssertionError(e); }
         });
     }
 
@@ -125,6 +127,18 @@ class TkSocialPlatformClientTest {
             assertEquals("IG_TOKEN_RESPONSE_INVALID",error.getCode());
             assertEquals(previous+1,urls.size()); assertTrue(responses.isEmpty());
         }
+    }
+
+    @Test void instagramLongTokenFailureCarriesSafeStageWithoutChangingProviderCode() {
+        responses.add("{\"access_token\":\"short\",\"user_id\":\"42\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\"]}");
+        responses.add(new TkSocialPlatformException("HTTP_400","provider-message-with-secret",false,false,false));
+
+        TkSocialPlatformException error=assertThrows(TkSocialPlatformException.class,
+                ()->client().authorizeInstagram("callback-code-secret","https://app.example/callback"));
+
+        assertEquals("INSTAGRAM_LONG_TOKEN",error.getStage());
+        assertEquals("HTTP_400",error.getCode());
+        assertEquals(2,urls.size());
     }
 
     @Test void mutationErrorsAreSanitizedAndCannotBeBlindlyRetried() {

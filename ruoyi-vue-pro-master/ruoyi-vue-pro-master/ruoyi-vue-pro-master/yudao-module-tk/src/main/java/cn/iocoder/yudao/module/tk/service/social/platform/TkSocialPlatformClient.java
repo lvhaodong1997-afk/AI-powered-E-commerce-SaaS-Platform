@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriComponentsBuilder;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.function.Supplier;
 
 @Component
 public class TkSocialPlatformClient {
@@ -36,34 +37,45 @@ public class TkSocialPlatformClient {
 
     public Authorization authorizeInstagram(String code, String redirectUri) {
         TkSocialProperties.Credentials c=properties.getInstagram();
-        JsonNode shortToken=call("POST","https://api.instagram.com/oauth/access_token",
-                map("client_id",c.getAppId(),"client_secret",c.getAppSecret(),"grant_type","authorization_code",
-                        "redirect_uri",redirectUri,"code",code),null,false);
-        // Defensive compatibility only: preserve the same identity/permission checks for either response shape.
-        if (shortToken.has("data")) {
-            JsonNode data=shortToken.get("data");
-            if (!data.isArray() || data.size()!=1 || !data.get(0).isObject())
-                throw rejected("IG_TOKEN_RESPONSE_INVALID","Instagram 令牌响应格式无效");
-            shortToken=data.get(0);
-        }
-        String token=required(shortToken,"access_token",false);
-        JsonNode longToken=call("GET","https://graph.instagram.com/access_token",
-                map("grant_type","ig_exchange_token","client_secret",c.getAppSecret(),"access_token",token),null,false);
-        Authorization a=token(longToken);
-        JsonNode profile=call("GET",ig("me"),map("fields","user_id,username,account_type"),a.accessToken,false);
-        a.externalId=profile.path("user_id").asText(profile.path("id").asText());
-        id(a.externalId);
-        a.accountName=profile.path("username").asText(); a.username=a.accountName;
-        a.accountType=profile.path("account_type").asText();
-        if (!Arrays.asList("BUSINESS","MEDIA_CREATOR","CREATOR").contains(a.accountType))
-            throw rejected("IG_PROFESSIONAL_REQUIRED","需要 Instagram 专业账号");
-        String authorizedId=shortToken.path("user_id").asText();
-        if (!authorizedId.isEmpty() && !authorizedId.equals(a.externalId))
-            throw rejected("IG_IDENTITY_MISMATCH","Instagram 授权身份不一致");
-        // Token exchange responses may omit permissions. Verify granted permissions using the token.
-        JsonNode granted=shortToken.get("permissions");
-        if (granted == null) granted=call("GET",ig("me/permissions"),map(),a.accessToken,false).path("data");
-        requirePermissions(granted,Arrays.asList("instagram_business_basic","instagram_business_content_publish"));
+        final JsonNode shortToken=instagramStage("INSTAGRAM_SHORT_TOKEN",()->{
+            JsonNode result=call("POST","https://api.instagram.com/oauth/access_token",
+                    map("client_id",c.getAppId(),"client_secret",c.getAppSecret(),"grant_type","authorization_code",
+                            "redirect_uri",redirectUri,"code",code),null,false);
+            // Defensive compatibility only: preserve the same identity/permission checks for either response shape.
+            if (result.has("data")) {
+                JsonNode data=result.get("data");
+                if (!data.isArray() || data.size()!=1 || !data.get(0).isObject())
+                    throw rejected("IG_TOKEN_RESPONSE_INVALID","Instagram 令牌响应格式无效");
+                result=data.get(0);
+            }
+            required(result,"access_token",false);
+            return result;
+        });
+        final String shortAccessToken=shortToken.path("access_token").asText();
+        final Authorization a=instagramStage("INSTAGRAM_LONG_TOKEN",()->token(call("GET",
+                "https://graph.instagram.com/access_token",
+                map("grant_type","ig_exchange_token","client_secret",c.getAppSecret(),
+                        "access_token",shortAccessToken),null,false)));
+        instagramStage("INSTAGRAM_PROFILE",()->{
+            JsonNode profile=call("GET",ig("me"),map("fields","user_id,username,account_type"),a.accessToken,false);
+            a.externalId=profile.path("user_id").asText(profile.path("id").asText());
+            id(a.externalId);
+            a.accountName=profile.path("username").asText(); a.username=a.accountName;
+            a.accountType=profile.path("account_type").asText();
+            if (!Arrays.asList("BUSINESS","MEDIA_CREATOR","CREATOR").contains(a.accountType))
+                throw rejected("IG_PROFESSIONAL_REQUIRED","需要 Instagram 专业账号");
+            String authorizedId=shortToken.path("user_id").asText();
+            if (!authorizedId.isEmpty() && !authorizedId.equals(a.externalId))
+                throw rejected("IG_IDENTITY_MISMATCH","Instagram 授权身份不一致");
+            return a;
+        });
+        instagramStage("INSTAGRAM_PERMISSIONS",()->{
+            // Token exchange responses may omit permissions. Verify granted permissions using the token.
+            JsonNode granted=shortToken.get("permissions");
+            if (granted == null) granted=call("GET",ig("me/permissions"),map(),a.accessToken,false).path("data");
+            requirePermissions(granted,Arrays.asList("instagram_business_basic","instagram_business_content_publish"));
+            return null;
+        });
         a.scopes="instagram_business_basic,instagram_business_content_publish";
         return a;
     }
@@ -235,6 +247,10 @@ public class TkSocialPlatformClient {
     }
     private JsonNode call(String method,String url,Map<String,String> params,String token,boolean mutation) {
         properties.requireEnabled(); return transport.request(method,url,params,token,mutation);
+    }
+    private static <T> T instagramStage(String stage, Supplier<T> action) {
+        try { return action.get(); }
+        catch (TkSocialPlatformException e) { throw e.withStage(stage); }
     }
     private String ig(String path) { return "https://graph.instagram.com/"+properties.version()+"/"+path; }
     private String fb(String path) { return "https://graph.facebook.com/"+properties.version()+"/"+path; }

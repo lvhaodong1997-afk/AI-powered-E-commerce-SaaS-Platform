@@ -97,6 +97,7 @@ public class TkSocialHttpTransport implements TkSocialPlatformClient.Transport {
 
     public static TkSocialPlatformException failure(int httpStatus,JsonNode body,boolean mutation) {
         int code=body==null?0:body.path("error").path("code").asInt(0);
+        if (code==0 && body!=null) code=body.path("code").asInt(0);
         boolean permission=code==10 || code==200;
         boolean reauth=permission || code==190 || code==102 || httpStatus==401;
         boolean rate=httpStatus==429 || code==4 || code==17 || code==32 || code==613 || code==80004;
