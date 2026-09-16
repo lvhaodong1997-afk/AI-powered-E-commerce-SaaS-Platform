@@ -93,7 +93,7 @@ public class TkSocialPlatformClient {
                 map("client_id",c.getAppId(),"client_secret",c.getAppSecret(),"redirect_uri",redirectUri,"code",code),null,false);
         JsonNode longToken=call("GET",fb("oauth/access_token"),map("grant_type","fb_exchange_token",
                 "client_id",c.getAppId(),"client_secret",c.getAppSecret(),"fb_exchange_token",required(shortToken,"access_token",false)),null,false);
-        Authorization a=token(longToken);
+        Authorization a=facebookToken(longToken);
         JsonNode profile=call("GET",fb("me"),map("fields","id,name"),a.accessToken,false);
         a.externalId=required(profile,"id",false); a.accountName=profile.path("name").asText();
         requirePermissions(call("GET",fb("me/permissions"),map(),a.accessToken,false).path("data"),
@@ -261,6 +261,12 @@ public class TkSocialPlatformClient {
         long ttl=node.path("expires_in").asLong();
         if (ttl<=0) throw rejected("TOKEN_EXPIRY_MISSING","Meta 未返回有效令牌期限");
         a.expiresAt=LocalDateTime.now().plusSeconds(ttl); return a;
+    }
+    private static Authorization facebookToken(JsonNode node) {
+        Authorization a=new Authorization(); a.accessToken=required(node,"access_token",false);
+        long ttl=node.path("expires_in").asLong();
+        if (ttl>0) a.expiresAt=LocalDateTime.now().plusSeconds(ttl);
+        return a;
     }
     private static void requirePermissions(JsonNode node,List<String> required) {
         Set<String> granted=new HashSet<>();

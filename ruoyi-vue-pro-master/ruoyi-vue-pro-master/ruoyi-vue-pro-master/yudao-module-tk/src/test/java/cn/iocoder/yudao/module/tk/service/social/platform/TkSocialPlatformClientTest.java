@@ -73,6 +73,65 @@ class TkSocialPlatformClientTest {
         assertEquals("id,user_id,username,account_type", parameters.get(2).get("fields"));
     }
 
+    @Test void facebookAcceptsLongTokenWithoutExpiresInForPageAuthorization() {
+        responses.add("{\"access_token\":\"short\"}");
+        responses.add("{\"access_token\":\"long\"}");
+        responses.add("{\"id\":\"100\",\"name\":\"owner\"}");
+        responses.add("{\"data\":[{\"permission\":\"pages_show_list\",\"status\":\"granted\"},{\"permission\":\"pages_read_engagement\",\"status\":\"granted\"},{\"permission\":\"pages_manage_posts\",\"status\":\"granted\"}]}");
+        responses.add("{\"data\":[{\"id\":\"200\",\"name\":\"page\",\"access_token\":\"page-token\",\"tasks\":[\"CREATE_CONTENT\"]}]}");
+
+        TkSocialPlatformClient.Authorization authorization=client().authorizeFacebook("code","https://app.example/callback");
+
+        assertEquals("long",authorization.getAccessToken());
+        assertNull(authorization.getExpiresAt());
+        assertEquals("100",authorization.getExternalId());
+        assertEquals(1,authorization.getPages().size());
+        assertEquals("200",authorization.getPages().get(0).getId());
+    }
+
+    @Test void facebookKeepsReturnedTokenExpiry() {
+        responses.add("{\"access_token\":\"short\"}");
+        responses.add("{\"access_token\":\"long\",\"expires_in\":3600}");
+        responses.add("{\"id\":\"100\",\"name\":\"owner\"}");
+        responses.add("{\"data\":[\"pages_show_list\",\"pages_read_engagement\",\"pages_manage_posts\"]}");
+        responses.add("{\"data\":[]}");
+        java.time.LocalDateTime before=java.time.LocalDateTime.now();
+        TkSocialPlatformClient.Authorization authorization=client().authorizeFacebook("code","https://app.example/callback");
+        assertFalse(authorization.getExpiresAt().isBefore(before.plusSeconds(3600)));
+        assertFalse(authorization.getExpiresAt().isAfter(java.time.LocalDateTime.now().plusSeconds(3600)));
+        assertTrue(responses.isEmpty());
+    }
+
+    @Test void facebookRejectsMissingAccessTokenBeforeProfileLookup() {
+        responses.add("{\"access_token\":\"short\"}");
+        responses.add("{\"expires_in\":3600}");
+        TkSocialPlatformException error=assertThrows(TkSocialPlatformException.class,
+                ()->client().authorizeFacebook("code","https://app.example/callback"));
+        assertEquals("RESPONSE_INCOMPLETE",error.getCode());
+        assertEquals(2,urls.size());
+    }
+
+    @Test void facebookWithoutExpiryStillRejectsMissingPublishPermission() {
+        responses.add("{\"access_token\":\"short\"}");
+        responses.add("{\"access_token\":\"long\"}");
+        responses.add("{\"id\":\"100\",\"name\":\"owner\"}");
+        responses.add("{\"data\":[{\"permission\":\"pages_show_list\",\"status\":\"granted\"},{\"permission\":\"pages_read_engagement\",\"status\":\"granted\"},{\"permission\":\"pages_manage_posts\",\"status\":\"declined\"}]}");
+        TkSocialPlatformException error=assertThrows(TkSocialPlatformException.class,
+                ()->client().authorizeFacebook("code","https://app.example/callback"));
+        assertEquals("PERMISSIONS_MISSING",error.getCode());
+        assertEquals(4,urls.size());
+    }
+
+    @Test void instagramStillRejectsLongTokenWithoutExpiry() {
+        responses.add("{\"access_token\":\"short\"}");
+        responses.add("{\"access_token\":\"long\"}");
+        TkSocialPlatformException error=assertThrows(TkSocialPlatformException.class,
+                ()->client().authorizeInstagram("code","https://app.example/callback"));
+        assertEquals("TOKEN_EXPIRY_MISSING",error.getCode());
+        assertEquals("INSTAGRAM_LONG_TOKEN",error.getStage());
+        assertEquals(2,urls.size());
+    }
+
     @Test void instagramAcceptsTokenIdentityMatchingProfileIdAndKeepsPublishingIdentitySeparate() {
         responses.add("{\"access_token\":\"short\",\"user_id\":\"100\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\"]}");
         responses.add("{\"access_token\":\"long\",\"expires_in\":5184000}");
