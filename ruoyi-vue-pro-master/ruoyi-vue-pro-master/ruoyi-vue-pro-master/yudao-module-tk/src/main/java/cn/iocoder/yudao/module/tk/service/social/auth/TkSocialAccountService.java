@@ -169,7 +169,8 @@ public class TkSocialAccountService {
         checkBindingOwner(account,session);
         if (account==null) account=new TkSocialAccountDO();
         account.setTenantId(session.getTenantId()); account.setCompanyId(session.getCompanyId());
-        account.setCreator(session.getCreator()); account.setPlatform(session.getPlatform()); account.setExternalAccountId(externalId);
+        account.setCreator(session.getCreator()); account.setUpdater(session.getCreator());
+        account.setPlatform(session.getPlatform()); account.setExternalAccountId(externalId);
         account.setProviderUserId(providerUser); account.setAccountName(name); account.setUsername(username); account.setAccountType(type);
         account.setAccessTokenCiphertext(cipher.encrypt(token,accountContext(account)));
         account.setTokenExpiresAt(expiry); account.setTokenType("INSTAGRAM".equals(session.getPlatform())?"IG_LONG_LIVED":"PAGE");

@@ -167,6 +167,7 @@ class TkSocialAuthSecurityTest {
         verify(accounts).insert(inserted.capture());
         assertEquals("200",inserted.getValue().getExternalAccountId());
         assertEquals("100",inserted.getValue().getProviderUserId());
+        assertEquals(session().getCreator(),inserted.getValue().getUpdater());
     }
 
     @Test void instagramIdentityMismatchUsesAccurateSafeFailureReason() {
