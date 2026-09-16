@@ -155,6 +155,36 @@ class TkSocialAuthSecurityTest {
         verify(accounts,never()).insert(any(TkSocialAccountDO.class)); verify(accounts).updateById(existing);
     }
 
+    @Test void instagramBindingStoresPublishingAndProviderIdentitiesSeparately() {
+        TkSocialAccountService service=new TkSocialAccountService(properties,accounts,scope,platform,cipher);
+        TkSocialPlatformClient.Authorization authorization=new TkSocialPlatformClient.Authorization();
+        authorization.setExternalId("200"); authorization.setProviderUserId("100");
+        authorization.setAccessToken("new-token"); authorization.setExpiresAt(LocalDateTime.now().plusDays(60));
+
+        service.bind(session(),authorization,Collections.emptyList());
+
+        org.mockito.ArgumentCaptor<TkSocialAccountDO> inserted=org.mockito.ArgumentCaptor.forClass(TkSocialAccountDO.class);
+        verify(accounts).insert(inserted.capture());
+        assertEquals("200",inserted.getValue().getExternalAccountId());
+        assertEquals("100",inserted.getValue().getProviderUserId());
+    }
+
+    @Test void instagramIdentityMismatchUsesAccurateSafeFailureReason() {
+        TkSocialAuthService auth=new TkSocialAuthService(properties,sessions,scope,platform,cipher,
+                mock(TkSocialAccountService.class));
+        TkSocialAuthSessionDO session=session();
+        when(sessions.findByStateHash(anyString())).thenReturn(session);
+        when(sessions.claim(eq(session.getId()),eq("PENDING"),eq("PROCESSING"),any())).thenReturn(1);
+        when(platform.authorizeInstagram(eq("code"),anyString())).thenThrow(
+                new TkSocialPlatformException("IG_IDENTITY_MISMATCH","private-provider-message",false,false,false)
+                        .withStage("INSTAGRAM_PROFILE"));
+
+        assertFalse(auth.callback("INSTAGRAM","code","state",null));
+
+        verify(sessions).finish(eq(session.getId()),eq("PROCESSING"),eq("FAILED"),isNull(),
+                eq("Instagram 授权身份校验失败，请重新授权"),any());
+    }
+
     @Test void expiredInstagramTokenDoesNotAttemptRefresh() {
         TkSocialAccountService service=new TkSocialAccountService(properties,accounts,scope,platform,cipher);
         TkSocialAccountDO account=new TkSocialAccountDO();

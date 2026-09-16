@@ -63,13 +63,25 @@ class TkSocialPlatformClientTest {
     @Test void instagramExchangesShortTokenWithInstagramCredentialsThenLongLived() {
         responses.add("{\"access_token\":\"short\",\"user_id\":\"42\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\"]}");
         responses.add("{\"access_token\":\"long\",\"expires_in\":5184000}");
-        responses.add("{\"user_id\":\"42\",\"username\":\"creator\",\"account_type\":\"MEDIA_CREATOR\"}");
+        responses.add("{\"id\":\"42\",\"user_id\":\"42\",\"username\":\"creator\",\"account_type\":\"MEDIA_CREATOR\"}");
         TkSocialPlatformClient.Authorization a = client().authorizeInstagram("code", "https://app.example/callback");
-        assertEquals("long", a.getAccessToken()); assertEquals("42", a.getExternalId());
+        assertEquals("long", a.getAccessToken()); assertEquals("42", a.getExternalId()); assertEquals("42", a.getProviderUserId());
         assertEquals("ig-app", parameters.get(0).get("client_id"));
         assertEquals("ig-secret", parameters.get(0).get("client_secret"));
         assertEquals("ig_exchange_token", parameters.get(1).get("grant_type"));
         assertFalse(parameters.get(1).containsValue("fb-secret"));
+        assertEquals("id,user_id,username,account_type", parameters.get(2).get("fields"));
+    }
+
+    @Test void instagramAcceptsTokenIdentityMatchingProfileIdAndKeepsPublishingIdentitySeparate() {
+        responses.add("{\"access_token\":\"short\",\"user_id\":\"100\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\"]}");
+        responses.add("{\"access_token\":\"long\",\"expires_in\":5184000}");
+        responses.add("{\"id\":\"100\",\"user_id\":\"200\",\"username\":\"creator\",\"account_type\":\"BUSINESS\"}");
+
+        TkSocialPlatformClient.Authorization authorization=client().authorizeInstagram("code","https://app.example/callback");
+
+        assertEquals("200",authorization.getExternalId());
+        assertEquals("100",authorization.getProviderUserId());
     }
 
     @Test void instagramRefreshUsesExistingLongLivedAccessTokenNotRefreshToken() {
@@ -95,7 +107,7 @@ class TkSocialPlatformClientTest {
             String token="{\"access_token\":\"short\",\"user_id\":\"99\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\"]}";
             responses.add(wrapped?"{\"data\":["+token+"]}":token);
             responses.add("{\"access_token\":\"long\",\"expires_in\":5184000}");
-            responses.add("{\"user_id\":\"42\",\"username\":\"creator\",\"account_type\":\"BUSINESS\"}");
+            responses.add("{\"id\":\"41\",\"user_id\":\"42\",\"username\":\"creator\",\"account_type\":\"BUSINESS\"}");
             TkSocialPlatformException error=assertThrows(TkSocialPlatformException.class,
                     ()->client().authorizeInstagram("code","https://app.example/callback"));
             assertEquals("IG_IDENTITY_MISMATCH",error.getCode());

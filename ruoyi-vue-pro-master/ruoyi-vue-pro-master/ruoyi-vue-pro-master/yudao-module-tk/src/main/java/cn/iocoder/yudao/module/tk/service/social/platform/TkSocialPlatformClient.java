@@ -57,15 +57,17 @@ public class TkSocialPlatformClient {
                 map("grant_type","ig_exchange_token","client_secret",c.getAppSecret(),
                         "access_token",shortAccessToken),null,false)));
         instagramStage("INSTAGRAM_PROFILE",()->{
-            JsonNode profile=call("GET",ig("me"),map("fields","user_id,username,account_type"),a.accessToken,false);
+            JsonNode profile=call("GET",ig("me"),map("fields","id,user_id,username,account_type"),a.accessToken,false);
             a.externalId=profile.path("user_id").asText(profile.path("id").asText());
             id(a.externalId);
+            a.providerUserId=profile.path("id").asText(a.externalId);
+            id(a.providerUserId);
             a.accountName=profile.path("username").asText(); a.username=a.accountName;
             a.accountType=profile.path("account_type").asText();
             if (!Arrays.asList("BUSINESS","MEDIA_CREATOR","CREATOR").contains(a.accountType))
                 throw rejected("IG_PROFESSIONAL_REQUIRED","需要 Instagram 专业账号");
             String authorizedId=shortToken.path("user_id").asText();
-            if (!authorizedId.isEmpty() && !authorizedId.equals(a.externalId))
+            if (!authorizedId.isEmpty() && !authorizedId.equals(a.providerUserId) && !authorizedId.equals(a.externalId))
                 throw rejected("IG_IDENTITY_MISMATCH","Instagram 授权身份不一致");
             return a;
         });
@@ -312,7 +314,7 @@ public class TkSocialPlatformClient {
     }
     @Data public static class Authorization {
         @ToString.Exclude private String accessToken;
-        private String externalId,accountName,username,accountType,scopes;
+        private String externalId,providerUserId,accountName,username,accountType,scopes;
         private LocalDateTime expiresAt;
         @ToString.Exclude private List<PageCandidate> pages;
     }

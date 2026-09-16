@@ -149,7 +149,7 @@ public class TkSocialAccountService {
         List<TkSocialAccountDO> changes=new ArrayList<>();
         if ("INSTAGRAM".equals(session.getPlatform())) changes.add(binding(session,authorization.getExternalId(),
                 authorization.getAccountName(),authorization.getUsername(),authorization.getAccountType(),
-                authorization.getAccessToken(),authorization.getExpiresAt(),authorization.getExternalId(),authorization.getScopes()));
+                authorization.getAccessToken(),authorization.getExpiresAt(),authorization.getProviderUserId(),authorization.getScopes()));
         else for (TkSocialPlatformClient.PageCandidate page:selected) {
             if (!TkSocialPlatformClient.canPublish(page.getTasks())) throw new IllegalArgumentException("Page 缺少发布内容任务权限");
             changes.add(binding(session,page.getId(),page.getName(),null,"PAGE",page.getAccessToken(),

@@ -195,9 +195,11 @@ public class TkSocialAuthService {
     }
     private static String authFailureReason(Exception error) {
         if (error instanceof TkSocialPlatformException) {
-            String stage=((TkSocialPlatformException)error).getStage();
+            TkSocialPlatformException platformError=(TkSocialPlatformException)error;
+            String stage=platformError.getStage();
             if ("INSTAGRAM_SHORT_TOKEN".equals(stage)) return "Instagram 授权码交换失败，请重新授权";
             if ("INSTAGRAM_LONG_TOKEN".equals(stage)) return "Instagram 长效令牌获取失败，请重新授权";
+            if ("IG_IDENTITY_MISMATCH".equals(platformError.getCode())) return "Instagram 授权身份校验失败，请重新授权";
             if ("INSTAGRAM_PROFILE".equals(stage)) return "无法读取 Instagram 专业账号信息，请检查账号类型后重试";
             if ("INSTAGRAM_PERMISSIONS".equals(stage)) return "Instagram 发布权限校验未通过，请重新授权";
         }
