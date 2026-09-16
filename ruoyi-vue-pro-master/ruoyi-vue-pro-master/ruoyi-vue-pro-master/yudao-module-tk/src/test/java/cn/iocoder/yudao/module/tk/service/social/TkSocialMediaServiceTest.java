@@ -47,6 +47,25 @@ class TkSocialMediaServiceTest {
         assertEquals("IMAGE", media.getMediaType());
         assertEquals(640, media.getWidth());
     }
+
+    @Test void fallsBackToOriginalUrlWhenStorageDoesNotSupportPresigning() throws Exception {
+        when(scope.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L, "USER", 100L));
+        when(scope.getWritableCompanyId(null)).thenReturn(100L);
+        when(files.createFile(any(), anyString(), eq("tk/100/100/social-media"), eq("image/jpeg")))
+                .thenReturn("https://assets.example.com/social/local.jpg");
+        when(files.presignGetUrl(anyString(), eq(86400)))
+                .thenThrow(new UnsupportedOperationException("不支持的操作"));
+        doAnswer(call -> { ((TkSocialMediaDO)call.getArgument(0)).setId(13L); return 1; })
+                .when(mapper).insert(any(TkSocialMediaDO.class));
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        ImageIO.write(new BufferedImage(640, 800, BufferedImage.TYPE_INT_RGB), "jpg", bytes);
+
+        TkSocialMediaDO media = service.upload(new MockMultipartFile("file", "local.jpg", "image/jpeg", bytes.toByteArray()));
+
+        assertEquals(13L, media.getId());
+        assertEquals("https://assets.example.com/social/local.jpg", media.getPublicUrl());
+        verify(mapper).insert(any(TkSocialMediaDO.class));
+    }
     @Test void rejectsUnusableStorageUrls() {
         for (String url : new String[]{"/uploads/a.jpg", "http://example.com/a.jpg", "https://localhost/a.jpg",
                 "https://127.0.0.1/a.jpg", "https://user:pass@example.com/a.jpg"}) {

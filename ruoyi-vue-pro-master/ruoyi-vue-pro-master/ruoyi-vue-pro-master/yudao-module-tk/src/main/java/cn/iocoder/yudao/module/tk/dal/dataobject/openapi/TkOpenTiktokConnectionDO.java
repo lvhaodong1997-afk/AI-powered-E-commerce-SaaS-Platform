@@ -29,6 +29,14 @@ public class TkOpenTiktokConnectionDO extends BaseDO {
     private String displayName;
     private String username;
     private String avatarUrl;
+    private String bioDescription;
+    private String profileDeepLink;
+    private Boolean verified;
+    private Long followerCount;
+    private Long followingCount;
+    private Long likesCount;
+    private Long videoCount;
+    private LocalDateTime statsUpdatedAt;
     private String scopes;
     private String accessTokenCipher;
     private String refreshTokenCipher;

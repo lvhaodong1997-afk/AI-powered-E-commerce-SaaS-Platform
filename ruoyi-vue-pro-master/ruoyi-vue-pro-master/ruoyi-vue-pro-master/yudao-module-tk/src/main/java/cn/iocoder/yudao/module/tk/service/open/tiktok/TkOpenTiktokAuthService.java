@@ -155,6 +155,31 @@ public class TkOpenTiktokAuthService {
         return result;
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public TkOpenTiktokAuthVO.ConnectionResp refreshProfile(String connectionId) {
+        String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
+        TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(clientId, connectionId);
+        if (connection == null) {
+            throw TkOpenApiException.notFound("CONNECTION_NOT_FOUND", "connection does not exist");
+        }
+        TkOpenPublishPlatformAdapter adapter = platform();
+        String accessToken = validAccessToken(connection, adapter, false);
+        TkOpenPublishPlatformAdapter.PlatformUser user = adapter.queryUserInfo(accessToken);
+        if (user.isAccessTokenInvalid()) {
+            accessToken = validAccessToken(connection, adapter, true);
+            user = adapter.queryUserInfo(accessToken);
+        }
+        if (!user.isSuccess()) {
+            throw TkOpenApiException.badRequest("PROFILE_QUERY_FAILED",
+                    StrUtil.blankToDefault(user.getFailReason(), "TikTok account profile query failed"));
+        }
+        applyUserProfile(connection, user);
+        connection.setStatsUpdatedAt(LocalDateTime.now());
+        connection.setFailReason(null);
+        connectionMapper.updateById(connection);
+        return toConnectionResp(connection);
+    }
+
     public void disconnect(String connectionId) {
         String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
         TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(clientId, connectionId);
@@ -238,6 +263,10 @@ public class TkOpenTiktokAuthService {
             connection.setDisplayName(user.isSuccess() ? user.getDisplayName() : token.getOpenId());
             connection.setUsername(user.isSuccess() ? user.getUsername() : token.getOpenId());
             connection.setAvatarUrl(user.isSuccess() ? user.getAvatarUrl() : null);
+            if (user.isSuccess()) {
+                applyUserProfile(connection, user);
+                connection.setStatsUpdatedAt(LocalDateTime.now());
+            }
             connection.setScopes(token.getScopes());
             connection.setAccessTokenCipher(secretCipher.encrypt(token.getAccessToken()));
             connection.setRefreshTokenCipher(secretCipher.encrypt(token.getRefreshToken()));
@@ -277,6 +306,18 @@ public class TkOpenTiktokAuthService {
         payload.put("connectionId", connection == null ? null : connection.getConnectionId());
         payload.put("externalAccountId", session.getExternalAccountId());
         payload.put("accountName", connection == null ? null : connection.getDisplayName());
+        if (connection != null) {
+            payload.put("username", connection.getUsername());
+            payload.put("avatarUrl", connection.getAvatarUrl());
+            payload.put("bioDescription", connection.getBioDescription());
+            payload.put("profileDeepLink", connection.getProfileDeepLink());
+            payload.put("verified", connection.getVerified());
+            payload.put("followerCount", connection.getFollowerCount());
+            payload.put("followingCount", connection.getFollowingCount());
+            payload.put("likesCount", connection.getLikesCount());
+            payload.put("videoCount", connection.getVideoCount());
+            payload.put("statsUpdatedAt", connection.getStatsUpdatedAt());
+        }
         payload.put("status", status);
         payload.put("failReason", session.getFailReason());
         payload.put("clientState", session.getClientState());
@@ -301,6 +342,49 @@ public class TkOpenTiktokAuthService {
 
     private TkOpenPublishPlatformAdapter platform() {
         return platformRegistry.getRequired("TIKTOK");
+    }
+
+    private String validAccessToken(TkOpenTiktokConnectionDO connection,
+                                    TkOpenPublishPlatformAdapter adapter, boolean force) {
+        if (!"AUTHORIZED".equals(connection.getAuthStatus())) {
+            throw TkOpenApiException.badRequest("REAUTH_REQUIRED", "TikTok authorization is required");
+        }
+        if (!force && connection.getAccessTokenExpireTime() != null
+                && connection.getAccessTokenExpireTime().isAfter(LocalDateTime.now().plusMinutes(1))) {
+            return secretCipher.decrypt(connection.getAccessTokenCipher());
+        }
+        String refreshToken = secretCipher.decrypt(connection.getRefreshTokenCipher());
+        TkOpenPublishPlatformAdapter.OAuthTokenResult result = adapter.refreshAccessToken(refreshToken);
+        if (!result.isSuccess()) {
+            String reason = StrUtil.blankToDefault(result.getFailReason(), "TikTok token refresh failed");
+            connectionMapper.updateById(new TkOpenTiktokConnectionDO().setId(connection.getId())
+                    .setTokenStatus("INVALID").setAuthStatus("REAUTH_REQUIRED").setFailReason(reason));
+            throw TkOpenApiException.badRequest("REAUTH_REQUIRED", reason);
+        }
+        connection.setAccessTokenCipher(secretCipher.encrypt(result.getAccessToken()));
+        if (StrUtil.isNotBlank(result.getRefreshToken())) {
+            connection.setRefreshTokenCipher(secretCipher.encrypt(result.getRefreshToken()));
+        }
+        connection.setAccessTokenExpireTime(LocalDateTime.now().plusSeconds(defaultLong(result.getAccessTokenExpiresIn(), 86400L)));
+        connection.setRefreshTokenExpireTime(LocalDateTime.now().plusSeconds(defaultLong(result.getRefreshTokenExpiresIn(), 31536000L)));
+        connection.setTokenStatus("NORMAL").setFailReason(null);
+        connectionMapper.updateById(connection);
+        return result.getAccessToken();
+    }
+
+    private void applyUserProfile(TkOpenTiktokConnectionDO connection,
+                                  TkOpenPublishPlatformAdapter.PlatformUser user) {
+        connection.setOpenId(StrUtil.blankToDefault(user.getOpenId(), connection.getOpenId()));
+        connection.setDisplayName(StrUtil.blankToDefault(user.getDisplayName(), connection.getDisplayName()));
+        connection.setUsername(StrUtil.blankToDefault(user.getUsername(), connection.getUsername()));
+        connection.setAvatarUrl(user.getAvatarUrl());
+        connection.setBioDescription(user.getBioDescription());
+        connection.setProfileDeepLink(user.getProfileDeepLink());
+        connection.setVerified(user.getVerified());
+        connection.setFollowerCount(user.getFollowerCount());
+        connection.setFollowingCount(user.getFollowingCount());
+        connection.setLikesCount(user.getLikesCount());
+        connection.setVideoCount(user.getVideoCount());
     }
 
     private long defaultLong(Long value, long fallback) {
@@ -388,6 +472,13 @@ public class TkOpenTiktokAuthService {
         response.setClientState(session.getClientState());
         response.setConnectionId(session.getConnectionId());
         response.setAccountName(session.getAccountName());
+        if (StrUtil.isNotBlank(session.getConnectionId())) {
+            TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(
+                    session.getClientId(), session.getConnectionId());
+            if (connection != null) {
+                applyConnectionProfile(response, connection);
+            }
+        }
         response.setStatus(session.getStatus());
         response.setFailReason(session.getFailReason());
         response.setExpireTime(session.getExpireTime());
@@ -401,9 +492,32 @@ public class TkOpenTiktokAuthService {
         response.setAccountName(connection.getDisplayName());
         response.setUsername(connection.getUsername());
         response.setAvatarUrl(connection.getAvatarUrl());
+        response.setBioDescription(connection.getBioDescription());
+        response.setProfileDeepLink(connection.getProfileDeepLink());
+        response.setVerified(connection.getVerified());
+        response.setFollowerCount(connection.getFollowerCount());
+        response.setFollowingCount(connection.getFollowingCount());
+        response.setLikesCount(connection.getLikesCount());
+        response.setVideoCount(connection.getVideoCount());
+        response.setStatsUpdatedAt(connection.getStatsUpdatedAt());
         response.setAuthStatus(connection.getAuthStatus());
         response.setTokenStatus(connection.getTokenStatus());
         response.setLastAuthTime(connection.getLastAuthTime());
         return response;
+    }
+
+    private void applyConnectionProfile(TkOpenTiktokAuthVO.SessionStatusResp response,
+                                        TkOpenTiktokConnectionDO connection) {
+        response.setAccountName(connection.getDisplayName());
+        response.setUsername(connection.getUsername());
+        response.setAvatarUrl(connection.getAvatarUrl());
+        response.setBioDescription(connection.getBioDescription());
+        response.setProfileDeepLink(connection.getProfileDeepLink());
+        response.setVerified(connection.getVerified());
+        response.setFollowerCount(connection.getFollowerCount());
+        response.setFollowingCount(connection.getFollowingCount());
+        response.setLikesCount(connection.getLikesCount());
+        response.setVideoCount(connection.getVideoCount());
+        response.setStatsUpdatedAt(connection.getStatsUpdatedAt());
     }
 }

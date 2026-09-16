@@ -44,6 +44,12 @@ public class TkOpenTiktokPublishController {
         return TkOpenApiResponse.success(publishService.getMetrics(taskId));
     }
 
+    @PostMapping("/tasks/metrics/batch")
+    public TkOpenApiResponse<TkOpenTiktokPublishVO.MetricsBatchResp> batchMetrics(
+            @Valid @RequestBody TkOpenTiktokPublishVO.MetricsBatchReq request) {
+        return TkOpenApiResponse.success(publishService.getMetricsBatch(request.getTaskIds()));
+    }
+
     @PostMapping("/details/{detailId}/retry")
     public TkOpenApiResponse<Boolean> retry(@PathVariable String detailId) {
         publishService.retry(detailId);

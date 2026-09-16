@@ -43,7 +43,7 @@ public class TkTiktokApiClient {
     private static final String VIDEO_LIST_URL = "https://open.tiktokapis.com/v2/video/list/";
     private static final String VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/"
             + "?fields=id,create_time,cover_image_url,share_url,video_description,duration,height,width,title,embed_html,embed_link,like_count,comment_count,share_count,view_count,is_aigc";
-    private static final String USER_INFO_FIELDS = "open_id,union_id,avatar_url,display_name,username,follower_count,following_count,likes_count,video_count";
+    private static final String USER_INFO_FIELDS = "open_id,union_id,avatar_url,display_name,username,bio_description,profile_deep_link,is_verified,follower_count,following_count,likes_count,video_count";
     private static final int UPLOAD_MAX_ATTEMPTS = 3;
     private static final int UPLOAD_TIMEOUT_MILLIS = 10 * 60 * 1000;
 
@@ -193,15 +193,20 @@ public class TkTiktokApiClient {
         JsonNode error = getErrorNode(root);
         if (!"ok".equals(error.path("code").asText())) {
             return new UserInfo(false, formatApiError(error, "TikTok user_info 查询失败"),
-                    null, null, null, null, null, null, null, null, null);
+                    error.path("code").asText(null), null, null, null, null, null, null, null,
+                    null, null, null, null, null);
         }
         JsonNode user = root.path("data").path("user");
-        return new UserInfo(true, null,
+        return new UserInfo(true, null, null,
                 user.path("open_id").asText(null),
                 user.path("union_id").asText(null),
                 user.path("display_name").asText(null),
                 user.path("username").asText(null),
                 user.path("avatar_url").asText(null),
+                user.path("bio_description").asText(null),
+                user.path("profile_deep_link").asText(null),
+                user.has("is_verified") && !user.path("is_verified").isNull()
+                        ? user.path("is_verified").asBoolean() : null,
                 numberAsLong(user.path("follower_count")),
                 numberAsLong(user.path("following_count")),
                 numberAsLong(user.path("likes_count")),
@@ -568,15 +573,18 @@ public class TkTiktokApiClient {
     }
 
     @Data
-    @AllArgsConstructor
     public static class UserInfo {
         private boolean success;
         private String failReason;
+        private String errorCode;
         private String openId;
         private String unionId;
         private String displayName;
         private String username;
         private String avatarUrl;
+        private String bioDescription;
+        private String profileDeepLink;
+        private Boolean verified;
         private Long followerCount;
         private Long followingCount;
         private Long likesCount;
@@ -584,8 +592,36 @@ public class TkTiktokApiClient {
 
         public UserInfo(boolean success, String failReason, String openId, String unionId,
                         String displayName, String username, String avatarUrl) {
-            this(success, failReason, openId, unionId, displayName, username, avatarUrl,
-                    null, null, null, null);
+            this(success, failReason, null, openId, unionId, displayName, username, avatarUrl,
+                    null, null, null, null, null, null, null);
+        }
+
+        public UserInfo(boolean success, String failReason, String openId, String unionId,
+                        String displayName, String username, String avatarUrl,
+                        Long followerCount, Long followingCount, Long likesCount, Long videoCount) {
+            this(success, failReason, null, openId, unionId, displayName, username, avatarUrl,
+                    null, null, null, followerCount, followingCount, likesCount, videoCount);
+        }
+
+        public UserInfo(boolean success, String failReason, String errorCode, String openId, String unionId,
+                        String displayName, String username, String avatarUrl, String bioDescription,
+                        String profileDeepLink, Boolean verified, Long followerCount, Long followingCount,
+                        Long likesCount, Long videoCount) {
+            this.success = success;
+            this.failReason = failReason;
+            this.errorCode = errorCode;
+            this.openId = openId;
+            this.unionId = unionId;
+            this.displayName = displayName;
+            this.username = username;
+            this.avatarUrl = avatarUrl;
+            this.bioDescription = bioDescription;
+            this.profileDeepLink = profileDeepLink;
+            this.verified = verified;
+            this.followerCount = followerCount;
+            this.followingCount = followingCount;
+            this.likesCount = likesCount;
+            this.videoCount = videoCount;
         }
     }
 

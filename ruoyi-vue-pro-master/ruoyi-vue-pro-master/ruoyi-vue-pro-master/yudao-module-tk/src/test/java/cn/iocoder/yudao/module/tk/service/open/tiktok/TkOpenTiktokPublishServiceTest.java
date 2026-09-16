@@ -14,6 +14,8 @@ import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher;
 import cn.iocoder.yudao.module.tk.service.open.api.TkOpenApiCallbackService;
 import cn.iocoder.yudao.module.tk.service.open.platform.TkOpenPublishPlatformAdapter;
 import cn.iocoder.yudao.module.tk.service.open.platform.TkOpenPublishPlatformRegistry;
+import cn.iocoder.yudao.module.tk.service.open.platform.TkOpenTiktokPlatformAdapter;
+import cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokApiClient;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -26,6 +28,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -242,6 +245,62 @@ class TkOpenTiktokPublishServiceTest {
         assertEquals(6L, property(response, "commentCount"));
         assertEquals(7L, property(response, "shareCount"));
         verify(taskMapper).selectByClientAndTaskId("client_b", "task_metrics");
+    }
+
+    @Test
+    void shouldBatchMetricsByConnectionAndReturnOneItemPerPublishedDetail() throws Exception {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenPublishPlatformRegistry registry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenApiSecretCipher cipher = mock(TkOpenApiSecretCipher.class);
+        TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
+        TkOpenTiktokPlatformAdapter adapter = new TkOpenTiktokPlatformAdapter(apiClient);
+        TkOpenTiktokPublishTaskDO task1 = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task-1").clientId("client-b").status("SUCCESS").build();
+        TkOpenTiktokPublishTaskDO task2 = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task-2").clientId("client-b").status("SUCCESS").build();
+        TkOpenTiktokPublishDetailDO detail1 = TkOpenTiktokPublishDetailDO.builder()
+                .id(1L).detailId("detail-1").taskId("task-1").clientId("client-b")
+                .connectionId("conn-1").publicPostId("post-1").status("SUCCESS").build();
+        TkOpenTiktokPublishDetailDO detail2 = TkOpenTiktokPublishDetailDO.builder()
+                .id(2L).detailId("detail-2").taskId("task-2").clientId("client-b")
+                .connectionId("conn-1").publicPostId("post-2").status("SUCCESS").build();
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
+                .id(3L).connectionId("conn-1").clientId("client-b").authStatus("AUTHORIZED")
+                .accessTokenCipher("access-cipher").accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build();
+        when(taskMapper.selectByClientAndTaskId("client-b", "task-1")).thenReturn(task1);
+        when(taskMapper.selectByClientAndTaskId("client-b", "task-2")).thenReturn(task2);
+        when(detailMapper.selectListByClientAndTaskId("client-b", "task-1"))
+                .thenReturn(Collections.singletonList(detail1));
+        when(detailMapper.selectListByClientAndTaskId("client-b", "task-2"))
+                .thenReturn(Collections.singletonList(detail2));
+        when(connectionMapper.selectByClientAndConnectionId("client-b", "conn-1")).thenReturn(connection);
+        when(cipher.decrypt("access-cipher")).thenReturn("access-token");
+        when(registry.getRequired("TIKTOK")).thenReturn(adapter);
+        when(apiClient.queryVideoShareUrl(eq("access-token"), anyList())).thenReturn(
+                new TkTiktokApiClient.VideoQueryResult(true, null, null, null, null,
+                        Arrays.asList(video("post-1", 101L), video("post-2", 202L))));
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+                mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
+                registry, null, cipher, null);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client-b", "B", "metrics"), "req-batch");
+
+        Object response = TkOpenTiktokPublishService.class.getMethod("getMetricsBatch", List.class)
+                .invoke(service, Arrays.asList("task-1", "task-2"));
+
+        List<?> items = (List<?>) property(response, "items");
+        assertEquals(2, items.size());
+        assertEquals(101L, property(items.get(0), "viewCount"));
+        assertEquals(202L, property(items.get(1), "viewCount"));
+        ArgumentCaptor<List<String>> ids = ArgumentCaptor.forClass(List.class);
+        verify(apiClient).queryVideoShareUrl(eq("access-token"), ids.capture());
+        assertEquals(Arrays.asList("post-1", "post-2"), ids.getValue());
+    }
+
+    private static TkTiktokApiClient.VideoInfo video(String id, long viewCount) {
+        return new TkTiktokApiClient.VideoInfo(id, null, null, "https://tiktok/video/" + id,
+                null, null, null, null, null, null, null, 11L, 12L, 13L, viewCount, null);
     }
 
     @Test

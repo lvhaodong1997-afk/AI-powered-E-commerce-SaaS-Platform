@@ -10,6 +10,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Component
@@ -73,7 +75,9 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
     public PlatformUser queryUserInfo(String accessToken) {
         TkTiktokApiClient.UserInfo user = apiClient.queryUserInfo(accessToken);
         return new PlatformUser(user.isSuccess(), user.getOpenId(), user.getDisplayName(), user.getUsername(),
-                user.getAvatarUrl(), user.getFailReason());
+                user.getAvatarUrl(), user.getBioDescription(), user.getProfileDeepLink(), user.getVerified(),
+                user.getFollowerCount(), user.getFollowingCount(), user.getLikesCount(), user.getVideoCount(),
+                user.getFailReason(), user.getErrorCode());
     }
 
     @Override
@@ -116,23 +120,44 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
             return new VideoMetricsResult(false, null, null, null, null, null, null,
                     "公开视频编号为空", null);
         }
-        TkTiktokApiClient.VideoQueryResult result = apiClient.queryVideoShareUrl(accessToken,
-                Collections.singletonList(publicPostId));
+        return queryVideoMetrics(accessToken, Collections.singletonList(publicPostId))
+                .get(publicPostId);
+    }
+
+    @Override
+    public Map<String, VideoMetricsResult> queryVideoMetrics(String accessToken, List<String> publicPostIds) {
+        Map<String, VideoMetricsResult> resultById = new LinkedHashMap<>();
+        if (publicPostIds == null || publicPostIds.stream().noneMatch(StrUtil::isNotBlank)) {
+            return resultById;
+        }
+        TkTiktokApiClient.VideoQueryResult result = apiClient.queryVideoShareUrl(accessToken, publicPostIds);
         if (!result.isSuccess()) {
-            return new VideoMetricsResult(false, publicPostId, null, null, null, null, null,
-                    result.getFailReason(), result.getErrorCode());
+            for (String publicPostId : publicPostIds) {
+                if (StrUtil.isNotBlank(publicPostId)) {
+                    resultById.put(publicPostId, new VideoMetricsResult(false, publicPostId, null,
+                            null, null, null, null, result.getFailReason(), result.getErrorCode()));
+                }
+            }
+            return resultById;
         }
-        TkTiktokApiClient.VideoInfo video = result.getVideos().stream()
-                .filter(item -> publicPostId.equals(item.getId()))
-                .findFirst()
-                .orElse(result.getVideos().isEmpty() ? null : result.getVideos().get(0));
-        if (video == null) {
-            return new VideoMetricsResult(false, publicPostId, null, null, null, null, null,
-                    "TikTok 视频不存在或暂不可见", null);
+        for (String publicPostId : publicPostIds) {
+            if (StrUtil.isBlank(publicPostId)) {
+                continue;
+            }
+            TkTiktokApiClient.VideoInfo video = result.getVideos().stream()
+                    .filter(item -> publicPostId.equals(item.getId()))
+                    .findFirst().orElse(null);
+            if (video == null) {
+                resultById.put(publicPostId, new VideoMetricsResult(false, publicPostId, null,
+                        null, null, null, null, "TikTok 视频不存在或暂不可见", null));
+                continue;
+            }
+            resultById.put(publicPostId, new VideoMetricsResult(true,
+                    StrUtil.blankToDefault(video.getId(), publicPostId), video.getShareUrl(),
+                    video.getViewCount(), video.getLikeCount(), video.getCommentCount(),
+                    video.getShareCount(), null, null));
         }
-        return new VideoMetricsResult(true, StrUtil.blankToDefault(video.getId(), publicPostId),
-                video.getShareUrl(), video.getViewCount(), video.getLikeCount(), video.getCommentCount(),
-                video.getShareCount(), null, null);
+        return resultById;
     }
 
     @Override

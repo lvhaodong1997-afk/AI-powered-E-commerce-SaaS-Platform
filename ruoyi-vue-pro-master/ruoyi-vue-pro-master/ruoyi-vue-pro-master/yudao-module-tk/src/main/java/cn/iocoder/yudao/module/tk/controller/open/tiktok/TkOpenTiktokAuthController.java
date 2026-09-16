@@ -55,6 +55,12 @@ public class TkOpenTiktokAuthController {
         return TkOpenApiResponse.success(authService.getConnections(externalAccountId, status));
     }
 
+    @PostMapping("/connections/{connectionId}/profile/refresh")
+    public TkOpenApiResponse<TkOpenTiktokAuthVO.ConnectionResp> refreshProfile(
+            @PathVariable String connectionId) {
+        return TkOpenApiResponse.success(authService.refreshProfile(connectionId));
+    }
+
     @PostMapping("/connections/{connectionId}/disconnect")
     public TkOpenApiResponse<Boolean> disconnect(@PathVariable String connectionId) {
         authService.disconnect(connectionId);

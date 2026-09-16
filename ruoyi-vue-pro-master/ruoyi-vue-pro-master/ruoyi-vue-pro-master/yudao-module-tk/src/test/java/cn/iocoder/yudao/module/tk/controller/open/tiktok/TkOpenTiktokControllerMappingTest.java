@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.controller.open.tiktok;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 
@@ -34,5 +35,24 @@ class TkOpenTiktokControllerMappingTest {
                 .getDeclaredMethod("metrics", String.class).getAnnotation(GetMapping.class);
 
         assertTrue(Arrays.asList(mapping.value()).contains("/tasks/{taskId}/metrics"));
+    }
+
+    @Test
+    void publishControllerExposesBatchTaskMetricsEndpoint() throws Exception {
+        PostMapping mapping = TkOpenTiktokPublishController.class
+                .getDeclaredMethod("batchMetrics", Class.forName(
+                        "cn.iocoder.yudao.module.tk.controller.open.tiktok.vo.TkOpenTiktokPublishVO$MetricsBatchReq"))
+                .getAnnotation(PostMapping.class);
+
+        assertTrue(Arrays.asList(mapping.value()).contains("/tasks/metrics/batch"));
+    }
+
+    @Test
+    void authControllerExposesProfileRefreshEndpoint() throws Exception {
+        PostMapping mapping = TkOpenTiktokAuthController.class
+                .getDeclaredMethod("refreshProfile", String.class)
+                .getAnnotation(PostMapping.class);
+
+        assertTrue(Arrays.asList(mapping.value()).contains("/connections/{connectionId}/profile/refresh"));
     }
 }

@@ -115,4 +115,18 @@ public final class TkOpenTiktokPublishVO {
         private LocalDateTime metricsLastSyncTime;
         private String metricsFailReason;
     }
+
+    @Data
+    public static class MetricsBatchReq {
+        @NotEmpty
+        @Size(max = 50)
+        private List<String> taskIds;
+    }
+
+    @Data
+    public static class MetricsBatchResp {
+        private Integer requestedCount;
+        private Integer resultCount;
+        private List<MetricsResp> items;
+    }
 }

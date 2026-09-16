@@ -117,7 +117,7 @@ public class TkSocialMediaService {
         String url = files.createFile(bytes, UUID.randomUUID() + (video ? ".mp4" : ".jpg"),
                 "tk/" + current.getTenantId() + "/" + companyId + "/social-media", type);
         try {
-            validateReadUrl(files.presignGetUrl(url, 86400));
+            validateReadUrl(resolveReadableUrl(url));
             TkSocialMediaDO media = new TkSocialMediaDO();
             media.setTenantId(current.getTenantId()); media.setCompanyId(companyId); media.setCreator(current.getUserIdString());
             media.setFileName(name.substring(0, Math.min(255, name.length()))); media.setContentType(type);
@@ -178,9 +178,18 @@ public class TkSocialMediaService {
 
     public String readUrl(TkSocialMediaDO media) {
         if (media == null) return null;
-        String url = files.presignGetUrl(media.getPublicUrl(), 86400);
+        String url = resolveReadableUrl(media.getPublicUrl());
         validateReadUrl(url);
         return url;
+    }
+
+    private String resolveReadableUrl(String url) {
+        try {
+            String readableUrl = files.presignGetUrl(url, 86400);
+            return readableUrl == null || readableUrl.trim().isEmpty() ? url : readableUrl;
+        } catch (UnsupportedOperationException ex) {
+            return url;
+        }
     }
 
     public static void validateForPlatform(TkSocialMediaDO media,String platform) {

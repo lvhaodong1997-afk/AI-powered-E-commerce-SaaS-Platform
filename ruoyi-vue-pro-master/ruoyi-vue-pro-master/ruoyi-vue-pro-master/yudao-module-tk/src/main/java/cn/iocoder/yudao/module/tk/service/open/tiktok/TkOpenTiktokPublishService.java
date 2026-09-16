@@ -274,6 +274,136 @@ public class TkOpenTiktokPublishService {
         }
     }
 
+    public TkOpenTiktokPublishVO.MetricsBatchResp getMetricsBatch(List<String> taskIds) {
+        if (taskIds == null || taskIds.isEmpty() || taskIds.size() > 50) {
+            throw TkOpenApiException.badRequest("PUBLISH_METRICS_BATCH_INVALID",
+                    "taskIds must contain between 1 and 50 items");
+        }
+        String clientId = currentClient();
+        LinkedHashSet<String> requestedTaskIds = taskIds.stream()
+                .filter(StrUtil::isNotBlank).collect(Collectors.toCollection(LinkedHashSet::new));
+        if (requestedTaskIds.isEmpty()) {
+            throw TkOpenApiException.badRequest("PUBLISH_METRICS_BATCH_INVALID",
+                    "taskIds must contain at least one non-blank item");
+        }
+
+        Map<String, List<TkOpenTiktokPublishDetailDO>> detailsByTask = new LinkedHashMap<>();
+        Map<String, List<TkOpenTiktokPublishVO.MetricsResp>> immediateByTask = new LinkedHashMap<>();
+        Map<String, TkOpenTiktokPublishVO.MetricsResp> responseByDetail = new HashMap<>();
+        Map<String, List<TkOpenTiktokPublishDetailDO>> detailsByConnection = new LinkedHashMap<>();
+
+        for (String taskId : requestedTaskIds) {
+            TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(clientId, taskId);
+            if (task == null) {
+                immediateByTask.put(taskId, Collections.singletonList(batchFailure(taskId, "NOT_FOUND",
+                        "publish task does not exist")));
+                continue;
+            }
+            List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectListByClientAndTaskId(clientId, taskId);
+            if (details.isEmpty()) {
+                immediateByTask.put(taskId, Collections.singletonList(batchFailure(taskId, "NOT_FOUND",
+                        "publish detail does not exist")));
+                continue;
+            }
+            List<TkOpenTiktokPublishDetailDO> resolvedDetails = new ArrayList<>();
+            for (TkOpenTiktokPublishDetailDO detail : details) {
+                if (StrUtil.isBlank(detail.getPublicPostId()) && StrUtil.isNotBlank(detail.getPublishId())) {
+                    syncDetail(detail);
+                    detail = detailMapper.selectByClientAndDetailId(clientId, detail.getDetailId());
+                }
+                if (detail == null) {
+                    continue;
+                }
+                resolvedDetails.add(detail);
+                if (StrUtil.isBlank(detail.getPublicPostId())) {
+                    responseByDetail.put(detail.getDetailId(),
+                            toMetricsResp(detail, metricsStateBeforePublicPost(detail), detail.getMetricsFailReason()));
+                } else {
+                    detailsByConnection.computeIfAbsent(detail.getConnectionId(), key -> new ArrayList<>()).add(detail);
+                }
+            }
+            detailsByTask.put(taskId, resolvedDetails);
+        }
+
+        for (Map.Entry<String, List<TkOpenTiktokPublishDetailDO>> entry : detailsByConnection.entrySet()) {
+            String connectionId = entry.getKey();
+            List<TkOpenTiktokPublishDetailDO> details = entry.getValue();
+            TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(clientId, connectionId);
+            if (connection == null) {
+                for (TkOpenTiktokPublishDetailDO detail : details) {
+                    responseByDetail.put(detail.getDetailId(), toMetricsResp(detail, "FAILED",
+                            "TikTok connection does not exist"));
+                }
+                continue;
+            }
+            if (!"AUTHORIZED".equals(connection.getAuthStatus())) {
+                for (TkOpenTiktokPublishDetailDO detail : details) {
+                    responseByDetail.put(detail.getDetailId(), toMetricsResp(detail, "REAUTH_REQUIRED",
+                            StrUtil.blankToDefault(connection.getFailReason(), "TikTok authorization is required")));
+                }
+                continue;
+            }
+            try {
+                TkOpenPublishPlatformAdapter adapter = platform();
+                String token = validAccessToken(connection, adapter, false);
+                for (int offset = 0; offset < details.size(); offset += 20) {
+                    List<TkOpenTiktokPublishDetailDO> chunk = details.subList(offset,
+                            Math.min(offset + 20, details.size()));
+                    List<String> publicPostIds = chunk.stream().map(TkOpenTiktokPublishDetailDO::getPublicPostId)
+                            .collect(Collectors.toList());
+                    Map<String, TkOpenPublishPlatformAdapter.VideoMetricsResult> metrics =
+                            adapter.queryVideoMetrics(token, publicPostIds);
+                    if (containsInvalidAccessToken(metrics)) {
+                        token = validAccessToken(connection, adapter, true);
+                        metrics = adapter.queryVideoMetrics(token, publicPostIds);
+                    }
+                    for (TkOpenTiktokPublishDetailDO detail : chunk) {
+                        TkOpenPublishPlatformAdapter.VideoMetricsResult result = metrics.get(detail.getPublicPostId());
+                        if (result == null) {
+                            responseByDetail.put(detail.getDetailId(), persistMetricsFailure(detail, "UNAVAILABLE",
+                                    "TikTok video metrics are unavailable"));
+                        } else if (result.isAccessTokenInvalid()) {
+                            responseByDetail.put(detail.getDetailId(), persistMetricsFailure(detail,
+                                    "REAUTH_REQUIRED", "TikTok access token is invalid"));
+                        } else if (!result.isSuccess()) {
+                            responseByDetail.put(detail.getDetailId(), persistMetricsFailure(detail, "UNAVAILABLE",
+                                    StrUtil.blankToDefault(result.getFailReason(), "TikTok video metrics are unavailable")));
+                        } else {
+                            responseByDetail.put(detail.getDetailId(), persistMetrics(detail, result));
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                String reason = StrUtil.maxLength(StrUtil.blankToDefault(ex.getMessage(),
+                        "TikTok video metrics query failed"), 1000);
+                String status = "AUTHORIZED".equals(connection.getAuthStatus()) ? "FAILED" : "REAUTH_REQUIRED";
+                for (TkOpenTiktokPublishDetailDO detail : details) {
+                    responseByDetail.put(detail.getDetailId(), persistMetricsFailure(detail, status, reason));
+                }
+            }
+        }
+
+        List<TkOpenTiktokPublishVO.MetricsResp> items = new ArrayList<>();
+        for (String taskId : requestedTaskIds) {
+            List<TkOpenTiktokPublishVO.MetricsResp> immediate = immediateByTask.get(taskId);
+            if (immediate != null) {
+                items.addAll(immediate);
+                continue;
+            }
+            for (TkOpenTiktokPublishDetailDO detail : detailsByTask.getOrDefault(taskId, Collections.emptyList())) {
+                TkOpenTiktokPublishVO.MetricsResp response = responseByDetail.get(detail.getDetailId());
+                if (response != null) {
+                    items.add(response);
+                }
+            }
+        }
+        TkOpenTiktokPublishVO.MetricsBatchResp response = new TkOpenTiktokPublishVO.MetricsBatchResp();
+        response.setRequestedCount(requestedTaskIds.size());
+        response.setResultCount(items.size());
+        response.setItems(items);
+        return response;
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public void retry(String detailId) {
         String clientId = currentClient();
@@ -656,6 +786,20 @@ public class TkOpenTiktokPublishService {
         if ("SEND_TO_USER_INBOX".equalsIgnoreCase(detail.getTiktokStatus())) return "UNAVAILABLE";
         if ("PENDING".equals(detail.getStatus())) return "WAITING_PUBLISH";
         return StrUtil.blankToDefault(detail.getMetricsStatus(), "WAITING_PUBLIC");
+    }
+
+    private TkOpenTiktokPublishVO.MetricsResp batchFailure(String taskId, String status, String reason) {
+        TkOpenTiktokPublishVO.MetricsResp response = new TkOpenTiktokPublishVO.MetricsResp();
+        response.setTaskId(taskId);
+        response.setMetricsStatus(status);
+        response.setMetricsFailReason(reason);
+        return response;
+    }
+
+    private boolean containsInvalidAccessToken(
+            Map<String, TkOpenPublishPlatformAdapter.VideoMetricsResult> metrics) {
+        return metrics != null && metrics.values().stream().anyMatch(Objects::nonNull)
+                && metrics.values().stream().anyMatch(TkOpenPublishPlatformAdapter.VideoMetricsResult::isAccessTokenInvalid);
     }
 
     private TkOpenTiktokPublishVO.MetricsResp persistMetrics(TkOpenTiktokPublishDetailDO detail,
