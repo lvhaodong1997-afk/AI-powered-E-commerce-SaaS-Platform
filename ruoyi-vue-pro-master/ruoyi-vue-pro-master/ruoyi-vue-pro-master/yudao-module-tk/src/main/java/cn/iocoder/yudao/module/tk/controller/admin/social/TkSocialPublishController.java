@@ -28,8 +28,22 @@ public class TkSocialPublishController {
         Map<String,Object> values=new LinkedHashMap<>();
         values.put("enabled",service.isEnabled()); values.put("mediaTypes",Arrays.asList("IMAGE","VIDEO"));
         values.put("platforms",Arrays.asList("INSTAGRAM","FACEBOOK_PAGE"));
-        values.put("maxVideoBytes",TkSocialMediaService.MAX_VIDEO_BYTES); values.put("maxVideoSizeMb",100);
+        values.put("maxVideoBytes",TkSocialMediaService.MAX_VIDEO_BYTES); values.put("maxVideoSizeMb",1024);
         return success(values);
+    }
+    @PostMapping("/media/video-upload-session")
+    @PreAuthorize("@ss.hasPermission('tk:social-publish:create')")
+    public CommonResult<TkSocialVideoUploadSessionRespVO> createVideoUploadSession(@Valid @RequestBody TkSocialVideoUploadSessionReqVO request) {
+        service.requireEnabled();
+        return success(media.createDirectVideoUpload(request.getFileName(), request.getFileSize(), request.getContentType()));
+    }
+    @PostMapping("/media/video-upload-complete")
+    @PreAuthorize("@ss.hasPermission('tk:social-publish:create')")
+    public CommonResult<Map<String,Object>> completeVideoUpload(@Valid @RequestBody TkSocialVideoUploadCompleteReqVO request) {
+        service.requireEnabled();
+        TkSocialMediaDO value = media.completeDirectVideoUpload(request);
+        Map<String,Object> result=fields(value,"id","fileName","mediaType","fileSize","status","width","height","durationSeconds","frameRate");
+        result.put("publicUrl",media.readUrl(value)); return success(result);
     }
     @PostMapping("/media/upload")
     @PreAuthorize("@ss.hasPermission('tk:social-publish:create')")

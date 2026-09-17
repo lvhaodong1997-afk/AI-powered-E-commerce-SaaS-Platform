@@ -3,6 +3,7 @@ import type {
   SocialPublishApi, SocialAccount, SocialAuthSession, SocialCapabilities, SocialCreate,
   SocialDetail, SocialMedia, SocialPlatform, SocialTask, FacebookPage
 } from '@/api/tk/socialPublish'
+import { uploadSocialVideoToOss } from '@/api/tk/socialPublish'
 
 export const canRetrySocialDetail = (status: string) => ['FAILED', 'REAUTH_REQUIRED'].includes(status)
 export const isSocialAccountAuthorized = (status: string) => ['AUTHORIZED', 'ACTIVE'].includes(status)
@@ -42,7 +43,7 @@ export function createMetaPublishController(
     details: [] as SocialDetail[], detailTotal: 0, detailTaskId: undefined as number | undefined,
     detailQuery: { pageNo: 1, pageSize: 10 }, lastTaskId: undefined as number | undefined,
     draft: { title: '', accountIds: [] as number[], instagramCaption: '', facebookMessage: '', generationTaskId: undefined as number | undefined },
-    media: undefined as SocialMedia | undefined, uploading: false, submitting: false,
+    media: undefined as SocialMedia | undefined, uploading: false, uploadPercent: 0, submitting: false,
     auth: { status: 'PENDING', message: '' } as SocialAuthSession,
     authBusy: false, sessionId: '', authPlatform: undefined as SocialPlatform | undefined,
     pages: [] as FacebookPage[], pageIds: [] as string[], pagePickerVisible: false, binding: false,
@@ -249,6 +250,26 @@ export function createMetaPublishController(
     if (!Number.isSafeInteger(id) || id <= 0) throw new Error('请选择有效的成片')
     state.media = undefined; state.draft.generationTaskId = id
   }
+
+  function readVideoMetadata(file: File): Promise<{ width: number; height: number; durationSeconds: number; frameRate: number }> {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video')
+      const source = URL.createObjectURL(file)
+      const cleanup = () => { URL.revokeObjectURL(source); video.remove() }
+      video.preload = 'metadata'
+      video.onloadedmetadata = () => {
+        const metadata = { width: video.videoWidth, height: video.videoHeight, durationSeconds: video.duration, frameRate: 30 }
+        cleanup()
+        if (!metadata.width || !metadata.height || !Number.isFinite(metadata.durationSeconds) || metadata.durationSeconds <= 0) {
+          reject(new Error('无法读取视频元数据，请重新选择 MP4 视频'))
+        } else resolve(metadata)
+      }
+      video.onerror = () => { cleanup(); reject(new Error('无法读取视频元数据，请重新选择 MP4 视频')) }
+      video.src = source
+      video.load()
+    })
+  }
+
   async function upload(file: File) {
     requirePermission('tk:social-publish:create')
     if (state.uploading || state.submitting) return
@@ -258,12 +279,21 @@ export function createMetaPublishController(
     const maxMb = type === 'VIDEO' ? state.maxVideoSizeMb : 8
     if (!file.size || file.size > (type === 'VIDEO' ? state.maxVideoBytes : 8 * 1024 * 1024)) throw new Error(`文件大小须大于 0 且不超过 ${maxMb} MB`)
     const version = epoch
-    state.uploading = true
+    state.uploading = true; state.uploadPercent = 0
     try {
-      const media = await api.upload(file)
+      let media: SocialMedia
+      if (type === 'VIDEO') {
+        const metadata = await readVideoMetadata(file)
+        const session = await api.videoUploadSession({ fileName: file.name, fileSize: file.size, contentType: 'video/mp4' })
+        await uploadSocialVideoToOss(session, file, percent => { if (live(version)) state.uploadPercent = percent })
+        media = await api.videoUploadComplete({
+          uploadId: session.uploadId, fileName: file.name, fileSize: file.size, contentType: 'video/mp4',
+          objectKey: session.objectKey, ...metadata
+        })
+      } else media = await api.upload(file)
       if (!live(version)) return
       state.media = media; state.draft.generationTaskId = undefined
-    } finally { state.uploading = false }
+    } finally { state.uploading = false; state.uploadPercent = 0 }
   }
   async function submit() {
     requirePermission('tk:social-publish:create')

@@ -81,6 +81,26 @@ public class TkUploadSessionService {
         sessionMapper.insert(session);
     }
 
+    public void createSocial(String uploadId, Long companyId, String fileName, Long fileSize,
+                             String contentType, String storageMode) {
+        TkUserScope scope = dataScopeService.getCurrentScope();
+        int expireHours = generationProperties.getUpload().getSessionExpireHours() == null
+                ? 24 : Math.max(1, generationProperties.getUpload().getSessionExpireHours());
+        TkUploadSessionDO session = new TkUploadSessionDO()
+                .setUploadId(uploadId)
+                .setCompanyId(companyId)
+                .setLibraryId(null)
+                .setFileName(fileName)
+                .setFileSize(fileSize)
+                .setContentType(contentType)
+                .setStorageMode(storageMode)
+                .setStatus("UPLOADING")
+                .setExpiresAt(LocalDateTime.now().plusHours(expireHours));
+        session.setTenantId(scope.getTenantId());
+        session.setCreator(scope.getUserIdString());
+        sessionMapper.insert(session);
+    }
+
     public TkUploadSessionDO validateAccessible(String uploadId) {
         TkUploadSessionDO session = findAccessible(uploadId);
         if (session == null) {
@@ -141,6 +161,13 @@ public class TkUploadSessionService {
                 .setStatus("CANCELLED").setCancelledTime(LocalDateTime.now()));
         if ("local".equalsIgnoreCase(session.getStorageMode())) {
             cn.hutool.core.io.FileUtil.del(localUploadStorageService.getTmpDir(uploadId).toFile());
+        } else if ("social-oss".equalsIgnoreCase(session.getStorageMode())
+                && ossObjectStorageService != null && ossObjectStorageService.isConfigured()) {
+            try {
+                ossObjectStorageService.deleteObject(ossObjectStorageService.buildSocialObjectKey(session));
+            } catch (Exception ex) {
+                log.warn("[cancel][failed to delete social OSS object, uploadId({})]", uploadId, ex);
+            }
         }
     }
 
@@ -160,6 +187,14 @@ public class TkUploadSessionService {
                     ossObjectStorageService.deleteObject(ossObjectStorageService.buildTiktokObjectKey(session));
                 } catch (Exception ex) {
                     log.warn("[expireSessions][failed to delete expired TikTok OSS object, uploadId({})]",
+                            session.getUploadId(), ex);
+                }
+            } else if ("social-oss".equalsIgnoreCase(session.getStorageMode())
+                    && ossObjectStorageService != null && ossObjectStorageService.isConfigured()) {
+                try {
+                    ossObjectStorageService.deleteObject(ossObjectStorageService.buildSocialObjectKey(session));
+                } catch (Exception ex) {
+                    log.warn("[expireSessions][failed to delete expired social OSS object, uploadId({})]",
                             session.getUploadId(), ex);
                 }
             }

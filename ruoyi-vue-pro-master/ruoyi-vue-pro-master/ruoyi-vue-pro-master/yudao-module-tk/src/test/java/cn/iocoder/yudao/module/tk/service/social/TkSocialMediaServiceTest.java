@@ -20,6 +20,17 @@ class TkSocialMediaServiceTest {
     private final TkDataScopeService scope = mock(TkDataScopeService.class);
     private final TkSocialMediaService service = new TkSocialMediaService(files, mapper, scope);
 
+    @Test void acceptsVideoLimitOfOneGiB() {
+        assertEquals(1L * 1024 * 1024 * 1024, TkSocialMediaService.MAX_VIDEO_BYTES);
+    }
+
+    @Test void rejectsIncompleteDirectUploadMetadata() {
+        assertThrows(IllegalArgumentException.class,
+                () -> TkSocialMediaService.validateDirectVideoMetadata(0, 1080, 10D, 30D));
+        assertThrows(IllegalArgumentException.class,
+                () -> TkSocialMediaService.validateDirectVideoMetadata(1080, 1920, 10D, 10D));
+    }
+
     @Test void rejectsFakeJpegBeforeWritingStorage() {
         assertThrows(IllegalArgumentException.class, () -> service.upload(
                 new MockMultipartFile("file", "fake.jpg", "image/jpeg", new byte[]{1,2,3})));

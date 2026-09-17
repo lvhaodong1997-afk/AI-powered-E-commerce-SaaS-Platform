@@ -43,7 +43,7 @@ public class TkSocialVideoInspector {
                     .redirectError(ProcessBuilder.Redirect.DISCARD).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
             if (!process.waitFor(120,TimeUnit.SECONDS) || process.exitValue()!=0)
                 throw new IllegalArgumentException("发布副本音频转换失败或超时");
-            if (Files.size(output)>TkSocialMediaService.MAX_VIDEO_BYTES) throw new IllegalArgumentException("转换后视频不能超过 100MB");
+            if (Files.size(output)>TkSocialMediaService.MAX_VIDEO_BYTES) throw new IllegalArgumentException("转换后视频不能超过 1GB");
             return Files.readAllBytes(output);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt(); throw new IllegalStateException("发布副本准备已中断");

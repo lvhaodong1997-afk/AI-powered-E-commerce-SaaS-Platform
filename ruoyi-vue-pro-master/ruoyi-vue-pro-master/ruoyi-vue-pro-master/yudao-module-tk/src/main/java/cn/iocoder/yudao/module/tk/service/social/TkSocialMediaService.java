@@ -1,10 +1,13 @@
 package cn.iocoder.yudao.module.tk.service.social;
 
 import cn.iocoder.yudao.module.infra.api.file.FileApi;
+import cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadCompleteReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadSessionRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialMediaDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialMediaMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialPublishTaskMapper;
 import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialPublishTaskDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkUploadSessionDO;
 import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
@@ -16,6 +19,10 @@ import java.time.LocalDateTime;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.service.generation.TkGenerationTaskService;
 import cn.iocoder.yudao.module.tk.service.upload.TkGenerationOutputStorageService;
+import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService;
+import cn.iocoder.yudao.module.tk.service.upload.TkOssPostPolicySigner;
+import cn.iocoder.yudao.module.tk.service.upload.TkUploadSessionService;
+import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import org.springframework.stereotype.Service;
@@ -28,12 +35,13 @@ import java.io.*;
 import java.net.URI;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 
 @Service
 public class TkSocialMediaService {
-    public static final long MAX_VIDEO_BYTES = 100L * 1024 * 1024;
+    public static final long MAX_VIDEO_BYTES = 1L * 1024 * 1024 * 1024;
     private static final long MAX_IMAGE_BYTES = 8L * 1024 * 1024;
     private final FileApi files;
     private final TkSocialMediaMapper mapper;
@@ -45,10 +53,100 @@ public class TkSocialMediaService {
     @Resource private TkGenerationOutputStorageService outputStorage;
     @Resource private TkSocialPublishTaskMapper tasks;
     @Resource private PlatformTransactionManager transactionManager;
+    @Resource private TkGenerationProperties generationProperties;
+    @Resource private TkOssObjectStorageService ossObjectStorageService;
+    @Resource private TkUploadSessionService uploadSessionService;
     @Value("${tk.social.enabled:false}") private boolean enabled;
 
     public TkSocialMediaService(FileApi files, TkSocialMediaMapper mapper, TkDataScopeService scope) {
         this.files = files; this.mapper = mapper; this.scope = scope;
+    }
+
+    public TkSocialVideoUploadSessionRespVO createDirectVideoUpload(String fileName, Long fileSize, String contentType) {
+        validateDirectVideoFile(fileName, fileSize);
+        TkUserScope current = scope.getCurrentScope();
+        Long companyId = scope.getWritableCompanyId(null);
+        if (!current.hasTenantScope() || companyId == null) throw new IllegalArgumentException("请先选择租户");
+        validateOssUploadConfig();
+        String uploadId = UUID.randomUUID().toString().replace("-", "");
+        String objectKey = socialObjectKey(current.getTenantId(), companyId, uploadId);
+        TkOssPostPolicySigner.Policy policy = TkOssPostPolicySigner.signExact(
+                generationProperties.getUpload().getOss().getAccessKeyId(),
+                generationProperties.getUpload().getOss().getAccessKeySecret(), objectKey,
+                MAX_VIDEO_BYTES, generationProperties.getUpload().getOss().getPolicyExpireSeconds(), Clock.systemUTC());
+        uploadSessionService.createSocial(uploadId, companyId, fileName, fileSize,
+                "video/mp4", "social-oss");
+        TkSocialVideoUploadSessionRespVO response = new TkSocialVideoUploadSessionRespVO();
+        response.setUploadId(uploadId);
+        response.setUploadUrl(ossObjectStorageService.browserUploadUrl());
+        response.setObjectKey(objectKey);
+        response.setPublicUrl(ossObjectStorageService.publicUrlForObjectKey(objectKey));
+        response.setAccessKeyId(policy.getAccessKeyId());
+        response.setPolicy(policy.getPolicy());
+        response.setSignature(policy.getSignature());
+        response.setSuccessActionStatus("200");
+        response.setExpiration(policy.getExpiration());
+        return response;
+    }
+
+    public TkSocialMediaDO completeDirectVideoUpload(TkSocialVideoUploadCompleteReqVO request) {
+        if (request == null) throw new IllegalArgumentException("上传信息不能为空");
+        validateDirectVideoFile(request.getFileName(), request.getFileSize());
+        validateDirectVideoMetadata(request.getWidth(), request.getHeight(), request.getDurationSeconds(), request.getFrameRate());
+        TkUploadSessionDO session = uploadSessionService.validateAccessible(request.getUploadId());
+        TkUserScope current = scope.getCurrentScope();
+        Long companyId = scope.getWritableCompanyId(null);
+        if (!Objects.equals(session.getTenantId(), current.getTenantId())
+                || !Objects.equals(session.getCompanyId(), companyId)
+                || !Objects.equals(session.getFileName(), request.getFileName())
+                || !Objects.equals(session.getFileSize(), request.getFileSize())) {
+            throw new IllegalArgumentException("上传会话与文件信息不一致");
+        }
+        String expectedKey = socialObjectKey(session.getTenantId(), session.getCompanyId(), session.getUploadId());
+        if (!expectedKey.equals(request.getObjectKey())) throw new IllegalArgumentException("OSS 上传对象无效");
+        validateOssUploadConfig();
+        TkOssObjectStorageService.ObjectMetadata metadata = ossObjectStorageService.headObject(expectedKey);
+        if (metadata.getContentLength() != request.getFileSize()) throw new IllegalArgumentException("OSS 文件大小和上传记录不一致");
+        TkSocialMediaDO media = new TkSocialMediaDO();
+        media.setTenantId(session.getTenantId()); media.setCompanyId(session.getCompanyId()); media.setCreator(session.getCreator());
+        media.setFileName(request.getFileName().substring(0, Math.min(255, request.getFileName().length())));
+        media.setContentType("video/mp4"); media.setMediaType("VIDEO"); media.setFileSize(metadata.getContentLength());
+        media.setObjectKey(expectedKey); media.setPublicUrl(ossObjectStorageService.publicUrlForObjectKey(expectedKey));
+        media.setStatus("READY"); media.setWidth(request.getWidth()); media.setHeight(request.getHeight());
+        media.setDurationSeconds(request.getDurationSeconds()); media.setFrameRate(request.getFrameRate());
+        mapper.insert(media);
+        uploadSessionService.markCompleted(request.getUploadId());
+        return media;
+    }
+
+    private void validateDirectVideoFile(String fileName, Long fileSize) {
+        String name = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
+        if (!name.endsWith(".mp4")) throw new IllegalArgumentException("直传仅支持 MP4 视频");
+        if (fileSize == null || fileSize <= 0) throw new IllegalArgumentException("文件大小必须大于 0");
+        if (fileSize > MAX_VIDEO_BYTES) throw new IllegalArgumentException("视频不能超过 1GB");
+    }
+
+    public static void validateDirectVideoMetadata(Integer width, Integer height, Double durationSeconds, Double frameRate) {
+        if (width == null || height == null || width < 1 || height < 1
+                || durationSeconds == null || !Double.isFinite(durationSeconds) || durationSeconds <= 0
+                || frameRate == null || !Double.isFinite(frameRate) || frameRate < 23 || frameRate > 60) {
+            throw new IllegalArgumentException("视频元数据无效，请重新选择视频");
+        }
+    }
+
+    private void validateOssUploadConfig() {
+        TkGenerationProperties.Upload upload = generationProperties == null ? null : generationProperties.getUpload();
+        TkGenerationProperties.Oss oss = upload == null ? null : upload.getOss();
+        if (upload == null || !"oss".equalsIgnoreCase(upload.getStorageType()) || oss == null
+                || !Boolean.TRUE.equals(oss.getEnabled()) || !ossObjectStorageService.isConfigured()) {
+            throw new IllegalStateException("OSS 上传未配置，请先完成 OSS 配置");
+        }
+    }
+
+    private String socialObjectKey(Long tenantId, Long companyId, String uploadId) {
+        String prefix = generationProperties.getUpload().getOss().getUploadPathPrefix();
+        prefix = prefix == null || prefix.trim().isEmpty() ? "tk" : prefix.replaceAll("/+$", "");
+        return prefix + "/" + tenantId + "/" + companyId + "/social-media/" + uploadId + ".mp4";
     }
 
     public TkSocialMediaDO upload(MultipartFile file) {
@@ -57,7 +155,7 @@ public class TkSocialMediaService {
         boolean video = name.toLowerCase(Locale.ROOT).endsWith(".mp4");
         if (!video && !name.toLowerCase(Locale.ROOT).matches(".*\\.jpe?g$")) throw new IllegalArgumentException("支持 MP4 视频和 JPEG 图片");
         long limit = video ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
-        if (file.getSize() > limit) throw new IllegalArgumentException(video ? "视频不能超过 100MB" : "图片不能超过 8MB");
+        if (file.getSize() > limit) throw new IllegalArgumentException(video ? "视频不能超过 1GB" : "图片不能超过 8MB");
         if (!uploadSlot.tryAcquire()) throw new IllegalArgumentException("已有媒体正在上传，请稍后重试");
         try (InputStream input = file.getInputStream()) {
             return save(readBounded(input, limit), name, video);
@@ -82,7 +180,7 @@ public class TkSocialMediaService {
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(60000);
             if (connection.getResponseCode() != 200) throw new IllegalArgumentException("生成视频读取失败，请检查存储访问配置");
-            if (connection.getContentLengthLong() > MAX_VIDEO_BYTES) throw new IllegalArgumentException("视频不能超过 100MB");
+            if (connection.getContentLengthLong() > MAX_VIDEO_BYTES) throw new IllegalArgumentException("视频不能超过 1GB");
             try (InputStream input = connection.getInputStream()) {
                 return save(readBounded(input, MAX_VIDEO_BYTES), "generation-" + taskId + ".mp4", true);
             }
@@ -184,6 +282,8 @@ public class TkSocialMediaService {
     }
 
     private String resolveReadableUrl(String url) {
+        String ossUrl = ossObjectStorageService == null ? url : ossObjectStorageService.resolveReadUrl(url);
+        if (!Objects.equals(ossUrl, url)) return ossUrl;
         try {
             String readableUrl = files.presignGetUrl(url, 86400);
             return readableUrl == null || readableUrl.trim().isEmpty() ? url : readableUrl;

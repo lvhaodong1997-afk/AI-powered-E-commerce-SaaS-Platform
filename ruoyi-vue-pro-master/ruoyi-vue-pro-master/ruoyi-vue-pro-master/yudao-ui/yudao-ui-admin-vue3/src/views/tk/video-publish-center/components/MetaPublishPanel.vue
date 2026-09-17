@@ -67,7 +67,8 @@
                 <MetaGeneratedPicker :disabled="state.uploading || state.submitting || !state.mediaTypes.includes('VIDEO')" :facebook-selected="facebookSelected" @select="selectGenerated" />
                 <el-button v-if="state.media || state.draft.generationTaskId" :disabled="state.uploading" @click="controller.clearMedia">移除媒体</el-button>
               </div>
-              <p class="hint">MP4 最大 {{ state.maxVideoSizeMb }} MB，JPEG 最大 8 MB。Instagram 必须选择媒体；Facebook 可只填写正文。服务端将进一步校验视频格式和平台限制。</p>
+              <el-progress v-if="state.uploading" :percentage="state.uploadPercent" :status="state.uploadPercent === 100 ? 'success' : undefined" />
+              <p class="hint">MP4 最大 {{ state.maxVideoSizeMb }} MB，JPEG 最大 8 MB。视频将直接上传到 OSS，Instagram 必须选择媒体；Facebook 可只填写正文。服务端将进一步校验视频格式和平台限制。</p>
               <el-alert v-if="facebookSelected" title="Facebook 视频将发布为 Reels" description="本发布流程支持 9:16 竖屏、分辨率至少 540×960、帧率 23–60 fps、时长 4–60 秒。系统成片与上传视频都需通过服务端校验。" type="info" :closable="false" />
               <p v-if="instagramSelected" class="hint">Instagram 视频：本发布流程支持 23–60 fps，其他格式要求由服务端进一步校验。</p>
               <el-tag v-if="state.draft.generationTaskId" type="success">系统成片 #{{ state.draft.generationTaskId }}{{ generationTitle ? ` · ${generationTitle}` : '' }}</el-tag>

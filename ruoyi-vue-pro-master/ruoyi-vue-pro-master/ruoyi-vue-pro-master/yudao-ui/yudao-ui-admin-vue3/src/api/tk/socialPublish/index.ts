@@ -42,6 +42,17 @@ export interface SocialMedia {
   durationSeconds?: number
   frameRate?: number
 }
+export interface SocialVideoUploadSession {
+  uploadId: string
+  uploadUrl: string
+  publicUrl: string
+  objectKey: string
+  accessKeyId: string
+  policy: string
+  signature: string
+  successActionStatus: string
+  expiration: string
+}
 export interface SocialCreate {
   accountIds: number[]
   mediaId?: number
@@ -96,6 +107,12 @@ export const SocialPublishApi = {
   validate: (id: number) => request.post<boolean>({ url: '/tk/social-account/validate', params: { id } }),
   unbind: (id: number) => request.delete<boolean>({ url: '/tk/social-account/unbind', params: { id } }),
   delete: (id: number) => request.delete<boolean>({ url: '/tk/social-account/delete', params: { id } }),
+  videoUploadSession: (data: { fileName: string; fileSize: number; contentType: string }) =>
+    request.post<SocialVideoUploadSession>({ url: '/tk/social-publish/media/video-upload-session', data, timeout: 30_000 }),
+  videoUploadComplete: (data: {
+    uploadId: string; fileName: string; fileSize: number; contentType: string; objectKey: string
+    width: number; height: number; durationSeconds: number; frameRate: number
+  }) => request.post<SocialMedia>({ url: '/tk/social-publish/media/video-upload-complete', data, timeout: 30_000 }),
   upload: (file: Blob) => {
     const data = new FormData()
     data.append('file', file)
@@ -107,4 +124,32 @@ export const SocialPublishApi = {
   detailPage: (params: SocialPageQuery & { taskId: number }) => request.get<SocialPage<SocialDetail>>({ url: '/tk/social-publish/detail-page', params }),
   retry: (detailId: number) => request.post<boolean>({ url: '/tk/social-publish/retry', params: { detailId } }),
   sync: (taskId: number) => request.post<boolean>({ url: '/tk/social-publish/status/sync', params: { taskId } })
+}
+
+export function uploadSocialVideoToOss(session: SocialVideoUploadSession, file: Blob,
+                                       onProgress?: (percent: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', session.uploadUrl)
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable) onProgress?.(Math.min(99, Math.round(event.loaded / event.total * 100)))
+    }
+    xhr.onerror = () => reject(new Error('OSS 上传失败，请检查网络后重试'))
+    xhr.onabort = () => reject(new Error('OSS 上传已取消'))
+    xhr.onload = () => {
+      if ([200, 201, 204].includes(xhr.status)) {
+        onProgress?.(100)
+        resolve()
+      } else reject(new Error(`OSS 上传失败（HTTP ${xhr.status}）`))
+    }
+    const form = new FormData()
+    form.append('key', session.objectKey)
+    form.append('policy', session.policy)
+    form.append('OSSAccessKeyId', session.accessKeyId)
+    form.append('Signature', session.signature)
+    form.append('success_action_status', session.successActionStatus)
+    form.append('Content-Type', 'video/mp4')
+    form.append('file', file)
+    xhr.send(form)
+  })
 }

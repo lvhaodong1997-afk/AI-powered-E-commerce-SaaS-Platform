@@ -111,6 +111,21 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
         return StrUtil.isBlank(objectKey) ? url : toReadUrl(objectKey);
     }
 
+    public String browserUploadUrl() {
+        TkGenerationProperties.Oss oss = getOss();
+        if (oss == null || !isConfigured()) {
+            throw new IllegalStateException("OSS 上传配置不完整");
+        }
+        return uploadUrl(oss);
+    }
+
+    public String publicUrlForObjectKey(String objectKey) {
+        if (StrUtil.isBlank(objectKey) || !isConfigured()) {
+            throw new IllegalArgumentException("OSS 对象不能为空");
+        }
+        return toReadUrl(objectKey);
+    }
+
     public String buildTiktokObjectKey(TkUploadSessionDO session) {
         TkGenerationProperties.Oss oss = getOss();
         String prefix = StrUtil.removeSuffix(StrUtil.blankToDefault(oss == null ? null : oss.getUploadPathPrefix(), "tk"), "/");
@@ -118,6 +133,13 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
                 .toLowerCase(Locale.ROOT);
         return prefix + "/" + session.getTenantId() + "/" + session.getCompanyId()
                 + "/tiktok-publish-media/" + session.getUploadId() + "." + extension;
+    }
+
+    public String buildSocialObjectKey(TkUploadSessionDO session) {
+        TkGenerationProperties.Oss oss = getOss();
+        String prefix = StrUtil.removeSuffix(StrUtil.blankToDefault(oss == null ? null : oss.getUploadPathPrefix(), "tk"), "/");
+        return prefix + "/" + session.getTenantId() + "/" + session.getCompanyId()
+                + "/social-media/" + session.getUploadId() + ".mp4";
     }
 
     private TkGenerationProperties.Oss getOss() {
