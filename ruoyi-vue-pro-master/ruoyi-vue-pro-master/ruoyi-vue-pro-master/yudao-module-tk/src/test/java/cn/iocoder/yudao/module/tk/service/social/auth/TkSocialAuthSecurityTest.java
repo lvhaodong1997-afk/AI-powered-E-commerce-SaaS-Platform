@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.social.auth;
 
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+import cn.iocoder.yudao.framework.security.core.LoginUser;
 import cn.iocoder.yudao.module.tk.dal.dataobject.social.*;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.*;
 import cn.iocoder.yudao.module.tk.service.scope.*;
@@ -8,6 +9,8 @@ import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformClient
 import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformException;
 import org.junit.jupiter.api.*;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
@@ -34,7 +37,7 @@ class TkSocialAuthSecurityTest {
         TenantContextHolder.setTenantId(9L);
         when(scope.getCurrentScope()).thenReturn(new TkUserScope(7L, 9L, "TENANT_ADMIN", 9L));
     }
-    @AfterEach void cleanup() { TenantContextHolder.clear(); }
+    @AfterEach void cleanup() { TenantContextHolder.clear(); SecurityContextHolder.clearContext(); }
 
     @Test void cipherAuthenticatesOwnerContextAndUsesFreshNonce() {
         String a = cipher.encrypt("secret", "tenant:9");
@@ -124,6 +127,23 @@ class TkSocialAuthSecurityTest {
         assertSame(response, service.insights(1L, "reach", "day"));
         verify(platform).instagramInsights("42", "stored-token", "reach", "day");
         verify(platform, never()).instagramInsights(anyString(), eq("caller-token"), anyString(), anyString());
+    }
+
+    @Test void insightsUsesSelectedTenantWhenPlatformAdminHasNoThreadTenant() throws Exception {
+        TkSocialAccountService service = new TkSocialAccountService(properties, accounts, scope, platform, cipher);
+        TkSocialAccountDO account = authorizedAccount("stored-token");
+        when(accounts.selectById(1L)).thenReturn(account);
+        com.fasterxml.jackson.databind.JsonNode response = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree("{\"data\":[{\"name\":\"reach\"}]}");
+        when(platform.instagramInsights("42", "stored-token", "reach", "day")).thenReturn(response);
+        when(scope.getCurrentScope()).thenReturn(new TkUserScope(7L, 9L, "PLATFORM_ADMIN", 9L));
+
+        LoginUser loginUser=new LoginUser().setId(7L).setTenantId(1L).setVisitTenantId(9L);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(loginUser,null));
+        TenantContextHolder.clear();
+
+        assertSame(response, service.insights(1L, "reach", "day"));
+        verify(platform).instagramInsights("42", "stored-token", "reach", "day");
     }
 
     @Test void disabledFeatureNeverQueriesMissingTables() {

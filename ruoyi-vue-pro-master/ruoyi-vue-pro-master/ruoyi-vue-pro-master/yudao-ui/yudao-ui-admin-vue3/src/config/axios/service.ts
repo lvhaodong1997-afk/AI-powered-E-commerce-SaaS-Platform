@@ -209,7 +209,9 @@ service.interceptors.response.use(
     } else if (code === 500) {
       const displayMsg = getTkApiErrorMessage(config.url, msg, t('sys.api.errMsg500'))
       ElMessage.error(displayMsg)
-      return Promise.reject(new Error(displayMsg))
+      const error = new Error(displayMsg) as Error & { displayedByAxios?: boolean }
+      error.displayedByAxios = true
+      return Promise.reject(error)
     } else if (code === 901) {
       ElMessage.error({
         offset: 300,

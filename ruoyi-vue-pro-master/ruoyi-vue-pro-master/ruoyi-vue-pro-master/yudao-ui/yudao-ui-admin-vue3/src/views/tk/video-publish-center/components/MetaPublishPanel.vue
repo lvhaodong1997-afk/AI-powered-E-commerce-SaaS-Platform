@@ -191,6 +191,7 @@ async function runInsights() {
 async function run(action: () => Promise<unknown>) {
   try { await action() } catch (reason) {
     if (reason === 'cancel' || reason === 'close') return
+    if (reason instanceof Error && (reason as Error & { displayedByAxios?: boolean }).displayedByAxios) return
     ElMessage.error(reason instanceof Error ? reason.message : '操作失败，请重试')
   }
 }

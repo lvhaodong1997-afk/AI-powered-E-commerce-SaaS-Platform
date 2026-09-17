@@ -1,11 +1,13 @@
 package cn.iocoder.yudao.module.tk.service.social.auth;
 
 import cn.iocoder.yudao.framework.common.pojo.*;
+import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import cn.iocoder.yudao.module.tk.dal.dataobject.social.*;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialAccountMapper;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
+import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import cn.iocoder.yudao.module.tk.service.social.platform.*;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -56,11 +58,12 @@ public class TkSocialAccountService {
         throw new IllegalArgumentException("不支持的平台");
     }
 
-    /** Worker must set the tenant; never infer it from an untrusted ID or use a caller's stale token snapshot. */
+    /** Resolve the selected tenant for requests and retain explicit tenant context for background workers. */
     public String getValidToken(TkSocialAccountDO requested) {
         properties.requireEnabled();
-        if (requested==null || TenantContextHolder.getTenantId()==null
-                || !TenantContextHolder.getTenantId().equals(requested.getTenantId())
+        Long tenantId=resolveTokenTenantId();
+        if (requested==null || tenantId==null
+                || !tenantId.equals(requested.getTenantId())
                 || TenantContextHolder.isIgnore()) throw new IllegalStateException("Meta 令牌租户上下文不匹配");
         TkSocialAccountDO account=accounts.selectById(requested.getId());
         if (account==null || !Objects.equals(account.getTenantId(),requested.getTenantId())
@@ -99,6 +102,14 @@ public class TkSocialAccountService {
             if (e.isReauthRequired()) markReauth(account,e.getMessage());
             throw e;
         }
+    }
+
+    private Long resolveTokenTenantId() {
+        if (SecurityFrameworkUtils.getLoginUserId()!=null) {
+            TkUserScope current=scope.getCurrentScope();
+            return current==null ? null : current.getTenantId();
+        }
+        return TenantContextHolder.getTenantId();
     }
 
     public void validate(Long id) {
