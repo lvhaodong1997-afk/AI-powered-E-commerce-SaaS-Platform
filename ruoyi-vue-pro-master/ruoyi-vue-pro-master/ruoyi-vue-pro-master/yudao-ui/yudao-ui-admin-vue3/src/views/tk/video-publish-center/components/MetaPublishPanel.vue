@@ -34,8 +34,9 @@
           <el-table-column prop="tokenExpiresAt" label="授权到期时间" min-width="170"><template #default="{ row }">{{ row.tokenExpiresAt || '以平台校验结果为准' }}</template></el-table-column>
           <el-table-column prop="lastValidatedAt" label="最近校验" min-width="170" />
           <el-table-column prop="failReason" label="异常说明" min-width="170" show-overflow-tooltip />
-          <el-table-column label="操作" min-width="270">
+          <el-table-column label="操作" min-width="360">
             <template #default="{ row }">
+              <el-button v-if="can('tk:social-account:query') && isSocialAccountAuthorized(row.status)" link @click="openInsights(row)">测试数据分析</el-button>
               <el-button v-if="can('tk:social-account:update')" link :disabled="state.busyAccounts.includes(row.id)" @click="accountAction('validate', row)">校验</el-button>
               <el-button v-if="can('tk:social-account:authorize')" link :disabled="state.authBusy" @click="run(() => controller.connect(row.platform))">重新授权</el-button>
               <el-button v-if="can('tk:social-account:update')" link type="warning" :disabled="state.busyAccounts.includes(row.id)" @click="accountAction('unbind', row)">解绑</el-button>
@@ -129,6 +130,18 @@
       </el-checkbox-group>
       <template #footer><el-button :disabled="state.binding" @click="controller.cancelAuth">取消</el-button><el-button type="primary" :loading="state.binding" :disabled="!state.pageIds.length" @click="run(controller.bindPages)">绑定所选主页</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="insightVisible" title="Meta 数据分析测试" width="min(760px, 95vw)" destroy-on-close>
+      <el-form label-position="top">
+        <el-form-item label="账号"><el-input :model-value="insightAccount ? `${platformLabel(insightAccount.platform)} · ${accountLabel(insightAccount)}` : ''" readonly /></el-form-item>
+        <div class="copy-grid">
+          <el-form-item label="指标"><el-input v-model="insightMetric" maxlength="512" /></el-form-item>
+          <el-form-item label="周期"><el-input v-model="insightPeriod" maxlength="512" /></el-form-item>
+        </div>
+        <el-button type="primary" :loading="insightLoading" @click="run(runInsights)">请求 Insights</el-button>
+      </el-form>
+      <pre v-if="insightResult" class="insight-result">{{ insightResult }}</pre>
+    </el-dialog>
   </section>
 </template>
 
@@ -150,6 +163,7 @@ const controller = createMetaPublishController(SocialPublishApi, can, {
 })
 const state = controller.state
 const fileInput = ref<HTMLInputElement>(), generationTitle = ref(''), accountPage = ref(1)
+const insightVisible = ref(false), insightLoading = ref(false), insightAccount = ref<SocialAccount>(), insightMetric = ref(''), insightPeriod = ref('day'), insightResult = ref('')
 const accountRows = computed(() => state.accounts.slice((accountPage.value - 1) * 10, accountPage.value * 10))
 const facebookSelected = computed(() => state.accounts.some(account => account.platform === 'FACEBOOK_PAGE' && state.draft.accountIds.includes(account.id)))
 const instagramSelected = computed(() => state.accounts.some(account => account.platform === 'INSTAGRAM' && state.draft.accountIds.includes(account.id)))
@@ -158,6 +172,22 @@ const authLabel = computed(() => ({ PENDING: '等待授权', PROCESSING: '正在
 const statuses: SocialStatus[] = ['PENDING', 'PROCESSING', 'SUCCESS', 'PARTIAL_SUCCESS', 'FAILED', 'REAUTH_REQUIRED', 'UNKNOWN']
 const statusType = (status: string) => status === 'SUCCESS' ? 'success' : status === 'FAILED' ? 'danger' : ['UNKNOWN', 'REAUTH_REQUIRED', 'PARTIAL_SUCCESS'].includes(status) ? 'warning' : 'info'
 function safeUrl(value?: string) { try { const url = new URL(value || ''); return ['https:', 'http:'].includes(url.protocol) ? url.href : undefined } catch { return undefined } }
+function openInsights(account: SocialAccount) {
+  insightAccount.value = account
+  insightMetric.value = account.platform === 'INSTAGRAM' ? 'reach' : 'page_impressions'
+  insightPeriod.value = 'day'
+  insightResult.value = ''
+  insightVisible.value = true
+}
+async function runInsights() {
+  if (!insightAccount.value) return
+  if (!insightMetric.value.trim() || !insightPeriod.value.trim()) throw new Error('请填写指标和周期')
+  insightLoading.value = true
+  try {
+    const response = await SocialPublishApi.insights(insightAccount.value.id, { metric: insightMetric.value.trim(), period: insightPeriod.value.trim() })
+    insightResult.value = JSON.stringify(response, null, 2)
+  } finally { insightLoading.value = false }
+}
 async function run(action: () => Promise<unknown>) {
   try { await action() } catch (reason) {
     if (reason === 'cancel' || reason === 'close') return
@@ -208,6 +238,7 @@ p { margin: 6px 0 12px; }
 .file-input { display: none; }
 .copy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .status-filter { width: 200px; margin: 12px 0; }
+.insight-result { max-height: 420px; overflow: auto; margin: 16px 0 0; padding: 12px; background: var(--el-fill-color-light); white-space: pre-wrap; word-break: break-word; }
 .page-choices { display: flex; flex-direction: column; align-items: flex-start; }
 .page-choices :deep(.el-checkbox) { height: auto; min-height: 32px; white-space: normal; }
 @media (max-width: 760px) { .copy-grid { grid-template-columns: 1fr; } }

@@ -61,7 +61,7 @@ class TkSocialPlatformClientTest {
     }
 
     @Test void instagramExchangesShortTokenWithInstagramCredentialsThenLongLived() {
-        responses.add("{\"access_token\":\"short\",\"user_id\":\"42\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\"]}");
+        responses.add("{\"access_token\":\"short\",\"user_id\":\"42\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\",\"instagram_business_manage_insights\"]}");
         responses.add("{\"access_token\":\"long\",\"expires_in\":5184000}");
         responses.add("{\"id\":\"42\",\"user_id\":\"42\",\"username\":\"creator\",\"account_type\":\"MEDIA_CREATOR\"}");
         TkSocialPlatformClient.Authorization a = client().authorizeInstagram("code", "https://app.example/callback");
@@ -70,14 +70,14 @@ class TkSocialPlatformClientTest {
         assertEquals("ig-secret", parameters.get(0).get("client_secret"));
         assertEquals("ig_exchange_token", parameters.get(1).get("grant_type"));
         assertFalse(parameters.get(1).containsValue("fb-secret"));
-        assertEquals("id,user_id,username,account_type", parameters.get(2).get("fields"));
+        assertTrue(parameters.get(2).get("fields").contains("followers_count"));
     }
 
     @Test void facebookAcceptsLongTokenWithoutExpiresInForPageAuthorization() {
         responses.add("{\"access_token\":\"short\"}");
         responses.add("{\"access_token\":\"long\"}");
         responses.add("{\"id\":\"100\",\"name\":\"owner\"}");
-        responses.add("{\"data\":[{\"permission\":\"pages_show_list\",\"status\":\"granted\"},{\"permission\":\"pages_read_engagement\",\"status\":\"granted\"},{\"permission\":\"pages_manage_posts\",\"status\":\"granted\"}]}");
+        responses.add("{\"data\":[{\"permission\":\"pages_show_list\",\"status\":\"granted\"},{\"permission\":\"pages_read_engagement\",\"status\":\"granted\"},{\"permission\":\"pages_manage_posts\",\"status\":\"granted\"},{\"permission\":\"read_insights\",\"status\":\"granted\"}]}");
         responses.add("{\"data\":[{\"id\":\"200\",\"name\":\"page\",\"access_token\":\"page-token\",\"tasks\":[\"CREATE_CONTENT\"]}]}");
 
         TkSocialPlatformClient.Authorization authorization=client().authorizeFacebook("code","https://app.example/callback");
@@ -93,7 +93,7 @@ class TkSocialPlatformClientTest {
         responses.add("{\"access_token\":\"short\"}");
         responses.add("{\"access_token\":\"long\",\"expires_in\":3600}");
         responses.add("{\"id\":\"100\",\"name\":\"owner\"}");
-        responses.add("{\"data\":[\"pages_show_list\",\"pages_read_engagement\",\"pages_manage_posts\"]}");
+        responses.add("{\"data\":[\"pages_show_list\",\"pages_read_engagement\",\"pages_manage_posts\",\"read_insights\"]}");
         responses.add("{\"data\":[]}");
         java.time.LocalDateTime before=java.time.LocalDateTime.now();
         TkSocialPlatformClient.Authorization authorization=client().authorizeFacebook("code","https://app.example/callback");
@@ -122,6 +122,17 @@ class TkSocialPlatformClientTest {
         assertEquals(4,urls.size());
     }
 
+    @Test void facebookRejectsMissingInsightsPermission() {
+        responses.add("{\"access_token\":\"short\"}");
+        responses.add("{\"access_token\":\"long\"}");
+        responses.add("{\"id\":\"100\",\"name\":\"owner\"}");
+        responses.add("{\"data\":[{\"permission\":\"pages_show_list\",\"status\":\"granted\"},{\"permission\":\"pages_read_engagement\",\"status\":\"granted\"},{\"permission\":\"pages_manage_posts\",\"status\":\"granted\"}]}");
+
+        TkSocialPlatformException error=assertThrows(TkSocialPlatformException.class,
+                ()->client().authorizeFacebook("code","https://app.example/callback"));
+        assertEquals("PERMISSIONS_MISSING",error.getCode());
+    }
+
     @Test void instagramStillRejectsLongTokenWithoutExpiry() {
         responses.add("{\"access_token\":\"short\"}");
         responses.add("{\"access_token\":\"long\"}");
@@ -133,7 +144,7 @@ class TkSocialPlatformClientTest {
     }
 
     @Test void instagramAcceptsTokenIdentityMatchingProfileIdAndKeepsPublishingIdentitySeparate() {
-        responses.add("{\"access_token\":\"short\",\"user_id\":\"100\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\"]}");
+        responses.add("{\"access_token\":\"short\",\"user_id\":\"100\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\",\"instagram_business_manage_insights\"]}");
         responses.add("{\"access_token\":\"long\",\"expires_in\":5184000}");
         responses.add("{\"id\":\"100\",\"user_id\":\"200\",\"username\":\"creator\",\"account_type\":\"BUSINESS\"}");
 
@@ -151,19 +162,19 @@ class TkSocialPlatformClientTest {
     }
 
     @Test void instagramAcceptsSingletonWrappedTokenWithoutLosingIdentityOrPermissions() {
-        responses.add("{\"data\":[{\"access_token\":\"wrapped-short\",\"user_id\":\"42\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\"]}]}");
+        responses.add("{\"data\":[{\"access_token\":\"wrapped-short\",\"user_id\":\"42\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\",\"instagram_business_manage_insights\"]}]}");
         responses.add("{\"access_token\":\"long\",\"expires_in\":5184000}");
         responses.add("{\"user_id\":\"42\",\"username\":\"creator\",\"account_type\":\"MEDIA_CREATOR\"}");
         TkSocialPlatformClient.Authorization result=client().authorizeInstagram("code","https://app.example/callback");
         assertEquals("long",result.getAccessToken()); assertEquals("42",result.getExternalId());
-        assertEquals("instagram_business_basic,instagram_business_content_publish",result.getScopes());
+        assertEquals("instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights",result.getScopes());
         assertEquals("wrapped-short",parameters.get(1).get("access_token"));
         assertEquals(3,urls.size());
     }
 
     @Test void bothInstagramTokenShapesRejectMismatchedIdentity() {
         for (boolean wrapped:new boolean[]{false,true}) {
-            String token="{\"access_token\":\"short\",\"user_id\":\"99\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\"]}";
+            String token="{\"access_token\":\"short\",\"user_id\":\"99\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\",\"instagram_business_manage_insights\"]}";
             responses.add(wrapped?"{\"data\":["+token+"]}":token);
             responses.add("{\"access_token\":\"long\",\"expires_in\":5184000}");
             responses.add("{\"id\":\"41\",\"user_id\":\"42\",\"username\":\"creator\",\"account_type\":\"BUSINESS\"}");
@@ -201,7 +212,7 @@ class TkSocialPlatformClientTest {
     }
 
     @Test void instagramLongTokenFailureCarriesSafeStageWithoutChangingProviderCode() {
-        responses.add("{\"access_token\":\"short\",\"user_id\":\"42\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\"]}");
+        responses.add("{\"access_token\":\"short\",\"user_id\":\"42\",\"permissions\":[\"instagram_business_basic\",\"instagram_business_content_publish\",\"instagram_business_manage_insights\"]}");
         responses.add(new TkSocialPlatformException("HTTP_400","provider-message-with-secret",false,false,false));
 
         TkSocialPlatformException error=assertThrows(TkSocialPlatformException.class,
@@ -210,6 +221,28 @@ class TkSocialPlatformClientTest {
         assertEquals("INSTAGRAM_LONG_TOKEN",error.getStage());
         assertEquals("HTTP_400",error.getCode());
         assertEquals(2,urls.size());
+    }
+
+    @Test void instagramInsightsRequestUsesConfiguredMetricsAndPeriod() {
+        responses.add("{\"data\":[{\"name\":\"reach\",\"values\":[{\"value\":12}]}]}");
+
+        JsonNode result=client().instagramInsights("42","secret","reach","day");
+
+        assertEquals(12,result.path("data").get(0).path("values").get(0).path("value").asInt());
+        assertTrue(urls.get(0).endsWith("/42/insights"));
+        assertEquals("reach",parameters.get(0).get("metric"));
+        assertEquals("day",parameters.get(0).get("period"));
+    }
+
+    @Test void facebookPageInsightsRequestUsesConfiguredMetricsAndPeriod() {
+        responses.add("{\"data\":[{\"name\":\"page_views_total\",\"values\":[{\"value\":8}]}]}");
+
+        JsonNode result=client().facebookPageInsights("200","page-secret","page_views_total","day");
+
+        assertEquals(8,result.path("data").get(0).path("values").get(0).path("value").asInt());
+        assertTrue(urls.get(0).endsWith("/200/insights"));
+        assertEquals("page_views_total",parameters.get(0).get("metric"));
+        assertEquals("day",parameters.get(0).get("period"));
     }
 
     @Test void mutationErrorsAreSanitizedAndCannotBeBlindlyRetried() {

@@ -113,6 +113,19 @@ class TkSocialAuthSecurityTest {
         verifyNoInteractions(platform);
     }
 
+    @Test void insightsUseStoredAccountTokenAndDoNotAcceptCallerToken() throws Exception {
+        TkSocialAccountService service = new TkSocialAccountService(properties, accounts, scope, platform, cipher);
+        TkSocialAccountDO account = authorizedAccount("stored-token");
+        when(accounts.selectById(1L)).thenReturn(account);
+        com.fasterxml.jackson.databind.JsonNode response = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree("{\"data\":[{\"name\":\"reach\"}]}");
+        when(platform.instagramInsights("42", "stored-token", "reach", "day")).thenReturn(response);
+
+        assertSame(response, service.insights(1L, "reach", "day"));
+        verify(platform).instagramInsights("42", "stored-token", "reach", "day");
+        verify(platform, never()).instagramInsights(anyString(), eq("caller-token"), anyString(), anyString());
+    }
+
     @Test void disabledFeatureNeverQueriesMissingTables() {
         properties.setEnabled(false);
         TkSocialAccountService service = new TkSocialAccountService(properties, accounts, scope, platform, cipher);

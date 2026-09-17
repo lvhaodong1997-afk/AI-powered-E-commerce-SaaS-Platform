@@ -29,7 +29,7 @@ public class TkSocialPlatformClient {
                 ? "https://www.instagram.com/oauth/authorize" : "https://www.facebook.com/"+properties.version()+"/dialog/oauth");
         u.queryParam("client_id",c.getAppId()).queryParam("redirect_uri",c.getRedirectUri())
                 .queryParam("response_type","code").queryParam("state",state);
-        if ("INSTAGRAM".equals(platform)) u.queryParam("scope","instagram_business_basic,instagram_business_content_publish")
+        if ("INSTAGRAM".equals(platform)) u.queryParam("scope","instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights")
                 .queryParam("enable_fb_login","0").queryParam("force_authentication","1");
         else u.queryParam("config_id",c.getConfigId()).queryParam("override_default_response_type","true");
         return u.build().encode().toUriString();
@@ -57,7 +57,7 @@ public class TkSocialPlatformClient {
                 map("grant_type","ig_exchange_token","client_secret",c.getAppSecret(),
                         "access_token",shortAccessToken),null,false)));
         instagramStage("INSTAGRAM_PROFILE",()->{
-            JsonNode profile=call("GET",ig("me"),map("fields","id,user_id,username,account_type"),a.accessToken,false);
+            JsonNode profile=call("GET",ig("me"),map("fields","id,user_id,username,account_type,followers_count,media_count"),a.accessToken,false);
             a.externalId=profile.path("user_id").asText(profile.path("id").asText());
             id(a.externalId);
             a.providerUserId=profile.path("id").asText(a.externalId);
@@ -75,10 +75,10 @@ public class TkSocialPlatformClient {
             // Token exchange responses may omit permissions. Verify granted permissions using the token.
             JsonNode granted=shortToken.get("permissions");
             if (granted == null) granted=call("GET",ig("me/permissions"),map(),a.accessToken,false).path("data");
-            requirePermissions(granted,Arrays.asList("instagram_business_basic","instagram_business_content_publish"));
+            requirePermissions(granted,Arrays.asList("instagram_business_basic","instagram_business_content_publish","instagram_business_manage_insights"));
             return null;
         });
-        a.scopes="instagram_business_basic,instagram_business_content_publish";
+        a.scopes="instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights";
         return a;
     }
 
@@ -97,9 +97,9 @@ public class TkSocialPlatformClient {
         JsonNode profile=call("GET",fb("me"),map("fields","id,name"),a.accessToken,false);
         a.externalId=required(profile,"id",false); a.accountName=profile.path("name").asText();
         requirePermissions(call("GET",fb("me/permissions"),map(),a.accessToken,false).path("data"),
-                Arrays.asList("pages_show_list","pages_read_engagement","pages_manage_posts"));
+                Arrays.asList("pages_show_list","pages_read_engagement","pages_manage_posts","read_insights"));
         a.pages=facebookPages(a.accessToken);
-        a.scopes="pages_show_list,pages_read_engagement,pages_manage_posts";
+        a.scopes="pages_show_list,pages_read_engagement,pages_manage_posts,read_insights";
         return a;
     }
 
@@ -137,7 +137,7 @@ public class TkSocialPlatformClient {
             if (!externalId.equals(profile.path("user_id").asText(profile.path("id").asText())))
                 throw rejected("IDENTITY_MISMATCH","Meta 账号身份不一致");
             requirePermissions(call("GET",ig("me/permissions"),map(),accessToken,false).path("data"),
-                    Arrays.asList("instagram_business_basic","instagram_business_content_publish"));
+                    Arrays.asList("instagram_business_basic","instagram_business_content_publish","instagram_business_manage_insights"));
             return null;
         }
         if (!"FACEBOOK_PAGE".equals(platform)) throw rejected("PLATFORM_INVALID","不支持的平台");
@@ -145,13 +145,28 @@ public class TkSocialPlatformClient {
         JsonNode debug=call("GET",fb("debug_token"),map("input_token",accessToken),c.getAppId()+"|"+c.getAppSecret(),false).path("data");
         if (!debug.path("is_valid").asBoolean() || !c.getAppId().equals(debug.path("app_id").asText()))
             throw new TkSocialPlatformException("TOKEN_INVALID","Meta 授权失效，请重新授权",false,true,false);
-        requirePermissions(debug.path("scopes"),Arrays.asList("pages_read_engagement","pages_manage_posts"));
+        requirePermissions(debug.path("scopes"),Arrays.asList("pages_show_list","pages_read_engagement","pages_manage_posts","read_insights"));
         JsonNode profile=call("GET",fb("me"),map("fields","id"),accessToken,false);
         if (!externalId.equals(profile.path("id").asText())) throw rejected("IDENTITY_MISMATCH","Meta Page 身份不一致");
         long expires=debug.path("expires_at").asLong();
         long dataExpires=debug.path("data_access_expires_at").asLong();
         if (dataExpires>0 && (expires==0 || dataExpires<expires)) expires=dataExpires;
         return expires>0 ? LocalDateTime.ofInstant(java.time.Instant.ofEpochSecond(expires),java.time.ZoneId.systemDefault()) : null;
+    }
+
+    public JsonNode instagramInsights(String externalId,String accessToken,String metric,String period) {
+        id(externalId);
+        return call("GET",ig(externalId+"/insights"),map("metric",queryValue(metric),"period",queryValue(period)),accessToken,false);
+    }
+
+    public JsonNode instagramMediaInsights(String mediaId,String accessToken,String metric) {
+        id(mediaId);
+        return call("GET",ig(mediaId+"/insights"),map("metric",queryValue(metric)),accessToken,false);
+    }
+
+    public JsonNode facebookPageInsights(String pageId,String accessToken,String metric,String period) {
+        id(pageId);
+        return call("GET",fb(pageId+"/insights"),map("metric",queryValue(metric),"period",queryValue(period)),accessToken,false);
     }
 
     public PublishResult advance(String platform,String externalAccountId,String accessToken,String mediaType,
@@ -285,6 +300,11 @@ public class TkSocialPlatformClient {
     }
     private static void id(String value) {
         if (value==null || !value.matches("[0-9]{1,100}")) throw rejected("ID_INVALID","Meta 账号或媒体标识无效");
+    }
+    private static String queryValue(String value) {
+        if (value==null || value.trim().isEmpty() || !value.matches("[A-Za-z0-9_,.-]{1,512}"))
+            throw rejected("INSIGHTS_QUERY_INVALID","Meta Insights 查询参数无效");
+        return value;
     }
     private static void mediaUrl(String value) {
         try {

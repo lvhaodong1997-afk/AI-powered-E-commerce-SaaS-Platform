@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.tk.controller.admin.social;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import cn.iocoder.yudao.framework.common.pojo.*;
 import cn.iocoder.yudao.module.tk.service.social.auth.*;
 import lombok.Data;
@@ -35,6 +36,15 @@ public class TkSocialAccountController {
     public CommonResult<PageResult<Map<String,Object>>> page(@Valid PageParam page,
                                                             @RequestParam(value="platform",required=false) String platform) {
         return success(accounts.page(page,platform));
+    }
+    @GetMapping("/insights")
+    @PreAuthorize("@ss.hasPermission('tk:social-account:query')")
+    public CommonResult<JsonNode> insights(@RequestParam("id") Long id,
+                                           @RequestParam(value="metric",defaultValue="reach")
+                                           @Pattern(regexp="[A-Za-z0-9_,.-]{1,512}") String metric,
+                                           @RequestParam(value="period",defaultValue="day")
+                                           @Pattern(regexp="[A-Za-z0-9_,.-]{1,512}") String period) {
+        return success(accounts.insights(id,metric,period));
     }
     @PostMapping("/validate")
     @PreAuthorize("@ss.hasPermission('tk:social-account:update')")

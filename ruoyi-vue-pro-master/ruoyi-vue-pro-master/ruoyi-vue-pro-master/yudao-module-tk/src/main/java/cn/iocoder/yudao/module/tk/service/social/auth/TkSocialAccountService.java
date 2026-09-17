@@ -43,6 +43,19 @@ public class TkSocialAccountService {
         return new PageResult<>(safe,result.getTotal());
     }
 
+    /** Read account-level Meta Insights with the encrypted token owned by this account. */
+    public com.fasterxml.jackson.databind.JsonNode insights(Long id,String metric,String period) {
+        properties.requireEnabled();
+        TkSocialAccountDO account=requireReadable(id);
+        if (!"AUTHORIZED".equals(account.getStatus())) throw reauth("Meta 账号未授权，请重新授权");
+        String token=getValidToken(account);
+        if ("INSTAGRAM".equals(account.getPlatform()))
+            return platform.instagramInsights(account.getExternalAccountId(),token,metric,period);
+        if ("FACEBOOK_PAGE".equals(account.getPlatform()))
+            return platform.facebookPageInsights(account.getExternalAccountId(),token,metric,period);
+        throw new IllegalArgumentException("不支持的平台");
+    }
+
     /** Worker must set the tenant; never infer it from an untrusted ID or use a caller's stale token snapshot. */
     public String getValidToken(TkSocialAccountDO requested) {
         properties.requireEnabled();

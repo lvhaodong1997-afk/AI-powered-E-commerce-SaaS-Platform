@@ -24,6 +24,7 @@ export interface SocialAccount {
   lastValidatedAt?: string
   failReason?: string
 }
+export type SocialInsights = Record<string, unknown>
 export interface SocialAuthSession {
   status: 'PENDING' | 'PROCESSING' | 'PAGES_READY' | 'SUCCESS' | 'FAILED' | 'EXPIRED'
   message?: string
@@ -91,6 +92,7 @@ export const SocialPublishApi = {
   facebookPages: (sessionId: string) => request.get<FacebookPage[]>({ url: '/tk/social-account/facebook-pages', params: { sessionId } }),
   bindPages: (data: { sessionId: string; pageIds: string[] }) => request.post<boolean>({ url: '/tk/social-account/facebook-pages/bind', data }),
   accountPage: (params: SocialPageQuery & { platform?: SocialPlatform }) => request.get<SocialPage<SocialAccount>>({ url: '/tk/social-account/page', params }),
+  insights: (id: number, params: { metric: string; period: string }) => request.get<SocialInsights>({ url: '/tk/social-account/insights', params: { id, ...params } }),
   validate: (id: number) => request.post<boolean>({ url: '/tk/social-account/validate', params: { id } }),
   unbind: (id: number) => request.delete<boolean>({ url: '/tk/social-account/unbind', params: { id } }),
   delete: (id: number) => request.delete<boolean>({ url: '/tk/social-account/delete', params: { id } }),
