@@ -38,6 +38,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.*;
 import java.util.concurrent.Semaphore;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.springframework.transaction.annotation.Transactional;
+import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient.ObjectMetadata;
 
 @Service
 public class TkSocialMediaService {
@@ -89,31 +93,45 @@ public class TkSocialMediaService {
         return response;
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public TkSocialMediaDO completeDirectVideoUpload(TkSocialVideoUploadCompleteReqVO request) {
         if (request == null) throw new IllegalArgumentException("上传信息不能为空");
         validateDirectVideoFile(request.getFileName(), request.getFileSize());
-        validateDirectVideoMetadata(request.getWidth(), request.getHeight(), request.getDurationSeconds(), request.getFrameRate());
-        TkUploadSessionDO session = uploadSessionService.validateAccessible(request.getUploadId());
+        TkUploadSessionDO session = uploadSessionService.lockSocialCompletion(request.getUploadId());
         TkUserScope current = scope.getCurrentScope();
         Long companyId = scope.getWritableCompanyId(null);
         if (!Objects.equals(session.getTenantId(), current.getTenantId())
                 || !Objects.equals(session.getCompanyId(), companyId)
+                || !Objects.equals(session.getCreator(), current.getUserIdString())
+                || !"social-oss".equals(session.getStorageMode())
                 || !Objects.equals(session.getFileName(), request.getFileName())
                 || !Objects.equals(session.getFileSize(), request.getFileSize())) {
             throw new IllegalArgumentException("上传会话与文件信息不一致");
         }
         String expectedKey = socialObjectKey(session.getTenantId(), session.getCompanyId(), session.getUploadId());
         if (!expectedKey.equals(request.getObjectKey())) throw new IllegalArgumentException("OSS 上传对象无效");
+        TkSocialMediaDO existing = mapper.selectOne(new QueryWrapper<TkSocialMediaDO>()
+                .eq("tenant_id", session.getTenantId()).eq("upload_id", session.getUploadId()));
+        if (existing != null) {
+            if (!Objects.equals(existing.getCompanyId(), companyId) || !Objects.equals(existing.getCreator(), session.getCreator())
+                    || !Objects.equals(existing.getObjectKey(), expectedKey)) throw new IllegalArgumentException("上传会话归属不一致");
+            return existing;
+        }
+        if (!"UPLOADING".equals(session.getStatus())) throw new IllegalArgumentException("上传会话已结束");
         validateOssUploadConfig();
         TkOssObjectStorageService.ObjectMetadata metadata = ossObjectStorageService.headObject(expectedKey);
         if (metadata.getContentLength() != request.getFileSize()) throw new IllegalArgumentException("OSS 文件大小和上传记录不一致");
+        if (metadata.getEtag() == null || metadata.getEtag().trim().isEmpty()) throw new IllegalArgumentException("OSS 文件标识缺失");
         TkSocialMediaDO media = new TkSocialMediaDO();
         media.setTenantId(session.getTenantId()); media.setCompanyId(session.getCompanyId()); media.setCreator(session.getCreator());
         media.setFileName(request.getFileName().substring(0, Math.min(255, request.getFileName().length())));
         media.setContentType("video/mp4"); media.setMediaType("VIDEO"); media.setFileSize(metadata.getContentLength());
         media.setObjectKey(expectedKey); media.setPublicUrl(ossObjectStorageService.publicUrlForObjectKey(expectedKey));
-        media.setStatus("READY"); media.setWidth(request.getWidth()); media.setHeight(request.getHeight());
-        media.setDurationSeconds(request.getDurationSeconds()); media.setFrameRate(request.getFrameRate());
+        media.setUploadId(session.getUploadId());
+        media.setStatus("PROCESSING"); media.setMetadataStatus("PENDING");
+        media.setSourceFileSize(metadata.getContentLength()); media.setSourceEtag(metadata.getEtag());
+        media.setSourceVersionId(metadata.getVersionId()); media.setInspectionAttempts(0);
+        media.setInspectionNextRetry(LocalDateTime.now()); media.setNormalized(false);
         mapper.insert(media);
         uploadSessionService.markCompleted(request.getUploadId());
         return media;
@@ -158,7 +176,16 @@ public class TkSocialMediaService {
         if (file.getSize() > limit) throw new IllegalArgumentException(video ? "视频不能超过 1GB" : "图片不能超过 8MB");
         if (!uploadSlot.tryAcquire()) throw new IllegalArgumentException("已有媒体正在上传，请稍后重试");
         try (InputStream input = file.getInputStream()) {
-            return save(readBounded(input, limit), name, video);
+            if (video) {
+                BufferedInputStream buffered = new BufferedInputStream(input);
+                buffered.mark(12);
+                byte[] header = new byte[12];
+                if (buffered.read(header) != 12 || !"ftyp".equals(new String(header, 4, 4, StandardCharsets.US_ASCII)))
+                    throw new IllegalArgumentException("文件不是有效的 MP4 视频");
+                buffered.reset();
+                return saveVideo(buffered, name, file.getSize());
+            }
+            return saveImage(readBounded(input, limit), name);
         } catch (IOException ex) {
             throw new IllegalStateException("读取上传文件失败");
         } finally { uploadSlot.release(); }
@@ -170,58 +197,120 @@ public class TkSocialMediaService {
             throw new IllegalArgumentException("请先完成视频生成");
         }
         scope.validateReadable(task.getTenantId(), task.getCompanyId(), task.getCreator());
-        String readUrl = outputStorage.refreshGeneratedAssetReadUrl(task, task.getOutputUrl());
-        validateReadUrl(readUrl);
+        validateOssUploadConfig();
+        String key = ossObjectStorageService.requireOwnedObjectKey(task.getOutputUrl(), task.getTenantId(), task.getCompanyId());
         if (!uploadSlot.tryAcquire()) throw new IllegalArgumentException("已有媒体正在上传，请稍后重试");
-        HttpURLConnection connection = null;
-        try {
-            connection = (HttpURLConnection) URI.create(readUrl).toURL().openConnection();
-            connection.setInstanceFollowRedirects(false);
-            connection.setConnectTimeout(15000);
-            connection.setReadTimeout(60000);
-            if (connection.getResponseCode() != 200) throw new IllegalArgumentException("生成视频读取失败，请检查存储访问配置");
-            if (connection.getContentLengthLong() > MAX_VIDEO_BYTES) throw new IllegalArgumentException("视频不能超过 1GB");
-            try (InputStream input = connection.getInputStream()) {
-                return save(readBounded(input, MAX_VIDEO_BYTES), "generation-" + taskId + ".mp4", true);
-            }
+        try (TkSocialVideoInspector.Workspace workspace = videoInspector.openWorkspace()) {
+            Path source = workspace.getDirectory().resolve("source.mp4");
+            ObjectMetadata identity = ossObjectStorageService.headObject(key);
+            ossObjectStorageService.downloadToFile(key, source, identity, MAX_VIDEO_BYTES);
+            TkOssObjectStorageService.requireIdentity(identity, ossObjectStorageService.headObject(key));
+            return saveVideoPath(source, "generation-" + taskId + ".mp4", workspace.getDirectory());
         } catch (IOException ex) {
             throw new IllegalStateException("读取生成视频失败，请稍后重试");
         } finally {
-            if (connection != null) connection.disconnect();
             uploadSlot.release();
         }
     }
 
-    private TkSocialMediaDO save(byte[] bytes, String name, boolean video) {
-        int width, height;
-        double duration = 0;
-        double frameRate = 0;
-        if (video) {
-            if (bytes.length < 12 || !"ftyp".equals(new String(bytes, 4, 4, StandardCharsets.US_ASCII))) {
-                throw new IllegalArgumentException("文件不是有效的 MP4 视频");
+    private TkSocialMediaDO saveVideo(InputStream input, String name, long expectedSize) throws IOException {
+        try (TkSocialVideoInspector.Workspace workspace = videoInspector.openWorkspace()) {
+            Path source = workspace.getDirectory().resolve("source.mp4");
+            try (OutputStream output = Files.newOutputStream(source)) {
+                if (TkOssObjectStorageService.copyBounded(input, output, MAX_VIDEO_BYTES) != expectedSize)
+                    throw new IllegalArgumentException("上传文件大小不一致");
             }
-            bytes = videoInspector.prepareForPublish(bytes);
-            TkSocialVideoInspector.Metadata metadata = videoInspector.inspect(bytes);
-            width = metadata.getWidth(); height = metadata.getHeight(); duration = metadata.getDurationSeconds();
-            frameRate = metadata.getFrameRate();
-        } else {
-            int[] size = inspectJpeg(bytes);
-            width = size[0]; height = size[1];
+            return saveVideoPath(source, name, workspace.getDirectory());
         }
+    }
+
+    private TkSocialMediaDO saveVideoPath(Path source, String name, Path workspace) throws IOException {
+        try (InputStream input = Files.newInputStream(source)) {
+            byte[] header = new byte[12];
+            if (input.read(header) != 12 || !"ftyp".equals(new String(header, 4, 4, StandardCharsets.US_ASCII)))
+                throw new IllegalArgumentException("文件不是有效的 MP4 视频");
+        }
+        validateOssUploadConfig();
         TkUserScope current = scope.getCurrentScope();
         Long companyId = scope.getWritableCompanyId(null);
         if (!current.hasTenantScope() || companyId == null) throw new IllegalArgumentException("请先选择租户");
-        String type = video ? "video/mp4" : "image/jpeg";
-        String url = files.createFile(bytes, UUID.randomUUID() + (video ? ".mp4" : ".jpg"),
+        TkSocialMediaDO media = new TkSocialMediaDO();
+        media.setTenantId(current.getTenantId()); media.setCompanyId(companyId); media.setCreator(current.getUserIdString());
+        media.setFileName(name.substring(0, Math.min(255, name.length()))); media.setMediaType("VIDEO"); media.setContentType("video/mp4");
+        media.setObjectKey(socialObjectKey(current.getTenantId(), companyId, UUID.randomUUID().toString().replace("-", "")));
+        try {
+            ObjectMetadata original = ossObjectStorageService.uploadFile(media.getObjectKey(), source, MAX_VIDEO_BYTES);
+            media.setSourceFileSize(original.getContentLength()); media.setSourceEtag(original.getEtag()); media.setSourceVersionId(original.getVersionId());
+            preparePublishCopy(media, source, workspace);
+            media.setInspectionAttempts(1);
+            mapper.insert(media);
+            return media;
+        } catch (RuntimeException ex) {
+            deleteOwnedObjects(media); throw ex;
+        }
+    }
+
+    /** Invoked by the lease worker under explicit tenant context and with a scoped DB record. */
+    void inspectOwnedSource(TkSocialMediaDO media) {
+        ossObjectStorageService.validateOwnedKey(media.getObjectKey(), media.getTenantId(), media.getCompanyId());
+        try (TkSocialVideoInspector.Workspace workspace = videoInspector.openWorkspace()) {
+            Path source = workspace.getDirectory().resolve("source.mp4");
+            ObjectMetadata expected = sourceIdentity(media);
+            TkOssObjectStorageService.requireIdentity(expected, ossObjectStorageService.headObject(media.getObjectKey()));
+            ossObjectStorageService.downloadToFile(media.getObjectKey(), source, expected, MAX_VIDEO_BYTES);
+            preparePublishCopy(media, source, workspace.getDirectory());
+        }
+    }
+
+    private void preparePublishCopy(TkSocialMediaDO media, Path source, Path workspace) {
+        Path publish = videoInspector.prepareForPublish(source, workspace.resolve("publish.mp4"));
+        TkSocialVideoInspector.Metadata result = videoInspector.inspect(publish);
+        TkOssObjectStorageService.requireIdentity(sourceIdentity(media), ossObjectStorageService.headObject(media.getObjectKey()));
+        String key = socialObjectKey(media.getTenantId(), media.getCompanyId(), UUID.randomUUID().toString().replace("-", ""))
+                .replace("/social-media/", "/social-media-publish/");
+        // Always copy to a server-only key, even when audio is unchanged: browser POST policies cannot overwrite it.
+        media.setPublishObjectKey(key);
+        ObjectMetadata published = ossObjectStorageService.uploadFile(key, publish, MAX_VIDEO_BYTES);
+        media.setPublishEtag(published.getEtag()); media.setPublishVersionId(published.getVersionId());
+        media.setFileSize(published.getContentLength()); media.setNormalized(!source.equals(publish));
+        media.setWidth(result.getWidth()); media.setHeight(result.getHeight());
+        media.setDurationSeconds(result.getDurationSeconds()); media.setFrameRate(result.getFrameRate());
+        media.setVideoCodec(result.getVideoCodec()); media.setAudioCodec(result.getAudioCodec());
+        media.setVideoBitrate(result.getVideoBitrate()); media.setAudioBitrate(result.getAudioBitrate()); media.setAudioSampleRate(result.getAudioSampleRate());
+        media.setPublicUrl(ossObjectStorageService.publicUrlForObjectKey(key)); media.setStatus("READY");
+        media.setMetadataStatus("VERIFIED"); media.setMetadataSource("FFPROBE"); media.setMetadataError(null);
+        media.setInspectedAt(LocalDateTime.now());
+    }
+
+    private ObjectMetadata sourceIdentity(TkSocialMediaDO media) {
+        return new ObjectMetadata(media.getSourceFileSize() == null ? 0 : media.getSourceFileSize(), null, media.getSourceEtag(), media.getSourceVersionId());
+    }
+    void deletePublishCopy(TkSocialMediaDO media) {
+        if (media.getPublishObjectKey() != null) {
+            try { ossObjectStorageService.deleteObject(media.getPublishObjectKey()); } catch (RuntimeException ignored) { }
+        }
+    }
+    private void deleteOwnedObjects(TkSocialMediaDO media) {
+        deletePublishCopy(media);
+        if (media.getObjectKey() != null) try { ossObjectStorageService.deleteObject(media.getObjectKey()); } catch (RuntimeException ignored) { }
+    }
+
+    private TkSocialMediaDO saveImage(byte[] bytes, String name) {
+        int[] size = inspectJpeg(bytes);
+        TkUserScope current = scope.getCurrentScope();
+        Long companyId = scope.getWritableCompanyId(null);
+        if (!current.hasTenantScope() || companyId == null) throw new IllegalArgumentException("请先选择租户");
+        String type = "image/jpeg";
+        String url = files.createFile(bytes, UUID.randomUUID() + ".jpg",
                 "tk/" + current.getTenantId() + "/" + companyId + "/social-media", type);
         try {
             validateReadUrl(resolveReadableUrl(url));
             TkSocialMediaDO media = new TkSocialMediaDO();
             media.setTenantId(current.getTenantId()); media.setCompanyId(companyId); media.setCreator(current.getUserIdString());
             media.setFileName(name.substring(0, Math.min(255, name.length()))); media.setContentType(type);
-            media.setMediaType(video ? "VIDEO" : "IMAGE"); media.setFileSize((long)bytes.length);
-            media.setWidth(width); media.setHeight(height); media.setDurationSeconds(duration);
-            media.setFrameRate(frameRate);
+            media.setMediaType("IMAGE"); media.setFileSize((long)bytes.length);
+            media.setWidth(size[0]); media.setHeight(size[1]); media.setDurationSeconds(0D);
+            media.setFrameRate(0D); media.setMetadataStatus("NOT_REQUIRED");
             media.setPublicUrl(url); media.setStatus("READY");
             mapper.insert(media);
             return media;
@@ -232,30 +321,97 @@ public class TkSocialMediaService {
     }
 
     public TkSocialMediaDO requireReadable(Long id) {
+        TkSocialMediaDO media = getReadable(id);
+        if ("VIDEO".equals(media.getMediaType()) && !"VERIFIED".equals(media.getMetadataStatus()))
+            throw new IllegalArgumentException("PROCESSING".equals(media.getStatus()) ? "视频检测中，请稍后重试"
+                    : "视频尚未通过服务端检查；请重新上传后发布");
+        if (!"READY".equals(media.getStatus())) throw new IllegalArgumentException("媒体尚未就绪");
+        return media;
+    }
+
+    public TkSocialMediaDO getReadable(Long id) {
         TkSocialMediaDO media = mapper.selectById(id);
         if (media == null) throw new IllegalArgumentException("媒体不存在");
         scope.validateReadable(media.getTenantId(), media.getCompanyId(), media.getCreator());
-        if (!"READY".equals(media.getStatus())) throw new IllegalArgumentException("媒体尚未就绪");
-        return media;
+        if ("DELETED".equals(media.getStatus()) || "DELETING".equals(media.getStatus())) throw new IllegalArgumentException("媒体已清理");
+        return requeueHistorical(media);
+    }
+
+    private TkSocialMediaDO requeueHistorical(TkSocialMediaDO media) {
+        if (!historical(media) || ossObjectStorageService == null || !ossObjectStorageService.isConfigured()) return media;
+        String key;
+        try {
+            key = media.getObjectKey() == null ? ossObjectStorageService.requireOwnedObjectKey(media.getPublicUrl(), media.getTenantId(), media.getCompanyId())
+                    : media.getObjectKey();
+            if (key == null) return media;
+            ossObjectStorageService.validateOwnedKey(key, media.getTenantId(), media.getCompanyId());
+        } catch (IllegalArgumentException ex) { return media; }
+        final String ownedKey = key;
+        return new TransactionTemplate(transactionManager).execute(status -> {
+            TkSocialMediaDO current = mapper.lockMedia(media.getId(), media.getTenantId());
+            if (current == null || !historical(current) || !Objects.equals(current.getCompanyId(), media.getCompanyId())) return media;
+            // Never change a media snapshot referenced by any existing publication.
+            if (tasks.selectCount(new QueryWrapper<TkSocialPublishTaskDO>().eq("tenant_id", current.getTenantId()).eq("media_id", current.getId())) > 0)
+                return current;
+            ObjectMetadata identity;
+            try {
+                identity = ossObjectStorageService.headObject(ownedKey);
+                if (identity.getContentLength() <= 0 || identity.getContentLength() > MAX_VIDEO_BYTES
+                        || !Objects.equals(current.getFileSize(), identity.getContentLength())
+                        || identity.getEtag() == null || identity.getEtag().isEmpty()) return current;
+            } catch (RuntimeException ex) { return current; }
+            LocalDateTime now = LocalDateTime.now();
+            int queued = mapper.update(null, new UpdateWrapper<TkSocialMediaDO>()
+                    .eq("id", current.getId()).eq("tenant_id", current.getTenantId()).eq("company_id", current.getCompanyId())
+                    .eq("status", "READY").and(q -> q.isNull("metadata_status").or().eq("metadata_status", "UNVERIFIED"))
+                    .notInSql("id", "SELECT media_id FROM tk_social_publish_task WHERE media_id IS NOT NULL")
+                    .set("status", "PROCESSING").set("metadata_status", "PENDING").set("metadata_source", null).set("metadata_error", null)
+                    .set("object_key", ownedKey).set("source_file_size", identity.getContentLength())
+                    .set("source_etag", identity.getEtag()).set("source_version_id", identity.getVersionId())
+                    .set("width", null).set("height", null).set("duration_seconds", null).set("frame_rate", null)
+                    .set("video_codec", null).set("audio_codec", null).set("video_bitrate", null).set("audio_bitrate", null).set("audio_sample_rate", null)
+                    .set("inspection_attempts", 0).set("inspection_next_retry", now).set("inspection_lease_token", null).set("inspection_lease_until", null));
+            if (queued == 1) {
+                current.setStatus("PROCESSING"); current.setMetadataStatus("PENDING"); current.setMetadataSource(null); current.setMetadataError(null);
+                current.setObjectKey(ownedKey); current.setSourceFileSize(identity.getContentLength()); current.setSourceEtag(identity.getEtag());
+                current.setSourceVersionId(identity.getVersionId()); current.setWidth(null); current.setHeight(null); current.setDurationSeconds(null);
+                current.setFrameRate(null); current.setVideoCodec(null); current.setAudioCodec(null); current.setVideoBitrate(null);
+                current.setAudioBitrate(null); current.setAudioSampleRate(null); current.setInspectionAttempts(0); current.setInspectionNextRetry(now);
+            }
+            return current;
+        });
+    }
+    private static boolean historical(TkSocialMediaDO media) {
+        return "VIDEO".equals(media.getMediaType()) && "READY".equals(media.getStatus())
+                && (media.getMetadataStatus() == null || "UNVERIFIED".equals(media.getMetadataStatus()));
     }
 
     /** Must run in the task-creation transaction; serializes publication with cleanup. */
     public void lockReady(Long id,Long tenantId) {
         TkSocialMediaDO source=mapper.lockMedia(id,tenantId);
         if (source==null || !"READY".equals(source.getStatus())) throw new IllegalArgumentException("媒体已过期或清理中，请重新上传");
+        if ("VIDEO".equals(source.getMediaType()) && !"VERIFIED".equals(source.getMetadataStatus()))
+            throw new IllegalArgumentException("视频尚未通过服务端检查");
     }
 
     public void cleanupUnreferenced(Long id,Long tenantId) {
         TkSocialMediaDO candidate=new TransactionTemplate(transactionManager).execute(status -> {
             TkSocialMediaDO source=mapper.lockMedia(id,tenantId);
-            if (source==null || !Arrays.asList("READY","DELETING").contains(source.getStatus())) return null;
+            if (source==null || !Arrays.asList("READY","FAILED","DELETING").contains(source.getStatus())) return null;
             if (tasks.selectCount(new QueryWrapper<TkSocialPublishTaskDO>().eq("tenant_id",tenantId).eq("media_id",id))>0) return null;
             mapper.update(null,new UpdateWrapper<TkSocialMediaDO>().eq("id",id).eq("tenant_id",tenantId).set("status","DELETING"));
             return source;
         });
         if (candidate==null) return;
         // Claim is committed before storage I/O. A crashed deletion is retried by the sweep.
-        files.deleteFileByUrl(candidate.getPublicUrl());
+        if (candidate.getObjectKey() != null && candidate.getSourceEtag() != null) {
+            ossObjectStorageService.validateOwnedKey(candidate.getObjectKey(), candidate.getTenantId(), candidate.getCompanyId());
+            if (candidate.getPublishObjectKey() != null) {
+                ossObjectStorageService.validateOwnedKey(candidate.getPublishObjectKey(), candidate.getTenantId(), candidate.getCompanyId());
+                ossObjectStorageService.deleteObject(candidate.getPublishObjectKey());
+            }
+            ossObjectStorageService.deleteObject(candidate.getObjectKey());
+        } else files.deleteFileByUrl(candidate.getPublicUrl());
         mapper.update(null,new UpdateWrapper<TkSocialMediaDO>().eq("id",id).eq("tenant_id",tenantId).eq("status","DELETING")
                 .set("status","DELETED").set("deleted",true));
     }
@@ -265,7 +421,7 @@ public class TkSocialMediaService {
         if (!enabled) return;
         List<TkSocialMediaDO> candidates=TenantUtils.executeIgnore(() -> mapper.selectList(
                 new QueryWrapper<TkSocialMediaDO>().and(q -> q.eq("status","DELETING")
-                        .or(s -> s.eq("status","READY").lt("create_time",LocalDateTime.now().minusHours(24))))
+                        .or(s -> s.in("status","READY","FAILED").lt("create_time",LocalDateTime.now().minusHours(24))))
                         .notInSql("id","SELECT media_id FROM tk_social_publish_task WHERE media_id IS NOT NULL AND deleted=0")
                         .orderByAsc("id").last("LIMIT 20")));
         for (TkSocialMediaDO candidate:candidates) {
@@ -276,9 +432,21 @@ public class TkSocialMediaService {
 
     public String readUrl(TkSocialMediaDO media) {
         if (media == null) return null;
+        if ("VERIFIED".equals(media.getMetadataStatus()) && media.getPublishObjectKey() != null) {
+            ossObjectStorageService.validateOwnedKey(media.getPublishObjectKey(), media.getTenantId(), media.getCompanyId());
+            TkOssObjectStorageService.requireIdentity(new ObjectMetadata(media.getFileSize(), null, media.getPublishEtag(), media.getPublishVersionId()),
+                    ossObjectStorageService.headObject(media.getPublishObjectKey()));
+            return ossObjectStorageService.publicUrlForObjectKey(media.getPublishObjectKey());
+        }
         String url = resolveReadableUrl(media.getPublicUrl());
         validateReadUrl(url);
         return url;
+    }
+
+    public String originalUrl(TkSocialMediaDO media) {
+        if (media.getObjectKey() == null) return readUrl(media);
+        ossObjectStorageService.validateOwnedKey(media.getObjectKey(), media.getTenantId(), media.getCompanyId());
+        return ossObjectStorageService.publicUrlForObjectKey(media.getObjectKey());
     }
 
     private String resolveReadableUrl(String url) {

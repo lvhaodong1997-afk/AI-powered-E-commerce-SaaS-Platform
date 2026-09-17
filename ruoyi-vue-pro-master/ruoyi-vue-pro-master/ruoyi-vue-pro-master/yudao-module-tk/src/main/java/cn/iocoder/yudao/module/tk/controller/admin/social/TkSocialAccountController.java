@@ -18,8 +18,10 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 public class TkSocialAccountController {
     private final TkSocialAccountService accounts;
     private final TkSocialAuthService auth;
-    public TkSocialAccountController(TkSocialAccountService accounts,TkSocialAuthService auth) {
-        this.accounts=accounts; this.auth=auth;
+    private final cn.iocoder.yudao.module.tk.service.social.stats.TkSocialStatsService stats;
+    public TkSocialAccountController(TkSocialAccountService accounts,TkSocialAuthService auth,
+            cn.iocoder.yudao.module.tk.service.social.stats.TkSocialStatsService stats) {
+        this.accounts=accounts; this.auth=auth; this.stats=stats;
     }
     @GetMapping("/facebook-pages")
     @PreAuthorize("@ss.hasPermission('tk:social-account:authorize')")
@@ -35,7 +37,9 @@ public class TkSocialAccountController {
     @PreAuthorize("@ss.hasPermission('tk:social-account:query')")
     public CommonResult<PageResult<Map<String,Object>>> page(@Valid PageParam page,
                                                             @RequestParam(value="platform",required=false) String platform) {
-        return success(accounts.page(page,platform));
+        PageResult<Map<String,Object>> result=accounts.page(page,platform);
+        stats.attachAccountSummaries(result.getList());
+        return success(result);
     }
     @GetMapping("/insights")
     @PreAuthorize("@ss.hasPermission('tk:social-account:query')")

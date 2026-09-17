@@ -8,6 +8,27 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TkOssObjectStorageServiceTest {
+    @Test void identityChecksRejectSameSizeReplacementAndVersionChanges() {
+        TkOssObjectStorageClient.ObjectMetadata original = new TkOssObjectStorageClient.ObjectMetadata(1024, null, "etag1", "v1");
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> TkOssObjectStorageService.requireIdentity(original, original));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> TkOssObjectStorageService.requireIdentity(original,
+                new TkOssObjectStorageClient.ObjectMetadata(1024, null, "etag2", "v1")));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> TkOssObjectStorageService.requireIdentity(original,
+                new TkOssObjectStorageClient.ObjectMetadata(1024, null, "etag1", "v2")));
+    }
+    @Test void boundedCopyDoesNotWriteExcessBytes() {
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> TkOssObjectStorageService.copyBounded(
+                new java.io.ByteArrayInputStream(new byte[100]), output, 64));
+        assertTrue(output.size() <= 64);
+    }
+    @Test void ownedKeysRejectCrossTenantAndUrlInputs() {
+        TkOssObjectStorageService service = new TkOssObjectStorageService();
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> service.validateOwnedKey("tk/100/200/social-media/a.mp4", 100L, 200L));
+        for (String key : new String[]{"tk/999/200/social-media/a.mp4", "tk/100/200/../a.mp4", "https://evil.example/a.mp4"})
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> service.validateOwnedKey(key, 100L, 200L));
+    }
 
     @Test
     void resolveReadUrlSignsHistoricalPrivateOssUrl() {

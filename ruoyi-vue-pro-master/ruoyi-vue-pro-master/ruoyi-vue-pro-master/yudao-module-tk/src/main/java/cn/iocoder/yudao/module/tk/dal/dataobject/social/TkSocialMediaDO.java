@@ -25,4 +25,25 @@ public class TkSocialMediaDO extends TenantBaseDO {
     private Integer height;
     private Double durationSeconds;
     private Double frameRate;
+    private String uploadId;
+    private String metadataStatus;
+    private String metadataSource;
+    private String metadataError;
+    private String videoCodec;
+    private String audioCodec;
+    private Long videoBitrate;
+    private Long audioBitrate;
+    private Integer audioSampleRate;
+    private Long sourceFileSize;
+    private String sourceEtag;
+    private String sourceVersionId;
+    private String publishObjectKey;
+    private String publishEtag;
+    private String publishVersionId;
+    private Boolean normalized;
+    private Integer inspectionAttempts;
+    private String inspectionLeaseToken;
+    private LocalDateTime inspectionLeaseUntil;
+    private LocalDateTime inspectionNextRetry;
+    private LocalDateTime inspectedAt;
 }

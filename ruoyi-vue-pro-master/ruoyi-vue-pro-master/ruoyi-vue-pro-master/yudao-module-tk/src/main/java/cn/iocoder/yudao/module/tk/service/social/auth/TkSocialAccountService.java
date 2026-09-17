@@ -104,6 +104,22 @@ public class TkSocialAccountService {
         }
     }
 
+    /** Statistics must not invalidate publishing because an optional insight permission is absent. */
+    public String getStatisticsToken(TkSocialAccountDO requested) {
+        properties.requireEnabled();
+        Long tenant=resolveTokenTenantId();
+        if (requested==null || tenant==null || !tenant.equals(requested.getTenantId()) || TenantContextHolder.isIgnore())
+            throw new IllegalStateException("Meta 令牌租户上下文不匹配");
+        TkSocialAccountDO current=accounts.selectById(requested.getId());
+        if (current==null || !Objects.equals(current.getTenantId(),tenant)
+                || !Objects.equals(current.getCompanyId(),requested.getCompanyId())
+                || !Objects.equals(current.getExternalAccountId(),requested.getExternalAccountId()))
+            throw new IllegalArgumentException("Meta 账号已变更");
+        if (!"AUTHORIZED".equals(current.getStatus()) || (current.getTokenExpiresAt()!=null
+                && !current.getTokenExpiresAt().isAfter(LocalDateTime.now()))) throw reauth("Meta 授权失效，请重新授权");
+        return cipher.decrypt(current.getAccessTokenCiphertext(),accountContext(current));
+    }
+
     private Long resolveTokenTenantId() {
         if (SecurityFrameworkUtils.getLoginUserId()!=null) {
             TkUserScope current=scope.getCurrentScope();

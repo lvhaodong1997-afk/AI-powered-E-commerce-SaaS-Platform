@@ -107,6 +107,7 @@ public class TkSocialHttpTransport implements TkSocialPlatformClient.Transport {
                 :permission?"Meta 权限不足，请修复应用审核或 Page 权限后重新授权"
                 :reauth?"Meta 授权失效，请重新授权"
                 :rate?"Meta 请求频率受限，请稍后重试":"Meta 请求被拒绝，请检查账号权限及内容";
-        return new TkSocialPlatformException(code==0?"HTTP_"+httpStatus:"META_"+code,message,retry,reauth,uncertain);
+        int subcode=body==null?0:body.path("error").path("error_subcode").asInt(0);
+        return new TkSocialPlatformException(code==0?"HTTP_"+httpStatus:"META_"+code,message,retry,reauth,uncertain,subcode);
     }
 }

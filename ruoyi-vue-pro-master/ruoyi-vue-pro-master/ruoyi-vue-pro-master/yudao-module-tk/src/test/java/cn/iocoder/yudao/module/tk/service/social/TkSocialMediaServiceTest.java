@@ -5,6 +5,11 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialMediaDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialMediaMapper;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
+import cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadCompleteReqVO;
+import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
+import cn.iocoder.yudao.module.tk.service.upload.TkUploadSessionService;
+import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkUploadSessionDO;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 import javax.imageio.ImageIO;
@@ -15,6 +20,111 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class TkSocialMediaServiceTest {
+    @Test void historicalOwnedUnpublishedVideoIsRequeuedForTrueInspection() {
+        TkSocialMediaDO historical = prepareHistorical(0L);
+        TkSocialMediaDO result = service.getReadable(1L);
+        assertEquals("PROCESSING", result.getStatus());
+        assertEquals("PENDING", result.getMetadataStatus());
+        assertNull(result.getFrameRate());
+        assertEquals("\"etag-1\"", result.getSourceEtag());
+        assertEquals(1024L, result.getSourceFileSize());
+        assertThrows(IllegalArgumentException.class, () -> service.requireReadable(1L));
+    }
+    @Test void referencedHistoricalVideoRemainsUnchangedForExistingPublications() {
+        TkSocialMediaDO historical = prepareHistorical(1L);
+        assertSame(historical, service.getReadable(1L));
+        assertEquals("READY", historical.getStatus()); assertEquals("UNVERIFIED", historical.getMetadataStatus());
+        verify(mapper, never()).update(isNull(), any(com.baomidou.mybatisplus.core.conditions.Wrapper.class));
+    }
+    @Test void historicalForeignOssKeyCannotBeProbed() {
+        TkSocialMediaDO historical = prepareHistorical(0L);
+        historical.setObjectKey("tk/999/999/social-media/foreign.mp4");
+        TkOssObjectStorageService oss = (TkOssObjectStorageService) org.springframework.test.util.ReflectionTestUtils.getField(service, "ossObjectStorageService");
+        doThrow(new IllegalArgumentException("wrong owner")).when(oss).validateOwnedKey(historical.getObjectKey(),100L,100L);
+        assertEquals("READY", service.getReadable(1L).getStatus());
+        verify(oss, never()).headObject(anyString());
+        verify(mapper, never()).update(isNull(), any(com.baomidou.mybatisplus.core.conditions.Wrapper.class));
+    }
+    private TkSocialMediaDO prepareHistorical(long references) {
+        TkSocialVideoUploadCompleteReqVO request = directRequest(); prepareDirect(request);
+        TkSocialMediaDO value = prepareCleanup(references);
+        value.setCompanyId(100L); value.setCreator("7"); value.setMediaType("VIDEO"); value.setMetadataStatus("UNVERIFIED");
+        value.setObjectKey(request.getObjectKey()); value.setFileSize(1024L); value.setFrameRate(30D);
+        when(mapper.selectById(1L)).thenReturn(value);
+        return value;
+    }
+    @Test void completionIgnoresFabricatedClientFrameRateAndQueuesProbe() {
+        cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadCompleteReqVO request = directRequest();
+        prepareDirect(request);
+        TkSocialMediaDO result = service.completeDirectVideoUpload(request);
+        assertEquals("PROCESSING", result.getStatus());
+        assertNull(result.getFrameRate(), "Browser-supplied 30fps is not evidence");
+        assertNull(result.getWidth());
+        verify(mapper).insert(any(TkSocialMediaDO.class));
+    }
+    @Test void completionAcceptsAbsentBrowserMetadata() {
+        TkSocialVideoUploadCompleteReqVO request = directRequest(); prepareDirect(request);
+        request.setWidth(null); request.setHeight(null); request.setFrameRate(null); request.setDurationSeconds(null);
+        assertEquals("PROCESSING", service.completeDirectVideoUpload(request).getStatus());
+    }
+    @Test void repeatedCompletionReturnsSameMediaWithoutInsertingAgain() {
+        TkSocialVideoUploadCompleteReqVO request = directRequest(); prepareDirect(request);
+        TkSocialMediaDO existing = new TkSocialMediaDO();
+        existing.setId(20L); existing.setTenantId(100L); existing.setCompanyId(100L); existing.setCreator("7");
+        existing.setObjectKey(request.getObjectKey()); existing.setStatus("PROCESSING");
+        when(mapper.selectOne(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(existing);
+        assertSame(existing, service.completeDirectVideoUpload(request));
+        verify(mapper, never()).insert(any(TkSocialMediaDO.class));
+    }
+    @Test void completionRejectsObjectSizeMismatch() {
+        TkSocialVideoUploadCompleteReqVO request = directRequest(); TkOssObjectStorageService oss = prepareDirect(request);
+        when(oss.headObject(request.getObjectKey())).thenReturn(
+                new cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient.ObjectMetadata(999L, null));
+        assertThrows(IllegalArgumentException.class, () -> service.completeDirectVideoUpload(request));
+        verify(mapper, never()).insert(any(TkSocialMediaDO.class));
+    }
+    @Test void completionRejectsDifferentUploaderEvenWithinCompany() {
+        TkSocialVideoUploadCompleteReqVO request = directRequest(); prepareDirect(request);
+        when(scope.getCurrentScope()).thenReturn(new TkUserScope(8L, 100L, "USER", 100L));
+        assertThrows(IllegalArgumentException.class, () -> service.completeDirectVideoUpload(request));
+        verify(mapper, never()).insert(any(TkSocialMediaDO.class));
+    }
+    @Test void historicalUnverifiedVideoCannotStartNewPublication() {
+        TkSocialMediaDO media = new TkSocialMediaDO();
+        media.setId(1L); media.setTenantId(100L); media.setCompanyId(100L); media.setCreator("7");
+        media.setMediaType("VIDEO"); media.setStatus("READY");
+        when(mapper.selectById(1L)).thenReturn(media);
+        assertThrows(IllegalArgumentException.class, () -> service.requireReadable(1L));
+    }
+    private cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadCompleteReqVO directRequest() {
+        TkSocialVideoUploadCompleteReqVO request = new TkSocialVideoUploadCompleteReqVO();
+        request.setUploadId("abc123"); request.setFileName("movie.mp4"); request.setFileSize(1024L);
+        request.setObjectKey("tk/100/100/social-media/abc123.mp4");
+        request.setWidth(1080); request.setHeight(1920); request.setDurationSeconds(10D); request.setFrameRate(30D);
+        return request;
+    }
+    private cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService prepareDirect(
+            cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadCompleteReqVO request) {
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getUpload().setStorageType("oss"); properties.getUpload().getOss().setEnabled(true);
+        TkUploadSessionService sessions = mock(TkUploadSessionService.class);
+        TkUploadSessionDO session = new TkUploadSessionDO();
+        session.setUploadId(request.getUploadId()); session.setFileName(request.getFileName());
+        session.setFileSize(request.getFileSize()); session.setTenantId(100L); session.setCompanyId(100L);
+        session.setCreator("7"); session.setStorageMode("social-oss"); session.setStatus("UPLOADING");
+        when(sessions.lockSocialCompletion(request.getUploadId())).thenReturn(session);
+        TkOssObjectStorageService oss = mock(TkOssObjectStorageService.class);
+        when(oss.isConfigured()).thenReturn(true);
+        when(oss.headObject(request.getObjectKey())).thenReturn(
+                new cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient.ObjectMetadata(1024L, null, "\"etag-1\"", null));
+        when(oss.publicUrlForObjectKey(request.getObjectKey())).thenReturn("https://assets.example.com/abc123.mp4");
+        when(scope.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L, "USER", 100L));
+        when(scope.getWritableCompanyId(null)).thenReturn(100L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "generationProperties", properties);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "uploadSessionService", sessions);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "ossObjectStorageService", oss);
+        return oss;
+    }
     private final FileApi files = mock(FileApi.class);
     private final TkSocialMediaMapper mapper = mock(TkSocialMediaMapper.class);
     private final TkDataScopeService scope = mock(TkDataScopeService.class);

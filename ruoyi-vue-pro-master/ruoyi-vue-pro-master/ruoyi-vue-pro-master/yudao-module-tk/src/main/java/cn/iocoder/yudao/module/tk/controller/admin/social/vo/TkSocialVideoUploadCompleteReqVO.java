@@ -26,19 +26,12 @@ public class TkSocialVideoUploadCompleteReqVO {
     @NotBlank(message = "OSS 对象不能为空")
     private String objectKey;
 
-    @NotNull(message = "视频宽度不能为空")
-    @Min(value = 1, message = "视频宽度必须大于 0")
+    @Schema(description = "仅供兼容旧客户端，服务端不信任此值")
     private Integer width;
 
-    @NotNull(message = "视频高度不能为空")
-    @Min(value = 1, message = "视频高度必须大于 0")
     private Integer height;
 
-    @NotNull(message = "视频时长不能为空")
-    @Min(value = 1, message = "视频时长必须大于 0")
     private Double durationSeconds;
 
-    @NotNull(message = "视频帧率不能为空")
-    @Min(value = 1, message = "视频帧率必须大于 0")
     private Double frameRate;
 }

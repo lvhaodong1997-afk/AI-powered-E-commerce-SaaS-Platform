@@ -57,7 +57,13 @@ public class TkSocialPlatformClient {
                 map("grant_type","ig_exchange_token","client_secret",c.getAppSecret(),
                         "access_token",shortAccessToken),null,false)));
         instagramStage("INSTAGRAM_PROFILE",()->{
-            JsonNode profile=call("GET",ig("me"),map("fields","id,user_id,username,account_type,followers_count,media_count"),a.accessToken,false);
+            JsonNode profile;
+            try {
+                profile=call("GET",ig("me"),map("fields","id,user_id,username,account_type,followers_count,media_count"),a.accessToken,false);
+            } catch (TkSocialPlatformException e) {
+                if (!"META_100".equals(e.getCode()) || e.getSubcode()!=0) throw e;
+                profile=call("GET",ig("me"),map("fields","id,user_id,username,account_type"),a.accessToken,false);
+            }
             a.externalId=profile.path("user_id").asText(profile.path("id").asText());
             id(a.externalId);
             a.providerUserId=profile.path("id").asText(a.externalId);
@@ -157,6 +163,31 @@ public class TkSocialPlatformClient {
     public JsonNode instagramInsights(String externalId,String accessToken,String metric,String period) {
         id(externalId);
         return call("GET",ig(externalId+"/insights"),map("metric",queryValue(metric),"period",queryValue(period)),accessToken,false);
+    }
+
+    /** Statistics reads are intentionally separate from the publishing state machine. */
+    public JsonNode statisticsFields(String platform,String objectId,String accessToken,String fields) {
+        properties.requireEnabled(); statisticsId(platform,objectId);
+        if (!Arrays.asList("INSTAGRAM","FACEBOOK_PAGE").contains(platform)) throw rejected("PLATFORM_INVALID","不支持的平台");
+        if (fields==null || !fields.matches("[A-Za-z0-9_,.()]{1,256}")) throw rejected("FIELDS_INVALID","统计字段无效");
+        return call("GET","INSTAGRAM".equals(platform)?ig(objectId):fb(objectId),map("fields",fields),accessToken,false);
+    }
+
+    public JsonNode statisticsInsights(String platform,String objectId,String accessToken,String metric) {
+        properties.requireEnabled(); statisticsId(platform,objectId);
+        if ("INSTAGRAM".equals(platform)) return instagramMediaInsights(objectId,accessToken,metric);
+        if (!"FACEBOOK_PAGE".equals(platform)) throw rejected("PLATFORM_INVALID","不支持的平台");
+        return call("GET",fb(objectId+"/insights"),map("metric",queryValue(metric),"period","lifetime"),accessToken,false);
+    }
+
+    public JsonNode statisticsVideoInsights(String videoId,String accessToken,String metric) {
+        properties.requireEnabled(); id(videoId);
+        return call("GET",fb(videoId+"/video_insights"),map("metric",queryValue(metric)),accessToken,false);
+    }
+
+    private static void statisticsId(String platform,String objectId) {
+        if ("FACEBOOK_PAGE".equals(platform) && objectId!=null && objectId.matches("[0-9]{1,100}_[0-9]{1,100}")) return;
+        id(objectId);
     }
 
     public JsonNode instagramMediaInsights(String mediaId,String accessToken,String metric) {

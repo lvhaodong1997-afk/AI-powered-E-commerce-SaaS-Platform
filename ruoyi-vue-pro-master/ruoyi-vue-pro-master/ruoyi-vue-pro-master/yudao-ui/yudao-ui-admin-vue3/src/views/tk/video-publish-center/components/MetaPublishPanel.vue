@@ -31,11 +31,25 @@
           <el-table-column label="账号" min-width="180"><template #default="{ row }">{{ accountLabel(row) }}</template></el-table-column>
           <el-table-column label="平台" min-width="140"><template #default="{ row }">{{ platformLabel(row.platform) }}</template></el-table-column>
           <el-table-column label="状态" min-width="130"><template #default="{ row }">{{ socialStatusLabel(row.status) }}</template></el-table-column>
+          <el-table-column v-for="metric in accountMetrics" :key="metric.key" :label="metric.label" min-width="115">
+            <template #default="{ row }">
+              <el-tooltip :content="accountMetricHint(row.id, metric.key)" placement="top">
+                <span>{{ formatMetricValue(accountMetric(row.id, metric.key)) }}{{ accountMetric(row.id, metric.key)?.stale ? '（旧）' : '' }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column label="数据同步" min-width="150"><template #default="{ row }">
+            {{ statsStatusLabel(state.stats[statsKey('account', row.id)]?.syncStatus) }}
+            <div class="hint">{{ state.statsErrors[statsKey('account', row.id)] || state.stats[statsKey('account', row.id)]?.errorMessage }}</div>
+          </template></el-table-column>
+          <el-table-column label="数据更新时间" min-width="170"><template #default="{ row }">{{ statsDate(state.stats[statsKey('account', row.id)]?.lastSuccessTime) }}</template></el-table-column>
           <el-table-column prop="tokenExpiresAt" label="授权到期时间" min-width="170"><template #default="{ row }">{{ row.tokenExpiresAt || '以平台校验结果为准' }}</template></el-table-column>
           <el-table-column prop="lastValidatedAt" label="最近校验" min-width="170" />
           <el-table-column prop="failReason" label="异常说明" min-width="170" show-overflow-tooltip />
           <el-table-column label="操作" min-width="360">
             <template #default="{ row }">
+              <el-button link @click="run(() => controller.openStats('account', row.id))">查看数据</el-button>
+              <el-button v-if="can('tk:social-account:update')" link :disabled="!controller.canSyncStats('account', row.id)" :loading="state.statsSyncing[statsKey('account', row.id)]" @click="run(() => controller.syncStats('account', row.id))">同步数据</el-button>
               <el-button v-if="can('tk:social-account:query') && isSocialAccountAuthorized(row.status)" link @click="openInsights(row)">测试数据分析</el-button>
               <el-button v-if="can('tk:social-account:update')" link :disabled="state.busyAccounts.includes(row.id)" @click="accountAction('validate', row)">校验</el-button>
               <el-button v-if="can('tk:social-account:authorize')" link :disabled="state.authBusy" @click="run(() => controller.connect(row.platform))">重新授权</el-button>
@@ -72,15 +86,21 @@
               <el-alert v-if="facebookSelected" title="Facebook 视频将发布为 Reels" description="本发布流程支持 9:16 竖屏、分辨率至少 540×960、帧率 23–60 fps、时长 4–60 秒。系统成片与上传视频都需通过服务端校验。" type="info" :closable="false" />
               <p v-if="instagramSelected" class="hint">Instagram 视频：本发布流程支持 23–60 fps，其他格式要求由服务端进一步校验。</p>
               <el-tag v-if="state.draft.generationTaskId" type="success">系统成片 #{{ state.draft.generationTaskId }}{{ generationTitle ? ` · ${generationTitle}` : '' }}</el-tag>
-              <el-tag v-else-if="state.media" type="success">{{ state.media.mediaType === 'VIDEO' ? '视频' : '图片' }}：{{ state.media.fileName }}（上传完成）</el-tag>
-              <p v-if="state.media?.mediaType === 'VIDEO'" class="hint">分辨率 {{ state.media.width ?? '待校验' }} × {{ state.media.height ?? '待校验' }} · 时长 {{ state.media.durationSeconds ?? '待校验' }} 秒 · 帧率 {{ state.media.frameRate ?? '待校验' }} fps</p>
+              <el-tag v-else-if="state.media" :type="mediaReady ? 'success' : 'warning'">{{ state.media.mediaType === 'VIDEO' ? '视频' : '图片' }}：{{ state.media.fileName }}（{{ mediaReady ? '已就绪' : state.media.status === 'FAILED' ? '检测失败' : '等待服务端检测' }}）</el-tag>
+              <template v-if="state.media?.mediaType === 'VIDEO'">
+                <p class="hint">分辨率 {{ state.media.width ?? '待检测' }} × {{ state.media.height ?? '待检测' }} · 时长 {{ rounded(state.media.durationSeconds) }} 秒 · 帧率 {{ rounded(state.media.frameRate) }} fps</p>
+                <p class="hint">视频编码 {{ state.media.videoCodec || '待检测' }} · 音频编码 {{ state.media.audioCodec || '无 / 待检测' }} · 来源 {{ state.media.metadataSource || '待检测' }} · {{ metadataLabel(state.media.metadataStatus) }}</p>
+                <p v-if="state.media.normalized" class="hint">已由服务端标准化处理，发布使用检测后的媒体。</p>
+                <el-alert v-if="state.media.metadataError || state.mediaError" :title="state.media.metadataError || state.mediaError" type="error" :closable="false" />
+                <el-button link :loading="state.mediaChecking" @click="run(() => controller.refreshMedia())">刷新检测结果</el-button>
+              </template>
             </div>
           </el-form-item>
           <div class="copy-grid">
             <el-form-item label="Instagram 文案"><el-input v-model="state.draft.instagramCaption" type="textarea" :rows="4" :maxlength="2200" show-word-limit placeholder="Instagram caption" /></el-form-item>
             <el-form-item label="Facebook 正文"><el-input v-model="state.draft.facebookMessage" type="textarea" :rows="4" :maxlength="5000" show-word-limit placeholder="Facebook message" /></el-form-item>
           </div>
-          <el-button type="primary" :loading="state.submitting" :disabled="state.uploading || !state.draft.accountIds.length" @click="run(controller.submit)">创建异步发布任务</el-button>
+          <el-button type="primary" :loading="state.submitting" :disabled="state.uploading || !mediaReady || !state.draft.accountIds.length" @click="run(controller.submit)">创建异步发布任务</el-button>
           <p v-if="state.lastTaskId" class="hint" role="status">已创建任务 #{{ state.lastTaskId }}。排队或平台处理中时无需重复提交，下方会自动刷新。</p>
         </el-form>
       </ContentWrap>
@@ -116,6 +136,7 @@
           <el-table-column prop="retryCount" label="重试次数" width="95" />
           <el-table-column label="操作" min-width="260"><template #default="{ row }">
             <el-link v-if="safeUrl(row.publishUrl)" :href="safeUrl(row.publishUrl)" target="_blank" rel="noopener noreferrer">查看发布</el-link>
+            <el-button v-if="row.status === 'SUCCESS'" link @click="run(() => controller.openStats('detail', row.id))">查看数据</el-button>
             <el-button v-if="row.status === 'REAUTH_REQUIRED' && can('tk:social-account:authorize')" link :disabled="state.authBusy" @click="run(() => controller.connect(row.platform))">重新授权</el-button>
             <el-button v-if="canRetrySocialDetail(row.status) && can('tk:social-publish:retry')" link type="primary" :disabled="state.retrying.includes(row.id)" @click="retry(row)">{{ row.status === 'REAUTH_REQUIRED' ? '授权后重试' : '重试' }}</el-button>
           </template></el-table-column>
@@ -132,6 +153,10 @@
       <template #footer><el-button :disabled="state.binding" @click="controller.cancelAuth">取消</el-button><el-button type="primary" :loading="state.binding" :disabled="!state.pageIds.length" @click="run(controller.bindPages)">绑定所选主页</el-button></template>
     </el-dialog>
 
+    <MetaMediaStatsDrawer :target="state.statsTarget" :snapshot="state.stats[drawerKey]" :loading="state.statsLoading[drawerKey]" :syncing="state.statsSyncing[drawerKey]" :error="state.statsErrors[drawerKey]"
+      :can-sync="!!state.statsTarget && can(state.statsTarget.kind === 'account' ? 'tk:social-account:update' : 'tk:social-publish:query')"
+      :sync-allowed="!!state.statsTarget && controller.canSyncStats(state.statsTarget.kind, state.statsTarget.id)"
+      @close="controller.closeStats" @refresh="drawerAction(false)" @sync="drawerAction(true)" />
     <el-dialog v-model="insightVisible" title="Meta 数据分析测试" width="min(760px, 95vw)" destroy-on-close>
       <el-form label-position="top">
         <el-form-item label="账号"><el-input :model-value="insightAccount ? `${platformLabel(insightAccount.platform)} · ${accountLabel(insightAccount)}` : ''" readonly /></el-form-item>
@@ -149,11 +174,14 @@
 <script setup lang="ts">
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { SocialPublishApi, type SocialAccount, type SocialDetail, type SocialStatus } from '@/api/tk/socialPublish'
+import { SocialPublishApi, type SocialAccount, type SocialDetail, type SocialStatus, type SocialTime } from '@/api/tk/socialPublish'
 import type { TkGenerationTaskVO } from '@/api/tk/generation'
 import { hasPermission } from '@/directives/permission/hasPermi'
 import { accountLabel, canRetrySocialDetail, createMetaPublishController, isSocialAccountAuthorized, platformLabel, socialStatusLabel } from './metaPublishController'
 import MetaGeneratedPicker from './MetaGeneratedPicker.vue'
+import MetaMediaStatsDrawer from './MetaMediaStatsDrawer.vue'
+import { formatDate } from '@/utils/formatTime'
+import { availabilityLabel, formatMetricValue, statsKey, statsStatusLabel } from './metaStats'
 
 const props = defineProps<{ generationTaskId?: number }>()
 const can = (permission: string) => hasPermission([permission])
@@ -163,9 +191,31 @@ const controller = createMetaPublishController(SocialPublishApi, can, {
   now: Date.now, idempotencyKey: () => crypto.randomUUID(), notify: (text) => ElMessage.success(text)
 })
 const state = controller.state
+const accountMetrics = [{ key: 'followers', label: '粉丝' }, { key: 'following', label: '关注' }, { key: 'mediaCount', label: '作品数' }]
+const statsDate = (value?: SocialTime | null) => value == null ? '—' : formatDate(value)
+const accountMetric = (id: number, key: string) => state.stats[statsKey('account', id)]?.metrics.find(metric => metric.key === key)
+function accountMetricHint(id: number, key: string) {
+  const metric = accountMetric(id, key)
+  return metric ? [availabilityLabel(metric.availability), metric.sourceMetric, metric.scope, metric.period, statsDate(metric.fetchedAt), metric.errorMessage].filter(Boolean).join(' · ') : '尚无统计数据'
+}
+const drawerKey = computed(() => state.statsTarget ? statsKey(state.statsTarget.kind, state.statsTarget.id) : '')
+function drawerAction(sync: boolean) {
+  const target = state.statsTarget
+  if (target) void run(() => sync ? controller.syncStats(target.kind, target.id) : controller.refreshStats(target.kind, target.id))
+}
+const mediaReady = computed(() => !state.media || state.media.mediaType !== 'VIDEO' || (state.media.status === 'READY' && state.media.metadataStatus === 'VERIFIED'))
+const rounded = (value?: number) => value == null ? '待检测' : Number(value.toFixed(2))
+const metadataLabel = (status?: string) => ({ PENDING: '等待检测', INSPECTING: '检测中', VERIFIED: '检测通过', FAILED: '检测失败', UNVERIFIED: '尚未验证' }[status || ''] || '等待检测')
 const fileInput = ref<HTMLInputElement>(), generationTitle = ref(''), accountPage = ref(1)
 const insightVisible = ref(false), insightLoading = ref(false), insightAccount = ref<SocialAccount>(), insightMetric = ref(''), insightPeriod = ref('day'), insightResult = ref('')
 const accountRows = computed(() => state.accounts.slice((accountPage.value - 1) * 10, accountPage.value * 10))
+watch(accountRows, rows => {
+  if (!state.enabled || !can('tk:social-account:query')) return
+  for (const row of rows) {
+    const key = statsKey('account', row.id)
+    if (!state.stats[key] && !state.statsLoading[key] && !state.statsErrors[key]) void run(() => controller.refreshStats('account', row.id))
+  }
+})
 const facebookSelected = computed(() => state.accounts.some(account => account.platform === 'FACEBOOK_PAGE' && state.draft.accountIds.includes(account.id)))
 const instagramSelected = computed(() => state.accounts.some(account => account.platform === 'INSTAGRAM' && state.draft.accountIds.includes(account.id)))
 const acceptedMedia = computed(() => [state.mediaTypes.includes('VIDEO') ? '.mp4,video/mp4' : '', state.mediaTypes.includes('IMAGE') ? '.jpg,.jpeg,image/jpeg' : ''].filter(Boolean).join(','))

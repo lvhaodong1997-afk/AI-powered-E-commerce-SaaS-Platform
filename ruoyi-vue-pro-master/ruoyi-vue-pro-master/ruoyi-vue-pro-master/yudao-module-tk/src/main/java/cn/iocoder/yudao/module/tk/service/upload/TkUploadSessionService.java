@@ -109,6 +109,21 @@ public class TkUploadSessionService {
         return session;
     }
 
+    /** Called inside the social completion transaction; serializes retries of the same upload. */
+    public TkUploadSessionDO lockSocialCompletion(String uploadId) {
+        TkUploadSessionDO session = sessionMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<TkUploadSessionDO>()
+                .eq("upload_id", uploadId).last("FOR UPDATE"));
+        if (session == null) throw exception(TK_UPLOAD_SESSION_INVALID);
+        TkUserScope current = dataScopeService.getCurrentScope();
+        dataScopeService.validateReadable(session.getTenantId(), session.getCompanyId(), session.getCreator());
+        if (!"social-oss".equals(session.getStorageMode()) || !current.getUserIdString().equals(session.getCreator())
+                || !java.util.Objects.equals(current.getTenantId(), session.getTenantId())
+                || !(TkUploadSessionAccessPolicy.canAccess(session, LocalDateTime.now())
+                || TkUploadSessionAccessPolicy.canAccessCompleted(session, LocalDateTime.now())))
+            throw exception(TK_UPLOAD_SESSION_INVALID);
+        return session;
+    }
+
     public TkUploadSessionDO validateCompletedAccessible(String uploadId) {
         TkUploadSessionDO session = TenantUtils.executeIgnore(() -> sessionMapper.selectByUploadId(uploadId));
         if (session == null) {

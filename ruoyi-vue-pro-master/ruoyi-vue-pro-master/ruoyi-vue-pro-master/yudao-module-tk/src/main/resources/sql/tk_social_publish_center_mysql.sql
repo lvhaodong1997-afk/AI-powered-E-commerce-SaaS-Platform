@@ -66,6 +66,27 @@ CREATE TABLE IF NOT EXISTS tk_social_media (
   height int DEFAULT NULL,
   duration_seconds double DEFAULT NULL,
   frame_rate double DEFAULT NULL,
+  upload_id varchar(80) DEFAULT NULL,
+  metadata_status varchar(32) NOT NULL DEFAULT 'UNVERIFIED',
+  metadata_source varchar(32) DEFAULT NULL,
+  metadata_error varchar(512) DEFAULT NULL,
+  video_codec varchar(64) DEFAULT NULL,
+  audio_codec varchar(64) DEFAULT NULL,
+  video_bitrate bigint DEFAULT NULL,
+  audio_bitrate bigint DEFAULT NULL,
+  audio_sample_rate int DEFAULT NULL,
+  source_file_size bigint DEFAULT NULL,
+  source_etag varchar(128) DEFAULT NULL,
+  source_version_id varchar(256) DEFAULT NULL,
+  publish_object_key varchar(1024) DEFAULT NULL,
+  publish_etag varchar(128) DEFAULT NULL,
+  publish_version_id varchar(256) DEFAULT NULL,
+  normalized bit(1) NOT NULL DEFAULT b'0',
+  inspection_attempts int NOT NULL DEFAULT 0,
+  inspection_lease_token varchar(64) DEFAULT NULL,
+  inspection_lease_until datetime DEFAULT NULL,
+  inspection_next_retry datetime DEFAULT NULL,
+  inspected_at datetime DEFAULT NULL,
   creator varchar(64) NOT NULL DEFAULT '',
   create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updater varchar(64) NOT NULL DEFAULT '',
@@ -73,7 +94,9 @@ CREATE TABLE IF NOT EXISTS tk_social_media (
   deleted bit(1) NOT NULL DEFAULT b'0',
   PRIMARY KEY (id),
   KEY idx_social_media_scope (tenant_id, creator, create_time),
-  KEY idx_social_media_cleanup (status, create_time)
+  KEY idx_social_media_cleanup (status, create_time),
+  UNIQUE KEY uk_social_media_upload (tenant_id, upload_id),
+  KEY idx_social_media_probe (status, metadata_status, inspection_next_retry, inspection_lease_until)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS tk_social_publish_task (

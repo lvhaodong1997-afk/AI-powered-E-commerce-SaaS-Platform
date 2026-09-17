@@ -42,16 +42,28 @@ public class TkSocialPublishController {
     public CommonResult<Map<String,Object>> completeVideoUpload(@Valid @RequestBody TkSocialVideoUploadCompleteReqVO request) {
         service.requireEnabled();
         TkSocialMediaDO value = media.completeDirectVideoUpload(request);
-        Map<String,Object> result=fields(value,"id","fileName","mediaType","fileSize","status","width","height","durationSeconds","frameRate");
-        result.put("publicUrl",media.readUrl(value)); return success(result);
+        return success(mediaResponse(value));
     }
     @PostMapping("/media/upload")
     @PreAuthorize("@ss.hasPermission('tk:social-publish:create')")
     public CommonResult<Map<String,Object>> upload(@RequestParam("file") MultipartFile file) {
         service.requireEnabled();
         TkSocialMediaDO value=media.upload(file);
-        Map<String,Object> result=fields(value,"id","fileName","mediaType","fileSize","status","width","height","durationSeconds","frameRate");
-        result.put("publicUrl",media.readUrl(value)); return success(result);
+        return success(mediaResponse(value));
+    }
+    @GetMapping("/media/get")
+    @PreAuthorize("@ss.hasPermission('tk:social-publish:create')")
+    public CommonResult<Map<String,Object>> getMedia(@RequestParam("id") Long id) {
+        service.requireEnabled();
+        return success(mediaResponse(media.getReadable(id)));
+    }
+    private Map<String,Object> mediaResponse(TkSocialMediaDO value) {
+        Map<String,Object> result=fields(value,"id","fileName","mediaType","fileSize","status","width","height","durationSeconds","frameRate",
+                "metadataStatus","metadataSource","videoCodec","audioCodec","videoBitrate","audioBitrate","audioSampleRate","metadataError",
+                "normalized","sourceFileSize","inspectedAt");
+        if (value.getMetadataStatus()==null) result.put("metadataStatus", "VIDEO".equals(value.getMediaType()) ? "UNVERIFIED" : "NOT_REQUIRED");
+        result.put("publicUrl",media.readUrl(value)); result.put("originalUrl",media.originalUrl(value));
+        return result;
     }
     @PostMapping("/create")
     @PreAuthorize("@ss.hasPermission('tk:social-publish:create')")

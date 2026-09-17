@@ -2,6 +2,32 @@ import request from '@/config/axios'
 
 export type SocialPlatform = 'INSTAGRAM' | 'FACEBOOK_PAGE'
 export type SocialMediaType = 'IMAGE' | 'VIDEO'
+export type SocialTime = string | number
+export interface SocialMetric {
+  key: string
+  value: number | null
+  unit?: string
+  sourceMetric?: string
+  scope?: string
+  period?: string
+  availability: 'AVAILABLE' | 'PENDING' | 'UNKNOWN' | 'UNSUPPORTED' | 'PERMISSION_REQUIRED' | 'AUTH_REQUIRED' | 'OBJECT_UNAVAILABLE' | 'ERROR'
+  fetchedAt?: SocialTime | null
+  errorCode?: string
+  errorMessage?: string
+  stale?: boolean
+}
+export interface SocialStats {
+  objectId: number
+  platform: SocialPlatform
+  syncStatus: string
+  lastSuccessTime?: SocialTime | null
+  lastAttemptTime?: SocialTime | null
+  nextSyncTime?: SocialTime | null
+  errorCode?: string
+  errorMessage?: string
+  metrics: SocialMetric[]
+}
+export interface SocialStatsSync { accepted: boolean; syncStatus: string; nextPollAfterSeconds?: number }
 export type SocialStatus = 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'PARTIAL_SUCCESS' | 'FAILED' | 'REAUTH_REQUIRED' | 'UNKNOWN'
 export interface SocialPage<T> { list: T[]; total: number }
 export interface SocialPageQuery { pageNo: number; pageSize: number; status?: string }
@@ -23,6 +49,7 @@ export interface SocialAccount {
   tokenExpiresAt?: string
   lastValidatedAt?: string
   failReason?: string
+  stats?: SocialStats
 }
 export type SocialInsights = Record<string, unknown>
 export interface SocialAuthSession {
@@ -41,6 +68,17 @@ export interface SocialMedia {
   height?: number
   durationSeconds?: number
   frameRate?: number
+  metadataStatus?: string
+  metadataSource?: string
+  videoCodec?: string
+  audioCodec?: string
+  metadataError?: string
+  videoBitrate?: number
+  audioBitrate?: number
+  audioSampleRate?: number
+  normalized?: boolean
+  sourceFileSize?: number
+  originalUrl?: string
 }
 export interface SocialVideoUploadSession {
   uploadId: string
@@ -104,6 +142,11 @@ export const SocialPublishApi = {
   bindPages: (data: { sessionId: string; pageIds: string[] }) => request.post<boolean>({ url: '/tk/social-account/facebook-pages/bind', data }),
   accountPage: (params: SocialPageQuery & { platform?: SocialPlatform }) => request.get<SocialPage<SocialAccount>>({ url: '/tk/social-account/page', params }),
   insights: (id: number, params: { metric: string; period: string }) => request.get<SocialInsights>({ url: '/tk/social-account/insights', params: { id, ...params } }),
+  accountStats: (id: number) => request.get<SocialStats>({ url: '/tk/social-account/stats', params: { id } }),
+  accountStatsSync: (id: number) => request.post<SocialStatsSync>({ url: '/tk/social-account/stats/sync', params: { id } }),
+  detailStats: (detailId: number) => request.get<SocialStats>({ url: '/tk/social-publish/detail/stats', params: { detailId } }),
+  detailStatsSync: (detailId: number) => request.post<SocialStatsSync>({ url: '/tk/social-publish/detail/stats/sync', params: { detailId } }),
+  mediaGet: (id: number) => request.get<SocialMedia>({ url: '/tk/social-publish/media/get', params: { id } }),
   validate: (id: number) => request.post<boolean>({ url: '/tk/social-account/validate', params: { id } }),
   unbind: (id: number) => request.delete<boolean>({ url: '/tk/social-account/unbind', params: { id } }),
   delete: (id: number) => request.delete<boolean>({ url: '/tk/social-account/delete', params: { id } }),
@@ -111,7 +154,7 @@ export const SocialPublishApi = {
     request.post<SocialVideoUploadSession>({ url: '/tk/social-publish/media/video-upload-session', data, timeout: 30_000 }),
   videoUploadComplete: (data: {
     uploadId: string; fileName: string; fileSize: number; contentType: string; objectKey: string
-    width: number; height: number; durationSeconds: number; frameRate: number
+    width?: number; height?: number; durationSeconds?: number; frameRate?: number
   }) => request.post<SocialMedia>({ url: '/tk/social-publish/media/video-upload-complete', data, timeout: 30_000 }),
   upload: (file: Blob) => {
     const data = new FormData()

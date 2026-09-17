@@ -16,5 +16,11 @@ public interface TkOssObjectStorageClient {
     class ObjectMetadata {
         private final long contentLength;
         private final String sha256;
+        private final String etag;
+        private final String versionId;
+
+        public ObjectMetadata(long contentLength, String sha256) {
+            this(contentLength, sha256, null, null);
+        }
     }
 }
