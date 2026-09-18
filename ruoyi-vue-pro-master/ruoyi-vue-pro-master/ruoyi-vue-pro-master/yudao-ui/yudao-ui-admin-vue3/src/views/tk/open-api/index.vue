@@ -2,73 +2,87 @@
   <ContentWrap class="open-api-page">
     <div class="page-toolbar">
       <div>
-        <h1>开放 API 管理</h1>
-        <p>调用方、调用统计与回调事件</p>
+        <h1>{{ tt('openApi.title') }}</h1>
+        <p>{{ tt('openApi.subtitle') }}</p>
       </div>
       <el-button :loading="activeLoading" @click="refreshActiveTab">
-        <Icon icon="ep:refresh" class="mr-5px" /> 刷新
+        <Icon icon="ep:refresh" class="mr-5px" /> {{ tt('openApi.refresh') }}
       </el-button>
     </div>
 
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
-      <el-tab-pane label="调用方" name="clients">
+      <el-tab-pane :label="tt('openApi.tabs.clients')" name="clients">
         <el-form ref="clientQueryFormRef" :model="clientQuery" :inline="true" class="query-form">
-          <el-form-item label="调用方 ID" prop="clientId">
+          <el-form-item :label="tt('openApi.client.id')" prop="clientId">
             <el-input
               v-model="clientQuery.clientId"
-              placeholder="请输入调用方 ID"
+              :placeholder="tt('openApi.client.idPlaceholder')"
               clearable
               class="!w-220px"
               @keyup.enter="handleClientQuery"
             />
           </el-form-item>
-          <el-form-item label="调用方名称" prop="clientName">
+          <el-form-item :label="tt('openApi.client.name')" prop="clientName">
             <el-input
               v-model="clientQuery.clientName"
-              placeholder="请输入调用方名称"
+              :placeholder="tt('openApi.client.namePlaceholder')"
               clearable
               class="!w-220px"
               @keyup.enter="handleClientQuery"
             />
           </el-form-item>
-          <el-form-item label="状态" prop="status">
+          <el-form-item :label="tt('openApi.client.status')" prop="status">
             <el-select
               v-model="clientQuery.status"
-              placeholder="全部状态"
+              :placeholder="tt('openApi.allStatuses')"
               clearable
               class="!w-140px"
             >
-              <el-option label="启用" :value="0" />
-              <el-option label="停用" :value="1" />
+              <el-option :label="tt('openApi.enabled')" :value="0" />
+              <el-option :label="tt('openApi.disabled')" :value="1" />
             </el-select>
           </el-form-item>
           <el-form-item>
             <el-button @click="handleClientQuery"
-              ><Icon icon="ep:search" class="mr-5px" /> 搜索</el-button
+              ><Icon icon="ep:search" class="mr-5px" /> {{ tt('openApi.search') }}</el-button
             >
             <el-button @click="resetClientQuery"
-              ><Icon icon="ep:refresh-left" class="mr-5px" /> 重置</el-button
+              ><Icon icon="ep:refresh-left" class="mr-5px" /> {{ tt('openApi.reset') }}</el-button
             >
             <el-button type="primary" @click="openClientForm()">
-              <Icon icon="ep:plus" class="mr-5px" /> 新增调用方
+              <Icon icon="ep:plus" class="mr-5px" /> {{ tt('openApi.addClient') }}
             </el-button>
           </el-form-item>
         </el-form>
 
-        <el-table v-loading="clientLoading" :data="clientList" stripe empty-text="暂无调用方">
-          <el-table-column label="调用方" min-width="230">
+        <el-table
+          v-loading="clientLoading"
+          :data="clientList"
+          stripe
+          :empty-text="tt('openApi.client.empty')"
+        >
+          <el-table-column :label="tt('openApi.client.caller')" min-width="230">
             <template #default="{ row }">
               <div class="primary-cell">{{ valueOrDash(row.clientName) }}</div>
               <div class="secondary-cell">{{ valueOrDash(row.clientId) }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="回调地址" min-width="260" show-overflow-tooltip>
+          <el-table-column
+            :label="tt('openApi.client.callbackUrl')"
+            min-width="260"
+            show-overflow-tooltip
+          >
             <template #default="{ row }">
-              <div>授权：{{ valueOrDash(row.authCallbackUrl) }}</div>
-              <div class="secondary-cell">发布：{{ valueOrDash(row.publishCallbackUrl) }}</div>
+              <div
+                >{{ tt('openApi.client.authorization') }}:
+                {{ valueOrDash(row.authCallbackUrl) }}</div
+              >
+              <div class="secondary-cell"
+                >{{ tt('openApi.client.publish') }}: {{ valueOrDash(row.publishCallbackUrl) }}</div
+              >
             </template>
           </el-table-column>
-          <el-table-column label="权限" min-width="170">
+          <el-table-column :label="tt('openApi.client.permissions')" min-width="170">
             <template #default="{ row }">
               <el-tag
                 v-for="permission in permissionList(row.permissions)"
@@ -81,60 +95,70 @@
               <span v-if="!permissionList(row.permissions).length">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="限额" min-width="160">
+          <el-table-column :label="tt('openApi.client.quota')" min-width="160">
             <template #default="{ row }">
-              <div>{{ formatNumber(row.rateLimitPerMinute) }} / 分钟</div>
-              <div class="secondary-cell">{{ formatNumber(row.dailyQuota) }} / 日</div>
+              <div
+                >{{ formatNumber(row.rateLimitPerMinute) }} /
+                {{ tt('openApi.client.perMinute') }}</div
+              >
+              <div class="secondary-cell"
+                >{{ formatNumber(row.dailyQuota) }} / {{ tt('openApi.client.perDay') }}</div
+              >
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="120">
+          <el-table-column :label="tt('openApi.client.status')" width="120">
             <template #default="{ row }">
               <el-switch
                 :model-value="row.status === 0"
-                active-text="启用"
-                inactive-text="停用"
+                :active-text="tt('openApi.enabled')"
+                :inactive-text="tt('openApi.disabled')"
                 :loading="statusUpdatingId === row.clientId"
                 @change="handleClientStatusChange(row, $event)"
               />
             </template>
           </el-table-column>
-          <el-table-column label="更新时间" prop="updateTime" width="180">
+          <el-table-column :label="tt('openApi.client.updatedAt')" prop="updateTime" width="180">
             <template #default="{ row }">{{ valueOrDash(row.updateTime) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="180" fixed="right">
+          <el-table-column :label="tt('openApi.actions')" width="180" fixed="right">
             <template #default="{ row }">
-              <el-tooltip content="编辑调用方" placement="top">
-                <el-button link type="primary" aria-label="编辑调用方" @click="openClientForm(row)">
+              <el-tooltip :content="tt('openApi.client.edit')" placement="top">
+                <el-button
+                  link
+                  type="primary"
+                  :aria-label="tt('openApi.client.edit')"
+                  @click="openClientForm(row)"
+                >
                   <Icon icon="ep:edit-pen" />
                 </el-button>
               </el-tooltip>
-              <el-tooltip content="轮换调用密钥" placement="top">
+              <el-tooltip :content="tt('openApi.client.rotateClientSecret')" placement="top">
                 <el-button
                   link
                   type="warning"
-                  aria-label="轮换调用密钥"
+                  :aria-label="tt('openApi.client.rotateClientSecret')"
                   :loading="isClientActionLoading(row, 'CLIENT')"
                   @click="rotateSecret(row, 'CLIENT')"
                 >
                   <Icon icon="ep:key" />
                 </el-button>
               </el-tooltip>
-              <el-tooltip content="轮换回调密钥" placement="top">
+              <el-tooltip :content="tt('openApi.client.rotateCallbackSecret')" placement="top">
                 <el-button
                   link
                   type="warning"
-                  aria-label="轮换回调密钥"
+                  :aria-label="tt('openApi.client.rotateCallbackSecret')"
                   :loading="isClientActionLoading(row, 'CALLBACK')"
                   @click="rotateSecret(row, 'CALLBACK')"
                 >
                   <Icon icon="ep:connection" />
                 </el-button>
               </el-tooltip>
-              <el-tooltip content="删除调用方" placement="top">
+              <el-tooltip :content="tt('openApi.client.delete')" placement="top">
                 <el-button
                   link
                   type="danger"
-                  aria-label="删除调用方"
+                  :aria-label="tt('openApi.client.delete')"
                   :loading="isClientActionLoading(row, 'DELETE')"
                   @click="deleteClient(row)"
                 >
@@ -152,34 +176,34 @@
         />
       </el-tab-pane>
 
-      <el-tab-pane label="调用统计" name="usage">
+      <el-tab-pane :label="tt('openApi.tabs.usage')" name="usage">
         <el-form :inline="true" class="query-form">
-          <el-form-item label="调用方 ID">
+          <el-form-item :label="tt('openApi.usage.clientId')">
             <el-input
               v-model="usageQuery.clientId"
-              placeholder="请输入调用方 ID"
+              :placeholder="tt('openApi.client.idPlaceholder')"
               clearable
               class="!w-240px"
               @keyup.enter="getUsageList"
             />
           </el-form-item>
-          <el-form-item label="统计日期">
+          <el-form-item :label="tt('openApi.usage.date')">
             <el-date-picker
               v-model="usageDateRange"
               type="daterange"
-              range-separator="至"
-              start-placeholder="开始日期"
-              end-placeholder="结束日期"
+              :range-separator="tt('openApi.dateRangeSeparator')"
+              :start-placeholder="tt('openApi.startDate')"
+              :end-placeholder="tt('openApi.endDate')"
               value-format="YYYY-MM-DD"
               class="!w-280px"
             />
           </el-form-item>
           <el-form-item>
             <el-button @click="getUsageList"
-              ><Icon icon="ep:search" class="mr-5px" /> 搜索</el-button
+              ><Icon icon="ep:search" class="mr-5px" /> {{ tt('openApi.search') }}</el-button
             >
             <el-button @click="resetUsageQuery"
-              ><Icon icon="ep:refresh-left" class="mr-5px" /> 重置</el-button
+              ><Icon icon="ep:refresh-left" class="mr-5px" /> {{ tt('openApi.reset') }}</el-button
             >
           </el-form-item>
         </el-form>
@@ -188,44 +212,52 @@
           v-loading="usageLoading"
           :data="usageList"
           stripe
-          empty-text="当前条件下暂无调用统计"
+          :empty-text="tt('openApi.usage.empty')"
         >
-          <el-table-column label="日期" prop="requestDate" min-width="150">
+          <el-table-column
+            :label="tt('openApi.usage.requestDate')"
+            prop="requestDate"
+            min-width="150"
+          >
             <template #default="{ row }">{{ valueOrDash(row.requestDate) }}</template>
           </el-table-column>
-          <el-table-column label="调用方 ID" prop="clientId" min-width="220">
+          <el-table-column :label="tt('openApi.usage.clientId')" prop="clientId" min-width="220">
             <template #default="{ row }">{{ valueOrDash(row.clientId) }}</template>
           </el-table-column>
-          <el-table-column label="请求总数" min-width="130" align="right">
+          <el-table-column :label="tt('openApi.usage.requestCount')" min-width="130" align="right">
             <template #default="{ row }">{{ formatNumber(row.requestCount) }}</template>
           </el-table-column>
-          <el-table-column label="成功" min-width="120" align="right">
+          <el-table-column :label="tt('openApi.usage.success')" min-width="120" align="right">
             <template #default="{ row }">{{ formatNumber(row.successCount) }}</template>
           </el-table-column>
-          <el-table-column label="失败" min-width="120" align="right">
+          <el-table-column :label="tt('openApi.usage.failure')" min-width="120" align="right">
             <template #default="{ row }">{{ formatNumber(row.failureCount) }}</template>
           </el-table-column>
-          <el-table-column label="平均耗时" min-width="140" align="right">
+          <el-table-column
+            :label="tt('openApi.usage.averageDuration')"
+            min-width="140"
+            align="right"
+          >
             <template #default="{ row }">{{ formatDuration(row.averageDurationMs) }}</template>
           </el-table-column>
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="回调事件" name="events">
+      <el-tab-pane :label="tt('openApi.tabs.events')" name="events">
         <el-form ref="eventQueryFormRef" :model="eventQuery" :inline="true" class="query-form">
-          <el-form-item label="调用方 ID" prop="clientId">
+          <el-form-item :label="tt('openApi.events.clientId')" prop="clientId">
             <el-input
               v-model="eventQuery.clientId"
-              placeholder="请输入调用方 ID"
+              :placeholder="tt('openApi.client.idPlaceholder')"
               clearable
               class="!w-210px"
               @keyup.enter="handleEventQuery"
             />
           </el-form-item>
-          <el-form-item label="事件类型" prop="eventType">
+          <el-form-item :label="tt('openApi.events.eventType')" prop="eventType">
             <el-select
               v-model="eventQuery.eventType"
-              placeholder="全部事件"
+              :placeholder="tt('openApi.events.allEvents')"
               clearable
               class="!w-190px"
             >
@@ -237,10 +269,10 @@
               />
             </el-select>
           </el-form-item>
-          <el-form-item label="状态" prop="status">
+          <el-form-item :label="tt('openApi.events.status')" prop="status">
             <el-select
               v-model="eventQuery.status"
-              placeholder="全部状态"
+              :placeholder="tt('openApi.allStatuses')"
               clearable
               class="!w-150px"
             >
@@ -252,13 +284,13 @@
               />
             </el-select>
           </el-form-item>
-          <el-form-item label="创建时间">
+          <el-form-item :label="tt('openApi.events.createdAt')">
             <el-date-picker
               v-model="eventDateRange"
               type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
+              :range-separator="tt('openApi.dateRangeSeparator')"
+              :start-placeholder="tt('openApi.startDateTime')"
+              :end-placeholder="tt('openApi.endDateTime')"
               format="YYYY-MM-DD HH:mm"
               value-format="YYYY-MM-DD HH:mm:ss"
               class="!w-350px"
@@ -266,10 +298,10 @@
           </el-form-item>
           <el-form-item>
             <el-button @click="handleEventQuery"
-              ><Icon icon="ep:search" class="mr-5px" /> 搜索</el-button
+              ><Icon icon="ep:search" class="mr-5px" /> {{ tt('openApi.search') }}</el-button
             >
             <el-button @click="resetEventQuery"
-              ><Icon icon="ep:refresh-left" class="mr-5px" /> 重置</el-button
+              ><Icon icon="ep:refresh-left" class="mr-5px" /> {{ tt('openApi.reset') }}</el-button
             >
           </el-form-item>
         </el-form>
@@ -278,58 +310,58 @@
           v-loading="eventLoading"
           :data="eventList"
           stripe
-          empty-text="当前条件下暂无回调事件"
+          :empty-text="tt('openApi.events.empty')"
         >
-          <el-table-column label="事件" min-width="250">
+          <el-table-column :label="tt('openApi.events.event')" min-width="250">
             <template #default="{ row }">
               <div class="primary-cell">{{ valueOrDash(row.eventType) }}</div>
               <div class="secondary-cell">{{ valueOrDash(row.eventId) }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="调用方 ID" prop="clientId" min-width="190">
+          <el-table-column :label="tt('openApi.events.clientId')" prop="clientId" min-width="190">
             <template #default="{ row }">{{ valueOrDash(row.clientId) }}</template>
           </el-table-column>
-          <el-table-column label="资源" min-width="180">
+          <el-table-column :label="tt('openApi.events.resource')" min-width="180">
             <template #default="{ row }">
               <div>{{ valueOrDash(row.resourceType) }}</div>
               <div class="secondary-cell">{{ valueOrDash(row.resourceId) }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="125">
+          <el-table-column :label="tt('openApi.events.status')" width="125">
             <template #default="{ row }">
               <el-tag :type="eventStatusTagType(row.status)" effect="plain">{{
                 eventStatusLabel(row.status)
               }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="尝试 / HTTP" min-width="130">
+          <el-table-column :label="tt('openApi.events.attemptsHttp')" min-width="130">
             <template #default="{ row }">
-              <div>{{ formatNumber(row.attemptCount) }} 次</div>
+              <div>{{ formatNumber(row.attemptCount) }} {{ tt('openApi.events.attempts') }}</div>
               <div class="secondary-cell">{{
                 row.lastHttpStatus ? `HTTP ${row.lastHttpStatus}` : '-'
               }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="创建时间" prop="createTime" width="180">
+          <el-table-column :label="tt('openApi.events.createdAt')" prop="createTime" width="180">
             <template #default="{ row }">{{ valueOrDash(row.createTime) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="110" fixed="right">
+          <el-table-column :label="tt('openApi.actions')" width="110" fixed="right">
             <template #default="{ row }">
-              <el-tooltip content="查看详情" placement="top">
+              <el-tooltip :content="tt('openApi.events.viewDetails')" placement="top">
                 <el-button
                   link
                   type="primary"
-                  aria-label="查看回调事件详情"
+                  :aria-label="tt('openApi.events.viewDetails')"
                   @click="openEventDetail(row.eventId)"
                 >
                   <Icon icon="ep:view" />
                 </el-button>
               </el-tooltip>
-              <el-tooltip content="重放事件" placement="top">
+              <el-tooltip :content="tt('openApi.events.replay')" placement="top">
                 <el-button
                   link
                   type="warning"
-                  aria-label="重放回调事件"
+                  :aria-label="tt('openApi.events.replay')"
                   :loading="eventReplayingId === row.eventId"
                   :disabled="!isEventReplayable(row)"
                   @click="replayEvent(row)"
@@ -352,7 +384,7 @@
 
   <Dialog
     v-model="clientDialogVisible"
-    :title="clientForm.clientId ? '编辑调用方' : '新增调用方'"
+    :title="clientForm.clientId ? tt('openApi.form.editTitle') : tt('openApi.form.addTitle')"
     width="760px"
   >
     <el-form
@@ -362,46 +394,46 @@
       :rules="clientFormRules"
       label-width="120px"
     >
-      <el-form-item label="调用方名称" prop="clientName">
+      <el-form-item :label="tt('openApi.form.clientName')" prop="clientName">
         <el-input
           v-model="clientForm.clientName"
-          placeholder="请输入调用方名称"
+          :placeholder="tt('openApi.form.clientNamePlaceholder')"
           maxlength="128"
           show-word-limit
         />
       </el-form-item>
-      <el-form-item label="授权回调地址" prop="authCallbackUrl">
+      <el-form-item :label="tt('openApi.form.authCallbackUrl')" prop="authCallbackUrl">
         <el-input
           v-model="clientForm.authCallbackUrl"
           placeholder="https://example.com/auth/callback"
           maxlength="512"
         />
       </el-form-item>
-      <el-form-item label="发布回调地址" prop="publishCallbackUrl">
+      <el-form-item :label="tt('openApi.form.publishCallbackUrl')" prop="publishCallbackUrl">
         <el-input
           v-model="clientForm.publishCallbackUrl"
           placeholder="https://example.com/publish/callback"
           maxlength="512"
         />
       </el-form-item>
-      <el-form-item label="允许 IP" prop="allowedIps">
+      <el-form-item :label="tt('openApi.form.allowedIps')" prop="allowedIps">
         <el-input
           v-model="clientForm.allowedIps"
           type="textarea"
           :rows="2"
-          placeholder="多个 IP 或 CIDR 规则使用逗号分隔；留空表示不限制"
+          :placeholder="tt('openApi.form.allowedIpsPlaceholder')"
           maxlength="2048"
           show-word-limit
         />
       </el-form-item>
-      <el-form-item label="权限" prop="permissions">
+      <el-form-item :label="tt('openApi.form.permissions')" prop="permissions">
         <el-checkbox-group v-model="clientForm.permissions">
-          <el-checkbox label="auth">授权</el-checkbox>
-          <el-checkbox label="media">媒体</el-checkbox>
-          <el-checkbox label="publish">发布</el-checkbox>
+          <el-checkbox label="auth">{{ tt('openApi.permission.auth') }}</el-checkbox>
+          <el-checkbox label="media">{{ tt('openApi.permission.media') }}</el-checkbox>
+          <el-checkbox label="publish">{{ tt('openApi.permission.publish') }}</el-checkbox>
         </el-checkbox-group>
       </el-form-item>
-      <el-form-item label="每分钟限额" prop="rateLimitPerMinute">
+      <el-form-item :label="tt('openApi.form.perMinuteQuota')" prop="rateLimitPerMinute">
         <el-input-number
           v-model="clientForm.rateLimitPerMinute"
           :min="1"
@@ -409,57 +441,60 @@
           controls-position="right"
         />
       </el-form-item>
-      <el-form-item label="每日限额" prop="dailyQuota">
+      <el-form-item :label="tt('openApi.form.dailyQuota')" prop="dailyQuota">
         <el-input-number v-model="clientForm.dailyQuota" :min="1" controls-position="right" />
       </el-form-item>
-      <el-form-item label="状态" prop="status">
+      <el-form-item :label="tt('openApi.form.status')" prop="status">
         <el-radio-group v-model="clientForm.status">
-          <el-radio :label="0">启用</el-radio>
-          <el-radio :label="1">停用</el-radio>
+          <el-radio :label="0">{{ tt('openApi.enabled') }}</el-radio>
+          <el-radio :label="1">{{ tt('openApi.disabled') }}</el-radio>
         </el-radio-group>
       </el-form-item>
-      <el-form-item label="备注" prop="remark">
+      <el-form-item :label="tt('openApi.form.remark')" prop="remark">
         <el-input
           v-model="clientForm.remark"
           type="textarea"
           :rows="3"
-          placeholder="可选"
+          :placeholder="tt('openApi.form.remarkPlaceholder')"
           maxlength="512"
           show-word-limit
         />
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="clientDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="clientFormLoading" @click="submitClientForm"
-        >确定</el-button
-      >
+      <el-button @click="clientDialogVisible = false">{{ tt('openApi.cancel') }}</el-button>
+      <el-button type="primary" :loading="clientFormLoading" @click="submitClientForm">{{
+        tt('openApi.confirm')
+      }}</el-button>
     </template>
   </Dialog>
 
   <Dialog
     v-model="credentialDialogVisible"
-    title="一次性凭证"
+    :title="tt('openApi.credential.title')"
     width="680px"
     @closed="clearCredentials"
   >
     <el-alert
-      title="请立即保存凭证。关闭此窗口后，系统不会再次展示明文密钥。"
+      :title="tt('openApi.credential.warning')"
       type="warning"
       :closable="false"
       show-icon
     />
     <el-descriptions :column="1" border class="credential-list">
-      <el-descriptions-item label="调用方 ID">{{
+      <el-descriptions-item :label="tt('openApi.credential.clientId')">{{
         valueOrDash(credentials.clientId)
       }}</el-descriptions-item>
-      <el-descriptions-item v-if="credentials.clientSecret" label="调用密钥">
+      <el-descriptions-item
+        v-if="credentials.clientSecret"
+        :label="tt('openApi.credential.clientSecret')"
+      >
         <div class="credential-value">
           <code>{{ credentials.clientSecret }}</code>
-          <el-tooltip content="复制调用密钥" placement="top">
+          <el-tooltip :content="tt('openApi.credential.copyClientSecret')" placement="top">
             <el-button
               circle
-              aria-label="复制调用密钥"
+              :aria-label="tt('openApi.credential.copyClientSecret')"
               @click="copyCredential(credentials.clientSecret)"
             >
               <Icon icon="ep:copy-document" />
@@ -467,13 +502,16 @@
           </el-tooltip>
         </div>
       </el-descriptions-item>
-      <el-descriptions-item v-if="credentials.callbackSecret" label="回调密钥">
+      <el-descriptions-item
+        v-if="credentials.callbackSecret"
+        :label="tt('openApi.credential.callbackSecret')"
+      >
         <div class="credential-value">
           <code>{{ credentials.callbackSecret }}</code>
-          <el-tooltip content="复制回调密钥" placement="top">
+          <el-tooltip :content="tt('openApi.credential.copyCallbackSecret')" placement="top">
             <el-button
               circle
-              aria-label="复制回调密钥"
+              :aria-label="tt('openApi.credential.copyCallbackSecret')"
               @click="copyCredential(credentials.callbackSecret)"
             >
               <Icon icon="ep:copy-document" />
@@ -483,57 +521,64 @@
       </el-descriptions-item>
     </el-descriptions>
     <template #footer>
-      <el-button type="primary" @click="credentialDialogVisible = false">我已保存，关闭</el-button>
+      <el-button type="primary" @click="credentialDialogVisible = false">{{
+        tt('openApi.credential.close')
+      }}</el-button>
     </template>
   </Dialog>
 
-  <el-drawer v-model="eventDetailVisible" title="回调事件详情" size="680px" destroy-on-close>
+  <el-drawer
+    v-model="eventDetailVisible"
+    :title="tt('openApi.detail.title')"
+    size="680px"
+    destroy-on-close
+  >
     <div v-loading="eventDetailLoading" class="event-detail">
       <template v-if="eventDetail">
         <el-descriptions :column="1" border>
-          <el-descriptions-item label="事件 ID">{{
+          <el-descriptions-item :label="tt('openApi.detail.eventId')">{{
             valueOrDash(eventDetail.eventId)
           }}</el-descriptions-item>
-          <el-descriptions-item label="调用方 ID">{{
+          <el-descriptions-item :label="tt('openApi.detail.clientId')">{{
             valueOrDash(eventDetail.clientId)
           }}</el-descriptions-item>
-          <el-descriptions-item label="事件类型">{{
+          <el-descriptions-item :label="tt('openApi.detail.eventType')">{{
             valueOrDash(eventDetail.eventType)
           }}</el-descriptions-item>
-          <el-descriptions-item label="资源">
+          <el-descriptions-item :label="tt('openApi.detail.resource')">
             {{ valueOrDash(eventDetail.resourceType) }} / {{ valueOrDash(eventDetail.resourceId) }}
           </el-descriptions-item>
-          <el-descriptions-item label="回调地址">{{
+          <el-descriptions-item :label="tt('openApi.detail.callbackUrl')">{{
             valueOrDash(eventDetail.callbackUrl)
           }}</el-descriptions-item>
-          <el-descriptions-item label="状态">
+          <el-descriptions-item :label="tt('openApi.detail.status')">
             <el-tag :type="eventStatusTagType(eventDetail.status)" effect="plain">
               {{ eventStatusLabel(eventDetail.status) }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="投递信息">
-            {{ formatNumber(eventDetail.attemptCount) }} 次 /
+          <el-descriptions-item :label="tt('openApi.detail.deliveryInfo')">
+            {{ formatNumber(eventDetail.attemptCount) }} {{ tt('openApi.events.attempts') }} /
             {{ eventDetail.lastHttpStatus ? `HTTP ${eventDetail.lastHttpStatus}` : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="下次重试">{{
+          <el-descriptions-item :label="tt('openApi.detail.nextRetry')">{{
             valueOrDash(eventDetail.nextRetryTime)
           }}</el-descriptions-item>
-          <el-descriptions-item label="投递时间">{{
+          <el-descriptions-item :label="tt('openApi.detail.deliveredAt')">{{
             valueOrDash(eventDetail.deliveredTime)
           }}</el-descriptions-item>
-          <el-descriptions-item label="最后错误">{{
+          <el-descriptions-item :label="tt('openApi.detail.lastError')">{{
             valueOrDash(eventDetail.lastError)
           }}</el-descriptions-item>
-          <el-descriptions-item label="创建时间">{{
+          <el-descriptions-item :label="tt('openApi.detail.createdAt')">{{
             valueOrDash(eventDetail.createTime)
           }}</el-descriptions-item>
         </el-descriptions>
         <section class="payload-section">
-          <h2>Payload</h2>
+          <h2>{{ tt('openApi.detail.payload') }}</h2>
           <pre>{{ formattedPayload }}</pre>
         </section>
       </template>
-      <el-empty v-else-if="!eventDetailLoading" description="暂无事件详情" />
+      <el-empty v-else-if="!eventDetailLoading" :description="tt('openApi.detail.empty')" />
     </div>
   </el-drawer>
 </template>
@@ -548,6 +593,7 @@ import {
   type OpenApiEventVO,
   type OpenApiUsageVO
 } from '@/api/tk/openApi'
+import { useTkI18n } from '@/hooks/web/useTkI18n'
 
 defineOptions({ name: 'TkOpenApi' })
 
@@ -559,6 +605,7 @@ interface ClientFormData extends Omit<OpenApiClientSaveReq, 'permissions'> {
 }
 
 const message = useMessage()
+const { tt } = useTkI18n()
 const activeTab = ref<ActiveTab>('clients')
 
 const clientQueryFormRef = ref<FormInstance>()
@@ -579,14 +626,26 @@ const clientDialogVisible = ref(false)
 const clientFormLoading = ref(false)
 const clientFormRef = ref<FormInstance>()
 const clientForm = reactive<ClientFormData>(createClientForm())
-const clientFormRules = reactive<FormRules<ClientFormData>>({
-  clientName: [{ required: true, message: '调用方名称不能为空', trigger: 'blur' }],
-  permissions: [
-    { type: 'array', required: true, min: 1, message: '至少选择一项权限', trigger: 'change' }
+const clientFormRules = computed<FormRules<ClientFormData>>(() => ({
+  clientName: [
+    { required: true, message: tt('openApi.validation.clientNameRequired'), trigger: 'blur' }
   ],
-  rateLimitPerMinute: [{ required: true, message: '请输入每分钟限额', trigger: 'change' }],
-  dailyQuota: [{ required: true, message: '请输入每日限额', trigger: 'change' }]
-})
+  permissions: [
+    {
+      type: 'array',
+      required: true,
+      min: 1,
+      message: tt('openApi.validation.permissionRequired'),
+      trigger: 'change'
+    }
+  ],
+  rateLimitPerMinute: [
+    { required: true, message: tt('openApi.validation.perMinuteRequired'), trigger: 'change' }
+  ],
+  dailyQuota: [
+    { required: true, message: tt('openApi.validation.dailyQuotaRequired'), trigger: 'change' }
+  ]
+}))
 
 const credentialDialogVisible = ref(false)
 const credentials = reactive<OpenApiCredentialResp>({})
@@ -613,22 +672,22 @@ const eventDetailLoading = ref(false)
 const eventDetail = ref<OpenApiEventVO>()
 const eventReplayingId = ref<string>()
 
-const eventTypeOptions = [
-  { label: '授权完成', value: 'authorization.completed' },
-  { label: '授权失败', value: 'authorization.failed' },
-  { label: '发布处理中', value: 'publish.processing' },
-  { label: '发布成功', value: 'publish.success' },
-  { label: '发布失败', value: 'publish.failed' }
-]
+const eventTypeOptions = computed(() => [
+  { label: tt('openApi.eventType.authorizationCompleted'), value: 'authorization.completed' },
+  { label: tt('openApi.eventType.authorizationFailed'), value: 'authorization.failed' },
+  { label: tt('openApi.eventType.publishProcessing'), value: 'publish.processing' },
+  { label: tt('openApi.eventType.publishSuccess'), value: 'publish.success' },
+  { label: tt('openApi.eventType.publishFailed'), value: 'publish.failed' }
+])
 
-const eventStatusOptions = [
-  { label: '待投递', value: 'PENDING' },
-  { label: '投递中', value: 'DELIVERING' },
-  { label: '重试中', value: 'RETRYING' },
-  { label: '已投递', value: 'DELIVERED' },
-  { label: '失败', value: 'FAILED' },
-  { label: '已跳过', value: 'SKIPPED' }
-]
+const eventStatusOptions = computed(() => [
+  { label: tt('openApi.eventStatus.PENDING'), value: 'PENDING' },
+  { label: tt('openApi.eventStatus.DELIVERING'), value: 'DELIVERING' },
+  { label: tt('openApi.eventStatus.RETRYING'), value: 'RETRYING' },
+  { label: tt('openApi.eventStatus.DELIVERED'), value: 'DELIVERED' },
+  { label: tt('openApi.eventStatus.FAILED'), value: 'FAILED' },
+  { label: tt('openApi.eventStatus.SKIPPED'), value: 'SKIPPED' }
+])
 
 const activeLoading = computed(() => {
   if (activeTab.value === 'clients') return clientLoading.value
@@ -637,6 +696,12 @@ const activeLoading = computed(() => {
 })
 
 const formattedPayload = computed(() => formatJson(eventDetail.value?.payloadJson))
+
+const interpolate = (key: string, values: Record<string, string | number>) =>
+  Object.entries(values).reduce(
+    (result, [name, value]) => result.replaceAll(`{{${name}}}`, String(value)),
+    tt(key)
+  )
 
 function createClientForm(): ClientFormData {
   return {
@@ -722,11 +787,11 @@ const submitClientForm = async () => {
     }
     if (payload.clientId) {
       await TkOpenApiApi.updateClient({ ...payload, clientId: payload.clientId })
-      message.success('调用方已更新')
+      message.success(tt('openApi.messages.clientUpdated'))
     } else {
       const credential = await TkOpenApiApi.createClient(payload)
       showCredentials(credential)
-      message.success('调用方已创建')
+      message.success(tt('openApi.messages.clientCreated'))
     }
     clientDialogVisible.value = false
     await getClientList()
@@ -740,11 +805,14 @@ const handleClientStatusChange = async (
   enabled: string | number | boolean
 ) => {
   const status = enabled ? 0 : 1
-  const action = status === 0 ? '启用' : '停用'
+  const action = status === 0 ? tt('openApi.enabled') : tt('openApi.disabled')
   try {
     await message.confirm(
-      `确认${action}调用方「${row.clientName || row.clientId}」？`,
-      `${action}确认`
+      interpolate('openApi.messages.confirmStatus', {
+        action,
+        name: row.clientName || row.clientId
+      }),
+      interpolate('openApi.messages.statusConfirm', { action })
     )
   } catch {
     return
@@ -752,7 +820,7 @@ const handleClientStatusChange = async (
   statusUpdatingId.value = row.clientId
   try {
     await TkOpenApiApi.updateClientStatus(row.clientId, status)
-    message.success(`调用方已${action}`)
+    message.success(interpolate('openApi.messages.clientStatusUpdated', { action }))
     await getClientList()
   } finally {
     statusUpdatingId.value = undefined
@@ -762,8 +830,8 @@ const handleClientStatusChange = async (
 const deleteClient = async (row: OpenApiClientVO) => {
   try {
     await message.delConfirm(
-      `确认删除调用方「${row.clientName || row.clientId}」？删除后无法恢复。`,
-      '删除调用方'
+      interpolate('openApi.messages.deleteConfirm', { name: row.clientName || row.clientId }),
+      tt('openApi.messages.deleteTitle')
     )
   } catch {
     return
@@ -771,7 +839,7 @@ const deleteClient = async (row: OpenApiClientVO) => {
   clientActionLoadingKey.value = `${row.clientId}:DELETE`
   try {
     await TkOpenApiApi.deleteClient(row.clientId)
-    message.success('调用方已删除')
+    message.success(tt('openApi.messages.clientDeleted'))
     if (clientList.value.length === 1 && clientQuery.pageNo > 1) clientQuery.pageNo -= 1
     await getClientList()
   } finally {
@@ -780,11 +848,17 @@ const deleteClient = async (row: OpenApiClientVO) => {
 }
 
 const rotateSecret = async (row: OpenApiClientVO, type: SecretType) => {
-  const label = type === 'CLIENT' ? '调用密钥' : '回调密钥'
+  const label =
+    type === 'CLIENT'
+      ? tt('openApi.credential.clientSecret')
+      : tt('openApi.credential.callbackSecret')
   try {
     await message.confirm(
-      `确认轮换调用方「${row.clientName || row.clientId}」的${label}？旧密钥将立即失效。`,
-      '轮换密钥'
+      interpolate('openApi.messages.rotateConfirm', {
+        name: row.clientName || row.clientId,
+        label
+      }),
+      tt('openApi.messages.rotateTitle')
     )
   } catch {
     return
@@ -794,7 +868,7 @@ const rotateSecret = async (row: OpenApiClientVO, type: SecretType) => {
     const response = await TkOpenApiApi.rotateSecret(row.clientId, type)
     const secret = extractRotatedSecret(response, type)
     if (!secret) {
-      message.error('轮换成功，但未收到明文密钥')
+      message.error(tt('openApi.messages.rotateMissingSecret'))
       return
     }
     showCredentials({
@@ -802,7 +876,7 @@ const rotateSecret = async (row: OpenApiClientVO, type: SecretType) => {
       clientSecret: type === 'CLIENT' ? secret : undefined,
       callbackSecret: type === 'CALLBACK' ? secret : undefined
     })
-    message.success(`${label}已轮换`)
+    message.success(interpolate('openApi.messages.rotated', { label }))
   } finally {
     clientActionLoadingKey.value = undefined
   }
@@ -823,9 +897,9 @@ const copyCredential = async (value?: string) => {
   if (!value) return
   try {
     await navigator.clipboard.writeText(value)
-    message.success('已复制到剪贴板')
+    message.success(tt('openApi.messages.copied'))
   } catch {
-    message.error('复制失败，请手动复制')
+    message.error(tt('openApi.messages.copyFailed'))
   }
 }
 
@@ -888,8 +962,8 @@ const openEventDetail = async (eventId: string) => {
 const replayEvent = async (row: OpenApiEventVO) => {
   try {
     await message.confirm(
-      `确认重放事件「${row.eventId}」？系统将再次向回调地址发送该事件。`,
-      '重放回调事件'
+      interpolate('openApi.messages.replayConfirm', { eventId: row.eventId }),
+      tt('openApi.messages.replayTitle')
     )
   } catch {
     return
@@ -897,7 +971,7 @@ const replayEvent = async (row: OpenApiEventVO) => {
   eventReplayingId.value = row.eventId
   try {
     await TkOpenApiApi.replayEvent(row.eventId)
-    message.success('已提交回调事件重放')
+    message.success(tt('openApi.messages.replaySubmitted'))
     await getEventList()
     if (eventDetail.value?.eventId === row.eventId) {
       eventDetail.value = await TkOpenApiApi.getEvent(row.eventId)
@@ -928,18 +1002,22 @@ const permissionList = (value?: string) =>
     .filter(Boolean)
 
 const permissionLabel = (value: string) => {
-  const labels: Record<string, string> = { auth: '授权', media: '媒体', publish: '发布' }
+  const labels: Record<string, string> = {
+    auth: tt('openApi.permission.auth'),
+    media: tt('openApi.permission.media'),
+    publish: tt('openApi.permission.publish')
+  }
   return labels[value] || value
 }
 
 const eventStatusLabel = (value?: string) => {
   const labels: Record<string, string> = {
-    PENDING: '待投递',
-    DELIVERING: '投递中',
-    RETRYING: '重试中',
-    DELIVERED: '已投递',
-    FAILED: '失败',
-    SKIPPED: '已跳过'
+    PENDING: tt('openApi.eventStatus.PENDING'),
+    DELIVERING: tt('openApi.eventStatus.DELIVERING'),
+    RETRYING: tt('openApi.eventStatus.RETRYING'),
+    DELIVERED: tt('openApi.eventStatus.DELIVERED'),
+    FAILED: tt('openApi.eventStatus.FAILED'),
+    SKIPPED: tt('openApi.eventStatus.SKIPPED')
   }
   return value ? labels[value] || value : '-'
 }

@@ -17,6 +17,7 @@ import { deleteUserCache } from '@/hooks/web/useCache'
 import { ApiEncrypt } from '@/utils/encrypt'
 import { stringifyQuery } from '@/utils/queryString'
 import { CACHE_KEY, useCache } from '@/hooks/web/useCache'
+import { tkText } from '@/utils/tkI18n'
 
 const tenantEnable = import.meta.env.VITE_APP_TENANT_ENABLE
 const { result_code, base_url, request_timeout } = config
@@ -31,10 +32,16 @@ const ignoreMsgs = [
 const getTkApiErrorMessage = (url: string | undefined, message: string, fallback: string) => {
   if (message && message !== errorCode['default']) return message
   if (url?.includes('/tk/tiktok-content-display/')) {
-    return 'TikTok 公开视频同步失败，请检查账号授权和 video.list 权限后重试'
+    return tkText(
+      'TikTok 公开视频同步失败，请检查账号授权和 video.list 权限后重试',
+      'TikTok public video sync failed. Check account authorization and the video.list permission, then try again.'
+    )
   }
   if (url?.includes('/tk/tiktok-publish/')) {
-    return 'TikTok 发布状态同步失败，请稍后重试'
+    return tkText(
+      'TikTok 发布状态同步失败，请稍后重试',
+      'TikTok publishing status sync failed. Please try again later.'
+    )
   }
   return fallback
 }

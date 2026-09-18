@@ -487,7 +487,11 @@ const loadOverview = async (sync = false) => {
       const results = await TkTiktokAccountStatsApi.syncAllAccounts()
       const failures = results.filter((item) => item.failReason)
       if (failures.length) {
-        message.warning(`${failures.length} 个账号同步失败：${failures[0].failReason}`)
+        message.warning(
+          tt('accountStats.syncFailed')
+            .replace('{{count}}', String(failures.length))
+            .replace('{{reason}}', failures[0].failReason || '')
+        )
       }
     }
     applyOverview(await TkTiktokAccountStatsApi.getOverview())

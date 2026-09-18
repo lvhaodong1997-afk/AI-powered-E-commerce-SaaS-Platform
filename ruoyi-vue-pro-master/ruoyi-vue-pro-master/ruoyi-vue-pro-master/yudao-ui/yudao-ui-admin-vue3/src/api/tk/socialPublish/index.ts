@@ -1,4 +1,5 @@
 import request from '@/config/axios'
+import { metaText } from '@/locales/tk/metaPublishMessages'
 
 export type SocialPlatform = 'INSTAGRAM' | 'FACEBOOK_PAGE'
 export type SocialMediaType = 'IMAGE' | 'VIDEO'
@@ -10,7 +11,15 @@ export interface SocialMetric {
   sourceMetric?: string
   scope?: string
   period?: string
-  availability: 'AVAILABLE' | 'PENDING' | 'UNKNOWN' | 'UNSUPPORTED' | 'PERMISSION_REQUIRED' | 'AUTH_REQUIRED' | 'OBJECT_UNAVAILABLE' | 'ERROR'
+  availability:
+    | 'AVAILABLE'
+    | 'PENDING'
+    | 'UNKNOWN'
+    | 'UNSUPPORTED'
+    | 'PERMISSION_REQUIRED'
+    | 'AUTH_REQUIRED'
+    | 'OBJECT_UNAVAILABLE'
+    | 'ERROR'
   fetchedAt?: SocialTime | null
   errorCode?: string
   errorMessage?: string
@@ -27,10 +36,28 @@ export interface SocialStats {
   errorMessage?: string
   metrics: SocialMetric[]
 }
-export interface SocialStatsSync { accepted: boolean; syncStatus: string; nextPollAfterSeconds?: number }
-export type SocialStatus = 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'PARTIAL_SUCCESS' | 'FAILED' | 'REAUTH_REQUIRED' | 'UNKNOWN'
-export interface SocialPage<T> { list: T[]; total: number }
-export interface SocialPageQuery { pageNo: number; pageSize: number; status?: string }
+export interface SocialStatsSync {
+  accepted: boolean
+  syncStatus: string
+  nextPollAfterSeconds?: number
+}
+export type SocialStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'SUCCESS'
+  | 'PARTIAL_SUCCESS'
+  | 'FAILED'
+  | 'REAUTH_REQUIRED'
+  | 'UNKNOWN'
+export interface SocialPage<T> {
+  list: T[]
+  total: number
+}
+export interface SocialPageQuery {
+  pageNo: number
+  pageSize: number
+  status?: string
+}
 export interface SocialCapabilities {
   enabled: boolean
   mediaTypes: SocialMediaType[]
@@ -56,7 +83,11 @@ export interface SocialAuthSession {
   status: 'PENDING' | 'PROCESSING' | 'PAGES_READY' | 'SUCCESS' | 'FAILED' | 'EXPIRED'
   message?: string
 }
-export interface FacebookPage { id: string; name: string; tasks: string[] }
+export interface FacebookPage {
+  id: string
+  name: string
+  tasks: string[]
+}
 export interface SocialMedia {
   id: number
   fileName: string
@@ -134,56 +165,109 @@ export interface SocialDetail {
 
 export const SocialPublishApi = {
   capabilities: () => request.get<SocialCapabilities>({ url: '/tk/social-publish/capabilities' }),
-  authorize: (platform: SocialPlatform) => request.post<{ authorizeUrl: string; sessionId: string }>({
-    url: `/tk/social-auth/${platform === 'INSTAGRAM' ? 'instagram' : 'facebook'}/redirect-url`, data: {}
-  }),
-  session: (sessionId: string) => request.get<SocialAuthSession>({ url: '/tk/social-auth/session', params: { sessionId } }),
-  facebookPages: (sessionId: string) => request.get<FacebookPage[]>({ url: '/tk/social-account/facebook-pages', params: { sessionId } }),
-  bindPages: (data: { sessionId: string; pageIds: string[] }) => request.post<boolean>({ url: '/tk/social-account/facebook-pages/bind', data }),
-  accountPage: (params: SocialPageQuery & { platform?: SocialPlatform }) => request.get<SocialPage<SocialAccount>>({ url: '/tk/social-account/page', params }),
-  insights: (id: number, params: { metric: string; period: string }) => request.get<SocialInsights>({ url: '/tk/social-account/insights', params: { id, ...params } }),
-  accountStats: (id: number) => request.get<SocialStats>({ url: '/tk/social-account/stats', params: { id } }),
-  accountStatsSync: (id: number) => request.post<SocialStatsSync>({ url: '/tk/social-account/stats/sync', params: { id } }),
-  detailStats: (detailId: number) => request.get<SocialStats>({ url: '/tk/social-publish/detail/stats', params: { detailId } }),
-  detailStatsSync: (detailId: number) => request.post<SocialStatsSync>({ url: '/tk/social-publish/detail/stats/sync', params: { detailId } }),
-  mediaGet: (id: number) => request.get<SocialMedia>({ url: '/tk/social-publish/media/get', params: { id } }),
-  validate: (id: number) => request.post<boolean>({ url: '/tk/social-account/validate', params: { id } }),
-  unbind: (id: number) => request.delete<boolean>({ url: '/tk/social-account/unbind', params: { id } }),
-  delete: (id: number) => request.delete<boolean>({ url: '/tk/social-account/delete', params: { id } }),
+  authorize: (platform: SocialPlatform) =>
+    request.post<{ authorizeUrl: string; sessionId: string }>({
+      url: `/tk/social-auth/${platform === 'INSTAGRAM' ? 'instagram' : 'facebook'}/redirect-url`,
+      data: {}
+    }),
+  session: (sessionId: string) =>
+    request.get<SocialAuthSession>({ url: '/tk/social-auth/session', params: { sessionId } }),
+  facebookPages: (sessionId: string) =>
+    request.get<FacebookPage[]>({
+      url: '/tk/social-account/facebook-pages',
+      params: { sessionId }
+    }),
+  bindPages: (data: { sessionId: string; pageIds: string[] }) =>
+    request.post<boolean>({ url: '/tk/social-account/facebook-pages/bind', data }),
+  accountPage: (params: SocialPageQuery & { platform?: SocialPlatform }) =>
+    request.get<SocialPage<SocialAccount>>({ url: '/tk/social-account/page', params }),
+  insights: (id: number, params: { metric: string; period: string }) =>
+    request.get<SocialInsights>({ url: '/tk/social-account/insights', params: { id, ...params } }),
+  accountStats: (id: number) =>
+    request.get<SocialStats>({ url: '/tk/social-account/stats', params: { id } }),
+  accountStatsSync: (id: number) =>
+    request.post<SocialStatsSync>({ url: '/tk/social-account/stats/sync', params: { id } }),
+  detailStats: (detailId: number) =>
+    request.get<SocialStats>({ url: '/tk/social-publish/detail/stats', params: { detailId } }),
+  detailStatsSync: (detailId: number) =>
+    request.post<SocialStatsSync>({
+      url: '/tk/social-publish/detail/stats/sync',
+      params: { detailId }
+    }),
+  mediaGet: (id: number) =>
+    request.get<SocialMedia>({ url: '/tk/social-publish/media/get', params: { id } }),
+  validate: (id: number) =>
+    request.post<boolean>({ url: '/tk/social-account/validate', params: { id } }),
+  unbind: (id: number) =>
+    request.delete<boolean>({ url: '/tk/social-account/unbind', params: { id } }),
+  delete: (id: number) =>
+    request.delete<boolean>({ url: '/tk/social-account/delete', params: { id } }),
   videoUploadSession: (data: { fileName: string; fileSize: number; contentType: string }) =>
-    request.post<SocialVideoUploadSession>({ url: '/tk/social-publish/media/video-upload-session', data, timeout: 30_000 }),
+    request.post<SocialVideoUploadSession>({
+      url: '/tk/social-publish/media/video-upload-session',
+      data,
+      timeout: 30_000
+    }),
   videoUploadComplete: (data: {
-    uploadId: string; fileName: string; fileSize: number; contentType: string; objectKey: string
-    width?: number; height?: number; durationSeconds?: number; frameRate?: number
-  }) => request.post<SocialMedia>({ url: '/tk/social-publish/media/video-upload-complete', data, timeout: 30_000 }),
+    uploadId: string
+    fileName: string
+    fileSize: number
+    contentType: string
+    objectKey: string
+    width?: number
+    height?: number
+    durationSeconds?: number
+    frameRate?: number
+  }) =>
+    request.post<SocialMedia>({
+      url: '/tk/social-publish/media/video-upload-complete',
+      data,
+      timeout: 30_000
+    }),
   upload: (file: Blob) => {
     const data = new FormData()
     data.append('file', file)
     // post unwraps CommonResult; FormData lets the browser supply its boundary.
-    return request.post<SocialMedia>({ url: '/tk/social-publish/media/upload', data, timeout: 180_000 })
+    return request.post<SocialMedia>({
+      url: '/tk/social-publish/media/upload',
+      data,
+      timeout: 180_000
+    })
   },
-  create: (data: SocialCreate) => request.post<number>({ url: '/tk/social-publish/create', data, timeout: 180_000 }),
-  taskPage: (params: SocialPageQuery) => request.get<SocialPage<SocialTask>>({ url: '/tk/social-publish/task-page', params }),
-  detailPage: (params: SocialPageQuery & { taskId: number }) => request.get<SocialPage<SocialDetail>>({ url: '/tk/social-publish/detail-page', params }),
-  retry: (detailId: number) => request.post<boolean>({ url: '/tk/social-publish/retry', params: { detailId } }),
-  sync: (taskId: number) => request.post<boolean>({ url: '/tk/social-publish/status/sync', params: { taskId } })
+  create: (data: SocialCreate) =>
+    request.post<number>({ url: '/tk/social-publish/create', data, timeout: 180_000 }),
+  taskPage: (params: SocialPageQuery) =>
+    request.get<SocialPage<SocialTask>>({ url: '/tk/social-publish/task-page', params }),
+  detailPage: (params: SocialPageQuery & { taskId: number }) =>
+    request.get<SocialPage<SocialDetail>>({ url: '/tk/social-publish/detail-page', params }),
+  retry: (detailId: number) =>
+    request.post<boolean>({ url: '/tk/social-publish/retry', params: { detailId } }),
+  sync: (taskId: number) =>
+    request.post<boolean>({ url: '/tk/social-publish/status/sync', params: { taskId } })
 }
 
-export function uploadSocialVideoToOss(session: SocialVideoUploadSession, file: Blob,
-                                       onProgress?: (percent: number) => void): Promise<void> {
+export function uploadSocialVideoToOss(
+  session: SocialVideoUploadSession,
+  file: Blob,
+  onProgress?: (percent: number) => void
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', session.uploadUrl)
-    xhr.upload.onprogress = event => {
-      if (event.lengthComputable) onProgress?.(Math.min(99, Math.round(event.loaded / event.total * 100)))
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable)
+        onProgress?.(Math.min(99, Math.round((event.loaded / event.total) * 100)))
     }
-    xhr.onerror = () => reject(new Error('OSS 上传失败，请检查网络后重试'))
-    xhr.onabort = () => reject(new Error('OSS 上传已取消'))
+    xhr.onerror = () => reject(new Error(metaText('meta.ossUploadNetworkFailed')))
+    xhr.onabort = () => reject(new Error(metaText('meta.ossUploadCancelled')))
     xhr.onload = () => {
       if ([200, 201, 204].includes(xhr.status)) {
         onProgress?.(100)
         resolve()
-      } else reject(new Error(`OSS 上传失败（HTTP ${xhr.status}）`))
+      } else
+        reject(
+          new Error(metaText('meta.ossUploadHttpFailed').replace('{{status}}', String(xhr.status)))
+        )
     }
     const form = new FormData()
     form.append('key', session.objectKey)

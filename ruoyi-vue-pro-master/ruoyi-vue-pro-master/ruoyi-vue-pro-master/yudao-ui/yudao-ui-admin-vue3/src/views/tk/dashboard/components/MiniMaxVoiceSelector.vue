@@ -1,18 +1,14 @@
 <template>
   <div class="minimax-voice-selector">
     <div class="minimax-voice-filters">
-      <el-input
-        v-model="filter.name"
-        clearable
-        :placeholder="isEn ? 'Search voice' : '搜索音色名称'"
-      />
-      <el-select v-model="filter.language" clearable :placeholder="isEn ? 'Language' : '语言'">
+      <el-input v-model="filter.name" clearable :placeholder="tt('voice.searchPlaceholder')" />
+      <el-select v-model="filter.language" clearable :placeholder="tt('voice.language')">
         <el-option v-for="item in languageOptions" :key="item" :label="item" :value="item" />
       </el-select>
-      <el-select v-model="filter.country" clearable :placeholder="isEn ? 'Country' : '国家/地区'">
+      <el-select v-model="filter.country" clearable :placeholder="tt('voice.country')">
         <el-option v-for="item in countryOptions" :key="item" :label="item" :value="item" />
       </el-select>
-      <el-select v-model="filter.gender" clearable :placeholder="isEn ? 'Gender' : '性别'">
+      <el-select v-model="filter.gender" clearable :placeholder="tt('voice.gender')">
         <el-option v-for="item in genderOptions" :key="item" :label="item" :value="item" />
       </el-select>
     </div>
@@ -39,27 +35,15 @@
         </span>
         <span class="minimax-voice-actions" @click.stop>
           <el-tooltip
-            :content="
-              playingVoiceId === option.voiceId
-                ? isEn
-                  ? 'Stop'
-                  : '停止'
-                : isEn
-                  ? 'Preview'
-                  : '试听'
-            "
+            :content="playingVoiceId === option.voiceId ? tt('voice.stop') : tt('voice.preview')"
           >
             <el-button
               circle
               text
               :aria-label="
                 playingVoiceId === option.voiceId
-                  ? isEn
-                    ? 'Stop preview'
-                    : '停止试听'
-                  : isEn
-                    ? 'Preview voice'
-                    : '试听音色'
+                  ? tt('voice.stopPreview')
+                  : tt('voice.previewVoice')
               "
               :disabled="disabled || !option.previewUrl"
               @click="togglePreview(option)"
@@ -70,22 +54,12 @@
             </el-button>
           </el-tooltip>
           <el-tooltip
-            :content="
-              option.favorite ? (isEn ? 'Remove favorite' : '取消收藏') : isEn ? 'Favorite' : '收藏'
-            "
+            :content="option.favorite ? tt('voice.removeFavorite') : tt('voice.favorite')"
           >
             <el-button
               circle
               text
-              :aria-label="
-                option.favorite
-                  ? isEn
-                    ? 'Remove favorite'
-                    : '取消收藏'
-                  : isEn
-                    ? 'Favorite'
-                    : '收藏音色'
-              "
+              :aria-label="option.favorite ? tt('voice.removeFavorite') : tt('voice.favoriteVoice')"
               :loading="favoriteVoiceId === option.voiceId"
               :disabled="disabled || Boolean(favoriteVoiceId)"
               @click="toggleFavorite(option)"
@@ -97,7 +71,7 @@
       </div>
       <el-empty
         v-if="!loading && !filteredOptions.length"
-        :description="isEn ? 'No matching voices' : '暂无匹配音色'"
+        :description="tt('voice.noMatches')"
         :image-size="56"
       />
     </div>
@@ -108,6 +82,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { TkMiniMaxVoiceApi, type TkMiniMaxVoiceOptionVO } from '@/api/tk/voice'
+import { useTkI18n } from '@/hooks/web/useTkI18n'
 
 const props = defineProps<{
   modelValue: string
@@ -123,6 +98,7 @@ const emit = defineEmits<{
 }>()
 
 const filter = reactive({ name: '', language: '', country: '', gender: '' })
+const { tt } = useTkI18n()
 const currentAudio = ref<HTMLAudioElement>()
 const playingVoiceId = ref('')
 const favoriteVoiceId = ref('')
@@ -181,7 +157,7 @@ const togglePreview = async (option: TkMiniMaxVoiceOptionVO) => {
       return
     }
     stopPreview()
-    ElMessage.error(props.isEn ? 'Failed to play preview audio' : '音色试听失败')
+    ElMessage.error(tt('voice.previewFailed'))
   }
   try {
     await audio.play()
@@ -190,7 +166,7 @@ const togglePreview = async (option: TkMiniMaxVoiceOptionVO) => {
       return
     }
     stopPreview()
-    ElMessage.error(props.isEn ? 'Failed to play preview audio' : '音色试听失败')
+    ElMessage.error(tt('voice.previewFailed'))
   }
 }
 
@@ -207,7 +183,7 @@ const toggleFavorite = async (option: TkMiniMaxVoiceOptionVO) => {
     }
     emit('refresh')
   } catch {
-    ElMessage.error(props.isEn ? 'Failed to update favorite' : '收藏操作失败')
+    ElMessage.error(tt('voice.favoriteFailed'))
   } finally {
     favoriteVoiceId.value = ''
   }
