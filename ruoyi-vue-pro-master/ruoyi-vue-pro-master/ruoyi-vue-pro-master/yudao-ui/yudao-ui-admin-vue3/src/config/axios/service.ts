@@ -155,8 +155,8 @@ service.interceptors.response.use(
     // 未设置状态码则默认成功状态
     // 二进制数据则直接返回，例如说 Excel 导出
     if (
-      response.request.responseType === 'blob' ||
-      response.request.responseType === 'arraybuffer'
+      response.config.responseType === 'blob' ||
+      response.config.responseType === 'arraybuffer'
     ) {
       // 注意：如果导出的响应为 json，说明可能失败了，不直接返回进行下载
       if (response.data.type !== 'application/json') {
@@ -251,6 +251,7 @@ service.interceptors.response.use(
       message = t('sys.api.apiRequestFailed') + message.substr(message.length - 3)
     }
     ElMessage.error(message)
+    ;(error as AxiosError & { displayedByAxios?: boolean }).displayedByAxios = true
     return Promise.reject(error)
   }
 )

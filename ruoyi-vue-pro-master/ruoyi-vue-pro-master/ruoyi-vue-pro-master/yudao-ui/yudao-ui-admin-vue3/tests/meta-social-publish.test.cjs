@@ -101,6 +101,13 @@ test('new API methods send exact IDs and methods', async () => {
   ])
 })
 
+test('axios response handling avoids native request invocation and duplicate error toasts', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../src/config/axios/service.ts'), 'utf8')
+  assert.match(source, /response\.config\.responseType/)
+  assert.doesNotMatch(source, /response\.request\.responseType/)
+  assert.match(source, /error\.displayedByAxios\s*=\s*true/)
+})
+
 test('INSPECTING continues polling, UNVERIFIED cannot publish, and stopping invalidates in-flight media reads', async () => {
   const slow = deferred()
   let reads = 0
