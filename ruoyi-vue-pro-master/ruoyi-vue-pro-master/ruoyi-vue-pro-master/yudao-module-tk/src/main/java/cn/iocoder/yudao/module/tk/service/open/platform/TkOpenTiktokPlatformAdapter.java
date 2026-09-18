@@ -115,6 +115,18 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
     }
 
     @Override
+    public RecentVideosResult listRecentVideos(String accessToken, Long cursor, Integer maxCount) {
+        TkTiktokApiClient.VideoListResult result = apiClient.listVideos(accessToken, cursor, maxCount);
+        List<RecentVideo> videos = new java.util.ArrayList<>();
+        for (TkTiktokApiClient.VideoInfo video : result.getVideos()) {
+            videos.add(new RecentVideo(video.getId(), video.getCreateTime(), video.getTitle(),
+                    video.getVideoDescription(), video.getDuration(), video.getShareUrl()));
+        }
+        return new RecentVideosResult(result.isSuccess(), videos, result.getCursor(), result.isHasMore(),
+                result.getFailReason(), result.getErrorCode());
+    }
+
+    @Override
     public VideoMetricsResult queryVideoMetrics(String accessToken, String publicPostId) {
         if (StrUtil.isBlank(publicPostId)) {
             return new VideoMetricsResult(false, null, null, null, null, null, null,

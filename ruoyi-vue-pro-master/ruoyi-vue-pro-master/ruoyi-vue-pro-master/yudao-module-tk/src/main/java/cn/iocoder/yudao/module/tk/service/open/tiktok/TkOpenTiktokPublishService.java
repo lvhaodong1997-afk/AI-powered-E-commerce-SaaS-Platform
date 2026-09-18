@@ -29,6 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -41,6 +42,8 @@ public class TkOpenTiktokPublishService {
     private static final int PENDING_RECOVERY_DELAY_MINUTES = 1;
     private static final int INITIALIZATION_LEASE_MINUTES = 15;
     private static final int STATUS_STALE_MINUTES = 2;
+    private static final int RECOVERY_CONFIRMATION_MINUTES = 30;
+    private static final int RECENT_VIDEO_PAGE_SIZE = 20;
 
     private final TkOpenTiktokPublishTaskMapper taskMapper;
     private final TkOpenTiktokPublishDetailMapper detailMapper;
@@ -467,6 +470,17 @@ public class TkOpenTiktokPublishService {
         return count;
     }
 
+    public int reconcileRecoveryRequired(int limit) {
+        int count = 0;
+        int boundedLimit = Math.max(1, Math.min(limit, 200));
+        for (TkOpenTiktokPublishDetailDO detail : detailMapper.selectRecoveryRequired(boundedLimit)) {
+            if (reconcileRecoveryDetail(detail)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     public int resumeStalePending(int limit) {
         List<TkOpenTiktokPublishDetailDO> pending = detailMapper.selectStalePending(
                 LocalDateTime.now().minusMinutes(PENDING_RECOVERY_DELAY_MINUTES), limit);
@@ -640,6 +654,72 @@ public class TkOpenTiktokPublishService {
                 detail.getDetailId());
         refreshSummary(detail.getClientId(), detail.getTaskId());
         return true;
+    }
+
+    private boolean reconcileRecoveryDetail(TkOpenTiktokPublishDetailDO detail) {
+        TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(detail.getClientId(), detail.getTaskId());
+        TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(
+                detail.getClientId(), detail.getConnectionId());
+        if (task == null || connection == null) return false;
+        try {
+            TkOpenPublishPlatformAdapter adapter = platform();
+            String token = validAccessToken(connection, adapter, false);
+            TkOpenPublishPlatformAdapter.RecentVideosResult recent =
+                    adapter.listRecentVideos(token, null, RECENT_VIDEO_PAGE_SIZE);
+            if (recent.isAccessTokenInvalid()) {
+                recent = adapter.listRecentVideos(validAccessToken(connection, adapter, true), null, RECENT_VIDEO_PAGE_SIZE);
+            }
+            if (!recent.isSuccess()) {
+                log.warn("[reconcileRecoveryDetail][detailId({}) TikTok video.list failed: {}]",
+                        detail.getDetailId(), recent.getFailReason());
+                return false;
+            }
+            TkOpenPublishPlatformAdapter.RecentVideo match = recent.getVideos().stream()
+                    .filter(video -> matchesRecoveryVideo(task, detail, video))
+                    .findFirst().orElse(null);
+            if (match != null) {
+                detail.setStatus("SUCCESS").setTiktokStatus("PUBLISH_COMPLETE")
+                        .setPublicPostId(match.getPublicPostId()).setFailReason(null)
+                        .setLastSyncTime(LocalDateTime.now());
+                detailMapper.updateById(detail);
+                refreshSummary(detail.getClientId(), detail.getTaskId());
+                publishEvent(detail, task, "publish.success");
+                log.info("[reconcileRecoveryDetail][detailId({}) confirmed by TikTok video.list, publicPostId({})]",
+                        detail.getDetailId(), match.getPublicPostId());
+                return true;
+            }
+            if (detail.getCreateTime() != null
+                    && detail.getCreateTime().plusMinutes(RECOVERY_CONFIRMATION_MINUTES).isBefore(LocalDateTime.now())) {
+                failDetail(detail, task, "TikTok publish was not found after reconciliation");
+                log.warn("[reconcileRecoveryDetail][detailId({}) confirmed absent after reconciliation window]",
+                        detail.getDetailId());
+                return true;
+            }
+        } catch (Exception ex) {
+            log.warn("[reconcileRecoveryDetail][detailId({}) failed; next scan will retry]",
+                    detail.getDetailId(), ex);
+        }
+        return false;
+    }
+
+    private boolean matchesRecoveryVideo(TkOpenTiktokPublishTaskDO task,
+                                         TkOpenTiktokPublishDetailDO detail,
+                                         TkOpenPublishPlatformAdapter.RecentVideo video) {
+        if (StrUtil.isBlank(video.getPublicPostId()) || video.getCreateTime() == null || detail.getCreateTime() == null) {
+            return false;
+        }
+        long createdAt = detail.getCreateTime().atZone(ZoneId.systemDefault()).toEpochSecond();
+        if (video.getCreateTime() < createdAt - 300 || video.getCreateTime() > createdAt + 1800) return false;
+        String expected = normalizeRecoveryText(StrUtil.blankToDefault(task.getTitle(), "TikTok video"));
+        String caption = normalizeRecoveryText(task.getCaption());
+        String title = normalizeRecoveryText(video.getTitle());
+        String description = normalizeRecoveryText(video.getDescription());
+        return expected.equals(title) || expected.equals(description)
+                || (StrUtil.isNotBlank(caption) && (caption.equals(title) || caption.equals(description)));
+    }
+
+    private String normalizeRecoveryText(String value) {
+        return StrUtil.blankToDefault(value, "").replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
     }
 
     private void markRecoveryRequired(TkOpenTiktokPublishDetailDO detail, String reason) {

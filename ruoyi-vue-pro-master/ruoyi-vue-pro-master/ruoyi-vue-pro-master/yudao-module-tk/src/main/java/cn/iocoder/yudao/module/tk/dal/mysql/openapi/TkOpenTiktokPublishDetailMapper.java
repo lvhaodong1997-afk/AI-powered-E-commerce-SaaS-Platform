@@ -43,6 +43,14 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
                 .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
     }
 
+    default List<TkOpenTiktokPublishDetailDO> selectRecoveryRequired(int limit) {
+        return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
+                .eq(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
+                .eq(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED")
+                .orderByAsc(TkOpenTiktokPublishDetailDO::getLastSyncTime)
+                .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
+    }
+
     default List<TkOpenTiktokPublishDetailDO> selectTerminalForCallback(int limit) {
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                 .in(TkOpenTiktokPublishDetailDO::getStatus, java.util.Arrays.asList("SUCCESS", "FAILED"))

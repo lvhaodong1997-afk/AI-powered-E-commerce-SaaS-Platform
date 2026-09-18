@@ -23,6 +23,7 @@ public interface TkOpenPublishPlatformAdapter {
     PublishInitResult initVideoPost(String accessToken, String postMode, Map<String, Object> payload);
     void uploadVideo(String uploadUrl, Path videoFile, String contentType);
     PublishStatusResult fetchPostStatus(String accessToken, String publishId);
+    RecentVideosResult listRecentVideos(String accessToken, Long cursor, Integer maxCount);
     VideoMetricsResult queryVideoMetrics(String accessToken, String publicPostId);
     default Map<String, VideoMetricsResult> queryVideoMetrics(String accessToken, List<String> publicPostIds) {
         Map<String, VideoMetricsResult> result = new LinkedHashMap<>();
@@ -147,6 +148,36 @@ public interface TkOpenPublishPlatformAdapter {
         public boolean isAccessTokenInvalid() {
             return "access_token_invalid".equals(errorCode);
         }
+    }
+
+    @Data
+    @AllArgsConstructor
+    class RecentVideosResult {
+        private boolean success;
+        private List<RecentVideo> videos;
+        private Long cursor;
+        private boolean hasMore;
+        private String failReason;
+        private String errorCode;
+
+        public List<RecentVideo> getVideos() {
+            return videos == null ? Collections.emptyList() : videos;
+        }
+
+        public boolean isAccessTokenInvalid() {
+            return "access_token_invalid".equals(errorCode);
+        }
+    }
+
+    @Data
+    @AllArgsConstructor
+    class RecentVideo {
+        private String publicPostId;
+        private Long createTime;
+        private String title;
+        private String description;
+        private Integer duration;
+        private String shareUrl;
     }
 
     @Data

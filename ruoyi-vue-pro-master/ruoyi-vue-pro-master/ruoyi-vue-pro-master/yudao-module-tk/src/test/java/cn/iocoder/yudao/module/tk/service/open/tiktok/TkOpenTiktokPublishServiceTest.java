@@ -624,6 +624,159 @@ class TkOpenTiktokPublishServiceTest {
     }
 
     @Test
+    void shouldConfirmInterruptedPublishFromRecentTikTokVideoBeforeSuccessCallback() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenPublishPlatformRegistry registry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        TkOpenApiCallbackService callbackService = mock(TkOpenApiCallbackService.class);
+        TkOpenApiSecretCipher cipher = mock(TkOpenApiSecretCipher.class);
+        LocalDateTime created = LocalDateTime.now().minusMinutes(5);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task-reconcile").clientId("client_b").title("Recovery title").caption(null).build();
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder()
+                .id(12L).detailId("detail-reconcile").taskId("task-reconcile").clientId("client_b")
+                .connectionId("conn-reconcile").status("PROCESSING").tiktokStatus("RECOVERY_REQUIRED")
+                .retryCount(0).build();
+        detail.setCreateTime(created);
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
+                .id(13L).connectionId("conn-reconcile").clientId("client_b").authStatus("AUTHORIZED")
+                .accessTokenCipher("access-cipher").accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build();
+        TkOpenPublishPlatformAdapter.RecentVideo video = new TkOpenPublishPlatformAdapter.RecentVideo(
+                "post-reconcile", created.atZone(java.time.ZoneId.systemDefault()).toEpochSecond() + 30,
+                "Recovery title", null, 10, "https://tiktok/video/post-reconcile");
+        when(detailMapper.selectRecoveryRequired(100)).thenReturn(Collections.singletonList(detail));
+        when(taskMapper.selectByClientAndTaskId("client_b", "task-reconcile")).thenReturn(task);
+        when(connectionMapper.selectByClientAndConnectionId("client_b", "conn-reconcile")).thenReturn(connection);
+        when(detailMapper.selectListByClientAndTaskId("client_b", "task-reconcile"))
+                .thenReturn(Collections.singletonList(detail));
+        when(cipher.decrypt("access-cipher")).thenReturn("access-token");
+        when(registry.getRequired("TIKTOK")).thenReturn(adapter);
+        when(adapter.listRecentVideos("access-token", null, 20)).thenReturn(
+                new TkOpenPublishPlatformAdapter.RecentVideosResult(true,
+                        Collections.singletonList(video), null, false, null, null));
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+                mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
+                registry, callbackService, cipher, null);
+
+        try {
+            assertEquals(1, service.reconcileRecoveryRequired(100));
+            assertEquals("SUCCESS", detail.getStatus());
+            assertEquals("PUBLISH_COMPLETE", detail.getTiktokStatus());
+            assertEquals("post-reconcile", detail.getPublicPostId());
+            verify(callbackService).enqueueOnce(eq("client_b"), eq("publish.success"),
+                    eq("PUBLISH_DETAIL"), eq("detail-reconcile"), any(), eq(0));
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void shouldKeepInterruptedPublishUnresolvedWhenRecentVideosDoNotMatch() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenPublishPlatformRegistry registry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        TkOpenApiCallbackService callbackService = mock(TkOpenApiCallbackService.class);
+        TkOpenApiSecretCipher cipher = mock(TkOpenApiSecretCipher.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task-unresolved").clientId("client_b").title("Expected title").build();
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder()
+                .id(14L).detailId("detail-unresolved").taskId("task-unresolved").clientId("client_b")
+                .connectionId("conn-unresolved").status("PROCESSING").tiktokStatus("RECOVERY_REQUIRED")
+                .retryCount(0).build();
+        detail.setCreateTime(LocalDateTime.now().minusMinutes(5));
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
+                .id(15L).connectionId("conn-unresolved").clientId("client_b").authStatus("AUTHORIZED")
+                .accessTokenCipher("access-cipher").accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build();
+        when(detailMapper.selectRecoveryRequired(100)).thenReturn(Collections.singletonList(detail));
+        when(taskMapper.selectByClientAndTaskId("client_b", "task-unresolved")).thenReturn(task);
+        when(connectionMapper.selectByClientAndConnectionId("client_b", "conn-unresolved")).thenReturn(connection);
+        when(cipher.decrypt("access-cipher")).thenReturn("access-token");
+        when(registry.getRequired("TIKTOK")).thenReturn(adapter);
+        when(adapter.listRecentVideos("access-token", null, 20)).thenReturn(
+                new TkOpenPublishPlatformAdapter.RecentVideosResult(true, Collections.emptyList(), null,
+                        false, null, null));
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+                mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
+                registry, callbackService, cipher, null);
+
+        try {
+            assertEquals(0, service.reconcileRecoveryRequired(100));
+            assertEquals("PROCESSING", detail.getStatus());
+            assertEquals("RECOVERY_REQUIRED", detail.getTiktokStatus());
+            verify(callbackService, never()).enqueueOnce(anyString(), anyString(), anyString(), anyString(), any(), anyInt());
+            verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void shouldSendExistingFailedCallbackOnlyAfterRecoveryWindowExpires() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenPublishPlatformRegistry registry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        TkOpenApiCallbackService callbackService = mock(TkOpenApiCallbackService.class);
+        TkOpenApiSecretCipher cipher = mock(TkOpenApiSecretCipher.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task-expired").clientId("client_b").title("Expired title").build();
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder()
+                .id(16L).detailId("detail-expired").taskId("task-expired").clientId("client_b")
+                .connectionId("conn-expired").status("PROCESSING").tiktokStatus("RECOVERY_REQUIRED")
+                .retryCount(0).build();
+        detail.setCreateTime(LocalDateTime.now().minusMinutes(31));
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
+                .id(17L).connectionId("conn-expired").clientId("client_b").authStatus("AUTHORIZED")
+                .accessTokenCipher("access-cipher").accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build();
+        when(detailMapper.selectRecoveryRequired(100)).thenReturn(Collections.singletonList(detail));
+        when(taskMapper.selectByClientAndTaskId("client_b", "task-expired")).thenReturn(task);
+        when(connectionMapper.selectByClientAndConnectionId("client_b", "conn-expired")).thenReturn(connection);
+        when(cipher.decrypt("access-cipher")).thenReturn("access-token");
+        when(registry.getRequired("TIKTOK")).thenReturn(adapter);
+        when(adapter.listRecentVideos("access-token", null, 20)).thenReturn(
+                new TkOpenPublishPlatformAdapter.RecentVideosResult(true, Collections.emptyList(), null,
+                        false, null, null));
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+                mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
+                registry, callbackService, cipher, null);
+
+        try {
+            assertEquals(1, service.reconcileRecoveryRequired(100));
+            assertEquals("FAILED", detail.getStatus());
+            assertEquals("FAILED", detail.getTiktokStatus());
+            verify(callbackService).enqueueOnce(eq("client_b"), eq("publish.failed"),
+                    eq("PUBLISH_DETAIL"), eq("detail-expired"), any(), eq(0));
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void shouldExposeRecentVideosForInterruptedPublishReconciliation() {
+        TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
+        TkOpenTiktokPlatformAdapter adapter = new TkOpenTiktokPlatformAdapter(apiClient);
+        when(apiClient.listVideos("access-token", null, 20)).thenReturn(
+                new TkTiktokApiClient.VideoListResult(true,
+                        Collections.singletonList(new TkTiktokApiClient.VideoInfo("post-recovered", 101L,
+                                null, "https://tiktok/video/post-recovered", "title", 10, null, null,
+                                "title", null, null, 1L, 2L, 3L, 4L, null)),
+                        101L, false, null, null));
+
+        TkOpenPublishPlatformAdapter.RecentVideosResult result =
+                adapter.listRecentVideos("access-token", null, 20);
+
+        assertTrue(result.isSuccess());
+        assertEquals("post-recovered", result.getVideos().get(0).getPublicPostId());
+        assertEquals(101L, result.getVideos().get(0).getCreateTime());
+        verify(apiClient).listVideos("access-token", null, 20);
+    }
+
+    @Test
     void shouldReconcileMissingTerminalCallbackThroughExistingSuccessEvent() {
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
         TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
