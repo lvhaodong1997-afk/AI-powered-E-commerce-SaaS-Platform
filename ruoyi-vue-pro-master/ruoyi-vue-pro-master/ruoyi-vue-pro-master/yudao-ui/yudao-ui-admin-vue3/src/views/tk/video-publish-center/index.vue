@@ -19,7 +19,7 @@
           <el-tab-pane label="账号矩阵" name="accounts" />
           <el-tab-pane label="发布任务" name="tasks" />
           <el-tab-pane label="发布明细" name="details" />
-          <el-tab-pane v-if="hasPermission(['tk:social-publish:query'])" label="Instagram / Facebook" name="meta" />
+          <el-tab-pane v-if="hasPermission(['tk:social-publish:query'])" :label="tt('meta.title')" name="meta" />
         </el-tabs>
         <div v-if="activeTab !== 'meta'" class="toolbar-actions">
           <el-button @click="refreshAll"><Icon icon="ep:refresh" class="mr-5px" /> 刷新</el-button>

@@ -1,3 +1,5 @@
+import { metaZh } from './metaPublishMessages'
+
 export const tkZhCN: Record<string, string> = {
   'common.search': '搜索',
   'common.reset': '重置',
@@ -412,7 +414,9 @@ export const tkZhCN: Record<string, string> = {
   'businessLog.operator': '操作人',
   'businessLog.business': '业务',
   'businessLog.action': '动作',
-  'businessLog.message': '消息'
+  'businessLog.message': '消息',
+
+  ...metaZh
 }
 
 export default tkZhCN

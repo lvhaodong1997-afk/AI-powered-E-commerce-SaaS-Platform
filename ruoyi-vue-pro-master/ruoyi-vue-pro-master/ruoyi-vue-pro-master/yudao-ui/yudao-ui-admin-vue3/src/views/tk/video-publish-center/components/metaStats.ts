@@ -1,23 +1,38 @@
 import type { SocialMetric, SocialStats, SocialTime } from '@/api/tk/socialPublish'
+import { metaText } from '@/locales/tk/metaPublishMessages'
 
 export const statsKey = (kind: 'account' | 'detail', id: number) => `${kind}:${id}`
 export const timeMillis = (value?: SocialTime | null) => value == null ? 0 : typeof value === 'number' ? value : new Date(value).getTime() || 0
-export const formatMetricValue = (metric?: Pick<SocialMetric, 'value'>) =>
-  metric?.value == null || !Number.isFinite(metric.value) ? '—' : metric.value.toLocaleString('zh-CN')
-export function metricLabel(metric: Pick<SocialMetric, 'key' | 'sourceMetric'>) {
-  if (metric.key === 'likes') return /reaction/i.test(metric.sourceMetric || '') ? '反应数（Reactions）' : '点赞'
-  if (metric.key === 'views' && /play/i.test(metric.sourceMetric || '')) return '播放次数'
-  return ({ followers: '粉丝', following: '关注', mediaCount: '作品数', views: '观看', reach: '触达',
-    comments: '评论', shares: '分享', saves: '收藏' } as Record<string, string>)[metric.key] || metric.key
+export const formatMetricValue = (metric?: Pick<SocialMetric, 'value'>, locale = 'zh-CN') =>
+  metric?.value == null || !Number.isFinite(metric.value) ? '—' : metric.value.toLocaleString(locale.startsWith('en') ? 'en-US' : 'zh-CN')
+export const formatSocialDate = (value?: SocialTime | null, locale = 'zh-CN') => {
+  const timestamp = timeMillis(value)
+  if (!timestamp) return '—'
+  return new Intl.DateTimeFormat(locale.startsWith('en') ? 'en-US' : 'zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+  }).format(new Date(timestamp))
 }
-export const availabilityLabel = (value: string) => ({
-  AVAILABLE: '可用', PENDING: '待同步', UNKNOWN: '暂未获取', UNSUPPORTED: '平台不支持',
-  PERMISSION_REQUIRED: '需要权限', AUTH_REQUIRED: '需要重新授权', OBJECT_UNAVAILABLE: '平台作品或对象不可用', ERROR: '读取失败'
-}[value] || value)
-export const statsStatusLabel = (value?: string) => ({
-  SUCCESS: '同步成功', PROCESSING: '同步中', PENDING: '等待同步', FAILED: '同步失败',
-  PARTIAL_SUCCESS: '部分成功', NEVER: '尚未同步', COOLDOWN: '冷却中', DISABLED: '已禁用', INACTIVE: '未启用'
-}[value || ''] || value || '尚未同步')
+export function metricLabel(metric: Pick<SocialMetric, 'key' | 'sourceMetric'>, locale = 'zh-CN') {
+  const key = metric.key === 'likes'
+    ? /reaction/i.test(metric.sourceMetric || '') ? 'meta.reactions' : 'meta.likes'
+    : metric.key === 'views' && /play/i.test(metric.sourceMetric || '') ? 'meta.playCount'
+      : ({ followers: 'meta.followers', following: 'meta.following', mediaCount: 'meta.mediaCount', views: 'meta.views', reach: 'meta.reach',
+        comments: 'meta.comments', shares: 'meta.shares', saves: 'meta.saves' } as Record<string, string>)[metric.key]
+  return key ? metaText(key, locale) : metric.key
+}
+export const availabilityLabel = (value: string, locale = 'zh-CN') => {
+  const key = ({ AVAILABLE: 'meta.availableState', PENDING: 'meta.pendingState', UNKNOWN: 'meta.unknownState', UNSUPPORTED: 'meta.unsupportedState',
+    PERMISSION_REQUIRED: 'meta.permissionRequired', AUTH_REQUIRED: 'meta.authRequired', OBJECT_UNAVAILABLE: 'meta.objectUnavailable', ERROR: 'meta.readFailed' } as Record<string, string>)[value]
+  return key ? metaText(key, locale) : value
+}
+export const statsStatusLabel = (value?: string, locale = 'zh-CN') => {
+  const key = ({ SUCCESS: 'meta.syncSuccess', PROCESSING: 'meta.syncing', PENDING: 'meta.waitingSync', FAILED: 'meta.syncFailed',
+    PARTIAL_SUCCESS: 'meta.partialSync', NEVER: 'meta.neverSynced', COOLDOWN: 'meta.cooldown', DISABLED: 'meta.disabled', INACTIVE: 'meta.inactive' } as Record<string, string>)[value || '']
+  return key ? metaText(key, locale) : value || metaText('meta.neverSynced', locale)
+}
+export const scopeLabel = (value?: string, locale = 'zh-CN') => ({ account: metaText('meta.scopeAccount', locale), detail: metaText('meta.scopeDetail', locale), media: metaText('meta.scopeDetail', locale) }[value || ''] || value || '—')
+export const periodLabel = (value?: string, locale = 'zh-CN') => value === 'day' ? metaText('meta.periodDay', locale) : value || '—'
+export const unitLabel = (value?: string, locale = 'zh-CN') => value === 'count' ? metaText('meta.unitCount', locale) : value || '—'
 
 // Preserve provenance and the original fetch time whenever displaying an older value.
 export function mergeStats(previous: SocialStats | undefined, next: SocialStats): SocialStats {

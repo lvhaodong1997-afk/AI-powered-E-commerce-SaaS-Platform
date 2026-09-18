@@ -12,7 +12,8 @@ function load(relative, imports = {}) {
   }).outputText
   const module = { exports: {} }
   new Function('require', 'module', 'exports', output)(
-    (name) => imports[name] || (name === './metaStats' ? load('src/views/tk/video-publish-center/components/metaStats.ts') : require(name)), module, module.exports
+    (name) => imports[name] || (name === './metaStats' ? load('src/views/tk/video-publish-center/components/metaStats.ts')
+      : name === '@/locales/tk/metaPublishMessages' ? load('src/locales/tk/metaPublishMessages.ts') : require(name)), module, module.exports
   )
   return module.exports
 }
@@ -27,6 +28,24 @@ const accounts = [
   { id: 2, platform: 'FACEBOOK_PAGE', status: 'ACTIVE', accountName: 'Page A' },
   { id: 3, platform: 'FACEBOOK_PAGE', status: 'ACTIVE', accountName: 'Page B' }
 ]
+
+test('Meta publishing copy follows the selected locale for static and dynamic text', () => {
+  const { metaText, translateMetaText } = load('src/locales/tk/metaPublishMessages.ts')
+  assert.equal(metaText('meta.title', 'zh-CN'), 'Instagram / Facebook 发布')
+  assert.equal(metaText('meta.title', 'en'), 'Instagram / Facebook Publishing')
+  assert.equal(translateMetaText('发布成功', 'zh-CN'), '发布成功')
+  assert.equal(translateMetaText('发布成功', 'en'), 'Published successfully')
+  assert.equal(translateMetaText('指标', 'en'), 'Metric')
+  assert.equal(translateMetaText('指标', 'zh-CN'), '指标')
+  assert.equal(translateMetaText('授权未完成，请检查账号权限或绑定归属后重试', 'en'), 'Authorization is incomplete. Check the account permissions and Page ownership, then try again')
+  assert.equal(translateMetaText('OSS 上传失败（HTTP 413）', 'en'), 'OSS upload failed (HTTP 413)')
+})
+
+test('Meta statistics format numbers and timestamps with the selected locale', () => {
+  const { formatMetricValue, formatSocialDate } = load('src/views/tk/video-publish-center/components/metaStats.ts')
+  assert.equal(formatMetricValue({ value: 1234.5 }, 'en-US'), '1,234.5')
+  assert.notEqual(formatSocialDate(1700000000000, 'zh-CN'), formatSocialDate(1700000000000, 'en-US'))
+})
 
 const stats = (id, value = 0, syncStatus = 'SUCCESS') => ({ objectId: id, platform: 'INSTAGRAM', syncStatus,
   lastSuccessTime: 1700000000000, lastAttemptTime: 1700000000000, metrics: [

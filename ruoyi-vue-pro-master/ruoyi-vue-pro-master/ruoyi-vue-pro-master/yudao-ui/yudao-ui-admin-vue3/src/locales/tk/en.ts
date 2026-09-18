@@ -1,3 +1,5 @@
+import { metaEn } from './metaPublishMessages'
+
 export const tkEn: Record<string, string> = {
   'common.search': 'Search',
   'common.reset': 'Reset',
@@ -425,7 +427,9 @@ export const tkEn: Record<string, string> = {
   'businessLog.operator': 'Operator',
   'businessLog.business': 'Business',
   'businessLog.action': 'Action',
-  'businessLog.message': 'Message'
+  'businessLog.message': 'Message',
+
+  ...metaEn
 }
 
 export default tkEn
