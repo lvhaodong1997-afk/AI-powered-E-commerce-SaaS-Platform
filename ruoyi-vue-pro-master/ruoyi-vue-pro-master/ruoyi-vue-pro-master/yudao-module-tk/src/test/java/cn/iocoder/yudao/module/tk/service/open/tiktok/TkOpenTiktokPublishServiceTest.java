@@ -612,6 +612,11 @@ class TkOpenTiktokPublishServiceTest {
 
             assertEquals("PROCESSING", detail.getStatus());
             assertEquals("RECOVERY_REQUIRED", detail.getTiktokStatus());
+            ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper> update =
+                    ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+            verify(detailMapper).update(isNull(), update.capture());
+            assertFalse(update.getValue().getParamNameValuePairs().containsValue("FAILED"),
+                    "The persisted state must not report an uncertain publish as failed");
             verify(callbackService, never()).enqueue(anyString(), anyString(), anyString(), anyString(), any());
         } finally {
             service.destroy();
@@ -641,7 +646,7 @@ class TkOpenTiktokPublishServiceTest {
         try {
             assertEquals(1, service.reconcileTerminalCallbacks(100));
             verify(callbackService).enqueueOnce(eq("client_b"), eq("publish.success"),
-                    eq("PUBLISH_DETAIL"), eq("detail_terminal"), any());
+                    eq("PUBLISH_DETAIL"), eq("detail_terminal"), any(), eq(0));
         } finally {
             service.destroy();
         }
@@ -649,6 +654,25 @@ class TkOpenTiktokPublishServiceTest {
 
     @Test
     void shouldCompleteInboxSubmissionWhenTikTokDoesNotReturnPublishId() {
+        verifyPublishInterruption("inbox");
+    }
+
+    @Test
+    void shouldPreserveAcceptedPublishWhenCallbackEnqueueFails() {
+        verifyPublishInterruption("callback");
+    }
+
+    @Test
+    void shouldPreservePublishIdWhenFirstPersistenceThrows() {
+        verifyPublishInterruption("persist");
+    }
+
+    @Test
+    void shouldNotReportInitNetworkTimeoutAsDefinitiveFailure() {
+        verifyPublishInterruption("timeout");
+    }
+
+    private void verifyPublishInterruption(String scenario) {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
                 TkOpenTiktokPublishDetailDO.class);
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
@@ -691,6 +715,22 @@ class TkOpenTiktokPublishServiceTest {
         when(adapter.initVideoPost(eq("access-token"), eq("UPLOAD_TO_INBOX"), any()))
                 .thenReturn(new TkOpenPublishPlatformAdapter.PublishInitResult(true, null, null, null, null));
 
+        if (!"inbox".equals(scenario)) {
+            task.setPostMode("DIRECT_POST");
+            when(adapter.initVideoPost(eq("access-token"), eq("DIRECT_POST"), any()))
+                    .thenReturn(new TkOpenPublishPlatformAdapter.PublishInitResult(true, "publish_1", null, null, null));
+        }
+        if ("callback".equals(scenario)) {
+            doThrow(new IllegalStateException("event store temporarily unavailable")).when(callbackService)
+                    .enqueue(anyString(), eq("publish.processing"), anyString(), anyString(), any());
+        } else if ("persist".equals(scenario)) {
+            when(detailMapper.update(isNull(), any())).thenReturn(1)
+                    .thenThrow(new IllegalStateException("database temporarily unavailable")).thenReturn(1);
+        } else if ("timeout".equals(scenario)) {
+            when(adapter.initVideoPost(eq("access-token"), eq("DIRECT_POST"), any()))
+                    .thenThrow(new IllegalStateException("network request timed out"));
+        }
+
         TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mediaMapper, connectionMapper, mock(TkOpenApiIdempotencyMapper.class), platformRegistry,
                 callbackService, secretCipher, mock(cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService.class));
@@ -698,10 +738,15 @@ class TkOpenTiktokPublishServiceTest {
         try {
             service.processTask("client_b", "task_inbox");
 
-            assertEquals("SUCCESS", detail.getStatus());
-            assertEquals("SEND_TO_USER_INBOX", detail.getTiktokStatus());
-            verify(callbackService).enqueue(eq("client_b"), eq("publish.success"),
-                    eq("PUBLISH_DETAIL"), eq("detail_inbox"), any());
+            if ("inbox".equals(scenario)) {
+                assertEquals("SUCCESS", detail.getStatus());
+                assertEquals("SEND_TO_USER_INBOX", detail.getTiktokStatus());
+            } else {
+                assertEquals("PROCESSING", detail.getStatus());
+                assertEquals("timeout".equals(scenario) ? "RECOVERY_REQUIRED" : "publish_1",
+                        "timeout".equals(scenario) ? detail.getTiktokStatus() : detail.getPublishId());
+                verify(callbackService, never()).enqueue(anyString(), eq("publish.failed"), anyString(), anyString(), any());
+            }
         } finally {
             service.destroy();
         }

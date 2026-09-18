@@ -26,6 +26,49 @@ import static org.mockito.Mockito.*;
 class TkOpenApiCallbackServiceTest {
 
     @Test
+    void shouldDeduplicateAcrossRestartsButAllowANewPublishAttempt() {
+        TkOpenApiEventMapper mapper = mock(TkOpenApiEventMapper.class);
+        Map<String, TkOpenApiEventDO> stored = new java.util.HashMap<>();
+        when(mapper.selectByDedupeKey(anyString(), anyString())).thenAnswer(
+                call -> stored.get(call.getArgument(1)));
+        when(mapper.insert(any(TkOpenApiEventDO.class))).thenAnswer(call -> {
+            TkOpenApiEventDO event = call.getArgument(0);
+            stored.put(event.getDedupeKey(), event);
+            return 1;
+        });
+        TkOpenApiCallbackService first = new TkOpenApiCallbackService(mapper,
+                mock(TkOpenApiClientMapper.class), mock(TkOpenApiSecretCipher.class), null);
+        TkOpenApiCallbackService restarted = new TkOpenApiCallbackService(mapper,
+                mock(TkOpenApiClientMapper.class), mock(TkOpenApiSecretCipher.class), null);
+        try {
+            String eventId = first.enqueueOnce("c", "publish.failed", "PUBLISH_DETAIL", "d", null, 0);
+            assertEquals(eventId, restarted.enqueueOnce("c", "publish.failed", "PUBLISH_DETAIL", "d", null, 0));
+            org.junit.jupiter.api.Assertions.assertNotEquals(eventId,
+                    restarted.enqueueOnce("c", "publish.failed", "PUBLISH_DETAIL", "d", null, 1));
+            verify(mapper, times(2)).insert(any(TkOpenApiEventDO.class));
+        } finally {
+            first.destroy();
+            restarted.destroy();
+        }
+    }
+
+    @Test
+    void shouldReturnConcurrentWinnerInsteadOfCreatingDuplicateCallback() {
+        TkOpenApiEventMapper mapper = mock(TkOpenApiEventMapper.class);
+        when(mapper.selectByDedupeKey(anyString(), anyString())).thenReturn(null,
+                TkOpenApiEventDO.builder().eventId("winner").build());
+        when(mapper.insert(any(TkOpenApiEventDO.class)))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("duplicate"));
+        TkOpenApiCallbackService service = new TkOpenApiCallbackService(mapper,
+                mock(TkOpenApiClientMapper.class), mock(TkOpenApiSecretCipher.class), null);
+        try {
+            assertEquals("winner", service.enqueueOnce("c", "publish.success", "PUBLISH_DETAIL", "d", null, 0));
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
     void shouldRecoverExpiredDeliveringClaimsBeforeScanningPendingEvents() {
         TkOpenApiEventMapper eventMapper = mock(TkOpenApiEventMapper.class);
         when(eventMapper.selectRetryable(any(LocalDateTime.class), eq(100))).thenReturn(Collections.emptyList());

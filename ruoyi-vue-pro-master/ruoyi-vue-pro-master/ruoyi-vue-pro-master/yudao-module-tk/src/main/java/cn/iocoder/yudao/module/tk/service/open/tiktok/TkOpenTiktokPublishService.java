@@ -429,7 +429,7 @@ public class TkOpenTiktokPublishService {
         LocalDateTime initializationDeadline = now.minusMinutes(INITIALIZATION_LEASE_MINUTES);
         for (TkOpenTiktokPublishDetailDO detail
                 : detailMapper.selectStaleInitializing(initializationDeadline, boundedLimit)) {
-            if (failInterruptedInitialization(detail, initializationDeadline)) {
+            if (recoverInterruptedInitialization(detail, initializationDeadline)) {
                 count++;
             }
         }
@@ -450,13 +450,19 @@ public class TkOpenTiktokPublishService {
         int count = 0;
         int boundedLimit = Math.max(1, Math.min(limit, 200));
         for (TkOpenTiktokPublishDetailDO detail : detailMapper.selectTerminalForCallback(boundedLimit)) {
-            TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(
-                    detail.getClientId(), detail.getTaskId());
-            if (task == null) continue;
-            String eventType = "SUCCESS".equals(detail.getStatus()) ? "publish.success" : "publish.failed";
-            callbackService.enqueueOnce(detail.getClientId(), eventType, "PUBLISH_DETAIL",
-                    detail.getDetailId(), buildPublishEventPayload(detail, task));
-            count++;
+            try {
+                TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(
+                        detail.getClientId(), detail.getTaskId());
+                if (task == null) continue;
+                refreshSummary(detail.getClientId(), detail.getTaskId());
+                String eventType = "SUCCESS".equals(detail.getStatus()) ? "publish.success" : "publish.failed";
+                callbackService.enqueueOnce(detail.getClientId(), eventType, "PUBLISH_DETAIL",
+                        detail.getDetailId(), buildPublishEventPayload(detail, task), defaultInt(detail.getRetryCount()));
+                count++;
+            } catch (Exception ex) {
+                log.warn("[reconcileTerminalCallbacks][detailId({}) failed; next scan will retry]",
+                        detail.getDetailId(), ex);
+            }
         }
         return count;
     }
@@ -492,6 +498,7 @@ public class TkOpenTiktokPublishService {
                 .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "LOCAL_PROCESSING")
                 .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
         if (claimed <= 0) return;
+        detail.setStatus("PROCESSING");
         TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(detail.getClientId(), detail.getTaskId());
         TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(detail.getClientId(), detail.getConnectionId());
         TkOpenTiktokMediaDO media = task == null ? null : mediaMapper.selectByClientAndMediaId(detail.getClientId(), task.getMediaId());
@@ -500,6 +507,7 @@ public class TkOpenTiktokPublishService {
             return;
         }
         UploadSource source = null;
+        boolean initializationAttempted = false;
         try {
             TkOpenPublishPlatformAdapter adapter = platform();
             String token = validAccessToken(connection, adapter, false);
@@ -511,12 +519,16 @@ public class TkOpenTiktokPublishService {
             if (!creator.isSuccess()) throw new IllegalStateException(creator.getFailReason());
             source = resolveSource(media, adapter.verifiedPullDomain());
             Map<String, Object> payload = buildPayload(task, media, creator, source);
+            initializationAttempted = true;
             TkOpenPublishPlatformAdapter.PublishInitResult initialized = adapter.initVideoPost(token, task.getPostMode(), payload);
             if (initialized.isAccessTokenInvalid()) {
                 token = validAccessToken(connection, adapter, true);
                 initialized = adapter.initVideoPost(token, task.getPostMode(), payload);
             }
-            if (!initialized.isSuccess()) throw new IllegalStateException(initialized.getFailReason());
+            if (!initialized.isSuccess()) {
+                initializationAttempted = false; // A definitive platform rejection is safe to report as failed.
+                throw new IllegalStateException(initialized.getFailReason());
+            }
             detail.setPublishId(initialized.getPublishId());
             boolean sentToUserInbox = "UPLOAD_TO_INBOX".equalsIgnoreCase(task.getPostMode())
                     && StrUtil.isBlank(initialized.getPublishId());
@@ -550,7 +562,16 @@ public class TkOpenTiktokPublishService {
             connectionMapper.updateById(new TkOpenTiktokConnectionDO().setId(connection.getId()).setLastPublishTime(LocalDateTime.now()));
             publishEvent(detail, task, sentToUserInbox ? "publish.success" : "publish.processing");
         } catch (Exception ex) {
-            failDetail(detail, task, "TikTok publish failed: " + ex.getMessage());
+            if (initializationAttempted) {
+                // Once init was sent, a timeout or local persistence/callback error is not proof of failure.
+                if (!"SUCCESS".equals(detail.getStatus())) {
+                    markRecoveryRequired(detail, "TikTok publish outcome requires reconciliation: " + ex.getMessage());
+                }
+                log.warn("[processDetail][detailId({}) interrupted after platform init; never resubmit automatically]",
+                        detail.getDetailId(), ex);
+            } else {
+                failDetail(detail, task, "TikTok publish failed: " + ex.getMessage());
+            }
         } finally {
             if (source != null) source.cleanup();
         }
@@ -595,7 +616,7 @@ public class TkOpenTiktokPublishService {
         }
     }
 
-    private boolean failInterruptedInitialization(TkOpenTiktokPublishDetailDO detail, LocalDateTime deadline) {
+    private boolean recoverInterruptedInitialization(TkOpenTiktokPublishDetailDO detail, LocalDateTime deadline) {
         String reason = "Publish execution was interrupted before the platform publish ID was persisted; "
                 + "verify the TikTok account before retrying to avoid a duplicate post";
         int updated = detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
@@ -604,7 +625,7 @@ public class TkOpenTiktokPublishService {
                 .isNull(TkOpenTiktokPublishDetailDO::getPublishId)
                 .and(wrapper -> wrapper.isNull(TkOpenTiktokPublishDetailDO::getLastSyncTime)
                         .or().le(TkOpenTiktokPublishDetailDO::getLastSyncTime, deadline))
-                .set(TkOpenTiktokPublishDetailDO::getStatus, "FAILED")
+                .set(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
                 .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED")
                 .set(TkOpenTiktokPublishDetailDO::getFailReason, reason)
                 .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
@@ -615,6 +636,8 @@ public class TkOpenTiktokPublishService {
         detail.setTiktokStatus("RECOVERY_REQUIRED");
         detail.setFailReason(reason);
         detail.setLastSyncTime(LocalDateTime.now());
+        log.warn("[recoverInterruptedInitialization][detailId({}) requires verification; automatic republish blocked]",
+                detail.getDetailId());
         refreshSummary(detail.getClientId(), detail.getTaskId());
         return true;
     }
@@ -715,8 +738,13 @@ public class TkOpenTiktokPublishService {
 
     private void publishEvent(TkOpenTiktokPublishDetailDO detail, TkOpenTiktokPublishTaskDO task, String type) {
         if (callbackService == null) return;
-        callbackService.enqueue(detail.getClientId(), type, "PUBLISH_DETAIL", detail.getDetailId(),
-                buildPublishEventPayload(detail, task));
+        if ("publish.processing".equals(type)) {
+            callbackService.enqueue(detail.getClientId(), type, "PUBLISH_DETAIL", detail.getDetailId(),
+                    buildPublishEventPayload(detail, task));
+        } else {
+            callbackService.enqueueOnce(detail.getClientId(), type, "PUBLISH_DETAIL", detail.getDetailId(),
+                    buildPublishEventPayload(detail, task), defaultInt(detail.getRetryCount()));
+        }
     }
 
     private Map<String, Object> buildPublishEventPayload(TkOpenTiktokPublishDetailDO detail,
