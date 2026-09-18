@@ -17,6 +17,23 @@ public interface TkOpenApiEventMapper extends BaseMapperX<TkOpenApiEventDO> {
         return selectOne(TkOpenApiEventDO::getEventId, eventId);
     }
 
+    default TkOpenApiEventDO selectByDedupeKey(String clientId, String dedupeKey) {
+        return selectOne(new LambdaQueryWrapperX<TkOpenApiEventDO>()
+                .eq(TkOpenApiEventDO::getClientId, clientId)
+                .eq(TkOpenApiEventDO::getDedupeKey, dedupeKey));
+    }
+
+    default TkOpenApiEventDO selectByResourceAndEventType(String clientId, String eventType,
+                                                           String resourceType, String resourceId) {
+        return selectOne(new LambdaQueryWrapperX<TkOpenApiEventDO>()
+                .eq(TkOpenApiEventDO::getClientId, clientId)
+                .eq(TkOpenApiEventDO::getEventType, eventType)
+                .eq(TkOpenApiEventDO::getResourceType, resourceType)
+                .eq(TkOpenApiEventDO::getResourceId, resourceId)
+                .orderByDesc(TkOpenApiEventDO::getId)
+                .last("LIMIT 1"));
+    }
+
     default List<TkOpenApiEventDO> selectRetryable(LocalDateTime now, int limit) {
         return selectList(new LambdaQueryWrapperX<TkOpenApiEventDO>()
                 .in(TkOpenApiEventDO::getStatus, java.util.Arrays.asList("PENDING", "RETRYING"))

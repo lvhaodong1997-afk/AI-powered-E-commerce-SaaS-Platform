@@ -12,6 +12,7 @@ import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSigner;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -50,6 +51,31 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
 
     public String enqueue(String clientId, String eventType, String resourceType, String resourceId,
                           Map<String, Object> payload) {
+        return enqueueInternal(clientId, eventType, resourceType, resourceId, payload,
+                buildDedupeKey(clientId, eventType, resourceType, resourceId), false);
+    }
+
+    public String enqueueOnce(String clientId, String eventType, String resourceType, String resourceId,
+                              Map<String, Object> payload) {
+        String dedupeKey = buildDedupeKey(clientId, eventType, resourceType, resourceId);
+        TkOpenApiEventDO existing = eventMapper.selectByDedupeKey(clientId, dedupeKey);
+        if (existing == null) {
+            existing = eventMapper.selectByResourceAndEventType(clientId, eventType, resourceType, resourceId);
+        }
+        if (existing != null) {
+            return existing.getEventId();
+        }
+        try {
+            return enqueueInternal(clientId, eventType, resourceType, resourceId, payload, dedupeKey, true);
+        } catch (DuplicateKeyException ex) {
+            TkOpenApiEventDO winner = eventMapper.selectByDedupeKey(clientId, dedupeKey);
+            if (winner != null) return winner.getEventId();
+            throw ex;
+        }
+    }
+
+    private String enqueueInternal(String clientId, String eventType, String resourceType, String resourceId,
+                                   Map<String, Object> payload, String dedupeKey, boolean dedupe) {
         TkOpenApiClientDO client = clientMapper.selectByClientId(clientId);
         String callbackUrl = eventType.startsWith("authorization.")
                 ? client == null ? null : client.getAuthCallbackUrl()
@@ -66,6 +92,7 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
                 .eventType(eventType)
                 .resourceType(resourceType)
                 .resourceId(resourceId)
+                .dedupeKey(dedupe ? dedupeKey : null)
                 .callbackUrl(callbackUrl)
                 .payloadJson(JsonUtils.toJsonString(eventPayload))
                 .status(StrUtil.isBlank(callbackUrl) ? "SKIPPED" : "PENDING")
@@ -77,6 +104,11 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
             submitAfterCommit(eventId);
         }
         return eventId;
+    }
+
+    private String buildDedupeKey(String clientId, String eventType, String resourceType, String resourceId) {
+        return String.join("|", StrUtil.nullToEmpty(clientId), StrUtil.nullToEmpty(eventType),
+                StrUtil.nullToEmpty(resourceType), StrUtil.nullToEmpty(resourceId));
     }
 
     public int deliverPending(int limit) {

@@ -18,5 +18,6 @@ class TkOpenTiktokPublishStatusJobTest {
         InOrder order = inOrder(publishService);
         order.verify(publishService).resumeStalePending(100);
         order.verify(publishService).syncStale(100);
+        order.verify(publishService).reconcileTerminalCallbacks(100);
     }
 }

@@ -586,7 +586,7 @@ class TkOpenTiktokPublishServiceTest {
     }
 
     @Test
-    void shouldFailStaleProcessingDetailWithoutPublishIdInsteadOfLeavingItStuck() {
+    void shouldKeepInterruptedProcessingDetailRecoverableWithoutRetryingPublish() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
                 TkOpenTiktokPublishDetailDO.class);
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
@@ -610,10 +610,38 @@ class TkOpenTiktokPublishServiceTest {
         try {
             assertEquals(1, service.syncStale(100));
 
-            assertEquals("FAILED", detail.getStatus());
+            assertEquals("PROCESSING", detail.getStatus());
             assertEquals("RECOVERY_REQUIRED", detail.getTiktokStatus());
-            verify(callbackService).enqueue(eq("client_b"), eq("publish.failed"),
-                    eq("PUBLISH_DETAIL"), eq("detail_interrupted"), any());
+            verify(callbackService, never()).enqueue(anyString(), anyString(), anyString(), anyString(), any());
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void shouldReconcileMissingTerminalCallbackThroughExistingSuccessEvent() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenApiCallbackService callbackService = mock(TkOpenApiCallbackService.class);
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder()
+                .id(8L).detailId("detail_terminal").taskId("task_terminal").clientId("client_b")
+                .connectionId("conn_1").status("SUCCESS").tiktokStatus("PUBLISH_COMPLETE")
+                .publishId("publish_1").publicPostId("post_1").build();
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task_terminal").clientId("client_b").status("SUCCESS").build();
+        when(detailMapper.selectTerminalForCallback(100)).thenReturn(Collections.singletonList(detail));
+        when(detailMapper.selectListByClientAndTaskId("client_b", "task_terminal"))
+                .thenReturn(Collections.singletonList(detail));
+        when(taskMapper.selectByClientAndTaskId("client_b", "task_terminal")).thenReturn(task);
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+                mock(TkOpenTiktokMediaMapper.class), mock(TkOpenTiktokConnectionMapper.class),
+                mock(TkOpenApiIdempotencyMapper.class), null, callbackService,
+                mock(TkOpenApiSecretCipher.class), null);
+
+        try {
+            assertEquals(1, service.reconcileTerminalCallbacks(100));
+            verify(callbackService).enqueueOnce(eq("client_b"), eq("publish.success"),
+                    eq("PUBLISH_DETAIL"), eq("detail_terminal"), any());
         } finally {
             service.destroy();
         }

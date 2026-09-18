@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS `tk_open_api_event` (
   `event_type` varchar(64) NOT NULL,
   `resource_type` varchar(32) DEFAULT NULL,
   `resource_id` varchar(64) DEFAULT NULL,
+  `dedupe_key` varchar(256) DEFAULT NULL,
   `callback_url` varchar(512) DEFAULT NULL,
   `payload_json` mediumtext NOT NULL,
   `status` varchar(32) NOT NULL,
@@ -227,6 +228,7 @@ CREATE TABLE IF NOT EXISTS `tk_open_api_event` (
   `deleted` bit(1) NOT NULL DEFAULT b'0',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tk_open_event_id` (`event_id`),
+  UNIQUE KEY `uk_tk_open_event_dedupe` (`client_id`, `dedupe_key`),
   KEY `idx_tk_open_event_retry` (`status`, `next_retry_time`),
   KEY `idx_tk_open_event_client` (`client_id`, `create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -14,5 +14,6 @@ public class TkOpenTiktokPublishStatusJob {
     public void sync() {
         publishService.resumeStalePending(100);
         publishService.syncStale(100);
+        publishService.reconcileTerminalCallbacks(100);
     }
 }

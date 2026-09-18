@@ -27,6 +27,7 @@ public class TkOpenApiEventDO extends BaseDO {
     private String eventType;
     private String resourceType;
     private String resourceId;
+    private String dedupeKey;
     private String callbackUrl;
     private String payloadJson;
     private String status;

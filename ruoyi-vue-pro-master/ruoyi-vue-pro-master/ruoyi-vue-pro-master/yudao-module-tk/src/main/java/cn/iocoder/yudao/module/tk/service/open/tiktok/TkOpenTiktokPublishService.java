@@ -445,6 +445,22 @@ public class TkOpenTiktokPublishService {
         return count;
     }
 
+    public int reconcileTerminalCallbacks(int limit) {
+        if (callbackService == null) return 0;
+        int count = 0;
+        int boundedLimit = Math.max(1, Math.min(limit, 200));
+        for (TkOpenTiktokPublishDetailDO detail : detailMapper.selectTerminalForCallback(boundedLimit)) {
+            TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(
+                    detail.getClientId(), detail.getTaskId());
+            if (task == null) continue;
+            String eventType = "SUCCESS".equals(detail.getStatus()) ? "publish.success" : "publish.failed";
+            callbackService.enqueueOnce(detail.getClientId(), eventType, "PUBLISH_DETAIL",
+                    detail.getDetailId(), buildPublishEventPayload(detail, task));
+            count++;
+        }
+        return count;
+    }
+
     public int resumeStalePending(int limit) {
         List<TkOpenTiktokPublishDetailDO> pending = detailMapper.selectStalePending(
                 LocalDateTime.now().minusMinutes(PENDING_RECOVERY_DELAY_MINUTES), limit);
@@ -502,18 +518,27 @@ public class TkOpenTiktokPublishService {
             }
             if (!initialized.isSuccess()) throw new IllegalStateException(initialized.getFailReason());
             detail.setPublishId(initialized.getPublishId());
-            detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+            boolean sentToUserInbox = "UPLOAD_TO_INBOX".equalsIgnoreCase(task.getPostMode())
+                    && StrUtil.isBlank(initialized.getPublishId());
+            int persisted = detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
                     .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
                     .set(TkOpenTiktokPublishDetailDO::getPublishId, initialized.getPublishId())
                     .set(TkOpenTiktokPublishDetailDO::getTiktokStatus,
-                            StrUtil.isBlank(initialized.getPublishId()) ? "SEND_TO_USER_INBOX" : "UPLOAD_PENDING")
+                            sentToUserInbox ? "SEND_TO_USER_INBOX" : "UPLOAD_PENDING")
                     .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
+            if (persisted <= 0) {
+                markRecoveryRequired(detail, "Publish execution was interrupted before the platform publish ID was persisted; "
+                        + "verify the TikTok account before retrying to avoid a duplicate post");
+                return;
+            }
+            if (StrUtil.isBlank(initialized.getPublishId()) && !sentToUserInbox) {
+                markRecoveryRequired(detail, "TikTok did not return a publish ID; verify the TikTok account before retrying");
+                return;
+            }
             if (!source.pullFromUrl) {
                 if (StrUtil.isBlank(initialized.getUploadUrl())) throw new IllegalStateException("platform upload URL is missing");
                 adapter.uploadVideo(initialized.getUploadUrl(), source.file, media.getContentType());
             }
-            boolean sentToUserInbox = "UPLOAD_TO_INBOX".equalsIgnoreCase(task.getPostMode())
-                    && StrUtil.isBlank(initialized.getPublishId());
             detail.setStatus(sentToUserInbox ? "SUCCESS" : "PROCESSING");
             detail.setTiktokStatus(sentToUserInbox ? "SEND_TO_USER_INBOX" : "PROCESSING");
             detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
@@ -586,17 +611,21 @@ public class TkOpenTiktokPublishService {
         if (updated <= 0) {
             return false;
         }
-        detail.setStatus("FAILED");
+        detail.setStatus("PROCESSING");
         detail.setTiktokStatus("RECOVERY_REQUIRED");
         detail.setFailReason(reason);
         detail.setLastSyncTime(LocalDateTime.now());
-        TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(
-                detail.getClientId(), detail.getTaskId());
-        if (task != null) {
-            publishEvent(detail, task, "publish.failed");
-        }
         refreshSummary(detail.getClientId(), detail.getTaskId());
         return true;
+    }
+
+    private void markRecoveryRequired(TkOpenTiktokPublishDetailDO detail, String reason) {
+        detail.setStatus("PROCESSING");
+        detail.setTiktokStatus("RECOVERY_REQUIRED");
+        detail.setFailReason(StrUtil.maxLength(reason, 1000));
+        detail.setLastSyncTime(LocalDateTime.now());
+        detailMapper.updateById(detail);
+        refreshSummary(detail.getClientId(), detail.getTaskId());
     }
 
     private String validAccessToken(TkOpenTiktokConnectionDO connection, TkOpenPublishPlatformAdapter adapter, boolean force) {
@@ -686,13 +715,19 @@ public class TkOpenTiktokPublishService {
 
     private void publishEvent(TkOpenTiktokPublishDetailDO detail, TkOpenTiktokPublishTaskDO task, String type) {
         if (callbackService == null) return;
+        callbackService.enqueue(detail.getClientId(), type, "PUBLISH_DETAIL", detail.getDetailId(),
+                buildPublishEventPayload(detail, task));
+    }
+
+    private Map<String, Object> buildPublishEventPayload(TkOpenTiktokPublishDetailDO detail,
+                                                          TkOpenTiktokPublishTaskDO task) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("taskId", task.getTaskId()); payload.put("detailId", detail.getDetailId());
         payload.put("connectionId", detail.getConnectionId()); payload.put("externalRequestId", task.getExternalRequestId());
         payload.put("status", detail.getStatus()); payload.put("publishId", detail.getPublishId());
         payload.put("publicPostId", detail.getPublicPostId());
         payload.put("publishUrl", detail.getPublishUrl()); payload.put("failReason", detail.getFailReason());
-        callbackService.enqueue(detail.getClientId(), type, "PUBLISH_DETAIL", detail.getDetailId(), payload);
+        return payload;
     }
 
     private TkOpenTiktokPublishVO.TaskResp resolveIdempotentResult(String clientId, String hash,
