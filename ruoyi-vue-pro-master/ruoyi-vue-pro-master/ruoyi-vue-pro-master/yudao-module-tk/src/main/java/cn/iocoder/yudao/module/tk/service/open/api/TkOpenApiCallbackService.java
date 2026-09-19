@@ -4,20 +4,25 @@ import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenApiClientDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenApiEventDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishDetailDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenApiClientMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenApiEventMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokPublishDetailMapper;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiIds;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiCallbackUrlValidator;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSigner;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.annotation.PreDestroy;
+import javax.annotation.Resource;
 import java.net.InetAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -25,8 +30,10 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 @Service
 @Slf4j
@@ -38,8 +45,11 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
     private final TkOpenApiClientMapper clientMapper;
     private final TkOpenApiSecretCipher secretCipher;
     private final TkOpenApiCallbackHttpClient callbackHttpClient;
+    @Resource
+    private TkOpenTiktokPublishDetailMapper publishDetailMapper;
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
 
+    @Autowired
     public TkOpenApiCallbackService(TkOpenApiEventMapper eventMapper, TkOpenApiClientMapper clientMapper,
                                     TkOpenApiSecretCipher secretCipher,
                                     TkOpenApiCallbackHttpClient callbackHttpClient) {
@@ -47,6 +57,14 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
         this.clientMapper = clientMapper;
         this.secretCipher = secretCipher;
         this.callbackHttpClient = callbackHttpClient;
+    }
+
+    public TkOpenApiCallbackService(TkOpenApiEventMapper eventMapper, TkOpenApiClientMapper clientMapper,
+                                    TkOpenApiSecretCipher secretCipher,
+                                    TkOpenApiCallbackHttpClient callbackHttpClient,
+                                    TkOpenTiktokPublishDetailMapper publishDetailMapper) {
+        this(eventMapper, clientMapper, secretCipher, callbackHttpClient);
+        this.publishDetailMapper = publishDetailMapper;
     }
 
     public String enqueue(String clientId, String eventType, String resourceType, String resourceId,
@@ -144,6 +162,11 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
                 || !("PENDING".equals(event.getStatus()) || "RETRYING".equals(event.getStatus()))) {
             return;
         }
+        String historicalSkipReason = historicalTerminalSkipReason(event);
+        if (StrUtil.isNotBlank(historicalSkipReason)) {
+            markSkipped(event, historicalSkipReason);
+            return;
+        }
         int attempt = (event.getAttemptCount() == null ? 0 : event.getAttemptCount()) + 1;
         int claimed = eventMapper.update(null, Wrappers.lambdaUpdate(TkOpenApiEventDO.class)
                 .eq(TkOpenApiEventDO::getId, event.getId())
@@ -156,6 +179,11 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
         Integer httpStatus = null;
         String error = null;
         try {
+            String staleProcessingReason = staleProcessingReason(event);
+            if (StrUtil.isNotBlank(staleProcessingReason)) {
+                markSkipped(event, staleProcessingReason);
+                return;
+            }
             InetAddress[] validatedAddresses = TkOpenApiCallbackUrlValidator.resolveAndValidate(event.getCallbackUrl());
             TkOpenApiClientDO client = clientMapper.selectByClientId(event.getClientId());
             if (client == null || !Integer.valueOf(0).equals(client.getStatus())) {
@@ -185,7 +213,15 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
     }
 
     private void submitAfterCommit(String eventId) {
-        Runnable action = () -> executor.submit(() -> deliver(eventId));
+        Runnable action = () -> {
+            try {
+                executor.submit(() -> deliver(eventId));
+            } catch (RejectedExecutionException ex) {
+                // The durable PENDING row remains available to the retry job.
+                log.warn("[submitAfterCommit][eventId({}) scheduling rejected; leaving durable callback pending]",
+                        eventId);
+            }
+        };
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
@@ -210,7 +246,7 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
     }
 
     private void markRetry(TkOpenApiEventDO event, int attempt, Integer httpStatus, String error) {
-        boolean exhausted = attempt >= MAX_ATTEMPTS;
+        boolean exhausted = attempt >= MAX_ATTEMPTS && !isTerminalPublishCallback(event.getEventType());
         eventMapper.update(null, Wrappers.lambdaUpdate(TkOpenApiEventDO.class)
                 .eq(TkOpenApiEventDO::getId, event.getId())
                 .set(TkOpenApiEventDO::getStatus, exhausted ? "FAILED" : "RETRYING")
@@ -219,6 +255,61 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
                 .set(TkOpenApiEventDO::getLastError, StrUtil.maxLength(error, 1000))
                 .set(TkOpenApiEventDO::getNextRetryTime,
                         exhausted ? null : LocalDateTime.now().plusMinutes(backoffMinutes(attempt))));
+    }
+
+    private void markSkipped(TkOpenApiEventDO event, String reason) {
+        eventMapper.update(null, Wrappers.lambdaUpdate(TkOpenApiEventDO.class)
+                .eq(TkOpenApiEventDO::getId, event.getId())
+                .in(TkOpenApiEventDO::getStatus, java.util.Arrays.asList("PENDING", "RETRYING", "DELIVERING"))
+                .set(TkOpenApiEventDO::getStatus, "SKIPPED")
+                .set(TkOpenApiEventDO::getLastError, StrUtil.maxLength(reason, 1000))
+                .set(TkOpenApiEventDO::getNextRetryTime, null));
+    }
+
+    private String historicalTerminalSkipReason(TkOpenApiEventDO event) {
+        if ("publish.failed".equals(event.getEventType())
+                && "TikTok publish was not found after reconciliation".equals(payloadValue(event, "failReason"))) {
+            return "publish.failed callback skipped because reconciliation did not find the TikTok publish";
+        }
+        if ("publish.success".equals(event.getEventType())
+                && StrUtil.isBlank(payloadValue(event, "publishId"))) {
+            return "publish.success callback skipped because publishId is missing";
+        }
+        return null;
+    }
+
+    private String staleProcessingReason(TkOpenApiEventDO event) {
+        if (!"publish.processing".equals(event.getEventType()) || publishDetailMapper == null) return null;
+        TkOpenTiktokPublishDetailDO current = publishDetailMapper.selectByClientAndDetailId(
+                event.getClientId(), event.getResourceId());
+        if (current == null) {
+            return "publish.processing callback skipped because publish detail no longer exists";
+        }
+        if ("SUCCESS".equals(current.getStatus()) || "FAILED".equals(current.getStatus())) {
+            return "publish.processing callback skipped because publish detail is already terminal";
+        }
+        if (!Objects.equals(normalize(payloadValue(event, "publishId")), normalize(current.getPublishId()))) {
+            return "publish.processing callback skipped because publishId no longer matches the current attempt";
+        }
+        return null;
+    }
+
+    private String payloadValue(TkOpenApiEventDO event, String field) {
+        try {
+            JsonNode root = JsonUtils.parseTree(event.getPayloadJson());
+            JsonNode value = root == null ? null : root.get(field);
+            return value == null || value.isNull() ? null : value.asText();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String normalize(String value) {
+        return StrUtil.isBlank(value) ? null : value;
+    }
+
+    private boolean isTerminalPublishCallback(String eventType) {
+        return "publish.success".equals(eventType) || "publish.failed".equals(eventType);
     }
 
     private long backoffMinutes(int attempt) {

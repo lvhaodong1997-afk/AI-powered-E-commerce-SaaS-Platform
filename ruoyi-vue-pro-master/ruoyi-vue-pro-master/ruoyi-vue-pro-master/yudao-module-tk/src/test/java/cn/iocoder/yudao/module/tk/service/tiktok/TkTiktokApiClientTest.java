@@ -145,6 +145,46 @@ class TkTiktokApiClientTest {
 
         assertTrue(result.isSuccess());
         assertTrue(result.getPublicPostIds().isEmpty());
+        assertNull(result.getUploadedBytes());
+    }
+
+    @Test
+    void parsePostStatusPreservesUploadedByteCountIncludingZeroAndInt64() {
+        for (long uploadedBytes : new long[]{0L, 1L, 32_000_000L, 4_000_000_000L}) {
+            TkTiktokApiClient.PostStatusResult result = TkTiktokApiClient.parsePostStatusResult(JsonUtils.parseTree(
+                    "{\"data\":{\"status\":\"PROCESSING_UPLOAD\",\"uploaded_bytes\":" + uploadedBytes
+                            + "},\"error\":{\"code\":\"ok\"}}"));
+
+            assertTrue(result.isSuccess());
+            assertEquals("PROCESSING_UPLOAD", result.getStatus());
+            assertEquals(uploadedBytes, result.getUploadedBytes());
+        }
+    }
+
+    @Test
+    void parsePostStatusDoesNotTurnInvalidOrUnknownProgressIntoZero() {
+        for (String progress : Arrays.asList("null", "\"unknown\"", "true", "32000000.5",
+                "9223372036854775808")) {
+            TkTiktokApiClient.PostStatusResult result = TkTiktokApiClient.parsePostStatusResult(JsonUtils.parseTree(
+                    "{\"data\":{\"status\":\"PROCESSING_UPLOAD\",\"uploaded_bytes\":" + progress
+                            + "},\"error\":{\"code\":\"ok\"}}"));
+
+            assertNull(result.getUploadedBytes());
+        }
+    }
+
+    @Test
+    void legacyPostStatusConstructorsKeepProgressUnknownAndPublicIdsIntact() {
+        TkTiktokApiClient.PostStatusResult shortResult = new TkTiktokApiClient.PostStatusResult(
+                false, "FAILED", "expired", "access_token_invalid");
+        TkTiktokApiClient.PostStatusResult withIds = new TkTiktokApiClient.PostStatusResult(
+                true, "PUBLISH_COMPLETE", null, null, Arrays.asList("123", "456"));
+
+        assertNull(shortResult.getUploadedBytes());
+        assertTrue(shortResult.getPublicPostIds().isEmpty());
+        assertTrue(shortResult.isAccessTokenInvalid());
+        assertNull(withIds.getUploadedBytes());
+        assertEquals(Arrays.asList("123", "456"), withIds.getPublicPostIds());
     }
 
     @Test

@@ -32,12 +32,13 @@ class TkOpenPublishRecoveryMapperTest {
         }
         try (Connection db = DriverManager.getConnection("jdbc:h2:mem:recovery;MODE=MySQL"); Statement s = db.createStatement()) {
             s.execute("CREATE TABLE tk_open_tiktok_publish_detail (id BIGINT, detail_id VARCHAR, task_id VARCHAR,"
-                    + "client_id VARCHAR, status VARCHAR, retry_count INT, update_time TIMESTAMP, deleted BOOLEAN)");
+                    + "client_id VARCHAR, status VARCHAR, retry_count INT, update_time TIMESTAMP, deleted BOOLEAN,"
+                    + "fail_reason VARCHAR, publish_id VARCHAR DEFAULT 'official-id')");
             s.execute("CREATE TABLE tk_open_tiktok_publish_task (task_id VARCHAR, client_id VARCHAR, status VARCHAR, deleted BOOLEAN)");
             s.execute("CREATE TABLE tk_open_api_event (client_id VARCHAR, dedupe_key VARCHAR, resource_type VARCHAR,"
                     + "resource_id VARCHAR, event_type VARCHAR, deleted BOOLEAN)");
             s.execute("INSERT INTO tk_open_tiktok_publish_task VALUES ('task', 'c', 'SUCCESS', FALSE)");
-            s.execute("INSERT INTO tk_open_tiktok_publish_detail VALUES "
+            s.execute("INSERT INTO tk_open_tiktok_publish_detail (id,detail_id,task_id,client_id,status,retry_count,update_time,deleted) VALUES "
                     + "(1,'old','task','c','SUCCESS',0,TIMESTAMP '2026-09-01 00:00:00',FALSE),"
                     + "(2,'recent','task','c','SUCCESS',0,TIMESTAMP '2026-09-18 00:00:00',FALSE)");
             s.execute("INSERT INTO tk_open_api_event VALUES ('c','c|publish.success|PUBLISH_DETAIL|recent|0',"

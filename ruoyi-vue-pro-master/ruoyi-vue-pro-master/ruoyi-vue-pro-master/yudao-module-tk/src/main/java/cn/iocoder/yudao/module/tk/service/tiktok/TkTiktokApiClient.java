@@ -16,6 +16,8 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLEncoder;
+import java.nio.channels.Channels;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -244,6 +246,21 @@ public class TkTiktokApiClient {
     }
 
     public void uploadVideoChunks(String uploadUrl, Path videoFile, String contentType) {
+        resumeUploadVideoChunks(uploadUrl, videoFile, contentType, 0L);
+    }
+
+    /**
+     * Continues the existing upload using the original planner layout, without initializing a new post.
+     * TikTok uploaded_bytes is a count (1-indexed), so it is already the next zero-based byte offset.
+     * The caller must supply the same file and upload URL used for initialization.
+     */
+    public void resumeUploadVideoChunks(String uploadUrl, Path videoFile, String contentType, long uploadedBytes) {
+        resumeUploadVideoChunks(uploadUrl, videoFile, contentType, uploadedBytes, () -> { });
+    }
+
+    /** Checks upload ownership before every HTTP attempt, including retries; hook failures propagate unchanged. */
+    public void resumeUploadVideoChunks(String uploadUrl, Path videoFile, String contentType, long uploadedBytes,
+                                       Runnable beforeChunk) {
         if (videoFile == null || !Files.isRegularFile(videoFile)) {
             throw new IllegalArgumentException("TikTok 上传文件不存在");
         }
@@ -251,12 +268,30 @@ public class TkTiktokApiClient {
         try {
             long total = Files.size(videoFile);
             TkTiktokUploadPlanner.UploadPlan plan = TkTiktokUploadPlanner.plan(total);
-            try (InputStream inputStream = Files.newInputStream(videoFile)) {
-                for (int chunkIndex = 0; chunkIndex < plan.getTotalChunkCount(); chunkIndex++) {
+            if (uploadedBytes < 0 || uploadedBytes > total) {
+                throw new IllegalArgumentException("TikTok 已上传字节数超出文件范围");
+            }
+            if (uploadedBytes == total) {
+                return;
+            }
+            int firstChunk = -1;
+            for (int chunkIndex = 0; chunkIndex < plan.getTotalChunkCount(); chunkIndex++) {
+                if (plan.chunkOffset(chunkIndex) == uploadedBytes) {
+                    firstChunk = chunkIndex;
+                    break;
+                }
+            }
+            if (firstChunk < 0) {
+                throw new IllegalArgumentException("TikTok 已上传字节数不在原始分片边界");
+            }
+            try (SeekableByteChannel channel = Files.newByteChannel(videoFile);
+                 InputStream inputStream = Channels.newInputStream(channel)) {
+                channel.position(uploadedBytes);
+                for (int chunkIndex = firstChunk; chunkIndex < plan.getTotalChunkCount(); chunkIndex++) {
                     int length = Math.toIntExact(plan.chunkLength(chunkIndex));
                     byte[] chunk = readChunk(inputStream, length);
                     uploadChunkWithRetry(uploadUrl, chunk, mimeType, plan.chunkOffset(chunkIndex), total,
-                            chunkIndex, plan.getTotalChunkCount());
+                            chunkIndex, plan.getTotalChunkCount(), beforeChunk);
                 }
             }
         } catch (IOException ex) {
@@ -279,9 +314,17 @@ public class TkTiktokApiClient {
 
     private void uploadChunkWithRetry(String uploadUrl, byte[] chunk, String contentType,
                                       long offset, long total, int chunkIndex, int totalChunkCount) {
+        uploadChunkWithRetry(uploadUrl, chunk, contentType, offset, total, chunkIndex, totalChunkCount, () -> { });
+    }
+
+    private void uploadChunkWithRetry(String uploadUrl, byte[] chunk, String contentType,
+                                      long offset, long total, int chunkIndex, int totalChunkCount,
+                                      Runnable beforeChunk) {
         Throwable lastFailure = null;
         long end = offset + chunk.length - 1;
         for (int attempt = 0; attempt < UPLOAD_MAX_ATTEMPTS; attempt++) {
+            // A fenced worker must stop; never catch a lease failure as a retryable transport error.
+            beforeChunk.run();
             try (HttpResponse response = HttpRequest.put(uploadUrl)
                     .header("Content-Type", normalizeVideoMimeType(contentType))
                     .header("Content-Length", String.valueOf(chunk.length))
@@ -388,9 +431,11 @@ public class TkTiktokApiClient {
                     error.path("code").asText(null), Collections.emptyList());
         }
         JsonNode data = root.path("data");
+        JsonNode uploadedBytes = data.path("uploaded_bytes");
         return new PostStatusResult(true, data.path("status").asText("PROCESSING"),
                 data.path("fail_reason").asText(null), null,
-                parsePublicPostIds(data.path("publicaly_available_post_id")));
+                parsePublicPostIds(data.path("publicaly_available_post_id")),
+                uploadedBytes.isIntegralNumber() && uploadedBytes.canConvertToLong() ? uploadedBytes.longValue() : null);
     }
 
     static VideoQueryResult parseVideoQueryResult(JsonNode root) {
@@ -651,9 +696,16 @@ public class TkTiktokApiClient {
         private String failReason;
         private String errorCode;
         private List<String> publicPostIds;
+        /** TikTok uploaded_bytes count; null when absent or not a valid int64. */
+        private Long uploadedBytes;
 
         public PostStatusResult(boolean success, String status, String failReason, String errorCode) {
             this(success, status, failReason, errorCode, Collections.emptyList());
+        }
+
+        public PostStatusResult(boolean success, String status, String failReason, String errorCode,
+                                List<String> publicPostIds) {
+            this(success, status, failReason, errorCode, publicPostIds, null);
         }
 
         public boolean isAccessTokenInvalid() {

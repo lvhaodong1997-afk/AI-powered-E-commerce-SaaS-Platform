@@ -108,10 +108,26 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
     }
 
     @Override
+    public void uploadVideo(String uploadUrl, Path videoFile, String contentType, Runnable beforeChunk) {
+        apiClient.resumeUploadVideoChunks(uploadUrl, videoFile, contentType, 0L, beforeChunk);
+    }
+
+    @Override
+    public void resumeUploadVideo(String uploadUrl, Path videoFile, String contentType, long uploadedBytes) {
+        apiClient.resumeUploadVideoChunks(uploadUrl, videoFile, contentType, uploadedBytes);
+    }
+
+    @Override
+    public void resumeUploadVideo(String uploadUrl, Path videoFile, String contentType, long uploadedBytes,
+                                  Runnable beforeChunk) {
+        apiClient.resumeUploadVideoChunks(uploadUrl, videoFile, contentType, uploadedBytes, beforeChunk);
+    }
+
+    @Override
     public PublishStatusResult fetchPostStatus(String accessToken, String publishId) {
         TkTiktokApiClient.PostStatusResult result = apiClient.fetchPostStatus(accessToken, publishId);
         return new PublishStatusResult(result.isSuccess(), result.getStatus(), result.getFailReason(), result.getErrorCode(),
-                result.getPublicPostIds());
+                result.getPublicPostIds(), result.getUploadedBytes());
     }
 
     @Override

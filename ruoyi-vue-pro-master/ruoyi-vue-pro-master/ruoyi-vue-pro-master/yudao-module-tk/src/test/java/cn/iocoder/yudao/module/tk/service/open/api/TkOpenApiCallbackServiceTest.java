@@ -2,8 +2,10 @@ package cn.iocoder.yudao.module.tk.service.open.api;
 
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenApiClientDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenApiEventDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishDetailDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenApiClientMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenApiEventMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokPublishDetailMapper;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSigner;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
@@ -11,12 +13,15 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.net.InetAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,6 +29,12 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class TkOpenApiCallbackServiceTest {
+
+    @org.junit.jupiter.api.BeforeEach
+    void initMybatisLambdaMetadata() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkOpenApiEventDO.class);
+    }
 
     @Test
     void shouldDeduplicateAcrossRestartsButAllowANewPublishAttempt() {
@@ -135,5 +146,184 @@ class TkOpenApiCallbackServiceTest {
         } finally {
             service.destroy();
         }
+    }
+
+    @Test
+    void shouldKeepTerminalPublishCallbackRetryableAfterTheFiniteAttemptLimit() throws Exception {
+        TkOpenApiEventMapper eventMapper = mock(TkOpenApiEventMapper.class);
+        TkOpenApiCallbackHttpClient httpClient = mock(TkOpenApiCallbackHttpClient.class);
+        TkOpenApiClientMapper clientMapper = mock(TkOpenApiClientMapper.class);
+        TkOpenApiSecretCipher secretCipher = mock(TkOpenApiSecretCipher.class);
+        TkOpenApiEventDO event = publishEvent("publish.success", "success-1", "publish-1", 7);
+        when(eventMapper.selectByEventId(event.getEventId())).thenReturn(event);
+        when(eventMapper.update(isNull(), any())).thenReturn(1);
+        when(clientMapper.selectByClientId("client_a")).thenReturn(TkOpenApiClientDO.builder()
+                .clientId("client_a").callbackSecretCipher("cipher").status(0).build());
+        when(secretCipher.decrypt("cipher")).thenReturn("secret");
+        when(httpClient.post(any(), any(), anyMap(), anyString())).thenReturn(503);
+        TkOpenApiCallbackService service = new TkOpenApiCallbackService(
+                eventMapper, clientMapper, secretCipher, httpClient);
+        try {
+            service.deliver(event.getEventId());
+
+            Map<String, Object> values = lastUpdateValues(eventMapper);
+            org.junit.jupiter.api.Assertions.assertTrue(values.containsValue("RETRYING"));
+            org.junit.jupiter.api.Assertions.assertTrue(values.containsValue(8));
+            LocalDateTime nextRetryTime = values.values().stream()
+                    .filter(LocalDateTime.class::isInstance).map(LocalDateTime.class::cast)
+                    .findFirst().orElse(LocalDateTime.MIN);
+            org.junit.jupiter.api.Assertions.assertTrue(nextRetryTime.isAfter(LocalDateTime.now().plusHours(5)
+                    .plusMinutes(59)));
+            org.junit.jupiter.api.Assertions.assertTrue(nextRetryTime.isBefore(LocalDateTime.now().plusHours(6)
+                    .plusMinutes(1)), "terminal callback backoff should be capped at six hours");
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void shouldKeepFiniteRetryLimitForNonTerminalCallbackEvents() throws Exception {
+        TkOpenApiEventMapper eventMapper = mock(TkOpenApiEventMapper.class);
+        TkOpenApiCallbackHttpClient httpClient = mock(TkOpenApiCallbackHttpClient.class);
+        TkOpenApiClientMapper clientMapper = mock(TkOpenApiClientMapper.class);
+        TkOpenApiSecretCipher secretCipher = mock(TkOpenApiSecretCipher.class);
+        TkOpenApiEventDO event = publishEvent("authorization.failed", "auth-1", null, 7);
+        when(eventMapper.selectByEventId(event.getEventId())).thenReturn(event);
+        when(eventMapper.update(isNull(), any())).thenReturn(1);
+        when(clientMapper.selectByClientId("client_a")).thenReturn(TkOpenApiClientDO.builder()
+                .clientId("client_a").callbackSecretCipher("cipher").status(0).build());
+        when(secretCipher.decrypt("cipher")).thenReturn("secret");
+        when(httpClient.post(any(), any(), anyMap(), anyString())).thenReturn(503);
+        TkOpenApiCallbackService service = new TkOpenApiCallbackService(
+                eventMapper, clientMapper, secretCipher, httpClient);
+        try {
+            service.deliver(event.getEventId());
+
+            org.junit.jupiter.api.Assertions.assertTrue(lastUpdateValues(eventMapper).containsValue("FAILED"));
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void shouldSkipProcessingCallbackWhenDetailIsAlreadyTerminal() {
+        TkOpenApiEventMapper eventMapper = mock(TkOpenApiEventMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenApiCallbackHttpClient httpClient = mock(TkOpenApiCallbackHttpClient.class);
+        TkOpenApiEventDO event = publishEvent("publish.processing", "detail-1", "publish-1", 0);
+        when(eventMapper.selectByEventId(event.getEventId())).thenReturn(event);
+        when(eventMapper.update(isNull(), any())).thenReturn(1);
+        when(detailMapper.selectByClientAndDetailId("client_a", "detail-1"))
+                .thenReturn(TkOpenTiktokPublishDetailDO.builder()
+                        .clientId("client_a").detailId("detail-1").status("SUCCESS")
+                        .publishId("publish-1").build());
+        TkOpenApiCallbackService service = new TkOpenApiCallbackService(
+                eventMapper, mock(TkOpenApiClientMapper.class), mock(TkOpenApiSecretCipher.class),
+                httpClient, detailMapper);
+        try {
+            service.deliver(event.getEventId());
+
+            verifyNoInteractions(httpClient);
+            org.junit.jupiter.api.Assertions.assertTrue(lastUpdateValues(eventMapper).containsValue("SKIPPED"));
+            org.junit.jupiter.api.Assertions.assertTrue(lastUpdateValues(eventMapper).values().stream()
+                    .anyMatch(value -> String.valueOf(value).contains("already terminal")));
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void shouldSkipProcessingCallbackWhenPublishIdBelongsToAnOlderAttempt() {
+        TkOpenApiEventMapper eventMapper = mock(TkOpenApiEventMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenApiCallbackHttpClient httpClient = mock(TkOpenApiCallbackHttpClient.class);
+        TkOpenApiEventDO event = publishEvent("publish.processing", "detail-1", "publish-old", 0);
+        when(eventMapper.selectByEventId(event.getEventId())).thenReturn(event);
+        when(eventMapper.update(isNull(), any())).thenReturn(1);
+        when(detailMapper.selectByClientAndDetailId("client_a", "detail-1"))
+                .thenReturn(TkOpenTiktokPublishDetailDO.builder()
+                        .clientId("client_a").detailId("detail-1").status("PROCESSING")
+                        .publishId("publish-current").build());
+        TkOpenApiCallbackService service = new TkOpenApiCallbackService(
+                eventMapper, mock(TkOpenApiClientMapper.class), mock(TkOpenApiSecretCipher.class),
+                httpClient, detailMapper);
+        try {
+            service.deliver(event.getEventId());
+
+            verifyNoInteractions(httpClient);
+            org.junit.jupiter.api.Assertions.assertTrue(lastUpdateValues(eventMapper).containsValue("SKIPPED"));
+            org.junit.jupiter.api.Assertions.assertTrue(lastUpdateValues(eventMapper).values().stream()
+                    .anyMatch(value -> String.valueOf(value).contains("publishId no longer matches")));
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void shouldSkipHistoricalHeuristicTerminalCallbacksWithoutHttp() {
+        for (Map.Entry<String, ? extends Object> scenario : Arrays.asList(
+                new java.util.AbstractMap.SimpleEntry<>("publish.failed", "TikTok publish was not found after reconciliation"),
+                new java.util.AbstractMap.SimpleEntry<>("publish.success", null))) {
+            TkOpenApiEventMapper eventMapper = mock(TkOpenApiEventMapper.class);
+            TkOpenApiCallbackHttpClient httpClient = mock(TkOpenApiCallbackHttpClient.class);
+            TkOpenApiEventDO event = publishEvent(scenario.getKey(), "detail-1", null, 0);
+            event.setPayloadJson(scenario.getValue() == null
+                    ? "{\"status\":\"SUCCESS\",\"publishId\":null}"
+                    : "{\"status\":\"FAILED\",\"failReason\":\"TikTok publish was not found after reconciliation\"}");
+            when(eventMapper.selectByEventId(event.getEventId())).thenReturn(event);
+            when(eventMapper.update(isNull(), any())).thenReturn(1);
+            TkOpenApiCallbackService service = new TkOpenApiCallbackService(
+                    eventMapper, mock(TkOpenApiClientMapper.class), mock(TkOpenApiSecretCipher.class),
+                    httpClient);
+            try {
+                service.deliver(event.getEventId());
+                verifyNoInteractions(httpClient);
+                org.junit.jupiter.api.Assertions.assertTrue(lastUpdateValues(eventMapper).containsValue("SKIPPED"));
+            } finally {
+                service.destroy();
+            }
+        }
+    }
+
+    @Test
+    void shouldLeaveDurablePendingEventWhenAfterCommitSchedulingIsRejected() {
+        TkOpenApiEventMapper eventMapper = mock(TkOpenApiEventMapper.class);
+        TkOpenApiClientMapper clientMapper = mock(TkOpenApiClientMapper.class);
+        when(clientMapper.selectByClientId("client_a")).thenReturn(TkOpenApiClientDO.builder()
+                .clientId("client_a").publishCallbackUrl("https://8.8.8.8/callback").status(0).build());
+        when(eventMapper.insert(any(TkOpenApiEventDO.class))).thenReturn(1);
+        TkOpenApiCallbackService service = new TkOpenApiCallbackService(
+                eventMapper, clientMapper, mock(TkOpenApiSecretCipher.class), null);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.destroy();
+            service.enqueue("client_a", "publish.success", "PUBLISH_DETAIL", "detail-1", null);
+
+            org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+                    TransactionSynchronizationManager.getSynchronizations().get(0).afterCommit());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    private TkOpenApiEventDO publishEvent(String eventType, String resourceId, String publishId,
+                                          int attemptCount) {
+        String payload = publishId == null
+                ? "{\"status\":\"" + ("publish.failed".equals(eventType) ? "FAILED" : "SUCCESS") + "\",\"publishId\":null}"
+                : "{\"status\":\"PROCESSING\",\"publishId\":\"" + publishId + "\"}";
+        return TkOpenApiEventDO.builder().id(1L).eventId("evt-1").clientId("client_a")
+                .eventType(eventType).resourceType("PUBLISH_DETAIL").resourceId(resourceId)
+                .callbackUrl("https://8.8.8.8/callback").payloadJson(payload).status("PENDING")
+                .attemptCount(attemptCount).build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> lastUpdateValues(TkOpenApiEventMapper eventMapper) {
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<TkOpenApiEventDO>>
+                captor = ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(eventMapper, atLeastOnce()).update(isNull(), captor.capture());
+        return new HashMap<>(captor.getAllValues().get(captor.getAllValues().size() - 1).getParamNameValuePairs());
     }
 }

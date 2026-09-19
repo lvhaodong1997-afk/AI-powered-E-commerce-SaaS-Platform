@@ -29,10 +29,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.RejectedExecutionException;
+import javax.annotation.Resource;
+import java.security.MessageDigest;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import java.util.stream.Collectors;
 
 @Service
@@ -42,8 +48,7 @@ public class TkOpenTiktokPublishService {
     private static final int PENDING_RECOVERY_DELAY_MINUTES = 1;
     private static final int INITIALIZATION_LEASE_MINUTES = 15;
     private static final int STATUS_STALE_MINUTES = 2;
-    private static final int RECOVERY_CONFIRMATION_MINUTES = 30;
-    private static final int RECENT_VIDEO_PAGE_SIZE = 20;
+    private static final int WORKER_LEASE_MINUTES = 3;
 
     private final TkOpenTiktokPublishTaskMapper taskMapper;
     private final TkOpenTiktokPublishDetailMapper detailMapper;
@@ -56,6 +61,11 @@ public class TkOpenTiktokPublishService {
     private final TkLocalUploadStorageService localStorageService;
     private final TkOpenTiktokMediaService mediaService;
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
+    private final ScheduledExecutorService heartbeats = Executors.newScheduledThreadPool(1);
+    @Resource private TkOpenTiktokPublishAttemptService attemptService;
+    @Resource private TkOpenTiktokPublishTerminalService terminalService;
+    @Resource private TkOpenTiktokPublishResponseJournal responseJournal;
+    private volatile boolean stopping;
 
     public TkOpenTiktokPublishService(TkOpenTiktokPublishTaskMapper taskMapper,
                                       TkOpenTiktokPublishDetailMapper detailMapper,
@@ -414,13 +424,24 @@ public class TkOpenTiktokPublishService {
         if (detail == null) throw TkOpenApiException.notFound("PUBLISH_DETAIL_NOT_FOUND", "publish detail does not exist");
         if (!"FAILED".equals(detail.getStatus()))
             throw TkOpenApiException.badRequest("PUBLISH_RETRY_STATUS_INVALID", "publish detail cannot be retried");
-        detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+        taskMapper.selectByClientAndTaskIdForUpdate(clientId, detail.getTaskId());
+        int changed = detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
                 .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
+                .eq(TkOpenTiktokPublishDetailDO::getStatus, "FAILED")
+                .apply("COALESCE(retry_count,0) = {0}", defaultInt(detail.getRetryCount()))
                 .set(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")
                 .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RETRY_PENDING")
                 .set(TkOpenTiktokPublishDetailDO::getPublishId, null)
+                .set(TkOpenTiktokPublishDetailDO::getPublicPostId, null)
+                .set(TkOpenTiktokPublishDetailDO::getPublishUrl, null)
+                .set(TkOpenTiktokPublishDetailDO::getMetricsStatus, "WAITING_PUBLISH")
+                .set(TkOpenTiktokPublishDetailDO::getViewCount, null)
+                .set(TkOpenTiktokPublishDetailDO::getLikeCount, null)
+                .set(TkOpenTiktokPublishDetailDO::getCommentCount, null)
+                .set(TkOpenTiktokPublishDetailDO::getShareCount, null)
                 .set(TkOpenTiktokPublishDetailDO::getFailReason, null)
                 .set(TkOpenTiktokPublishDetailDO::getRetryCount, defaultInt(detail.getRetryCount()) + 1));
+        if (changed != 1) throw TkOpenApiException.conflict("PUBLISH_RETRY_STATUS_INVALID", "publish execution changed");
         refreshSummary(clientId, detail.getTaskId());
         submitAfterCommit(clientId, detail.getTaskId());
     }
@@ -449,22 +470,12 @@ public class TkOpenTiktokPublishService {
     }
 
     public int reconcileTerminalCallbacks(int limit) {
-        if (callbackService == null) return 0;
         int count = 0;
-        int boundedLimit = Math.max(1, Math.min(limit, 200));
-        for (TkOpenTiktokPublishDetailDO detail : detailMapper.selectTerminalForCallback(boundedLimit)) {
+        for (TkOpenTiktokPublishDetailDO detail : detailMapper.selectTerminalForCallback(Math.max(1, Math.min(limit, 200)))) {
             try {
-                TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(
-                        detail.getClientId(), detail.getTaskId());
-                if (task == null) continue;
-                refreshSummary(detail.getClientId(), detail.getTaskId());
-                String eventType = "SUCCESS".equals(detail.getStatus()) ? "publish.success" : "publish.failed";
-                callbackService.enqueueOnce(detail.getClientId(), eventType, "PUBLISH_DETAIL",
-                        detail.getDetailId(), buildPublishEventPayload(detail, task), defaultInt(detail.getRetryCount()));
-                count++;
+                if (terminalService.repairCallback(detail)) count++;
             } catch (Exception ex) {
-                log.warn("[reconcileTerminalCallbacks][detailId({}) failed; next scan will retry]",
-                        detail.getDetailId(), ex);
+                log.warn("[reconcileTerminalCallbacks][detailId({}) will retry]", detail.getDetailId(), ex);
             }
         }
         return count;
@@ -488,7 +499,7 @@ public class TkOpenTiktokPublishService {
         for (TkOpenTiktokPublishDetailDO detail : pending) {
             String key = detail.getClientId() + "\n" + detail.getTaskId();
             if (submittedTasks.add(key)) {
-                executor.submit(() -> processTask(detail.getClientId(), detail.getTaskId()));
+                submitTask(detail.getClientId(), detail.getTaskId());
             }
         }
         return submittedTasks.size();
@@ -497,32 +508,29 @@ public class TkOpenTiktokPublishService {
     void processTask(String clientId, String taskId) {
         try {
             for (TkOpenTiktokPublishDetailDO detail : detailMapper.selectListByClientAndTaskId(clientId, taskId)) {
-                if ("PENDING".equals(detail.getStatus())) processDetail(detail);
+                if (!stopping && "PENDING".equals(detail.getStatus())) processDetail(detail);
             }
-        } finally {
-            refreshSummary(clientId, taskId);
+        } catch (Exception ex) {
+            log.error("[processTask][taskId({}) worker failed; durable recovery will resume]", taskId, ex);
         }
     }
 
     private void processDetail(TkOpenTiktokPublishDetailDO detail) {
-        int claimed = detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
-                .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
-                .eq(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")
-                .set(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
-                .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "LOCAL_PROCESSING")
-                .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
-        if (claimed <= 0) return;
-        detail.setStatus("PROCESSING");
-        TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(detail.getClientId(), detail.getTaskId());
-        TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(detail.getClientId(), detail.getConnectionId());
-        TkOpenTiktokMediaDO media = task == null ? null : mediaMapper.selectByClientAndMediaId(detail.getClientId(), task.getMediaId());
-        if (task == null || connection == null || media == null) {
-            failDetail(detail, task, "publish resource no longer exists");
-            return;
-        }
+        TkOpenTiktokPublishAttemptDO attempt = null;
         UploadSource source = null;
-        boolean initializationAttempted = false;
+        ScheduledFuture<?> heartbeat = null;
+        boolean initSent = false;
+        String failureSource = "PRE_INIT_FAILURE";
         try {
+            attempt = attemptService.claim(detail);
+            if (attempt == null) return;
+            final TkOpenTiktokPublishAttemptDO executionAttempt = attempt;
+            detail.setStatus("PROCESSING");
+            heartbeat = startHeartbeat(attempt);
+            TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(detail.getClientId(), detail.getTaskId());
+            TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(detail.getClientId(), detail.getConnectionId());
+            TkOpenTiktokMediaDO media = task == null ? null : mediaMapper.selectByClientAndMediaId(detail.getClientId(), task.getMediaId());
+            if (task == null || connection == null || media == null) throw new IllegalStateException("publish resource no longer exists");
             TkOpenPublishPlatformAdapter adapter = platform();
             String token = validAccessToken(connection, adapter, false);
             TkOpenPublishPlatformAdapter.CreatorCapabilities creator = adapter.queryCreatorInfo(token);
@@ -533,106 +541,213 @@ public class TkOpenTiktokPublishService {
             if (!creator.isSuccess()) throw new IllegalStateException(creator.getFailReason());
             source = resolveSource(media, adapter.verifiedPullDomain());
             Map<String, Object> payload = buildPayload(task, media, creator, source);
-            initializationAttempted = true;
+            attemptService.ready(attempt, source.pullFromUrl ? "PULL_FROM_URL" : "FILE_UPLOAD",
+                    source.size, source.pullFromUrl ? null : fileSha256(source.file));
+            // This fenced durable transition must succeed before contacting TikTok.
+            attemptService.stage(attempt, "INIT_SENT");
+            initSent = true;
             TkOpenPublishPlatformAdapter.PublishInitResult initialized = adapter.initVideoPost(token, task.getPostMode(), payload);
             if (initialized.isAccessTokenInvalid()) {
+                // An explicit invalid-token rejection has no accepted publish; one refreshed request is safe.
                 token = validAccessToken(connection, adapter, true);
+                attemptService.heartbeat(attempt);
                 initialized = adapter.initVideoPost(token, task.getPostMode(), payload);
             }
             if (!initialized.isSuccess()) {
-                initializationAttempted = false; // A definitive platform rejection is safe to report as failed.
-                throw new IllegalStateException(initialized.getFailReason());
+                if (isDefinitiveInitRejection(initialized.getErrorCode())) {
+                    initSent = false;
+                    failureSource = "INIT_REJECTED";
+                }
+                throw new IllegalStateException(StrUtil.blankToDefault(initialized.getFailReason(), "TikTok initialization response was inconclusive"));
+            }
+            if (StrUtil.isBlank(initialized.getPublishId())) {
+                markRecoveryRequired(detail, "Awaiting authoritative TikTok result: initialization returned no publish ID");
+                return;
             }
             detail.setPublishId(initialized.getPublishId());
-            boolean sentToUserInbox = "UPLOAD_TO_INBOX".equalsIgnoreCase(task.getPostMode())
-                    && StrUtil.isBlank(initialized.getPublishId());
-            int persisted = detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
-                    .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
-                    .set(TkOpenTiktokPublishDetailDO::getPublishId, initialized.getPublishId())
-                    .set(TkOpenTiktokPublishDetailDO::getTiktokStatus,
-                            sentToUserInbox ? "SEND_TO_USER_INBOX" : "UPLOAD_PENDING")
-                    .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
-            if (persisted <= 0) {
-                markRecoveryRequired(detail, "Publish execution was interrupted before the platform publish ID was persisted; "
-                        + "verify the TikTok account before retrying to avoid a duplicate post");
-                return;
+            String encryptedUrl = StrUtil.isBlank(initialized.getUploadUrl()) ? null : secretCipher.encrypt(initialized.getUploadUrl());
+            // Journal first, so a process restart during database recovery retains the official response.
+            try { responseJournal.save(detail, attempt, initialized.getPublishId(), encryptedUrl); }
+            catch (RuntimeException journalFailure) {
+                log.warn("[processDetail][detailId({}) response journal unavailable; direct DB persistence is the fallback]",
+                        detail.getDetailId(), journalFailure);
             }
-            if (StrUtil.isBlank(initialized.getPublishId()) && !sentToUserInbox) {
-                markRecoveryRequired(detail, "TikTok did not return a publish ID; verify the TikTok account before retrying");
-                return;
-            }
+            persistResponse(detail, attempt, initialized.getPublishId(), encryptedUrl);
+            responseJournal.remove(detail.getDetailId(), defaultInt(detail.getRetryCount()));
+            if ("CONFIRMED_TERMINAL".equals(attempt.getPhase())) return;
             if (!source.pullFromUrl) {
                 if (StrUtil.isBlank(initialized.getUploadUrl())) throw new IllegalStateException("platform upload URL is missing");
-                adapter.uploadVideo(initialized.getUploadUrl(), source.file, media.getContentType());
+                attemptService.stage(attempt, "UPLOADING");
+                adapter.uploadVideo(initialized.getUploadUrl(), source.file, media.getContentType(),
+                        () -> attemptService.heartbeat(executionAttempt));
             }
-            detail.setStatus(sentToUserInbox ? "SUCCESS" : "PROCESSING");
-            detail.setTiktokStatus(sentToUserInbox ? "SEND_TO_USER_INBOX" : "PROCESSING");
-            detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
-                    .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
-                    .set(TkOpenTiktokPublishDetailDO::getStatus, detail.getStatus())
-                    .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, detail.getTiktokStatus())
+            attemptService.stage(attempt, "PLATFORM_PROCESSING");
+            detail.setTiktokStatus("PROCESSING");
+            int changed = detailMapper.update(null, processingUpdate(detail)
+                    .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "PROCESSING")
                     .set(TkOpenTiktokPublishDetailDO::getFailReason, null)
                     .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
             connectionMapper.updateById(new TkOpenTiktokConnectionDO().setId(connection.getId()).setLastPublishTime(LocalDateTime.now()));
-            publishEvent(detail, task, sentToUserInbox ? "publish.success" : "publish.processing");
+            if (changed > 0) publishEvent(detail, task, "publish.processing");
         } catch (Exception ex) {
-            if (initializationAttempted) {
-                // Once init was sent, a timeout or local persistence/callback error is not proof of failure.
-                if (!"SUCCESS".equals(detail.getStatus())) {
-                    markRecoveryRequired(detail, "TikTok publish outcome requires reconciliation: " + ex.getMessage());
+            log.warn("[processDetail][detailId({}) phase({}) publishId({}) requires attention]",
+                    detail.getDetailId(), attempt == null ? "CLAIM" : attempt.getPhase(), detail.getPublishId(), ex);
+            if (attempt != null) {
+                try {
+                    attemptService.error(attempt, safeError(ex));
+                    if (initSent || StrUtil.isNotBlank(detail.getPublishId())) {
+                        markRecoveryRequired(detail, "Awaiting authoritative TikTok result; execution interrupted");
+                    } else if (ex instanceof org.springframework.dao.DataAccessException) {
+                        // Local DB outages before init are restartable, not proof of a publishing failure.
+                        markRecoveryRequired(detail, "Preparing publish; local storage is temporarily unavailable");
+                    } else {
+                        terminalService.confirmLocal(detail, attempt.getOwnerToken(), "TikTok publish failed: " + safeError(ex), failureSource);
+                    }
+                } catch (Exception persistenceFailure) {
+                    log.error("[processDetail][detailId({}) cannot persist recovery; next scan will retry]", detail.getDetailId(), persistenceFailure);
                 }
-                log.warn("[processDetail][detailId({}) interrupted after platform init; never resubmit automatically]",
-                        detail.getDetailId(), ex);
-            } else {
-                failDetail(detail, task, "TikTok publish failed: " + ex.getMessage());
             }
         } finally {
+            if (heartbeat != null) heartbeat.cancel(false);
             if (source != null) source.cleanup();
         }
     }
 
+    private ScheduledFuture<?> startHeartbeat(TkOpenTiktokPublishAttemptDO attempt) {
+        return heartbeats.scheduleAtFixedRate(() -> {
+            try { attemptService.heartbeat(attempt); }
+            catch (Exception ex) { log.warn("[heartbeat][detailId({}) unable to renew execution]", attempt.getDetailId()); }
+        }, 20, 20, TimeUnit.SECONDS);
+    }
+
+    private void persistResponse(TkOpenTiktokPublishDetailDO detail, TkOpenTiktokPublishAttemptDO attempt,
+                                 String publishId, String uploadUrlCipher) {
+        RuntimeException last = null;
+        for (int retry = 0; retry < 3; retry++) {
+            try { attemptService.saveResponse(detail, attempt, publishId, uploadUrlCipher); return; }
+            catch (RuntimeException ex) {
+                last = ex;
+                if (retry < 2) {
+                    try { Thread.sleep(200L * (retry + 1)); }
+                    catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
+                }
+            }
+        }
+        throw last;
+    }
+
+    private static boolean isDefinitiveInitRejection(String errorCode) {
+        return StrUtil.equalsAny(errorCode, "access_token_invalid", "scope_not_authorized", "invalid_param",
+                "spam_risk_too_many_posts", "spam_risk_user_banned_from_posting", "reached_active_user_cap",
+                "unaudited_client_can_only_post_to_private_accounts", "url_ownership_unverified",
+                "privacy_level_option_mismatch", "spam_risk_too_many_pending_share", "rate_limit_exceeded");
+    }
+
+    private String safeError(Exception ex) {
+        // URLs can contain credentials. Keep the exception type and sanitized text in execution records.
+        return StrUtil.maxLength(StrUtil.blankToDefault(ex.getMessage(), ex.getClass().getSimpleName())
+                .replaceAll("https?://\\S+", "[URL]"), 1000);
+    }
+
+    private String fileSha256(Path file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = Files.newInputStream(file)) {
+            byte[] buffer = new byte[65536];
+            int count;
+            while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count);
+        }
+        StringBuilder hex = new StringBuilder();
+        for (byte b : digest.digest()) hex.append(String.format("%02x", b & 255));
+        return hex.toString();
+    }
+
     private void syncDetail(TkOpenTiktokPublishDetailDO detail) {
-        TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(detail.getClientId(), detail.getTaskId());
-        TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(detail.getClientId(), detail.getConnectionId());
-        if (task == null || connection == null) return;
         try {
+            TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(detail.getClientId(), detail.getConnectionId());
+            if (connection == null || StrUtil.isBlank(detail.getPublishId())) return;
             TkOpenPublishPlatformAdapter adapter = platform();
             String token = validAccessToken(connection, adapter, false);
             TkOpenPublishPlatformAdapter.PublishStatusResult status = adapter.fetchPostStatus(token, detail.getPublishId());
             if (status.isAccessTokenInvalid()) status = adapter.fetchPostStatus(validAccessToken(connection, adapter, true), detail.getPublishId());
             if (!status.isSuccess()) throw new IllegalStateException(status.getFailReason());
-            detail.setTiktokStatus(status.getStatus());
-            detail.setLastSyncTime(LocalDateTime.now());
-            List<String> publicPostIds = status.getPublicPostIds() == null
-                    ? Collections.emptyList() : status.getPublicPostIds();
-            if (StrUtil.isNotBlank(publicPostIds.isEmpty() ? null : publicPostIds.get(0))) {
-                detail.setPublicPostId(publicPostIds.get(0));
-                detail.setMetricsStatus("SYNCING");
-                detail.setMetricsFailReason(null);
-            } else if (isSuccess(status.getStatus())) {
-                detail.setMetricsStatus("WAITING_PUBLIC");
-            }
-            if (isSuccess(status.getStatus())) {
-                detail.setStatus("SUCCESS");
-                detail.setFailReason(null);
-                detailMapper.updateById(detail);
-                publishEvent(detail, task, "publish.success");
-            } else if (isFailed(status.getStatus())) {
-                failDetail(detail, task, StrUtil.blankToDefault(status.getFailReason(), "TikTok rejected the publish"));
+            String postId = status.getPublicPostIds() == null || status.getPublicPostIds().isEmpty() ? null : status.getPublicPostIds().get(0);
+            if (isSuccess(status.getStatus()) || isFailed(status.getStatus())) {
+                terminalService.confirm(detail, status.getStatus(), postId, status.getFailReason(), "STATUS_API");
             } else {
-                detailMapper.updateById(detail);
+                detailMapper.update(null, processingUpdate(detail)
+                        .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, status.getStatus())
+                        .set(TkOpenTiktokPublishDetailDO::getFailReason, null)
+                        .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
+                if ("PROCESSING_UPLOAD".equals(status.getStatus()) && status.getUploadedBytes() != null) {
+                    resumeUpload(detail);
+                }
             }
         } catch (Exception ex) {
-            detailMapper.updateById(new TkOpenTiktokPublishDetailDO().setId(detail.getId())
-                    .setLastSyncTime(LocalDateTime.now()).setFailReason(StrUtil.maxLength(ex.getMessage(), 1000)));
-        } finally {
-            refreshSummary(detail.getClientId(), detail.getTaskId());
+            log.warn("[syncDetail][detailId({}) status query deferred: {}]", detail.getDetailId(), safeError(ex));
+            detailMapper.update(null, processingUpdate(detail)
+                    .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
         }
     }
 
+    private void resumeUpload(TkOpenTiktokPublishDetailDO detail) {
+        TkOpenTiktokPublishAttemptDO attempt = attemptService.claimUpload(detail, LocalDateTime.now().minusMinutes(WORKER_LEASE_MINUTES));
+        if (attempt == null) return;
+        try {
+            executor.execute(() -> {
+                UploadSource source = null;
+                ScheduledFuture<?> heartbeat = startHeartbeat(attempt);
+                try {
+                    TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(detail.getClientId(), detail.getTaskId());
+                    TkOpenTiktokMediaDO media = task == null ? null : mediaMapper.selectByClientAndMediaId(detail.getClientId(), task.getMediaId());
+                    if (media == null || !"FILE_UPLOAD".equals(attempt.getUploadSource())) {
+                        throw new IllegalStateException("Original upload material is unavailable for same-session recovery");
+                    }
+                    source = resolveSource(media, null);
+                    if (!Objects.equals(source.size, attempt.getFileSize()) || !Objects.equals(fileSha256(source.file), attempt.getFileSha256()))
+                        throw new IllegalStateException("Recovery media differs from the original upload");
+                    TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(detail.getClientId(), detail.getConnectionId());
+                    TkOpenPublishPlatformAdapter adapter = platform();
+                    TkOpenPublishPlatformAdapter.PublishStatusResult current = adapter.fetchPostStatus(validAccessToken(connection, adapter, false), detail.getPublishId());
+                    if (current.isSuccess() && "PROCESSING_UPLOAD".equals(current.getStatus()) && current.getUploadedBytes() != null) {
+                        attemptService.heartbeat(attempt);
+                        adapter.resumeUploadVideo(secretCipher.decrypt(attempt.getUploadUrlCipher()), source.file,
+                                media.getContentType(), current.getUploadedBytes(), () -> attemptService.heartbeat(attempt));
+                        attemptService.stage(attempt, "PLATFORM_PROCESSING");
+                    } else if (current.isSuccess() && (isSuccess(current.getStatus()) || isFailed(current.getStatus()))) {
+                        terminalService.confirm(detail, current.getStatus(),
+                                current.getPublicPostIds() == null || current.getPublicPostIds().isEmpty() ? null : current.getPublicPostIds().get(0),
+                                current.getFailReason(), "STATUS_API");
+                    }
+                } catch (Exception ex) {
+                    try { attemptService.error(attempt, safeError(ex)); }
+                    catch (Exception ignored) { log.error("[resumeUpload][detailId({}) recovery record unavailable]", detail.getDetailId()); }
+                    log.warn("[resumeUpload][detailId({}) same-session upload deferred: {}]", detail.getDetailId(), safeError(ex));
+                } finally {
+                    heartbeat.cancel(false);
+                    if (source != null) source.cleanup();
+                }
+            });
+        } catch (RejectedExecutionException ex) {
+            log.info("[resumeUpload][detailId({}) queued for next recovery scan]", detail.getDetailId());
+        }
+    }
+
+    private LambdaUpdateWrapper<TkOpenTiktokPublishDetailDO> processingUpdate(TkOpenTiktokPublishDetailDO detail) {
+        LambdaUpdateWrapper<TkOpenTiktokPublishDetailDO> update = Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
+                .eq(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
+                .apply("COALESCE(retry_count,0) = {0}", defaultInt(detail.getRetryCount()));
+        if (StrUtil.isNotBlank(detail.getPublishId())) {
+            update.eq(TkOpenTiktokPublishDetailDO::getPublishId, detail.getPublishId());
+        } else update.isNull(TkOpenTiktokPublishDetailDO::getPublishId);
+        return update;
+    }
+
     private boolean recoverInterruptedInitialization(TkOpenTiktokPublishDetailDO detail, LocalDateTime deadline) {
-        String reason = "Publish execution was interrupted before the platform publish ID was persisted; "
-                + "verify the TikTok account before retrying to avoid a duplicate post";
+        if (attemptService.recoverUnsent(detail, deadline)) return true;
+        TkOpenTiktokPublishAttemptDO attempt = attemptService.current(detail);
+        if (TkOpenTiktokPublishAttemptService.active(attempt, LocalDateTime.now().minusMinutes(WORKER_LEASE_MINUTES))) return false;
+        String reason = "Awaiting authoritative TikTok result: publish initialization was interrupted";
         int updated = detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
                 .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
                 .eq(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
@@ -652,83 +767,31 @@ public class TkOpenTiktokPublishService {
         detail.setLastSyncTime(LocalDateTime.now());
         log.warn("[recoverInterruptedInitialization][detailId({}) requires verification; automatic republish blocked]",
                 detail.getDetailId());
-        refreshSummary(detail.getClientId(), detail.getTaskId());
         return true;
     }
 
     private boolean reconcileRecoveryDetail(TkOpenTiktokPublishDetailDO detail) {
-        TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(detail.getClientId(), detail.getTaskId());
-        TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(
-                detail.getClientId(), detail.getConnectionId());
-        if (task == null || connection == null) return false;
         try {
-            TkOpenPublishPlatformAdapter adapter = platform();
-            String token = validAccessToken(connection, adapter, false);
-            TkOpenPublishPlatformAdapter.RecentVideosResult recent =
-                    adapter.listRecentVideos(token, null, RECENT_VIDEO_PAGE_SIZE);
-            if (recent.isAccessTokenInvalid()) {
-                recent = adapter.listRecentVideos(validAccessToken(connection, adapter, true), null, RECENT_VIDEO_PAGE_SIZE);
-            }
-            if (!recent.isSuccess()) {
-                log.warn("[reconcileRecoveryDetail][detailId({}) TikTok video.list failed: {}]",
-                        detail.getDetailId(), recent.getFailReason());
-                return false;
-            }
-            TkOpenPublishPlatformAdapter.RecentVideo match = recent.getVideos().stream()
-                    .filter(video -> matchesRecoveryVideo(task, detail, video))
-                    .findFirst().orElse(null);
-            if (match != null) {
-                detail.setStatus("SUCCESS").setTiktokStatus("PUBLISH_COMPLETE")
-                        .setPublicPostId(match.getPublicPostId()).setFailReason(null)
-                        .setLastSyncTime(LocalDateTime.now());
-                detailMapper.updateById(detail);
-                refreshSummary(detail.getClientId(), detail.getTaskId());
-                publishEvent(detail, task, "publish.success");
-                log.info("[reconcileRecoveryDetail][detailId({}) confirmed by TikTok video.list, publicPostId({})]",
-                        detail.getDetailId(), match.getPublicPostId());
+            if (StrUtil.isNotBlank(detail.getPublishId())) {
+                syncDetail(detail);
                 return true;
             }
-            if (detail.getCreateTime() != null
-                    && detail.getCreateTime().plusMinutes(RECOVERY_CONFIRMATION_MINUTES).isBefore(LocalDateTime.now())) {
-                failDetail(detail, task, "TikTok publish was not found after reconciliation");
-                log.warn("[reconcileRecoveryDetail][detailId({}) confirmed absent after reconciliation window]",
-                        detail.getDetailId());
-                return true;
-            }
+            if (attemptService.recoverUnsent(detail, LocalDateTime.now().minusMinutes(WORKER_LEASE_MINUTES))) return true;
+            // Absence from video.list cannot distinguish private, moderated, delayed or failed posts.
+            detailMapper.update(null, processingUpdate(detail)
+                    .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
         } catch (Exception ex) {
-            log.warn("[reconcileRecoveryDetail][detailId({}) failed; next scan will retry]",
-                    detail.getDetailId(), ex);
+            log.warn("[reconcileRecoveryDetail][detailId({}) will retry]", detail.getDetailId(), ex);
         }
         return false;
     }
 
-    private boolean matchesRecoveryVideo(TkOpenTiktokPublishTaskDO task,
-                                         TkOpenTiktokPublishDetailDO detail,
-                                         TkOpenPublishPlatformAdapter.RecentVideo video) {
-        if (StrUtil.isBlank(video.getPublicPostId()) || video.getCreateTime() == null || detail.getCreateTime() == null) {
-            return false;
-        }
-        long createdAt = detail.getCreateTime().atZone(ZoneId.systemDefault()).toEpochSecond();
-        if (video.getCreateTime() < createdAt - 300 || video.getCreateTime() > createdAt + 1800) return false;
-        String expected = normalizeRecoveryText(StrUtil.blankToDefault(task.getTitle(), "TikTok video"));
-        String caption = normalizeRecoveryText(task.getCaption());
-        String title = normalizeRecoveryText(video.getTitle());
-        String description = normalizeRecoveryText(video.getDescription());
-        return expected.equals(title) || expected.equals(description)
-                || (StrUtil.isNotBlank(caption) && (caption.equals(title) || caption.equals(description)));
-    }
-
-    private String normalizeRecoveryText(String value) {
-        return StrUtil.blankToDefault(value, "").replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
-    }
-
     private void markRecoveryRequired(TkOpenTiktokPublishDetailDO detail, String reason) {
-        detail.setStatus("PROCESSING");
-        detail.setTiktokStatus("RECOVERY_REQUIRED");
-        detail.setFailReason(StrUtil.maxLength(reason, 1000));
-        detail.setLastSyncTime(LocalDateTime.now());
-        detailMapper.updateById(detail);
-        refreshSummary(detail.getClientId(), detail.getTaskId());
+        detail.setStatus("PROCESSING").setTiktokStatus("RECOVERY_REQUIRED").setFailReason(reason).setLastSyncTime(LocalDateTime.now());
+        detailMapper.update(null, processingUpdate(detail)
+                .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED")
+                .set(TkOpenTiktokPublishDetailDO::getFailReason, StrUtil.maxLength(reason, 1000))
+                .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
     }
 
     private String validAccessToken(TkOpenTiktokConnectionDO connection, TkOpenPublishPlatformAdapter adapter, boolean force) {
@@ -798,16 +861,12 @@ public class TkOpenTiktokPublishService {
         return UploadSource.file(temporary, true);
     }
 
-    private void failDetail(TkOpenTiktokPublishDetailDO detail, TkOpenTiktokPublishTaskDO task, String reason) {
-        detail.setStatus("FAILED"); detail.setTiktokStatus("FAILED"); detail.setFailReason(StrUtil.maxLength(reason, 1000));
-        detail.setLastSyncTime(LocalDateTime.now()); detailMapper.updateById(detail);
-        if (task != null) publishEvent(detail, task, "publish.failed");
-    }
-
     private void refreshSummary(String clientId, String taskId) {
         TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(clientId, taskId);
         if (task == null) return;
-        List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectListByClientAndTaskId(clientId, taskId);
+        List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectList(new cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
+                .eq(TkOpenTiktokPublishDetailDO::getClientId, clientId)
+                .eq(TkOpenTiktokPublishDetailDO::getTaskId, taskId).last("FOR UPDATE"));
         int success = (int) details.stream().filter(item -> "SUCCESS".equals(item.getStatus())).count();
         int failed = (int) details.stream().filter(item -> "FAILED".equals(item.getStatus())).count();
         int pending = details.size() - success - failed;
@@ -868,12 +927,22 @@ public class TkOpenTiktokPublishService {
     }
 
     private void submitAfterCommit(String clientId, String taskId) {
-        Runnable submit = () -> executor.submit(() -> processTask(clientId, taskId));
+        Runnable submit = () -> submitTask(clientId, taskId);
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void afterCommit() { submit.run(); }
             });
         } else submit.run();
+    }
+
+    private void submitTask(String clientId, String taskId) {
+        if (stopping) return;
+        try { executor.execute(() -> processTask(clientId, taskId)); }
+        catch (RejectedExecutionException ex) { log.info("[submitTask][taskId({}) retained for recovery]", taskId); }
+    }
+
+    public int recoverJournal(int limit) {
+        return responseJournal.replay(limit, detailMapper, attemptService);
     }
 
     private TkOpenTiktokPublishTaskDO requireTask(String clientId, String taskId) {
@@ -887,8 +956,8 @@ public class TkOpenTiktokPublishService {
     private boolean defaultBool(Boolean value, boolean fallback) { return value == null ? fallback : value; }
     private int defaultInt(Integer value) { return value == null ? 0 : value; }
     private long defaultLong(Long value, long fallback) { return value == null || value <= 0 ? fallback : value; }
-    private boolean isSuccess(String status) { return StrUtil.equalsAnyIgnoreCase(status, "PUBLISH_COMPLETE", "SUCCESS", "SEND_TO_USER_INBOX"); }
-    private boolean isFailed(String status) { return StrUtil.containsIgnoreCase(status, "FAIL") || StrUtil.containsIgnoreCase(status, "REJECT"); }
+    private boolean isSuccess(String status) { return "PUBLISH_COMPLETE".equals(status); }
+    private boolean isFailed(String status) { return "FAILED".equals(status); }
 
     private String resolvePrivacy(String requested, List<String> options) {
         if (options == null || options.isEmpty()) return requested;
@@ -1004,7 +1073,13 @@ public class TkOpenTiktokPublishService {
         return response;
     }
 
-    @PreDestroy public void destroy() { executor.shutdown(); }
+    @PreDestroy public void destroy() {
+        stopping = true;
+        executor.shutdown();
+        try { executor.awaitTermination(45, TimeUnit.SECONDS); }
+        catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+        heartbeats.shutdown();
+    }
 
     private static class UploadSource {
         private static final long MAX_SINGLE_CHUNK_SIZE = 64_000_000L;

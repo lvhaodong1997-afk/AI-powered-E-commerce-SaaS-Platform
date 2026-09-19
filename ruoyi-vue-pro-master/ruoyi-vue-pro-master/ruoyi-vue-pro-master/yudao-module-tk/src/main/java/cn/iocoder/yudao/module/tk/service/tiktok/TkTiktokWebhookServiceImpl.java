@@ -6,10 +6,16 @@ import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishDetailDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishPostDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokWebhookEventDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokConnectionDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishDetailDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishDetailMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokPublishPostMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkTiktokWebhookEventMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokConnectionMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokPublishDetailMapper;
 import cn.iocoder.yudao.module.tk.service.config.TkApiKeyConfigService;
+import cn.iocoder.yudao.module.tk.service.open.tiktok.TkOpenTiktokPublishTerminalService;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -22,11 +28,17 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @Slf4j
@@ -38,7 +50,11 @@ public class TkTiktokWebhookServiceImpl implements TkTiktokWebhookService {
     private static final String EVENT_COMPLETE = "post.publish.complete";
     private static final String EVENT_FAILED = "post.publish.failed";
 
-    private final ExecutorService executor = Executors.newFixedThreadPool(2);
+    // The existing DATETIME column doubles as last-attempt time and a recoverable processing lease.
+    private static final long RETRY_DELAY_SECONDS = 300L;
+    private final ExecutorService executor = new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(100), new ThreadPoolExecutor.AbortPolicy());
+    private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
 
     @Resource
     private TkApiKeyConfigService configService;
@@ -50,6 +66,12 @@ public class TkTiktokWebhookServiceImpl implements TkTiktokWebhookService {
     private TkTiktokPublishPostMapper publishPostMapper;
     @Resource
     private TkTiktokPublishService publishService;
+    @Resource
+    private TkOpenTiktokPublishDetailMapper openDetailMapper;
+    @Resource
+    private TkOpenTiktokConnectionMapper connectionMapper;
+    @Resource
+    private TkOpenTiktokPublishTerminalService terminalService;
 
     @Override
     public void receive(String rawBody, String signature) {
@@ -82,40 +104,143 @@ public class TkTiktokWebhookServiceImpl implements TkTiktokWebhookService {
             }
             throw duplicate;
         }
-        Long eventId = event.getId();
-        executor.submit(() -> process(eventId));
+        schedule(event.getId());
+    }
+
+    public void retryPending(int limit) {
+        List<TkTiktokWebhookEventDO> pending = eventMapper.selectRetryBatch(
+                now().minusSeconds(RETRY_DELAY_SECONDS), Math.max(1, Math.min(limit, 100)));
+        for (TkTiktokWebhookEventDO event : pending) {
+            schedule(event.getId());
+        }
+    }
+
+    private void schedule(Long eventId) {
+        if (!inFlight.add(eventId)) {
+            return;
+        }
+        try {
+            executor.execute(() -> {
+                try {
+                    TenantUtils.executeIgnore(() -> process(eventId));
+                } catch (Exception ex) {
+                    // Includes inbox read/write failures: stored RECEIVED or expired RETRYING is replayed.
+                    log.warn("[schedule][TikTok Webhook worker failed, id({})]", eventId, ex);
+                } finally {
+                    inFlight.remove(eventId);
+                }
+            });
+        } catch (RejectedExecutionException ex) {
+            inFlight.remove(eventId);
+            log.warn("[schedule][TikTok Webhook scheduling rejected, id({})]", eventId, ex);
+            LocalDateTime claimedAt = now();
+            try {
+                if (eventMapper.claimForProcessing(eventId, claimedAt,
+                        claimedAt.minusSeconds(RETRY_DELAY_SECONDS)) == 1) {
+                    finish(eventId, claimedAt, "FAILED", "Webhook scheduling rejected; durable replay pending");
+                }
+            } catch (Exception persistenceFailure) {
+                log.warn("[schedule][Failed to record scheduling rejection, id({}); durable inbox retained]",
+                        eventId, persistenceFailure);
+            }
+        }
     }
 
     private void process(Long eventId) {
         TkTiktokWebhookEventDO event = eventMapper.selectById(eventId);
-        if (event == null || "PROCESSED".equals(event.getStatus())) {
+        if (event == null || !("RECEIVED".equals(event.getStatus())
+                || "RETRYING".equals(event.getStatus()) || "FAILED".equals(event.getStatus()))) {
+            return;
+        }
+        LocalDateTime claimedAt = now();
+        if (eventMapper.claimForProcessing(eventId, claimedAt,
+                claimedAt.minusSeconds(RETRY_DELAY_SECONDS)) != 1) {
             return;
         }
         try {
             WebhookPayload payload = parse(event.getPayloadJson());
-            TkTiktokPublishDetailDO detail = StrUtil.isBlank(payload.getPublishId())
-                    ? null : detailMapper.selectByPublishId(payload.getPublishId());
-            if (detail == null && StrUtil.isNotBlank(payload.getPostId())) {
-                TkTiktokPublishPostDO post = publishPostMapper.selectByPublicPostId(payload.getPostId());
-                if (post != null) {
-                    detail = detailMapper.selectById(post.getPublishDetailId());
+            if (!isKnownEvent(payload.getEventType())) {
+                finish(eventId, claimedAt, "IGNORED", "Unsupported webhook event type");
+                return;
+            }
+            if (StrUtil.isBlank(payload.getPublishId())) {
+                finish(eventId, claimedAt, "RETRYING", "Missing publish_id; cannot safely correlate event");
+                return;
+            }
+            // Never infer an external publication from a title, timestamp, account or post ID.
+            List<TkOpenTiktokPublishDetailDO> external = openDetailMapper.selectList(
+                    new QueryWrapper<TkOpenTiktokPublishDetailDO>()
+                            .eq("publish_id", payload.getPublishId())
+                            .apply("BINARY publish_id = {0}", payload.getPublishId()).last("LIMIT 2"));
+            if (!external.isEmpty()) {
+                if (external.size() != 1) {
+                    finish(eventId, claimedAt, "CONFLICT", "Multiple external details have the same publish_id");
+                    return;
                 }
+                applyExternalEvent(eventId, claimedAt, external.get(0), payload);
+                return; // An external rejection must NEVER fall through to the internal publisher.
             }
-            if (detail != null) {
-                TkTiktokPublishDetailDO target = detail;
-                TenantUtils.execute(detail.getTenantId(), () -> applyEvent(target, payload));
+            TkTiktokPublishDetailDO detail = TenantUtils.executeIgnore(
+                    () -> detailMapper.selectByPublishId(payload.getPublishId()));
+            if (detail == null) {
+                finish(eventId, claimedAt, "RETRYING", "publish_id not persisted or not matched yet");
+                return;
             }
-            event.setStatus("PROCESSED");
-            event.setProcessedTime(LocalDateTime.now());
-            event.setFailReason(null);
-            eventMapper.updateById(event);
+            if ((EVENT_FAILED.equals(payload.getEventType()) && "SUCCESS".equals(detail.getStatus()))
+                    || ((EVENT_COMPLETE.equals(payload.getEventType())
+                    || EVENT_PUBLICLY_AVAILABLE.equals(payload.getEventType())) && "FAILED".equals(detail.getStatus()))) {
+                finish(eventId, claimedAt, "CONFLICT", "Webhook contradicts existing internal publishing terminal");
+                return;
+            }
+            TenantUtils.execute(detail.getTenantId(), () -> applyEvent(detail, payload));
+            finish(eventId, claimedAt, "PROCESSED", null);
         } catch (Exception ex) {
-            event.setStatus("FAILED");
-            event.setFailReason(StrUtil.maxLength(ex.getMessage(), 512));
-            event.setProcessedTime(LocalDateTime.now());
-            eventMapper.updateById(event);
             log.warn("[process][TikTok Webhook 处理失败，eventId({})]", event.getEventId(), ex);
+            finish(eventId, claimedAt, "FAILED", StrUtil.blankToDefault(ex.getMessage(), ex.getClass().getSimpleName()));
         }
+    }
+
+    private void applyExternalEvent(Long eventId, LocalDateTime claimedAt,
+                                    TkOpenTiktokPublishDetailDO detail, WebhookPayload payload) {
+        String clientKey = configService.getValue(TkTiktokApiClient.PROVIDER, "client-key");
+        if (StrUtil.isBlank(clientKey) || !clientKey.equals(payload.getClientKey())) {
+            finish(eventId, claimedAt, "REJECTED", "Platform client_key mismatch");
+            return;
+        }
+        TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(
+                detail.getClientId(), detail.getConnectionId());
+        if (connection == null || StrUtil.isBlank(payload.getUserOpenId())
+                || !Objects.equals(detail.getClientId(), connection.getClientId())
+                || !Objects.equals(detail.getConnectionId(), connection.getConnectionId())
+                || !payload.getUserOpenId().equals(connection.getOpenId())) {
+            finish(eventId, claimedAt, "REJECTED", "External connection identity mismatch");
+            return;
+        }
+        if (EVENT_NO_LONGER_PUBLIC.equals(payload.getEventType())) {
+            finish(eventId, claimedAt, "IGNORED", "Visibility change does not alter publishing terminal");
+            return;
+        }
+        String platformStatus = EVENT_FAILED.equals(payload.getEventType()) ? "FAILED" : "PUBLISH_COMPLETE";
+        boolean confirmed = terminalService.confirm(detail, platformStatus, payload.getPostId(),
+                payload.getFailReason(), "WEBHOOK");
+        finish(eventId, claimedAt, confirmed ? "PROCESSED" : "CONFLICT",
+                confirmed ? null : "Terminal confirmation rejected; retain evidence for investigation");
+    }
+
+    private static boolean isKnownEvent(String eventType) {
+        return EVENT_COMPLETE.equals(eventType) || EVENT_PUBLICLY_AVAILABLE.equals(eventType)
+                || EVENT_FAILED.equals(eventType) || EVENT_NO_LONGER_PUBLIC.equals(eventType);
+    }
+
+    private void finish(Long id, LocalDateTime claimedAt, String status, String reason) {
+        if (eventMapper.finishAttempt(id, claimedAt, status, StrUtil.maxLength(reason, 512), now()) != 1) {
+            log.warn("[finish][Webhook attempt superseded; preserving newer inbox state, id({})]", id);
+        }
+    }
+
+    private static LocalDateTime now() {
+        // Match the existing MySQL DATETIME precision for conditional claim completion.
+        return LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS);
     }
 
     private void applyEvent(TkTiktokPublishDetailDO detail, WebhookPayload payload) {
