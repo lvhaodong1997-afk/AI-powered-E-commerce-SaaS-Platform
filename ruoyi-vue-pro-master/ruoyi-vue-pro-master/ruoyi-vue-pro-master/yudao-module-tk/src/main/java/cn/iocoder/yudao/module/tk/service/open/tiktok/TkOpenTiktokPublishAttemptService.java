@@ -66,6 +66,17 @@ public class TkOpenTiktokPublishAttemptService {
         attempt.setPhase(phase);
     }
 
+    /** Atomically fences the lease immediately before the first remote publish side effect. */
+    public void beginRemoteInit(TkOpenTiktokPublishAttemptDO attempt, LocalDateTime deadline) {
+        LocalDateTime now = LocalDateTime.now();
+        requireWrite(attempts.update(null, owned(attempt)
+                .eq(TkOpenTiktokPublishAttemptDO::getPhase, "READY_TO_INIT")
+                .gt(TkOpenTiktokPublishAttemptDO::getHeartbeatTime, deadline)
+                .set(TkOpenTiktokPublishAttemptDO::getPhase, "INIT_SENT")
+                .set(TkOpenTiktokPublishAttemptDO::getHeartbeatTime, now)));
+        attempt.setPhase("INIT_SENT").setHeartbeatTime(now);
+    }
+
     /** Called before init: a persisted fenced phase is required before any remote side effect. */
     public void ready(TkOpenTiktokPublishAttemptDO attempt, String source, Long size, String sha256) {
         requireWrite(attempts.update(null, owned(attempt)
@@ -128,7 +139,10 @@ public class TkOpenTiktokPublishAttemptService {
     }
 
     /** Claim only the existing upload session; this never initializes a new publish. */
-    public TkOpenTiktokPublishAttemptDO claimUpload(TkOpenTiktokPublishDetailDO detail, LocalDateTime deadline) {
+    @Transactional(rollbackFor = Exception.class)
+    public TkOpenTiktokPublishAttemptDO claimUpload(TkOpenTiktokPublishDetailDO expected, LocalDateTime deadline) {
+        TkOpenTiktokPublishDetailDO detail = lock(expected);
+        if (detail == null || !sameAttempt(detail, expected) || !"PROCESSING".equals(detail.getStatus())) return null;
         TkOpenTiktokPublishAttemptDO attempt = current(detail);
         if (attempt == null || active(attempt, deadline) || StrUtil.isBlank(attempt.getUploadUrlCipher())
                 || !Objects.equals(detail.getPublishId(), attempt.getPublishId())) return null;

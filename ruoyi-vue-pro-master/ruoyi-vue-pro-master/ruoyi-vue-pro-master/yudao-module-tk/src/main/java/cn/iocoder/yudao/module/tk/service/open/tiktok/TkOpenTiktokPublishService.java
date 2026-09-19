@@ -544,7 +544,7 @@ public class TkOpenTiktokPublishService {
             attemptService.ready(attempt, source.pullFromUrl ? "PULL_FROM_URL" : "FILE_UPLOAD",
                     source.size, source.pullFromUrl ? null : fileSha256(source.file));
             // This fenced durable transition must succeed before contacting TikTok.
-            attemptService.stage(attempt, "INIT_SENT");
+            attemptService.beginRemoteInit(attempt, LocalDateTime.now().minusMinutes(WORKER_LEASE_MINUTES));
             initSent = true;
             TkOpenPublishPlatformAdapter.PublishInitResult initialized = adapter.initVideoPost(token, task.getPostMode(), payload);
             if (initialized.isAccessTokenInvalid()) {

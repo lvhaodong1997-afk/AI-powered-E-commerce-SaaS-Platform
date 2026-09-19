@@ -57,6 +57,35 @@ class TkOpenTiktokPublishAttemptServiceTest {
         verify(attempts, times(2)).update(any(), any());
     }
 
+    @Test void staleLeaseCannotAdvanceToRemoteInit() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts, details, tasks);
+        TkOpenTiktokPublishAttemptDO worker = attempt("READY_TO_INIT", "owner")
+                .setHeartbeatTime(LocalDateTime.now().minusMinutes(5));
+        when(attempts.update(any(), any())).thenReturn(0);
+
+        assertThrows(IllegalStateException.class,
+                () -> service.beginRemoteInit(worker, LocalDateTime.now().minusMinutes(3)));
+        verify(attempts).update(any(), any());
+    }
+
+    @Test void uploadRecoveryRequiresCurrentProcessingDetail() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts, details, tasks);
+        TkOpenTiktokPublishDetailDO expected = detail("PROCESSING", "publish");
+        TkOpenTiktokPublishDetailDO terminal = detail("SUCCESS", "publish");
+        when(tasks.selectByClientAndTaskIdForUpdate("c", "t")).thenReturn(task());
+        when(details.selectOne(any())).thenReturn(terminal);
+
+        assertNull(service.claimUpload(expected, LocalDateTime.now().minusMinutes(3)));
+        verify(attempts, never()).selectCurrent(anyString(), anyInt());
+        verify(attempts, never()).update(any(), any());
+    }
+
     @Test void firstResponsePersistenceFailureCanRetrySameOfficialId() {
         TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
         TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);

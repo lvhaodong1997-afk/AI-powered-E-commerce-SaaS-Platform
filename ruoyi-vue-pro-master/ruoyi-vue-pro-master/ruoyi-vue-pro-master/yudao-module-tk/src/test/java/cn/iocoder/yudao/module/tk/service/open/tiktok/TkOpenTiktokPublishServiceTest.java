@@ -944,6 +944,10 @@ class TkOpenTiktokPublishServiceTest {
             attempt.setPhase(invocation.getArgument(1));
             return null;
         }).when(attempts).stage(eq(attempt), anyString());
+        doAnswer(invocation -> {
+            attempt.setPhase("INIT_SENT");
+            return null;
+        }).when(attempts).beginRemoteInit(eq(attempt), any());
         if ("persist".equals(scenario)) {
             doThrow(new DataAccessResourceFailureException("response store temporarily unavailable"))
                     .doNothing().when(attempts).saveResponse(detail, attempt, "publish_1", null);
@@ -958,7 +962,7 @@ class TkOpenTiktokPublishServiceTest {
                     .thenThrow(new DataAccessResourceFailureException("media read unavailable"));
         } else if ("fenced".equals(scenario)) {
             doThrow(new IllegalStateException("Publish execution lease or record changed"))
-                    .when(attempts).stage(attempt, "INIT_SENT");
+                    .when(attempts).beginRemoteInit(eq(attempt), any());
         }
 
         try {
@@ -972,7 +976,7 @@ class TkOpenTiktokPublishServiceTest {
                 verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
                 verifyNoInteractions(terminal);
             } else if ("fenced".equals(scenario)) {
-                verify(attempts).stage(attempt, "INIT_SENT");
+                verify(attempts).beginRemoteInit(eq(attempt), any());
                 verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
                 assertEquals("PROCESSING", detail.getStatus());
                 verify(terminal, never()).confirm(any(), anyString(), any(), any(), anyString());
