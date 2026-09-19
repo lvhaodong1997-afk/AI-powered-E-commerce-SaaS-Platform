@@ -6,6 +6,7 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokConnectionD
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokMediaDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishDetailDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishTaskDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishAttemptDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.*;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiContext;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiException;
@@ -23,6 +24,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -543,28 +546,26 @@ class TkOpenTiktokPublishServiceTest {
     }
 
     @Test
-    void shouldSummarizeMixedResultsAsPartialSuccess() {
+    void shouldCaptureTaskReadExceptionWithoutInventingTerminalOrAggregate() {
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
         TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
-        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder().taskId("task_1")
-                .clientId("client_b").status("PROCESSING").build();
-        when(taskMapper.selectByClientAndTaskId("client_b", "task_1")).thenReturn(task);
-        when(detailMapper.selectListByClientAndTaskId("client_b", "task_1")).thenReturn(Arrays.asList(
-                TkOpenTiktokPublishDetailDO.builder().status("SUCCESS").build(),
-                TkOpenTiktokPublishDetailDO.builder().status("FAILED").build()));
+        when(detailMapper.selectListByClientAndTaskId("client_b", "task_1"))
+                .thenThrow(new DataAccessResourceFailureException("database unavailable"));
         TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), mock(TkOpenTiktokConnectionMapper.class),
                 mock(TkOpenApiIdempotencyMapper.class), null, null,
                 mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null);
 
-        service.processTask("client_b", "task_1");
-
-        ArgumentCaptor<TkOpenTiktokPublishTaskDO> captor = ArgumentCaptor.forClass(TkOpenTiktokPublishTaskDO.class);
-        verify(taskMapper).updateById(captor.capture());
-        assertEquals("PARTIAL_SUCCESS", captor.getValue().getStatus());
-        assertEquals(1, captor.getValue().getSuccessCount());
-        assertEquals(1, captor.getValue().getFailedCount());
-        assertEquals(0, captor.getValue().getPendingCount());
+        wireExecutionServices(service);
+        try {
+            assertDoesNotThrow(() -> service.processTask("client_b", "task_1"));
+            verify(detailMapper).selectListByClientAndTaskId("client_b", "task_1");
+            verify(detailMapper, never()).update(any(), any());
+            verifyNoInteractions(taskMapper, ReflectionTestUtils.getField(service, "terminalService"),
+                    ReflectionTestUtils.getField(service, "attemptService"));
+        } finally {
+            service.destroy();
+        }
     }
 
     @Test
@@ -608,7 +609,10 @@ class TkOpenTiktokPublishServiceTest {
                 mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null);
 
         try {
+            wireExecutionServices(service);
             assertEquals(1, service.syncStale(100));
+            verify((TkOpenTiktokPublishAttemptService) ReflectionTestUtils.getField(service, "attemptService"))
+                    .recoverUnsent(eq(detail), any(LocalDateTime.class));
 
             assertEquals("PROCESSING", detail.getStatus());
             assertEquals("RECOVERY_REQUIRED", detail.getTiktokStatus());
@@ -624,7 +628,7 @@ class TkOpenTiktokPublishServiceTest {
     }
 
     @Test
-    void shouldConfirmInterruptedPublishFromRecentTikTokVideoBeforeSuccessCallback() {
+    void shouldNeverConfirmInterruptedPublishByMatchingTitleAndTime() {
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
         TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
         TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
@@ -661,12 +665,14 @@ class TkOpenTiktokPublishServiceTest {
                 registry, callbackService, cipher, null);
 
         try {
-            assertEquals(1, service.reconcileRecoveryRequired(100));
-            assertEquals("SUCCESS", detail.getStatus());
-            assertEquals("PUBLISH_COMPLETE", detail.getTiktokStatus());
-            assertEquals("post-reconcile", detail.getPublicPostId());
-            verify(callbackService).enqueueOnce(eq("client_b"), eq("publish.success"),
-                    eq("PUBLISH_DETAIL"), eq("detail-reconcile"), any(), eq(0));
+            wireExecutionServices(service);
+            assertEquals(0, service.reconcileRecoveryRequired(100));
+            verify((TkOpenTiktokPublishAttemptService) ReflectionTestUtils.getField(service, "attemptService"))
+                    .recoverUnsent(eq(detail), any(LocalDateTime.class));
+            assertEquals("PROCESSING", detail.getStatus());
+            assertNull(detail.getPublicPostId());
+            verifyNoInteractions(callbackService);
+            verify(adapter, never()).listRecentVideos(anyString(), any(), anyInt());
         } finally {
             service.destroy();
         }
@@ -704,7 +710,10 @@ class TkOpenTiktokPublishServiceTest {
                 registry, callbackService, cipher, null);
 
         try {
+            wireExecutionServices(service);
             assertEquals(0, service.reconcileRecoveryRequired(100));
+            verify((TkOpenTiktokPublishAttemptService) ReflectionTestUtils.getField(service, "attemptService"))
+                    .recoverUnsent(eq(detail), any(LocalDateTime.class));
             assertEquals("PROCESSING", detail.getStatus());
             assertEquals("RECOVERY_REQUIRED", detail.getTiktokStatus());
             verify(callbackService, never()).enqueueOnce(anyString(), anyString(), anyString(), anyString(), any(), anyInt());
@@ -715,7 +724,7 @@ class TkOpenTiktokPublishServiceTest {
     }
 
     @Test
-    void shouldSendExistingFailedCallbackOnlyAfterRecoveryWindowExpires() {
+    void shouldNeverFailAnUnknownPublishBecauseThirtyMinutesElapsed() {
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
         TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
         TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
@@ -746,11 +755,13 @@ class TkOpenTiktokPublishServiceTest {
                 registry, callbackService, cipher, null);
 
         try {
-            assertEquals(1, service.reconcileRecoveryRequired(100));
-            assertEquals("FAILED", detail.getStatus());
-            assertEquals("FAILED", detail.getTiktokStatus());
-            verify(callbackService).enqueueOnce(eq("client_b"), eq("publish.failed"),
-                    eq("PUBLISH_DETAIL"), eq("detail-expired"), any(), eq(0));
+            wireExecutionServices(service);
+            assertEquals(0, service.reconcileRecoveryRequired(100));
+            verify((TkOpenTiktokPublishAttemptService) ReflectionTestUtils.getField(service, "attemptService"))
+                    .recoverUnsent(eq(detail), any(LocalDateTime.class));
+            assertEquals("PROCESSING", detail.getStatus());
+            assertEquals("RECOVERY_REQUIRED", detail.getTiktokStatus());
+            verifyNoInteractions(callbackService);
         } finally {
             service.destroy();
         }
@@ -797,6 +808,14 @@ class TkOpenTiktokPublishServiceTest {
                 mock(TkOpenApiSecretCipher.class), null);
 
         try {
+            wireExecutionServices(service);
+            when(taskMapper.selectByClientAndTaskIdForUpdate("client_b", "task_terminal")).thenReturn(task);
+            when(detailMapper.selectOne(any())).thenReturn(detail);
+            when(detailMapper.selectList(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class)))
+                    .thenReturn(Collections.singletonList(detail));
+            when(taskMapper.update(isNull(), any())).thenReturn(1);
+            ReflectionTestUtils.setField(service, "terminalService", new TkOpenTiktokPublishTerminalService(
+                    detailMapper, taskMapper, callbackService, mock(TkOpenTiktokPublishAttemptMapper.class)));
             assertEquals(1, service.reconcileTerminalCallbacks(100));
             verify(callbackService).enqueueOnce(eq("client_b"), eq("publish.success"),
                     eq("PUBLISH_DETAIL"), eq("detail_terminal"), any(), eq(0));
@@ -806,7 +825,7 @@ class TkOpenTiktokPublishServiceTest {
     }
 
     @Test
-    void shouldCompleteInboxSubmissionWhenTikTokDoesNotReturnPublishId() {
+    void shouldKeepInboxSubmissionWithoutPublishIdUnconfirmed() {
         verifyPublishInterruption("inbox");
     }
 
@@ -823,6 +842,26 @@ class TkOpenTiktokPublishServiceTest {
     @Test
     void shouldNotReportInitNetworkTimeoutAsDefinitiveFailure() {
         verifyPublishInterruption("timeout");
+    }
+
+    @Test
+    void shouldKeepTaskReadFailureBeforeInitRecoverable() {
+        verifyPublishInterruption("task-read");
+    }
+
+    @Test
+    void shouldKeepConnectionReadFailureBeforeInitRecoverable() {
+        verifyPublishInterruption("connection-read");
+    }
+
+    @Test
+    void shouldKeepMediaReadFailureBeforeInitRecoverable() {
+        verifyPublishInterruption("media-read");
+    }
+
+    @Test
+    void shouldNeverInitAfterLosingTheUnsentLease() {
+        verifyPublishInterruption("fenced");
     }
 
     private void verifyPublishInterruption(String scenario) {
@@ -876,9 +915,6 @@ class TkOpenTiktokPublishServiceTest {
         if ("callback".equals(scenario)) {
             doThrow(new IllegalStateException("event store temporarily unavailable")).when(callbackService)
                     .enqueue(anyString(), eq("publish.processing"), anyString(), anyString(), any());
-        } else if ("persist".equals(scenario)) {
-            when(detailMapper.update(isNull(), any())).thenReturn(1)
-                    .thenThrow(new IllegalStateException("database temporarily unavailable")).thenReturn(1);
         } else if ("timeout".equals(scenario)) {
             when(adapter.initVideoPost(eq("access-token"), eq("DIRECT_POST"), any()))
                     .thenThrow(new IllegalStateException("network request timed out"));
@@ -888,21 +924,197 @@ class TkOpenTiktokPublishServiceTest {
                 mediaMapper, connectionMapper, mock(TkOpenApiIdempotencyMapper.class), platformRegistry,
                 callbackService, secretCipher, mock(cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService.class));
 
+        wireExecutionServices(service);
+        TkOpenTiktokPublishAttemptService attempts = (TkOpenTiktokPublishAttemptService)
+                ReflectionTestUtils.getField(service, "attemptService");
+        TkOpenTiktokPublishTerminalService terminal = (TkOpenTiktokPublishTerminalService)
+                ReflectionTestUtils.getField(service, "terminalService");
+        TkOpenTiktokPublishResponseJournal journal = (TkOpenTiktokPublishResponseJournal)
+                ReflectionTestUtils.getField(service, "responseJournal");
+        TkOpenTiktokPublishAttemptDO attempt = TkOpenTiktokPublishAttemptDO.builder().id(9L)
+                .detailId(detail.getDetailId()).ownerToken("owner").attemptNo(0)
+                .phase("MATERIAL_PREPARATION").build();
+        when(attempts.claim(detail)).thenReturn(attempt);
+        when(attempts.current(detail)).thenReturn(attempt);
+        doAnswer(invocation -> {
+            attempt.setPhase("READY_TO_INIT");
+            return null;
+        }).when(attempts).ready(eq(attempt), anyString(), anyLong(), any());
+        doAnswer(invocation -> {
+            attempt.setPhase(invocation.getArgument(1));
+            return null;
+        }).when(attempts).stage(eq(attempt), anyString());
+        if ("persist".equals(scenario)) {
+            doThrow(new DataAccessResourceFailureException("response store temporarily unavailable"))
+                    .doNothing().when(attempts).saveResponse(detail, attempt, "publish_1", null);
+        } else if ("task-read".equals(scenario)) {
+            when(taskMapper.selectByClientAndTaskId("client_b", "task_inbox"))
+                    .thenThrow(new DataAccessResourceFailureException("task read unavailable"));
+        } else if ("connection-read".equals(scenario)) {
+            when(connectionMapper.selectByClientAndConnectionId("client_b", "conn_1"))
+                    .thenThrow(new DataAccessResourceFailureException("connection read unavailable"));
+        } else if ("media-read".equals(scenario)) {
+            when(mediaMapper.selectByClientAndMediaId("client_b", "media_1"))
+                    .thenThrow(new DataAccessResourceFailureException("media read unavailable"));
+        } else if ("fenced".equals(scenario)) {
+            doThrow(new IllegalStateException("Publish execution lease or record changed"))
+                    .when(attempts).stage(attempt, "INIT_SENT");
+        }
+
         try {
             service.processTask("client_b", "task_inbox");
 
-            if ("inbox".equals(scenario)) {
-                assertEquals("SUCCESS", detail.getStatus());
-                assertEquals("SEND_TO_USER_INBOX", detail.getTiktokStatus());
+            if (scenario.endsWith("-read")) {
+                assertEquals("PROCESSING", detail.getStatus());
+                assertEquals("RECOVERY_REQUIRED", detail.getTiktokStatus());
+                assertTrue(TkOpenTiktokPublishAttemptService.canRestart(attempt.getPhase()));
+                verify(attempts).error(eq(attempt), contains("read unavailable"));
+                verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
+                verifyNoInteractions(terminal);
+            } else if ("fenced".equals(scenario)) {
+                verify(attempts).stage(attempt, "INIT_SENT");
+                verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
+                assertEquals("PROCESSING", detail.getStatus());
+                verify(terminal, never()).confirm(any(), anyString(), any(), any(), anyString());
+            } else if ("inbox".equals(scenario)) {
+                assertEquals("PROCESSING", detail.getStatus());
+                assertEquals("RECOVERY_REQUIRED", detail.getTiktokStatus());
+                verify(adapter).initVideoPost(eq("access-token"), eq("UPLOAD_TO_INBOX"), anyMap());
+                verify(attempts, never()).saveResponse(any(), any(), anyString(), any());
+                verifyNoInteractions(terminal);
+                verify(callbackService, never()).enqueueOnce(anyString(), anyString(), anyString(), anyString(), any(), anyInt());
             } else {
                 assertEquals("PROCESSING", detail.getStatus());
                 assertEquals("timeout".equals(scenario) ? "RECOVERY_REQUIRED" : "publish_1",
                         "timeout".equals(scenario) ? detail.getTiktokStatus() : detail.getPublishId());
                 verify(callbackService, never()).enqueue(anyString(), eq("publish.failed"), anyString(), anyString(), any());
+                verifyNoInteractions(terminal);
+                if ("persist".equals(scenario)) {
+                    InOrder order = inOrder(journal, attempts);
+                    order.verify(journal).save(detail, attempt, "publish_1", null);
+                    order.verify(attempts, times(2)).saveResponse(detail, attempt, "publish_1", null);
+                    order.verify(journal).remove("detail_inbox", 0);
+                    assertEquals("PROCESSING", detail.getTiktokStatus());
+                    verify(callbackService).enqueue(eq("client_b"), eq("publish.processing"),
+                            eq("PUBLISH_DETAIL"), eq("detail_inbox"), any());
+                }
+                if ("timeout".equals(scenario)) {
+                    assertEquals("INIT_SENT", attempt.getPhase());
+                    when(detailMapper.selectRecoveryRequired(100)).thenReturn(Collections.singletonList(detail));
+                    assertEquals(0, service.reconcileRecoveryRequired(100));
+                    service.processTask("client_b", "task_inbox");
+                    verify(attempts, never()).saveResponse(any(), any(), anyString(), any());
+                }
+                verify(adapter, times(1)).initVideoPost(eq("access-token"), eq("DIRECT_POST"), anyMap());
             }
         } finally {
             service.destroy();
         }
+    }
+
+    @Test
+    void shouldKeepOfficialInboxDeliveryNonterminal() {
+        verifyStatusQuery("SEND_TO_USER_INBOX", false);
+    }
+
+    @Test
+    void shouldConfirmPrivatePublishCompleteWithoutPublicPostId() {
+        verifyStatusQuery("PUBLISH_COMPLETE", false);
+    }
+
+    @Test
+    void shouldDeferStatusNetworkFailureWithoutFailingPublish() {
+        verifyStatusQuery(null, true);
+    }
+
+    private void verifyStatusQuery(String platformStatus, boolean networkFailure) {
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokConnectionMapper connections = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenPublishPlatformRegistry registry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        TkOpenApiSecretCipher cipher = mock(TkOpenApiSecretCipher.class);
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder().id(1L)
+                .clientId("c").taskId("t").detailId("d").connectionId("connection")
+                .status("PROCESSING").publishId("official-id").retryCount(0).build();
+        when(details.selectStaleProcessing(any(), eq(100))).thenReturn(Collections.singletonList(detail));
+        when(connections.selectByClientAndConnectionId("c", "connection")).thenReturn(
+                TkOpenTiktokConnectionDO.builder().accessTokenCipher("cipher")
+                        .authStatus("AUTHORIZED")
+                        .accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build());
+        when(cipher.decrypt("cipher")).thenReturn("token");
+        when(registry.getRequired("TIKTOK")).thenReturn(adapter);
+        if (networkFailure) {
+            when(adapter.fetchPostStatus("token", "official-id"))
+                    .thenThrow(new IllegalStateException("network timed out"));
+        } else {
+            when(adapter.fetchPostStatus("token", "official-id")).thenReturn(
+                    new TkOpenPublishPlatformAdapter.PublishStatusResult(true, platformStatus,
+                            null, null, Collections.emptyList(), null));
+        }
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(
+                mock(TkOpenTiktokPublishTaskMapper.class), details, mock(TkOpenTiktokMediaMapper.class),
+                connections, mock(TkOpenApiIdempotencyMapper.class), registry,
+                mock(TkOpenApiCallbackService.class), cipher, null);
+        wireExecutionServices(service);
+        TkOpenTiktokPublishTerminalService terminal = (TkOpenTiktokPublishTerminalService)
+                ReflectionTestUtils.getField(service, "terminalService");
+        try {
+            assertEquals(1, service.syncStale(100));
+            verify(adapter).fetchPostStatus("token", "official-id");
+            if ("PUBLISH_COMPLETE".equals(platformStatus)) {
+                verify(terminal).confirm(detail, "PUBLISH_COMPLETE", null, null, "STATUS_API");
+                verify(details, never()).update(any(), any());
+            } else {
+                verifyNoInteractions(terminal);
+                ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper> update =
+                        ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+                verify(details).update(isNull(), update.capture());
+                assertFalse(update.getValue().getParamNameValuePairs().containsValue("FAILED"));
+                assertFalse(update.getValue().getParamNameValuePairs().containsValue("SUCCESS"));
+                if (!networkFailure) assertTrue(update.getValue().getParamNameValuePairs().containsValue(platformStatus));
+                assertEquals("PROCESSING", detail.getStatus());
+            }
+            verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void shouldIgnoreStaleDetailWhileExecutionHeartbeatIsActive() {
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder().id(1L)
+                .detailId("d").clientId("c").taskId("t").status("PROCESSING")
+                .tiktokStatus("LOCAL_PROCESSING").lastSyncTime(LocalDateTime.now().minusHours(1)).build();
+        when(details.selectStaleInitializing(any(), eq(100))).thenReturn(Collections.singletonList(detail));
+        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(
+                mock(TkOpenTiktokPublishTaskMapper.class), details, mock(TkOpenTiktokMediaMapper.class),
+                mock(TkOpenTiktokConnectionMapper.class), mock(TkOpenApiIdempotencyMapper.class),
+                null, null, mock(TkOpenApiSecretCipher.class), null);
+        wireExecutionServices(service);
+        TkOpenTiktokPublishAttemptService attempts = (TkOpenTiktokPublishAttemptService)
+                ReflectionTestUtils.getField(service, "attemptService");
+        when(attempts.current(detail)).thenReturn(TkOpenTiktokPublishAttemptDO.builder()
+                .phase("MATERIAL_PREPARATION").heartbeatTime(LocalDateTime.now()).build());
+        try {
+            assertEquals(0, service.syncStale(100));
+            verify(attempts).recoverUnsent(eq(detail), any());
+            verify(attempts).current(detail);
+            verify(details, never()).update(any(), any());
+            assertEquals("LOCAL_PROCESSING", detail.getTiktokStatus());
+        } finally {
+            service.destroy();
+        }
+    }
+
+    private void wireExecutionServices(TkOpenTiktokPublishService service) {
+        for (Class<?> entity : new Class<?>[]{TkOpenTiktokPublishDetailDO.class,
+                TkOpenTiktokPublishTaskDO.class, TkOpenTiktokPublishAttemptDO.class}) {
+            TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), entity);
+        }
+        ReflectionTestUtils.setField(service, "attemptService", mock(TkOpenTiktokPublishAttemptService.class));
+        ReflectionTestUtils.setField(service, "terminalService", mock(TkOpenTiktokPublishTerminalService.class));
+        ReflectionTestUtils.setField(service, "responseJournal", mock(TkOpenTiktokPublishResponseJournal.class));
     }
 
     private TkOpenTiktokPublishService newService() {

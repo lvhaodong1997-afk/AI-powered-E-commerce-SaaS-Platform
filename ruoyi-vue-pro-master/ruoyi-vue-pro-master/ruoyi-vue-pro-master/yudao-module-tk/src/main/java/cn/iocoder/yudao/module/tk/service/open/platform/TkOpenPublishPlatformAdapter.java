@@ -22,6 +22,18 @@ public interface TkOpenPublishPlatformAdapter {
     CreatorCapabilities queryCreatorInfo(String accessToken);
     PublishInitResult initVideoPost(String accessToken, String postMode, Map<String, Object> payload);
     void uploadVideo(String uploadUrl, Path videoFile, String contentType);
+    default void uploadVideo(String uploadUrl, Path videoFile, String contentType, Runnable beforeChunk) {
+        beforeChunk.run();
+        uploadVideo(uploadUrl, videoFile, contentType);
+    }
+    default void resumeUploadVideo(String uploadUrl, Path videoFile, String contentType, long uploadedBytes) {
+        throw new UnsupportedOperationException("Platform does not support upload resume");
+    }
+    default void resumeUploadVideo(String uploadUrl, Path videoFile, String contentType, long uploadedBytes,
+                                   Runnable beforeChunk) {
+        beforeChunk.run();
+        resumeUploadVideo(uploadUrl, videoFile, contentType, uploadedBytes);
+    }
     PublishStatusResult fetchPostStatus(String accessToken, String publishId);
     RecentVideosResult listRecentVideos(String accessToken, Long cursor, Integer maxCount);
     VideoMetricsResult queryVideoMetrics(String accessToken, String publicPostId);
@@ -140,9 +152,16 @@ public interface TkOpenPublishPlatformAdapter {
         private String failReason;
         private String errorCode;
         private List<String> publicPostIds;
+        /** Uploaded byte count; null means the platform did not report progress. */
+        private Long uploadedBytes;
 
         public PublishStatusResult(boolean success, String status, String failReason, String errorCode) {
             this(success, status, failReason, errorCode, java.util.Collections.emptyList());
+        }
+
+        public PublishStatusResult(boolean success, String status, String failReason, String errorCode,
+                                   List<String> publicPostIds) {
+            this(success, status, failReason, errorCode, publicPostIds, null);
         }
 
         public boolean isAccessTokenInvalid() {

@@ -46,6 +46,7 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
     default List<TkOpenTiktokPublishDetailDO> selectRecoveryRequired(int limit) {
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                 .eq(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
+                .isNull(TkOpenTiktokPublishDetailDO::getPublishId)
                 .eq(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED")
                 .orderByAsc(TkOpenTiktokPublishDetailDO::getLastSyncTime)
                 .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
@@ -54,6 +55,8 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
     default List<TkOpenTiktokPublishDetailDO> selectTerminalForCallback(int limit) {
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                 .in(TkOpenTiktokPublishDetailDO::getStatus, java.util.Arrays.asList("SUCCESS", "FAILED"))
+                .apply("(fail_reason IS NULL OR fail_reason <> 'TikTok publish was not found after reconciliation')")
+                .apply("(status <> 'SUCCESS' OR (publish_id IS NOT NULL AND publish_id <> ''))")
                 .apply("(NOT EXISTS (SELECT 1 FROM tk_open_api_event e"
                         + " WHERE e.client_id = tk_open_tiktok_publish_detail.client_id"
                         + " AND e.dedupe_key = CONCAT(tk_open_tiktok_publish_detail.client_id, '|publish.',"
