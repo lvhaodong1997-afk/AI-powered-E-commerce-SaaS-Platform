@@ -45,6 +45,12 @@ public class TkOpenTiktokPublishAttemptService {
                 .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "LOCAL_PROCESSING")
                 .set(TkOpenTiktokPublishDetailDO::getFailReason, null)
                 .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, now)));
+        // lock(expected) holds the task row; publish the running state atomically with the claim.
+        tasks.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
+                .eq(TkOpenTiktokPublishTaskDO::getClientId, current.getClientId())
+                .eq(TkOpenTiktokPublishTaskDO::getTaskId, current.getTaskId())
+                .eq(TkOpenTiktokPublishTaskDO::getStatus, "PENDING")
+                .set(TkOpenTiktokPublishTaskDO::getStatus, "PROCESSING"));
         return attempt;
     }
 

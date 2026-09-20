@@ -209,12 +209,14 @@ public class TkOpenTiktokPublishTerminalService {
     }
 
     private void aggregateAndEnqueue(TkOpenTiktokPublishDetailDO detail, TkOpenTiktokPublishTaskDO task) {
-        // A locking read sees current sibling outcomes even when a caller already has a REPEATABLE READ snapshot.
+        // A locking read sees current sibling outcomes even with a REPEATABLE READ snapshot.
+        // The task row already serializes sibling transitions, so sorting is unnecessary here.
+        // Keep ORDER BY out: the deployed SQL parser renders it after FOR UPDATE (invalid MySQL).
         List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectList(
                 new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                         .eq(TkOpenTiktokPublishDetailDO::getClientId, detail.getClientId())
                         .eq(TkOpenTiktokPublishDetailDO::getTaskId, detail.getTaskId())
-                        .orderByAsc(TkOpenTiktokPublishDetailDO::getId).last("FOR UPDATE"));
+                        .last("FOR UPDATE"));
         int success = (int) details.stream().filter(item -> "SUCCESS".equals(item.getStatus())).count();
         int failed = (int) details.stream().filter(item -> "FAILED".equals(item.getStatus())).count();
         int pending = details.size() - success - failed;

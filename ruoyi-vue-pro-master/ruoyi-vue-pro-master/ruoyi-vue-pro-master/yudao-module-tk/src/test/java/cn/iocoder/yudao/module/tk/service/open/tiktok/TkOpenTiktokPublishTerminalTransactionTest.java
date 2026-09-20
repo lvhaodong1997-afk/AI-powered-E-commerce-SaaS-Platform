@@ -109,6 +109,17 @@ class TkOpenTiktokPublishTerminalTransactionTest {
         factory.setDataSource(dataSource);
         factory.setConfiguration(configuration);
         factory.setGlobalConfig(global);
+        // Production interceptors parse and render SQL even when these open API tables have no rules.
+        com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor plugins =
+                new com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor();
+        plugins.addInnerInterceptor(new com.baomidou.mybatisplus.extension.plugins.inner.TenantLineInnerInterceptor(
+                new cn.iocoder.yudao.framework.tenant.core.db.TenantDatabaseInterceptor(
+                        new cn.iocoder.yudao.framework.tenant.config.TenantProperties())));
+        plugins.addInnerInterceptor(new com.baomidou.mybatisplus.extension.plugins.inner.DataPermissionInterceptor(
+                (com.baomidou.mybatisplus.extension.plugins.handler.MultiDataPermissionHandler)
+                        (table, where, statementId) -> null));
+        plugins.addInnerInterceptor(new com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor());
+        factory.setPlugins(plugins);
         factory.setTransactionFactory(new SpringManagedTransactionFactory());
         org.apache.ibatis.session.SqlSessionFactory sessionFactory = factory.getObject();
         assertNotNull(sessionFactory);
@@ -148,6 +159,23 @@ class TkOpenTiktokPublishTerminalTransactionTest {
                 statement.execute("SHUTDOWN");
             }
         }
+    }
+
+    @Test
+    void claimingQueuedDetailAlsoMarksTaskProcessingInSameTransaction() {
+        jdbc.update("DELETE FROM tk_open_tiktok_publish_attempt");
+        jdbc.update("UPDATE tk_open_tiktok_publish_detail SET status='PENDING',publish_id=NULL WHERE id=1");
+        jdbc.update("UPDATE tk_open_tiktok_publish_task SET status='PENDING' WHERE id=1");
+        ProxyFactory proxy = new ProxyFactory(new TkOpenTiktokPublishAttemptService(attempts, details, tasks));
+        proxy.setProxyTargetClass(true);
+        proxy.addAdvice(new TransactionInterceptor(new DataSourceTransactionManager(dataSource),
+                new AnnotationTransactionAttributeSource()));
+        TkOpenTiktokPublishAttemptService claims = (TkOpenTiktokPublishAttemptService) proxy.getProxy();
+
+        assertNotNull(claims.claim(snapshot()));
+        assertEquals("PROCESSING", snapshot().getStatus());
+        assertEquals("PROCESSING", tasks.selectById(1L).getStatus());
+        assertEquals(0, eventCount());
     }
 
     @Test
