@@ -13,7 +13,7 @@ ExecStartPre=/usr/bin/test -x /data/Tk/current/tools/reference-video-download/.v
 ExecStartPre=/usr/bin/test -f /data/Tk/current/tools/subtitle/asr_faster_whisper.py
 ExecStartPre=/usr/bin/test -x /data/Tk/current/.venv-asr/bin/python
 ExecStartPre=/usr/bin/test -d /data/Tk/current/models/faster-whisper
-ExecStart=/usr/bin/java -Xms512m -Xmx1024m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai -jar /data/Tk/current/app/yudao-server.jar --spring.config.additional-location=file:/data/Tk/current/app/application-prod.yaml --spring.profiles.active=prod
+ExecStart=/usr/bin/java -Xms1g -Xmx4g -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai -jar /data/Tk/current/app/yudao-server.jar --spring.config.additional-location=file:/data/Tk/current/app/application-prod.yaml --spring.profiles.active=prod
 SuccessExitStatus=143
 Restart=always
 RestartSec=10

@@ -48,6 +48,7 @@ public class TkTiktokApiClient {
     private static final String USER_INFO_FIELDS = "open_id,union_id,avatar_url,display_name,username,bio_description,profile_deep_link,is_verified,follower_count,following_count,likes_count,video_count";
     private static final int UPLOAD_MAX_ATTEMPTS = 3;
     private static final int UPLOAD_TIMEOUT_MILLIS = 10 * 60 * 1000;
+    private static final long[] QUERY_RETRY_DELAYS_MILLIS = {5_000L, 15_000L, 30_000L};
 
     @Resource
     private TkApiKeyConfigService configService;
@@ -152,7 +153,8 @@ public class TkTiktokApiClient {
             return new CreatorInfo(false, "账号缺少 Access Token", new ArrayList<>(),
                     false, false, false, null, null);
         }
-        return parseCreatorInfo(postJson(CREATOR_INFO_URL, accessToken, new HashMap<>()));
+        return parseCreatorInfo(executeQueryWithRetry("creator_info",
+                () -> postJson(CREATOR_INFO_URL, accessToken, new HashMap<>(), "creator_info")));
     }
 
     static CreatorInfo parseCreatorInfo(JsonNode root) {
@@ -183,7 +185,8 @@ public class TkTiktokApiClient {
                     null, null, null, null);
         }
         try {
-            JsonNode root = getJson(USER_INFO_URL + "?fields=" + userInfoFields(), accessToken);
+            JsonNode root = executeQueryWithRetry("user_info",
+                    () -> getJson(USER_INFO_URL + "?fields=" + userInfoFields(), accessToken, "user_info"));
             return parseUserInfo(root);
         } catch (Exception ex) {
             return new UserInfo(false, "TikTok user_info 查询失败：" + ex.getMessage(),
@@ -220,7 +223,7 @@ public class TkTiktokApiClient {
             return new PublishResult(false, null, null, "账号缺少 Access Token", null);
         }
         return parsePublishResult(postJson("UPLOAD_TO_INBOX".equals(postMode) ? INBOX_POST_URL : DIRECT_POST_URL,
-                accessToken, payload));
+                accessToken, payload, "publish_init"));
     }
 
     static PublishResult parsePublishResult(JsonNode root) {
@@ -410,7 +413,8 @@ public class TkTiktokApiClient {
         }
         Map<String, Object> payload = new HashMap<>();
         payload.put("publish_id", publishId);
-        return parsePostStatusResult(postJson(STATUS_URL, accessToken, payload));
+        return parsePostStatusResult(executeQueryWithRetry("publish_status",
+                () -> postJson(STATUS_URL, accessToken, payload, "publish_status")));
     }
 
     public VideoQueryResult queryVideoShareUrl(String accessToken, List<String> videoIds) {
@@ -421,7 +425,8 @@ public class TkTiktokApiClient {
         filters.put("video_ids", videoIds);
         Map<String, Object> payload = new HashMap<>();
         payload.put("filters", filters);
-        return parseVideoQueryResult(postJson(VIDEO_QUERY_URL, accessToken, payload));
+        return parseVideoQueryResult(executeQueryWithRetry("video_query",
+                () -> postJson(VIDEO_QUERY_URL, accessToken, payload, "video_query")));
     }
 
     static PostStatusResult parsePostStatusResult(JsonNode root) {
@@ -465,7 +470,8 @@ public class TkTiktokApiClient {
         }
         payload.put("max_count", maxCount == null ? 20 : Math.min(Math.max(maxCount, 1), 20));
         String url = VIDEO_LIST_URL + "?fields=id,create_time,cover_image_url,share_url,video_description,duration,height,width,title,embed_html,embed_link,like_count,comment_count,share_count,view_count";
-        return parseVideoListResult(postJson(url, accessToken, payload));
+        return parseVideoListResult(executeQueryWithRetry("video_list",
+                () -> postJson(url, accessToken, payload, "video_list")));
     }
 
     static VideoListResult parseVideoListResult(JsonNode root) {
@@ -540,7 +546,11 @@ public class TkTiktokApiClient {
                 .body(body)
                 .timeout(30_000)
                 .execute()) {
-            return JsonUtils.parseTree(response.body());
+            return parseJsonResponse(response.getStatus(), response.header("Content-Type"), response.body());
+        } catch (TikTokApiException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new TikTokApiException(0, null, false, "request failed: " + safeExceptionMessage(ex), ex);
         }
     }
 
@@ -549,23 +559,127 @@ public class TkTiktokApiClient {
     }
 
     private JsonNode postJson(String url, String accessToken, Map<String, Object> payload) {
+        return postJson(url, accessToken, payload, "api_request");
+    }
+
+    private JsonNode postJson(String url, String accessToken, Map<String, Object> payload, String operation) {
         try (HttpResponse response = HttpRequest.post(url)
                 .header("Authorization", "Bearer " + accessToken)
                 .header("Content-Type", "application/json; charset=UTF-8")
                 .body(JsonUtils.toJsonString(payload))
                 .timeout(30_000)
                 .execute()) {
-            return JsonUtils.parseTree(response.body());
+            return parseJsonResponse(response.getStatus(), response.header("Content-Type"), response.body());
+        } catch (TikTokApiException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new TikTokApiException(0, null, true, operation + " request failed: " + safeExceptionMessage(ex), ex);
         }
     }
 
     private JsonNode getJson(String url, String accessToken) {
+        return getJson(url, accessToken, "api_request");
+    }
+
+    private JsonNode getJson(String url, String accessToken, String operation) {
         try (HttpResponse response = HttpRequest.get(url)
                 .header("Authorization", "Bearer " + accessToken)
                 .timeout(10_000)
                 .execute()) {
-            return JsonUtils.parseTree(response.body());
+            return parseJsonResponse(response.getStatus(), response.header("Content-Type"), response.body());
+        } catch (TikTokApiException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new TikTokApiException(0, null, true, operation + " request failed: " + safeExceptionMessage(ex), ex);
         }
+    }
+
+    @FunctionalInterface
+    interface JsonRequest {
+        JsonNode execute();
+    }
+
+    static JsonNode executeQueryWithRetry(String operation, JsonRequest request) {
+        return executeQueryWithRetry(operation, request, QUERY_RETRY_DELAYS_MILLIS);
+    }
+
+    static JsonNode executeQueryWithRetry(String operation, JsonRequest request, long[] retryDelaysMillis) {
+        int maxAttempts = retryDelaysMillis.length + 1;
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            try {
+                return request.execute();
+            } catch (TikTokApiException ex) {
+                if (!ex.isRetryable() || attempt + 1 >= maxAttempts) {
+                    throw ex;
+                }
+                log.warn("[queryRetry][operation({}) attempt({}/{}) status({}) reason({})]",
+                        operation, attempt + 1, maxAttempts, ex.getStatus(), ex.getSafeDetail());
+                sleepBeforeQueryRetry(retryDelaysMillis[attempt]);
+            }
+        }
+        throw new IllegalStateException("TikTok query retry loop exited unexpectedly");
+    }
+
+    private static void sleepBeforeQueryRetry(long delayMillis) {
+        if (delayMillis <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(delayMillis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new TikTokApiException(0, null, false, "query retry interrupted", ex);
+        }
+    }
+
+    static JsonNode parseJsonResponse(int status, String contentType, String body) {
+        String trimmedBody = StrUtil.trim(body);
+        boolean retryable = isRetryableStatus(status);
+        if (StrUtil.isBlank(trimmedBody)) {
+            throw new TikTokApiException(status, contentType, retryable, "empty response body");
+        }
+        if (!isJsonContentType(contentType) && !(StrUtil.isBlank(contentType) && looksLikeJson(trimmedBody))) {
+            throw new TikTokApiException(status, contentType, retryable,
+                    "non-JSON response: " + responseSummary(trimmedBody));
+        }
+        try {
+            JsonNode root = JsonUtils.parseTree(trimmedBody);
+            if (root == null || root.isMissingNode() || root.isNull()) {
+                throw new IllegalArgumentException("JSON response is empty");
+            }
+            if (retryable) {
+                throw new TikTokApiException(status, contentType, true,
+                        "retryable HTTP status response: " + responseSummary(trimmedBody));
+            }
+            return root;
+        } catch (TikTokApiException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new TikTokApiException(status, contentType, retryable,
+                    "invalid JSON response: " + responseSummary(trimmedBody), ex);
+        }
+    }
+
+    private static boolean isJsonContentType(String contentType) {
+        return StrUtil.isNotBlank(contentType) && contentType.toLowerCase().contains("json");
+    }
+
+    private static boolean looksLikeJson(String body) {
+        return body.startsWith("{") || body.startsWith("[");
+    }
+
+    private static boolean isRetryableStatus(int status) {
+        return status == 408 || status == 425 || status == 429 || (status >= 500 && status <= 599);
+    }
+
+    private static String responseSummary(String body) {
+        String summary = body.replaceAll("\\s+", " ").replaceAll("https?://\\S+", "[URL]");
+        return StrUtil.maxLength(summary, 256);
+    }
+
+    private static String safeExceptionMessage(Exception ex) {
+        return StrUtil.maxLength(StrUtil.blankToDefault(ex.getMessage(), ex.getClass().getSimpleName())
+                .replaceAll("https?://\\S+", "[URL]"), 256);
     }
 
     private boolean isSuccessfulUploadStatus(int status) {
@@ -598,6 +712,43 @@ public class TkTiktokApiClient {
 
     private static boolean isAccessTokenInvalid(String errorCode) {
         return "access_token_invalid".equals(errorCode);
+    }
+
+    public static class TikTokApiException extends IllegalStateException {
+        private final int status;
+        private final String contentType;
+        private final boolean retryable;
+        private final String safeDetail;
+
+        public TikTokApiException(int status, String contentType, boolean retryable, String detail) {
+            this(status, contentType, retryable, detail, null);
+        }
+
+        public TikTokApiException(int status, String contentType, boolean retryable,
+                                  String detail, Throwable cause) {
+            super(StrUtil.format("TikTok upstream response error: HTTP {}, Content-Type {}, {}",
+                    status, StrUtil.blankToDefault(contentType, "unknown"), detail), cause);
+            this.status = status;
+            this.contentType = contentType;
+            this.retryable = retryable;
+            this.safeDetail = StrUtil.maxLength(StrUtil.blankToDefault(detail, "unknown"), 256);
+        }
+
+        public int getStatus() {
+            return status;
+        }
+
+        public String getContentType() {
+            return contentType;
+        }
+
+        public boolean isRetryable() {
+            return retryable;
+        }
+
+        public String getSafeDetail() {
+            return safeDetail;
+        }
     }
 
     @Data

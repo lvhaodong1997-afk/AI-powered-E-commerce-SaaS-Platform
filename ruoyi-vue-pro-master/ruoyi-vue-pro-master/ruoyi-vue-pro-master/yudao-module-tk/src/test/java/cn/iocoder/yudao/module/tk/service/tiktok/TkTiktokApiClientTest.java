@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.tk.service.tiktok;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -18,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.RETURNS_SELF;
@@ -26,6 +28,73 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 class TkTiktokApiClientTest {
+
+    @Test
+    void rejectsHtmlUpstreamResponseAsStructuredRetryableFailure() {
+        TkTiktokApiClient.TikTokApiException error = assertThrows(
+                TkTiktokApiClient.TikTokApiException.class,
+                () -> TkTiktokApiClient.parseJsonResponse(503, "text/html",
+                        "<HTML><TITLE>Service Unavailable</TITLE>Reference #15.abc</HTML>"));
+
+        assertEquals(503, error.getStatus());
+        assertEquals("text/html", error.getContentType());
+        assertTrue(error.isRetryable());
+        assertTrue(error.getMessage().contains("HTTP 503"));
+        assertFalse(error.getMessage().contains("JsonParseException"));
+
+        TkTiktokApiClient.TikTokApiException jsonError = assertThrows(
+                TkTiktokApiClient.TikTokApiException.class,
+                () -> TkTiktokApiClient.parseJsonResponse(503, "application/json",
+                        "{\"error\":{\"code\":\"service_unavailable\"}}"));
+        assertTrue(jsonError.isRetryable());
+    }
+
+    @Test
+    void keepsHttp400JsonForBusinessErrorParsingWithoutMarkingItRetryable() {
+        JsonNode response = TkTiktokApiClient.parseJsonResponse(400, "application/json;charset=UTF-8",
+                "{\"error\":{\"code\":\"invalid_param\",\"message\":\"bad request\"}}");
+
+        TkTiktokApiClient.PublishResult result = TkTiktokApiClient.parsePublishResult(response);
+
+        assertFalse(result.isSuccess());
+        assertEquals("invalid_param", result.getErrorCode());
+    }
+
+    @Test
+    void retriesOnlyTransientQueryFailuresAndDoesNotRetryBusinessFailures() {
+        AtomicInteger attempts = new AtomicInteger();
+        JsonNode result = TkTiktokApiClient.executeQueryWithRetry("creator_info", () -> {
+            if (attempts.incrementAndGet() < 3) {
+                throw new TkTiktokApiClient.TikTokApiException(503, "text/html", true, "temporary");
+            }
+            return JsonUtils.parseTree("{\"ok\":true}");
+        }, new long[]{0, 0, 0});
+
+        assertTrue(result.path("ok").asBoolean());
+        assertEquals(3, attempts.get());
+
+        AtomicInteger businessAttempts = new AtomicInteger();
+        TkTiktokApiClient.TikTokApiException businessError = assertThrows(
+                TkTiktokApiClient.TikTokApiException.class,
+                () -> TkTiktokApiClient.executeQueryWithRetry("creator_info", () -> {
+                    businessAttempts.incrementAndGet();
+                    throw new TkTiktokApiClient.TikTokApiException(400, "application/json", false, "bad request");
+                }, new long[]{0, 0, 0}));
+
+        assertEquals(400, businessError.getStatus());
+        assertEquals(1, businessAttempts.get());
+    }
+
+    @Test
+    void rejectsEmptyResponseWithoutAttemptingJsonParsing() {
+        TkTiktokApiClient.TikTokApiException error = assertThrows(
+                TkTiktokApiClient.TikTokApiException.class,
+                () -> TkTiktokApiClient.parseJsonResponse(200, "application/json", ""));
+
+        assertEquals(200, error.getStatus());
+        assertFalse(error.isRetryable());
+        assertTrue(error.getMessage().contains("empty"));
+    }
 
     @Test
     void parseTokenRefreshExtractsRotatedTokensAndExpiry() {

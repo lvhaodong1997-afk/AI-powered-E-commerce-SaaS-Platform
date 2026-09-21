@@ -60,7 +60,7 @@ public class TkOpenTiktokPublishService {
     private final TkOpenApiSecretCipher secretCipher;
     private final TkLocalUploadStorageService localStorageService;
     private final TkOpenTiktokMediaService mediaService;
-    private final ExecutorService executor = Executors.newFixedThreadPool(4);
+    private final ExecutorService executor = Executors.newFixedThreadPool(2);
     private final ScheduledExecutorService heartbeats = Executors.newScheduledThreadPool(1);
     @Resource private TkOpenTiktokPublishAttemptService attemptService;
     @Resource private TkOpenTiktokPublishTerminalService terminalService;
