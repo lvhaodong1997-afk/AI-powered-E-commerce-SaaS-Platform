@@ -34,6 +34,19 @@ public class TkOpenTiktokPublishController {
         return TkOpenApiResponse.success(publishService.getTask(taskId));
     }
 
+    @PostMapping("/tasks/{taskId}/reschedule")
+    public TkOpenApiResponse<TkOpenTiktokPublishVO.TaskResp> reschedule(
+            @PathVariable String taskId,
+            @Valid @RequestBody TkOpenTiktokPublishVO.ScheduleReq request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+        return TkOpenApiResponse.success(publishService.reschedule(taskId, request.getScheduledAt(), key));
+    }
+
+    @PostMapping("/tasks/{taskId}/cancel")
+    public TkOpenApiResponse<TkOpenTiktokPublishVO.TaskResp> cancel(@PathVariable String taskId) {
+        return TkOpenApiResponse.success(publishService.cancel(taskId));
+    }
+
     @GetMapping("/tasks/{taskId}/details")
     public TkOpenApiResponse<List<TkOpenTiktokPublishVO.DetailResp>> details(@PathVariable String taskId) {
         return TkOpenApiResponse.success(publishService.getDetails(taskId));

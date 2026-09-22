@@ -8,6 +8,8 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.*;
 import lombok.experimental.Accessors;
 
+import java.time.LocalDateTime;
+
 @TenantIgnore
 @TableName("tk_open_tiktok_publish_task")
 @KeySequence("tk_open_tiktok_publish_task_seq")
@@ -40,4 +42,7 @@ public class TkOpenTiktokPublishTaskDO extends BaseDO {
     private Integer pendingCount;
     private String status;
     private String failReason;
+    private LocalDateTime scheduledAt;
+    private String scheduleStatus;
+    private Integer scheduleVersion;
 }

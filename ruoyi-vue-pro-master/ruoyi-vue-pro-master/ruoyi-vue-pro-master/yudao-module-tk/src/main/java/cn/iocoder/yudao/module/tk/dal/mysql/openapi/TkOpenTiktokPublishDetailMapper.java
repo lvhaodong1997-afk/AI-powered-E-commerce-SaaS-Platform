@@ -23,6 +23,14 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
                 .orderByAsc(TkOpenTiktokPublishDetailDO::getId));
     }
 
+    default List<TkOpenTiktokPublishDetailDO> selectListByClientAndTaskIdForUpdate(String clientId, String taskId) {
+        return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
+                .eq(TkOpenTiktokPublishDetailDO::getClientId, clientId)
+                .eq(TkOpenTiktokPublishDetailDO::getTaskId, taskId)
+                .orderByAsc(TkOpenTiktokPublishDetailDO::getId)
+                .last("FOR UPDATE"));
+    }
+
     default List<TkOpenTiktokPublishDetailDO> selectStalePending(LocalDateTime deadline, int limit) {
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                 .eq(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")

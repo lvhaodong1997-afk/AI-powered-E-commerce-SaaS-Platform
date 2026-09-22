@@ -14,11 +14,14 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Authoritative detail outcome, attempt evidence, task aggregate and callback outbox transaction. */
 @Service
@@ -28,6 +31,8 @@ public class TkOpenTiktokPublishTerminalService {
     private final TkOpenTiktokPublishTaskMapper taskMapper;
     private final TkOpenApiCallbackService callbackService;
     private final TkOpenTiktokPublishAttemptMapper attemptMapper;
+    @Resource
+    private TkOpenTiktokMediaService mediaService;
 
     public TkOpenTiktokPublishTerminalService(TkOpenTiktokPublishDetailMapper detailMapper,
                                               TkOpenTiktokPublishTaskMapper taskMapper,
@@ -232,11 +237,33 @@ public class TkOpenTiktokPublishTerminalService {
                 .set(TkOpenTiktokPublishTaskDO::getFailedCount, failed)
                 .set(TkOpenTiktokPublishTaskDO::getPendingCount, pending)
                 .set(TkOpenTiktokPublishTaskDO::getStatus, status)
+                .set(TkOpenTiktokPublishTaskDO::getScheduleStatus,
+                        task.getScheduledAt() == null ? task.getScheduleStatus() : "COMPLETED")
                 .set(TkOpenTiktokPublishTaskDO::getFailReason, failReason));
         if (changed != 1) throw new IllegalStateException("Publish task disappeared during terminal confirmation");
         callbackService.enqueueOnce(detail.getClientId(), "SUCCESS".equals(detail.getStatus())
                         ? "publish.success" : "publish.failed", "PUBLISH_DETAIL", detail.getDetailId(),
                 buildPublishEventPayload(detail, task), attemptNo(detail));
+        cleanupScheduledMediaAfterCommit(detail, task);
+    }
+
+    private void cleanupScheduledMediaAfterCommit(TkOpenTiktokPublishDetailDO detail,
+                                                  TkOpenTiktokPublishTaskDO task) {
+        if (mediaService == null || task == null || task.getScheduledAt() == null) return;
+        Runnable cleanup = () -> {
+            try {
+                mediaService.cleanupScheduledPublishMedia(detail.getClientId(), task.getMediaId());
+            } catch (Exception ex) {
+                // Terminal persistence is authoritative; media service records cleanup failure separately.
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { cleanup.run(); }
+            });
+        } else {
+            cleanup.run();
+        }
     }
 
     // Exact existing TkOpenTiktokPublishService callback shape. Keep the public contract unchanged.

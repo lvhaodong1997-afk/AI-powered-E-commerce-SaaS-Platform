@@ -29,6 +29,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -148,6 +152,7 @@ public class TkOpenTiktokPublishService {
         taskRequest.setBrandContent(request.getBrandContent());
         taskRequest.setAigcContent(request.getAigcContent());
         taskRequest.setExternalRequestId(request.getExternalRequestId());
+        taskRequest.setScheduledAt(request.getScheduledAt());
         return createInternal(taskRequest, idempotencyKey, hash);
     }
 
@@ -163,6 +168,10 @@ public class TkOpenTiktokPublishService {
             }
             idempotencyMapper.deleteExpired(clientId, idempotencyKey, now);
         }
+        LocalDateTime scheduledAt = parseScheduledAt(request.getScheduledAt());
+        int requestedAccountCount = request.getConnectionIds() == null ? 0
+                : new LinkedHashSet<>(request.getConnectionIds()).size();
+        validateSchedule(request, scheduledAt, requestedAccountCount);
         TkOpenTiktokMediaDO media = mediaMapper.selectByClientAndMediaId(clientId, request.getMediaId());
         if (media == null) throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "media does not exist");
         if (!"READY".equals(media.getStatus())) throw TkOpenApiException.badRequest("MEDIA_NOT_READY", "media is not ready");
@@ -174,6 +183,13 @@ public class TkOpenTiktokPublishService {
         for (TkOpenTiktokConnectionDO connection : connections) {
             if (!"AUTHORIZED".equals(connection.getAuthStatus()))
                 throw TkOpenApiException.badRequest("CONNECTION_NOT_AUTHORIZED", "connection is not authorized");
+        }
+        boolean scheduled = scheduledAt != null;
+        if (scheduled) {
+            if (mediaService == null) {
+                throw TkOpenApiException.unavailable("MEDIA_SERVICE_UNAVAILABLE", "scheduled media service is unavailable");
+            }
+            mediaService.prepareForScheduledPublish(media);
         }
         String taskId = TkOpenApiIds.next("task");
         TkOpenApiIdempotencyDO record = TkOpenApiIdempotencyDO.builder()
@@ -204,24 +220,103 @@ public class TkOpenTiktokPublishService {
                 .brandContent(defaultBool(request.getBrandContent(), false))
                 .aigcContent(defaultBool(request.getAigcContent(), true))
                 .accountCount(connections.size()).successCount(0).failedCount(0).pendingCount(connections.size())
-                .status("PENDING").build();
+                .status(scheduled ? "SCHEDULED" : "PENDING")
+                .scheduledAt(scheduledAt)
+                .scheduleStatus(scheduled ? "SCHEDULED" : null)
+                .scheduleVersion(0)
+                .build();
         taskMapper.insert(task);
         for (TkOpenTiktokConnectionDO connection : connections) {
             detailMapper.insert(TkOpenTiktokPublishDetailDO.builder()
                     .detailId(TkOpenApiIds.next("detail"))
                     .taskId(task.getTaskId()).clientId(clientId).connectionId(connection.getConnectionId())
                     .accountName(StrUtil.blankToDefault(connection.getDisplayName(), connection.getUsername()))
-                    .status("PENDING").tiktokStatus("LOCAL_PENDING").metricsStatus("WAITING_PUBLISH")
+                    .status(scheduled ? "SCHEDULED" : "PENDING")
+                    .tiktokStatus(scheduled ? "SCHEDULED" : "LOCAL_PENDING").metricsStatus("WAITING_PUBLISH")
                     .retryCount(0).build());
         }
         record.setStatus("COMPLETED");
         idempotencyMapper.updateById(record);
-        submitAfterCommit(clientId, task.getTaskId());
+        if (!scheduled) submitAfterCommit(clientId, task.getTaskId());
         return toTaskResp(task);
     }
 
     public TkOpenTiktokPublishVO.TaskResp getTask(String taskId) {
         return toTaskResp(requireTask(currentClient(), taskId));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public TkOpenTiktokPublishVO.TaskResp reschedule(String taskId, String scheduledAt, String idempotencyKey) {
+        validateOptionalIdempotencyKey(idempotencyKey);
+        String clientId = currentClient();
+        LocalDateTime nextTime = parseScheduledAt(scheduledAt);
+        if (nextTime == null || !nextTime.isAfter(LocalDateTime.now())) {
+            throw TkOpenApiException.badRequest("SCHEDULE_TIME_INVALID", "scheduledAt is required");
+        }
+        TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskIdForUpdate(clientId, taskId);
+        if (task == null) throw TkOpenApiException.notFound("PUBLISH_TASK_NOT_FOUND", "publish task does not exist");
+        if (!"SCHEDULED".equals(task.getStatus()) || task.getScheduledAt() == null) {
+            throw TkOpenApiException.badRequest("SCHEDULE_NOT_MUTABLE", "only scheduled tasks can be rescheduled before execution");
+        }
+        List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectListByClientAndTaskIdForUpdate(clientId, taskId);
+        if (details.isEmpty() || details.stream().anyMatch(detail -> !"SCHEDULED".equals(detail.getStatus()))) {
+            throw TkOpenApiException.conflict("SCHEDULE_ALREADY_RUNNING", "scheduled task execution has already started");
+        }
+        int version = task.getScheduleVersion() == null ? 0 : task.getScheduleVersion();
+        int changed = taskMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
+                .eq(TkOpenTiktokPublishTaskDO::getId, task.getId())
+                .eq(TkOpenTiktokPublishTaskDO::getStatus, "SCHEDULED")
+                .set(TkOpenTiktokPublishTaskDO::getScheduledAt, nextTime)
+                .set(TkOpenTiktokPublishTaskDO::getScheduleStatus, "SCHEDULED")
+                .set(TkOpenTiktokPublishTaskDO::getScheduleVersion, version + 1));
+        if (changed != 1) throw TkOpenApiException.conflict("SCHEDULE_ALREADY_RUNNING", "scheduled task execution has already started");
+        task.setScheduledAt(nextTime).setScheduleStatus("SCHEDULED").setScheduleVersion(version + 1);
+        return toTaskResp(task);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public TkOpenTiktokPublishVO.TaskResp cancel(String taskId) {
+        String clientId = currentClient();
+        TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskIdForUpdate(clientId, taskId);
+        if (task == null) throw TkOpenApiException.notFound("PUBLISH_TASK_NOT_FOUND", "publish task does not exist");
+        if (!"SCHEDULED".equals(task.getStatus()) || task.getScheduledAt() == null) {
+            throw TkOpenApiException.badRequest("SCHEDULE_NOT_MUTABLE", "only scheduled tasks can be cancelled before execution");
+        }
+        List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectListByClientAndTaskIdForUpdate(clientId, taskId);
+        if (details.isEmpty() || details.stream().anyMatch(detail -> !"SCHEDULED".equals(detail.getStatus()))) {
+            throw TkOpenApiException.conflict("SCHEDULE_ALREADY_RUNNING", "scheduled task execution has already started");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        int changedDetails = detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                .eq(TkOpenTiktokPublishDetailDO::getClientId, clientId)
+                .eq(TkOpenTiktokPublishDetailDO::getTaskId, taskId)
+                .eq(TkOpenTiktokPublishDetailDO::getStatus, "SCHEDULED")
+                .set(TkOpenTiktokPublishDetailDO::getStatus, "CANCELLED")
+                .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "CANCELLED")
+                .set(TkOpenTiktokPublishDetailDO::getMetricsStatus, "UNAVAILABLE")
+                .set(TkOpenTiktokPublishDetailDO::getMetricsFailReason, "publish task was cancelled before execution")
+                .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, now));
+        if (changedDetails != details.size()) {
+            throw TkOpenApiException.conflict("SCHEDULE_ALREADY_RUNNING", "scheduled task execution has already started");
+        }
+        int version = task.getScheduleVersion() == null ? 0 : task.getScheduleVersion();
+        int changedTask = taskMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
+                .eq(TkOpenTiktokPublishTaskDO::getId, task.getId())
+                .eq(TkOpenTiktokPublishTaskDO::getStatus, "SCHEDULED")
+                .set(TkOpenTiktokPublishTaskDO::getStatus, "CANCELLED")
+                .set(TkOpenTiktokPublishTaskDO::getScheduleStatus, "CANCELLED")
+                .set(TkOpenTiktokPublishTaskDO::getScheduleVersion, version + 1)
+                .set(TkOpenTiktokPublishTaskDO::getPendingCount, 0)
+                .set(TkOpenTiktokPublishTaskDO::getFailReason, (String) null));
+        if (changedTask != 1) throw TkOpenApiException.conflict("SCHEDULE_ALREADY_RUNNING", "scheduled task execution has already started");
+        task.setStatus("CANCELLED").setScheduleStatus("CANCELLED").setScheduleVersion(version + 1).setPendingCount(0);
+        for (TkOpenTiktokPublishDetailDO detail : details) {
+            detail.setStatus("CANCELLED").setTiktokStatus("CANCELLED").setMetricsStatus("UNAVAILABLE")
+                    .setMetricsFailReason("publish task was cancelled before execution").setLastSyncTime(now);
+            if (callbackService != null) publishEvent(detail, task, "publish.cancelled");
+        }
+        cleanupScheduledMediaAfterCommit(clientId, task.getMediaId());
+        return toTaskResp(task);
     }
 
     public List<TkOpenTiktokPublishVO.DetailResp> getDetails(String taskId) {
@@ -503,6 +598,51 @@ public class TkOpenTiktokPublishService {
             }
         }
         return submittedTasks.size();
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public int dispatchDueScheduled(int limit) {
+        List<TkOpenTiktokPublishTaskDO> due = taskMapper.selectDueScheduled(LocalDateTime.now(),
+                Math.max(1, Math.min(limit, 200)));
+        List<String> submitted = new ArrayList<>();
+        for (TkOpenTiktokPublishTaskDO candidate : due) {
+            TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskIdForUpdate(
+                    candidate.getClientId(), candidate.getTaskId());
+            if (task == null || !"SCHEDULED".equals(task.getStatus()) || task.getScheduledAt() == null
+                    || task.getScheduledAt().isAfter(LocalDateTime.now())) continue;
+            List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectListByClientAndTaskIdForUpdate(
+                    task.getClientId(), task.getTaskId());
+            if (details.isEmpty() || details.stream().anyMatch(detail -> !"SCHEDULED".equals(detail.getStatus()))) continue;
+            int changedDetails = detailMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                    .eq(TkOpenTiktokPublishDetailDO::getClientId, task.getClientId())
+                    .eq(TkOpenTiktokPublishDetailDO::getTaskId, task.getTaskId())
+                    .eq(TkOpenTiktokPublishDetailDO::getStatus, "SCHEDULED")
+                    .set(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")
+                    .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "LOCAL_PENDING")
+                    .set(TkOpenTiktokPublishDetailDO::getFailReason, null));
+            if (changedDetails != details.size()) continue;
+            int version = task.getScheduleVersion() == null ? 0 : task.getScheduleVersion();
+            int changedTask = taskMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
+                    .eq(TkOpenTiktokPublishTaskDO::getId, task.getId())
+                    .eq(TkOpenTiktokPublishTaskDO::getStatus, "SCHEDULED")
+                    .set(TkOpenTiktokPublishTaskDO::getStatus, "PROCESSING")
+                    .set(TkOpenTiktokPublishTaskDO::getScheduleStatus, "RUNNING")
+                    .set(TkOpenTiktokPublishTaskDO::getScheduleVersion, version + 1));
+            if (changedTask != 1) {
+                throw new IllegalStateException("scheduled task changed during activation");
+            }
+            submitted.add(task.getClientId() + "\n" + task.getTaskId());
+        }
+        Runnable submit = () -> submitted.forEach(value -> {
+            String[] parts = value.split("\\n", 2);
+            submitTask(parts[0], parts[1]);
+        });
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { submit.run(); }
+            });
+        } else submit.run();
+        return submitted.size();
     }
 
     void processTask(String clientId, String taskId) {
@@ -846,6 +986,13 @@ public class TkOpenTiktokPublishService {
     }
 
     private UploadSource resolveSource(TkOpenTiktokMediaDO media, String verifiedDomain) throws Exception {
+        if (StrUtil.isNotBlank(media.getScheduledLocalPath())) {
+            Path scheduled = java.nio.file.Paths.get(media.getScheduledLocalPath()).toAbsolutePath().normalize();
+            if (Files.isRegularFile(scheduled)) return UploadSource.file(scheduled, false);
+        }
+        if ("READY".equals(media.getScheduledDownloadStatus())) {
+            throw new IllegalStateException("scheduled media local copy is unavailable");
+        }
         if (isVerifiedPullUrl(media.getFileUrl(), verifiedDomain)) return UploadSource.pull();
         Optional<Path> local = localStorageService == null ? Optional.empty()
                 : localStorageService.resolveLocalPath(media.getFileUrl());
@@ -883,6 +1030,24 @@ public class TkOpenTiktokPublishService {
         } else {
             callbackService.enqueueOnce(detail.getClientId(), type, "PUBLISH_DETAIL", detail.getDetailId(),
                     buildPublishEventPayload(detail, task), defaultInt(detail.getRetryCount()));
+        }
+    }
+
+    private void cleanupScheduledMediaAfterCommit(String clientId, String mediaId) {
+        if (mediaService == null) return;
+        Runnable cleanup = () -> {
+            try {
+                mediaService.cleanupScheduledPublishMedia(clientId, mediaId);
+            } catch (Exception ex) {
+                log.warn("[cleanupScheduledMedia][clientId({}) mediaId({}) deferred]", clientId, mediaId, ex);
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { cleanup.run(); }
+            });
+        } else {
+            cleanup.run();
         }
     }
 
@@ -982,7 +1147,53 @@ public class TkOpenTiktokPublishService {
         response.setTaskId(task.getTaskId()); response.setMediaId(task.getMediaId()); response.setExternalRequestId(task.getExternalRequestId());
         response.setStatus(task.getStatus()); response.setAccountCount(task.getAccountCount()); response.setSuccessCount(task.getSuccessCount());
         response.setFailedCount(task.getFailedCount()); response.setPendingCount(task.getPendingCount()); response.setFailReason(task.getFailReason());
+        response.setScheduledAt(task.getScheduledAt());
+        response.setScheduleStatus(task.getScheduleStatus());
+        boolean mutableSchedule = "SCHEDULED".equals(task.getStatus()) && task.getScheduledAt() != null;
+        response.setCanReschedule(mutableSchedule);
+        response.setCanCancel(mutableSchedule);
         response.setCreateTime(task.getCreateTime()); response.setUpdateTime(task.getUpdateTime()); return response;
+    }
+
+    static LocalDateTime parseScheduledAt(String raw) {
+        if (StrUtil.isBlank(raw)) return null;
+        String value = raw.trim();
+        try {
+            return OffsetDateTime.parse(value).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime();
+        } catch (DateTimeParseException ignored) {
+            try {
+                return ZonedDateTime.parse(value).withZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime();
+            } catch (DateTimeParseException ignoredAgain) {
+                try {
+                    return LocalDateTime.parse(value);
+                } catch (DateTimeParseException invalid) {
+                    throw TkOpenApiException.badRequest("SCHEDULE_TIME_INVALID",
+                            "scheduledAt must be an ISO-8601 date-time");
+                }
+            }
+        }
+    }
+
+    private void validateSchedule(TkOpenTiktokPublishVO.TaskCreateReq request,
+                                  LocalDateTime scheduledAt, int accountCount) {
+        if (scheduledAt == null) return;
+        if (!scheduledAt.isAfter(LocalDateTime.now())) {
+            throw TkOpenApiException.badRequest("SCHEDULE_TIME_INVALID", "scheduledAt must be in the future");
+        }
+        if (accountCount != 1) {
+            throw TkOpenApiException.badRequest("SCHEDULE_ACCOUNT_COUNT_INVALID",
+                    "scheduled publish supports exactly one TikTok account");
+        }
+        if (!"DIRECT_POST".equals(request.getPostMode())) {
+            throw TkOpenApiException.badRequest("SCHEDULE_MODE_UNSUPPORTED",
+                    "scheduled publish supports DIRECT_POST only");
+        }
+    }
+
+    private void validateOptionalIdempotencyKey(String idempotencyKey) {
+        if (StrUtil.isNotBlank(idempotencyKey) && idempotencyKey.length() > 128) {
+            throw TkOpenApiException.badRequest("IDEMPOTENCY_KEY_INVALID", "Idempotency-Key is too long");
+        }
     }
 
     private TkOpenTiktokPublishVO.DetailResp toDetailResp(TkOpenTiktokPublishDetailDO detail) {

@@ -309,7 +309,8 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
     }
 
     private boolean isTerminalPublishCallback(String eventType) {
-        return "publish.success".equals(eventType) || "publish.failed".equals(eventType);
+        return "publish.success".equals(eventType) || "publish.failed".equals(eventType)
+                || "publish.cancelled".equals(eventType);
     }
 
     private long backoffMinutes(int attempt) {

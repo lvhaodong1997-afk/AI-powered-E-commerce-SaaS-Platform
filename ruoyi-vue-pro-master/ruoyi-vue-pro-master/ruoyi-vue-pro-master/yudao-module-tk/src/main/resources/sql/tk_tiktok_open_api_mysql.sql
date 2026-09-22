@@ -108,6 +108,10 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_media` (
   `fail_reason` varchar(1024) DEFAULT NULL,
   `expire_time` datetime NOT NULL,
   `completed_time` datetime DEFAULT NULL,
+  `scheduled_local_path` varchar(2048) DEFAULT NULL COMMENT '定时发布本地媒体路径',
+  `scheduled_download_status` varchar(32) DEFAULT NULL COMMENT '定时发布媒体持久化状态',
+  `scheduled_download_fail_reason` varchar(1024) DEFAULT NULL COMMENT '定时发布媒体持久化失败原因',
+  `scheduled_downloaded_at` datetime DEFAULT NULL COMMENT '定时发布媒体持久化时间',
   `creator` varchar(64) DEFAULT '',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updater` varchar(64) DEFAULT '',
@@ -141,6 +145,9 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_task` (
   `pending_count` int NOT NULL DEFAULT 0,
   `status` varchar(32) NOT NULL,
   `fail_reason` varchar(1024) DEFAULT NULL,
+  `scheduled_at` datetime DEFAULT NULL COMMENT '计划发布时间',
+  `schedule_status` varchar(32) DEFAULT NULL COMMENT '计划发布状态',
+  `schedule_version` int NOT NULL DEFAULT 0 COMMENT '计划发布版本号',
   `creator` varchar(64) DEFAULT '',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updater` varchar(64) DEFAULT '',
@@ -149,6 +156,7 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_task` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tk_open_publish_task_id` (`task_id`),
   KEY `idx_tk_open_publish_task_client` (`client_id`, `create_time`),
+  KEY `idx_tk_open_publish_task_schedule` (`status`, `scheduled_at`),
   KEY `idx_tk_open_publish_task_external` (`client_id`, `external_request_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

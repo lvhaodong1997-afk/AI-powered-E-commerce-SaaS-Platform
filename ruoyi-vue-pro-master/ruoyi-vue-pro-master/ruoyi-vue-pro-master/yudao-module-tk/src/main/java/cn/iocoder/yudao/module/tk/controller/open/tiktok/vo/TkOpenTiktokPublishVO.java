@@ -36,6 +36,9 @@ public final class TkOpenTiktokPublishVO {
         private Boolean aigcContent;
         @Size(max = 128)
         private String externalRequestId;
+        /** ISO-8601 time with an optional offset, for example 2026-09-26T18:00:00+08:00. */
+        @Size(max = 64)
+        private String scheduledAt;
     }
 
     @Data
@@ -67,6 +70,8 @@ public final class TkOpenTiktokPublishVO {
         private Boolean aigcContent;
         @Size(max = 128)
         private String externalRequestId;
+        @Size(max = 64)
+        private String scheduledAt;
     }
 
     @Data
@@ -80,8 +85,19 @@ public final class TkOpenTiktokPublishVO {
         private Integer failedCount;
         private Integer pendingCount;
         private String failReason;
+        private LocalDateTime scheduledAt;
+        private String scheduleStatus;
+        private Boolean canReschedule;
+        private Boolean canCancel;
         private LocalDateTime createTime;
         private LocalDateTime updateTime;
+    }
+
+    @Data
+    public static class ScheduleReq {
+        @NotBlank
+        @Size(max = 64)
+        private String scheduledAt;
     }
 
     @Data

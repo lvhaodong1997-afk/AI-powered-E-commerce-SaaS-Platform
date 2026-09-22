@@ -19,6 +19,12 @@ public class TkOpenTiktokPublishStatusJob {
         run("recovery", () -> publishService.reconcileRecoveryRequired(100));
         run("callbacks", () -> publishService.reconcileTerminalCallbacks(100));
     }
+
+    @TenantIgnore
+    @Scheduled(fixedDelayString = "${tk.open-api.publish.schedule-delay-ms:10000}", initialDelay = 10000)
+    public void dispatchScheduled() {
+        run("scheduled", () -> publishService.dispatchDueScheduled(100));
+    }
     private void run(String phase, Runnable action) {
         try { action.run(); }
         catch (Exception ex) { log.warn("[sync][phase({}) deferred; other recovery phases continue]", phase, ex); }

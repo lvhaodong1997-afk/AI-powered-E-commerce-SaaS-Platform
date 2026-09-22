@@ -39,4 +39,8 @@ public class TkOpenTiktokMediaDO extends BaseDO {
     private String failReason;
     private LocalDateTime expireTime;
     private LocalDateTime completedTime;
+    private String scheduledLocalPath;
+    private String scheduledDownloadStatus;
+    private String scheduledDownloadFailReason;
+    private LocalDateTime scheduledDownloadedAt;
 }

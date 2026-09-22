@@ -217,6 +217,7 @@ public class TkGenerationProperties {
         private Integer chunkSizeBytes = 1 * 1024 * 1024;
         private Long maxFileSizeBytes = 1_000_000_000L;
         private Integer sessionExpireHours = 24;
+        private String scheduledPublishRootDir = "/tk-publish-media";
         private Oss oss = new Oss();
 
     }

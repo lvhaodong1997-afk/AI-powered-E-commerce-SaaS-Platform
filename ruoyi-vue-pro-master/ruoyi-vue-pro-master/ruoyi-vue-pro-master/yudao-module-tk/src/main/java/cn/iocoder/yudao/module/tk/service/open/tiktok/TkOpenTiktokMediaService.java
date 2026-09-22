@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.tk.service.open.tiktok;
 
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.http.HttpResponse;
 import cn.iocoder.yudao.module.tk.controller.open.tiktok.vo.TkOpenTiktokMediaVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokMediaDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokMediaMapper;
@@ -31,6 +32,7 @@ import java.security.MessageDigest;
 import java.util.Collections;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 
 @Service
 public class TkOpenTiktokMediaService {
@@ -125,6 +127,86 @@ public class TkOpenTiktokMediaService {
                 .build();
         mediaMapper.insert(media);
         return media;
+    }
+
+    /**
+     * Make a scheduled task independent from a short-lived remote URL or OSS object.
+     * The downloaded file is kept under the configured server-root directory until the
+     * scheduled task has finished or is cancelled.
+     */
+    public void prepareForScheduledPublish(TkOpenTiktokMediaDO media) {
+        if (media == null || StrUtil.isBlank(media.getMediaId())) {
+            throw TkOpenApiException.badRequest("MEDIA_NOT_READY", "media is not ready for scheduled publish");
+        }
+        if (StrUtil.isNotBlank(media.getScheduledLocalPath())) {
+            try {
+                Path existing = java.nio.file.Paths.get(media.getScheduledLocalPath()).toAbsolutePath().normalize();
+                if (Files.isRegularFile(existing) && Files.size(existing) > 0) return;
+            } catch (Exception ignored) {
+                // Rebuild the persisted copy when the previous path is stale.
+            }
+        }
+        Path target = scheduledTarget(media);
+        Path temporary = target.resolveSibling(target.getFileName() + ".downloading-" + UUID.randomUUID());
+        try {
+            Files.createDirectories(target.getParent());
+            copyMedia(media, temporary);
+            long size = Files.size(temporary);
+            if (size <= 0 || size > maxFileSize()) throw new IllegalStateException("scheduled media size is invalid");
+            if (StrUtil.isNotBlank(media.getSha256())
+                    && !media.getSha256().equalsIgnoreCase(sha256(temporary))) {
+                throw new IllegalStateException("scheduled media sha256 mismatch");
+            }
+            try {
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            LocalDateTime downloadedAt = LocalDateTime.now();
+            media.setScheduledLocalPath(target.toString()).setScheduledDownloadStatus("READY")
+                    .setScheduledDownloadFailReason(null).setScheduledDownloadedAt(downloadedAt).setFileSize(size);
+            mediaMapper.updateById(new TkOpenTiktokMediaDO().setId(media.getId())
+                    .setScheduledLocalPath(target.toString()).setScheduledDownloadStatus("READY")
+                    .setScheduledDownloadFailReason(null).setScheduledDownloadedAt(downloadedAt)
+                    .setFileSize(size));
+        } catch (Exception ex) {
+            try { Files.deleteIfExists(temporary); } catch (Exception ignored) {}
+            String reason = StrUtil.maxLength(StrUtil.blankToDefault(ex.getMessage(), "scheduled media download failed"), 1000);
+            media.setScheduledDownloadStatus("FAILED").setScheduledDownloadFailReason(reason);
+            try {
+                mediaMapper.updateById(new TkOpenTiktokMediaDO().setId(media.getId())
+                        .setScheduledDownloadStatus("FAILED").setScheduledDownloadFailReason(reason));
+            } catch (Exception ignored) {}
+            throw TkOpenApiException.unavailable("SCHEDULE_MEDIA_PREPARE_FAILED", reason);
+        }
+    }
+
+    public void cleanupScheduledPublishMedia(String clientId, String mediaId) {
+        if (StrUtil.isBlank(clientId) || StrUtil.isBlank(mediaId)) return;
+        TkOpenTiktokMediaDO media = mediaMapper.selectByClientAndMediaId(clientId, mediaId);
+        cleanupScheduledPublishMedia(media);
+    }
+
+    public void cleanupScheduledPublishMedia(TkOpenTiktokMediaDO media) {
+        if (media == null || StrUtil.isBlank(media.getScheduledLocalPath())) return;
+        Path root = scheduledPublishRoot();
+        Path path = java.nio.file.Paths.get(media.getScheduledLocalPath()).toAbsolutePath().normalize();
+        if (!path.startsWith(root)) {
+            throw new IllegalStateException("scheduled media path is outside the managed root");
+        }
+        try {
+            Files.deleteIfExists(path);
+            mediaMapper.updateById(new TkOpenTiktokMediaDO().setId(media.getId())
+                    .setScheduledDownloadStatus("CLEANED").setScheduledDownloadFailReason(null));
+        } catch (Exception ex) {
+            String reason = StrUtil.maxLength(StrUtil.blankToDefault(ex.getMessage(),
+                    "scheduled media cleanup failed"), 1000);
+            try {
+                mediaMapper.updateById(new TkOpenTiktokMediaDO().setId(media.getId())
+                        .setScheduledDownloadStatus("CLEANUP_FAILED").setScheduledDownloadFailReason(reason));
+            } catch (Exception ignored) {}
+            throw new IllegalStateException(reason, ex);
+        }
     }
 
     static URI validateRemoteVideoUrl(String videoUrl) {
@@ -373,6 +455,40 @@ public class TkOpenTiktokMediaService {
 
     private String safeName(String fileName) {
         return StrUtil.blankToDefault(FileUtil.getName(fileName), "video.mp4").replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private Path scheduledTarget(TkOpenTiktokMediaDO media) {
+        return scheduledPublishRoot()
+                .resolve(safeSegment(media.getClientId())).resolve(safeSegment(media.getMediaId()))
+                .resolve(safeName(media.getFileName())).normalize();
+    }
+
+    private Path scheduledPublishRoot() {
+        String root = StrUtil.blankToDefault(properties.getUpload().getScheduledPublishRootDir(), "/tk-publish-media")
+                .replace("${java.io.tmpdir}", System.getProperty("java.io.tmpdir"));
+        return java.nio.file.Paths.get(root).toAbsolutePath().normalize();
+    }
+
+    private void copyMedia(TkOpenTiktokMediaDO media, Path target) throws Exception {
+        java.util.Optional<Path> local = localStorageService == null || StrUtil.isBlank(media.getFileUrl())
+                ? java.util.Optional.empty() : localStorageService.resolveLocalPath(media.getFileUrl());
+        if (local.isPresent() && Files.isRegularFile(local.get())) {
+            Files.copy(local.get(), target, StandardCopyOption.REPLACE_EXISTING);
+            return;
+        }
+        URI remoteUrl = validateRemoteVideoUrl(media.getFileUrl());
+        try (HttpResponse response = cn.hutool.http.HttpRequest.get(remoteUrl.toString()).timeout(600000).execute()) {
+            if (!response.isOk()) throw new IllegalStateException("cannot download media, HTTP " + response.getStatus());
+            try (InputStream input = response.bodyStream(); OutputStream output = Files.newOutputStream(target)) {
+                byte[] buffer = new byte[1024 * 1024];
+                int read;
+                while ((read = input.read(buffer)) != -1) if (read > 0) output.write(buffer, 0, read);
+            }
+        }
+    }
+
+    private String safeSegment(String value) {
+        return StrUtil.blankToDefault(value, "unknown").replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
     private String sha256(Path path) throws Exception {

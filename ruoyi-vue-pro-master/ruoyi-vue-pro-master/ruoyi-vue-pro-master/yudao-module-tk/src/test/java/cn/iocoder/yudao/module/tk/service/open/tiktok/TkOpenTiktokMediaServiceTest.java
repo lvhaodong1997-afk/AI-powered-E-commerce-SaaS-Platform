@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.*;
+import org.mockito.ArgumentCaptor;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -129,6 +130,52 @@ class TkOpenTiktokMediaServiceTest {
         assertEquals("MEDIA_UPLOAD_STATUS_INVALID", completeError.getCode());
         assertEquals("MEDIA_UPLOAD_STATUS_INVALID", cancelError.getCode());
         verify(mapper, never()).updateById(any(TkOpenTiktokMediaDO.class));
+    }
+
+    @Test
+    void shouldPersistMediaForScheduledPublish(@TempDir Path tempDir) throws Exception {
+        TkOpenTiktokMediaMapper mapper = mock(TkOpenTiktokMediaMapper.class);
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getUpload().setRootDir(tempDir.resolve("uploads").toString());
+        properties.getUpload().setScheduledPublishRootDir(tempDir.resolve("scheduled").toString());
+        TkLocalUploadStorageService storage = new TkLocalUploadStorageService(properties);
+        Path source = storage.resolveRelativePath("open-api/client_b/media_1/video.mp4");
+        Files.createDirectories(source.getParent());
+        Files.write(source, new byte[]{1, 2, 3, 4});
+        TkOpenTiktokMediaDO media = TkOpenTiktokMediaDO.builder().id(9L).mediaId("media_1")
+                .clientId("client_b").fileName("video.mp4").fileUrl(storage.toPublicUrl("open-api/client_b/media_1/video.mp4"))
+                .contentType("video/mp4").fileSize(4L).status("READY").build();
+        TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, storage, properties,
+                mock(TkOssObjectStorageClient.class));
+
+        service.prepareForScheduledPublish(media);
+
+        assertNotNull(media.getScheduledLocalPath());
+        assertArrayEquals(new byte[]{1, 2, 3, 4}, Files.readAllBytes(java.nio.file.Paths.get(media.getScheduledLocalPath())));
+        assertEquals("READY", media.getScheduledDownloadStatus());
+        verify(mapper).updateById(any(TkOpenTiktokMediaDO.class));
+    }
+
+    @Test
+    void shouldCleanupScheduledMediaInsideManagedRoot(@TempDir Path tempDir) throws Exception {
+        TkOpenTiktokMediaMapper mapper = mock(TkOpenTiktokMediaMapper.class);
+        TkGenerationProperties properties = new TkGenerationProperties();
+        Path root = tempDir.resolve("scheduled");
+        properties.getUpload().setScheduledPublishRootDir(root.toString());
+        Path file = root.resolve("client_b/media_1/video.mp4");
+        Files.createDirectories(file.getParent());
+        Files.write(file, new byte[]{1, 2, 3});
+        TkOpenTiktokMediaDO media = TkOpenTiktokMediaDO.builder().id(9L).mediaId("media_1")
+                .clientId("client_b").scheduledLocalPath(file.toString()).scheduledDownloadStatus("READY").build();
+        TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, null, properties,
+                mock(TkOssObjectStorageClient.class));
+
+        service.cleanupScheduledPublishMedia(media);
+
+        assertFalse(Files.exists(file));
+        ArgumentCaptor<TkOpenTiktokMediaDO> update = ArgumentCaptor.forClass(TkOpenTiktokMediaDO.class);
+        verify(mapper).updateById(update.capture());
+        assertEquals("CLEANED", update.getValue().getScheduledDownloadStatus());
     }
 
     @Test

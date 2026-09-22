@@ -69,7 +69,170 @@ class TkOpenTiktokPublishServiceTest {
                 "cn.iocoder.yudao.module.tk.controller.open.tiktok.vo.TkOpenTiktokPublishVO$QuickTaskCreateReq");
         assertNotNull(requestType.getDeclaredField("externalAccountId"));
         assertNotNull(requestType.getDeclaredField("videoUrl"));
+        assertNotNull(requestType.getDeclaredField("scheduledAt"));
         assertNotNull(TkOpenTiktokPublishService.class.getMethod("createQuick", requestType, String.class));
+    }
+
+    @Test
+    void scheduledPublishExposesRescheduleAndCancelContract() throws Exception {
+        assertNotNull(TkOpenTiktokPublishVO.TaskCreateReq.class.getDeclaredField("scheduledAt"));
+        assertNotNull(TkOpenTiktokPublishVO.TaskResp.class.getDeclaredField("scheduleStatus"));
+        assertNotNull(TkOpenTiktokPublishVO.TaskResp.class.getDeclaredField("canReschedule"));
+        assertNotNull(TkOpenTiktokPublishVO.TaskResp.class.getDeclaredField("canCancel"));
+        assertNotNull(TkOpenTiktokPublishService.class.getMethod("reschedule", String.class, String.class, String.class));
+        assertNotNull(TkOpenTiktokPublishService.class.getMethod("cancel", String.class));
+    }
+
+    @Test
+    void shouldRejectScheduledPublishWithMultipleAccounts() {
+        TkOpenTiktokPublishService service = newService();
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-schedule-account");
+        TkOpenTiktokPublishVO.TaskCreateReq request = request();
+        request.setConnectionIds(Arrays.asList("conn_1", "conn_2"));
+        request.setScheduledAt("2099-09-26T18:00:00+08:00");
+
+        TkOpenApiException error = assertThrows(TkOpenApiException.class,
+                () -> service.create(request, "schedule-account"));
+
+        assertEquals("SCHEDULE_ACCOUNT_COUNT_INVALID", error.getCode());
+    }
+
+    @Test
+    void shouldRejectScheduledPublishWithUnsupportedMode() {
+        TkOpenTiktokPublishService service = newService();
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-schedule-mode");
+        TkOpenTiktokPublishVO.TaskCreateReq request = request();
+        request.setPostMode("UPLOAD_TO_INBOX");
+        request.setScheduledAt("2099-09-26T18:00:00+08:00");
+
+        TkOpenApiException error = assertThrows(TkOpenApiException.class,
+                () -> service.create(request, "schedule-mode"));
+
+        assertEquals("SCHEDULE_MODE_UNSUPPORTED", error.getCode());
+    }
+
+    @Test
+    void shouldCreateScheduledTaskWithoutSubmittingImmediately() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokMediaMapper mediaMapper = mock(TkOpenTiktokMediaMapper.class);
+        TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenApiIdempotencyMapper idempotencyMapper = mock(TkOpenApiIdempotencyMapper.class);
+        TkOpenTiktokMediaService mediaService = mock(TkOpenTiktokMediaService.class);
+        TkOpenTiktokMediaDO media = TkOpenTiktokMediaDO.builder().id(1L).mediaId("media_1")
+                .clientId("client_b").fileName("video.mp4").status("READY").build();
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder().id(2L)
+                .connectionId("conn_1").clientId("client_b").authStatus("AUTHORIZED").build();
+        when(mediaMapper.selectByClientAndMediaId("client_b", "media_1")).thenReturn(media);
+        when(connectionMapper.selectListByClientAndIds(eq("client_b"), any()))
+                .thenReturn(Collections.singletonList(connection));
+        TkOpenTiktokPublishService service = newQuickService(taskMapper, detailMapper, mediaMapper,
+                connectionMapper, idempotencyMapper, mediaService);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-scheduled-create");
+        TkOpenTiktokPublishVO.TaskCreateReq request = request();
+        request.setScheduledAt("2099-09-26T18:00:00+08:00");
+
+        TkOpenTiktokPublishVO.TaskResp response = service.create(request, "scheduled-create");
+
+        assertEquals("SCHEDULED", response.getStatus());
+        assertEquals("SCHEDULED", response.getScheduleStatus());
+        assertTrue(response.getCanReschedule());
+        assertTrue(response.getCanCancel());
+        verify(mediaService).prepareForScheduledPublish(media);
+        verify(taskMapper).insert(any(TkOpenTiktokPublishTaskDO.class));
+        verifyNoMoreInteractions(mediaService);
+        service.destroy();
+    }
+
+    @Test
+    void shouldParseOffsetScheduledTimeInServerZone() {
+        assertEquals(java.time.OffsetDateTime.parse("2099-09-26T18:00:00+08:00")
+                        .atZoneSameInstant(java.time.ZoneId.systemDefault()).toLocalDateTime(),
+                TkOpenTiktokPublishService.parseScheduledAt("2099-09-26T18:00:00+08:00")
+        );
+    }
+
+    @Test
+    void shouldRescheduleBeforeExecution() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder().id(7L).taskId("task_schedule")
+                .clientId("client_b").status("SCHEDULED").scheduleStatus("SCHEDULED")
+                .scheduledAt(LocalDateTime.now().plusHours(1)).scheduleVersion(2).build();
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder().id(8L)
+                .taskId("task_schedule").clientId("client_b").status("SCHEDULED").build();
+        when(taskMapper.selectByClientAndTaskIdForUpdate("client_b", "task_schedule")).thenReturn(task);
+        when(detailMapper.selectListByClientAndTaskIdForUpdate("client_b", "task_schedule"))
+                .thenReturn(Collections.singletonList(detail));
+        when(taskMapper.update(any(), any())).thenReturn(1);
+        TkOpenTiktokPublishService service = newService(taskMapper, mock(TkOpenApiIdempotencyMapper.class));
+        ReflectionTestUtils.setField(service, "detailMapper", detailMapper);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-reschedule");
+
+        TkOpenTiktokPublishVO.TaskResp response = service.reschedule("task_schedule",
+                "2099-09-26T19:00:00+08:00", "reschedule-key");
+
+        assertEquals("SCHEDULED", response.getScheduleStatus());
+        assertTrue(response.getCanReschedule());
+        assertEquals(TkOpenTiktokPublishService.parseScheduledAt("2099-09-26T19:00:00+08:00"),
+                response.getScheduledAt());
+        service.destroy();
+    }
+
+    @Test
+    void shouldCancelBeforeExecutionAndReturnTerminalState() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkOpenTiktokPublishDetailDO.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkOpenTiktokPublishTaskDO.class);
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder().id(7L).taskId("task_cancel")
+                .clientId("client_b").status("SCHEDULED").scheduleStatus("SCHEDULED")
+                .scheduledAt(LocalDateTime.now().plusHours(1)).scheduleVersion(0).pendingCount(1).build();
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder().id(8L)
+                .taskId("task_cancel").clientId("client_b").status("SCHEDULED").build();
+        when(taskMapper.selectByClientAndTaskIdForUpdate("client_b", "task_cancel")).thenReturn(task);
+        when(detailMapper.selectListByClientAndTaskIdForUpdate("client_b", "task_cancel"))
+                .thenReturn(Collections.singletonList(detail));
+        when(detailMapper.update(any(), any())).thenReturn(1);
+        when(taskMapper.update(any(), any())).thenReturn(1);
+        TkOpenTiktokPublishService service = newService(taskMapper, mock(TkOpenApiIdempotencyMapper.class));
+        ReflectionTestUtils.setField(service, "detailMapper", detailMapper);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-cancel");
+
+        TkOpenTiktokPublishVO.TaskResp response = service.cancel("task_cancel");
+
+        assertEquals("CANCELLED", response.getStatus());
+        assertEquals("CANCELLED", response.getScheduleStatus());
+        assertFalse(response.getCanCancel());
+        assertEquals("CANCELLED", detail.getStatus());
+        service.destroy();
+    }
+
+    @Test
+    void shouldActivateDueScheduledTaskExactlyOnce() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder().id(7L).taskId("task_due")
+                .clientId("client_b").status("SCHEDULED").scheduleStatus("SCHEDULED")
+                .scheduledAt(LocalDateTime.now().minusMinutes(1)).scheduleVersion(3).build();
+        TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder().id(8L)
+                .taskId("task_due").clientId("client_b").status("SCHEDULED").build();
+        when(taskMapper.selectDueScheduled(any(), eq(100))).thenReturn(Collections.singletonList(task));
+        when(taskMapper.selectByClientAndTaskIdForUpdate("client_b", "task_due")).thenReturn(task);
+        when(detailMapper.selectListByClientAndTaskIdForUpdate("client_b", "task_due"))
+                .thenReturn(Collections.singletonList(detail));
+        when(detailMapper.update(any(), any())).thenReturn(1);
+        when(taskMapper.update(any(), any())).thenReturn(1);
+        TkOpenTiktokPublishService service = newService(taskMapper, mock(TkOpenApiIdempotencyMapper.class));
+        ReflectionTestUtils.setField(service, "detailMapper", detailMapper);
+        ReflectionTestUtils.setField(service, "stopping", true);
+
+        assertEquals(1, service.dispatchDueScheduled(100));
+        verify(detailMapper).update(any(), any());
+        verify(taskMapper).update(any(), any());
+        service.destroy();
     }
 
     @Test

@@ -48,6 +48,21 @@ class TkOpenTiktokControllerMappingTest {
     }
 
     @Test
+    void publishControllerExposesScheduleMutationEndpoints() throws Exception {
+        PostMapping reschedule = TkOpenTiktokPublishController.class
+                .getDeclaredMethod("reschedule", String.class,
+                        Class.forName("cn.iocoder.yudao.module.tk.controller.open.tiktok.vo.TkOpenTiktokPublishVO$ScheduleReq"),
+                        String.class)
+                .getAnnotation(PostMapping.class);
+        PostMapping cancel = TkOpenTiktokPublishController.class
+                .getDeclaredMethod("cancel", String.class)
+                .getAnnotation(PostMapping.class);
+
+        assertTrue(Arrays.asList(reschedule.value()).contains("/tasks/{taskId}/reschedule"));
+        assertTrue(Arrays.asList(cancel.value()).contains("/tasks/{taskId}/cancel"));
+    }
+
+    @Test
     void authControllerExposesProfileRefreshEndpoint() throws Exception {
         PostMapping mapping = TkOpenTiktokAuthController.class
                 .getDeclaredMethod("refreshProfile", String.class)
