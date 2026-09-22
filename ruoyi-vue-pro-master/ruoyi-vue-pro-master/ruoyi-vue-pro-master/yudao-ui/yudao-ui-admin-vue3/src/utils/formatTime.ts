@@ -92,6 +92,38 @@ export function formatNullableDate(
 }
 
 /**
+ * 格式化接口返回的时间戳或日期字符串
+ *
+ * @param value 支持秒级、毫秒级时间戳、数字字符串和日期字符串
+ * @param format 需要转换的时间格式字符串
+ * @param emptyText 空值或无效值展示文案
+ */
+export function formatTimestamp(
+  value: dayjs.ConfigType | null | undefined,
+  format = 'YYYY-MM-DD HH:mm:ss',
+  emptyText = '-'
+): string {
+  if (value === null || value === undefined || value === '') {
+    return emptyText
+  }
+
+  let normalizedValue = value
+  if (
+    typeof value === 'number' ||
+    (typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value.trim()))
+  ) {
+    const timestamp = Number(value)
+    if (!Number.isFinite(timestamp)) {
+      return emptyText
+    }
+    normalizedValue = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp
+  }
+
+  const parsed = dayjs(normalizedValue)
+  return parsed.isValid() ? parsed.format(format) : emptyText
+}
+
+/**
  * 获取当前的日期+时间
  */
 export function getNowDateTime() {

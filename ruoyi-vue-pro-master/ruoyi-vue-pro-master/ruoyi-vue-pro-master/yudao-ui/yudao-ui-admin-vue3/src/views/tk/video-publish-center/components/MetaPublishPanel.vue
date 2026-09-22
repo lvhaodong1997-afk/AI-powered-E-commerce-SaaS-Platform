@@ -43,8 +43,8 @@
             <div class="hint">{{ translateText(state.statsErrors[statsKey('account', row.id)] || state.stats[statsKey('account', row.id)]?.errorMessage) }}</div>
           </template></el-table-column>
           <el-table-column :label="mt('meta.statsUpdated')" min-width="170"><template #default="{ row }">{{ statsDate(state.stats[statsKey('account', row.id)]?.lastSuccessTime) }}</template></el-table-column>
-          <el-table-column prop="tokenExpiresAt" :label="mt('meta.tokenExpires')" min-width="170"><template #default="{ row }">{{ row.tokenExpiresAt || mt('meta.platformValidationFallback') }}</template></el-table-column>
-          <el-table-column prop="lastValidatedAt" :label="mt('meta.lastValidated')" min-width="170" />
+          <el-table-column :label="mt('meta.tokenExpires')" min-width="170"><template #default="{ row }">{{ row.tokenExpiresAt ? formatTimestamp(row.tokenExpiresAt) : mt('meta.platformValidationFallback') }}</template></el-table-column>
+          <el-table-column :label="mt('meta.lastValidated')" min-width="170"><template #default="{ row }">{{ formatTimestamp(row.lastValidatedAt) }}</template></el-table-column>
           <el-table-column prop="failReason" :label="mt('meta.failureReason')" min-width="170" show-overflow-tooltip />
           <el-table-column :label="mt('meta.actions')" min-width="360">
             <template #default="{ row }">
@@ -116,7 +116,7 @@
           <el-table-column prop="title" :label="mt('meta.titleColumn')" min-width="180" />
           <el-table-column :label="mt('meta.status')" min-width="140"><template #default="{ row }"><el-tag :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag></template></el-table-column>
           <el-table-column :label="mt('meta.result')" min-width="220"><template #default="{ row }">{{ taskResult(row) }}</template></el-table-column>
-          <el-table-column prop="createTime" :label="mt('meta.createdTime')" min-width="170" />
+          <el-table-column :label="mt('meta.createdTime')" min-width="170"><template #default="{ row }">{{ formatTimestamp(row.createTime) }}</template></el-table-column>
           <el-table-column :label="mt('meta.actions')" min-width="180"><template #default="{ row }">
             <el-button link @click="run(() => controller.openDetails(row.id))">{{ mt('meta.viewDetails') }}</el-button>
             <el-button link :disabled="state.syncing.includes(row.id)" @click="run(() => controller.sync(row.id))">{{ mt('meta.verifyStatus') }}</el-button>
@@ -179,6 +179,7 @@ import type { TkGenerationTaskVO } from '@/api/tk/generation'
 import { hasPermission } from '@/directives/permission/hasPermi'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import { translateMetaText } from '@/locales/tk/metaPublishMessages'
+import { formatTimestamp } from '@/utils/formatTime'
 import { accountLabel, canRetrySocialDetail, createMetaPublishController, isSocialAccountAuthorized, platformLabel, socialStatusLabel } from './metaPublishController'
 import MetaGeneratedPicker from './MetaGeneratedPicker.vue'
 import MetaMediaStatsDrawer from './MetaMediaStatsDrawer.vue'

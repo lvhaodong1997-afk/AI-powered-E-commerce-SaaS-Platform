@@ -4,12 +4,12 @@
       <div class="page-heading">
         <h2 class="page-title">{{ tt('accountStats.title') }}</h2>
         <p class="page-subtitle"
-          >{{ tt('accountStats.updatedAt') }}{{ formatDateTime(overview.dataUpdatedAt) }}</p
+          >{{ tt('accountStats.updatedAt') }}{{ formatTimestamp(overview.dataUpdatedAt, undefined, '--') }}</p
         >
       </div>
       <div class="page-actions">
         <el-tag v-if="overview.latestVideoSyncedAt" type="info" effect="plain">
-          {{ tt('accountStats.videoData') }}{{ formatDateTime(overview.latestVideoSyncedAt) }}
+          {{ tt('accountStats.videoData') }}{{ formatTimestamp(overview.latestVideoSyncedAt, undefined, '--') }}
         </el-tag>
         <el-button
           type="primary"
@@ -357,7 +357,7 @@
             </div>
             <div class="account-card-footer">
               <span>{{ tt('accountStats.statsUpdatedAt') }}</span>
-              <span class="footer-time">{{ formatDateTime(account.statsUpdatedAt) }}</span>
+                      <span class="footer-time">{{ formatTimestamp(account.statsUpdatedAt, undefined, '--') }}</span>
             </div>
           </el-card>
         </div>
@@ -374,7 +374,7 @@ import {
   type TkTiktokAccountStatsVO
 } from '@/api/tk/tiktokAccountStats'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
-import { formatDate } from '@/utils/formatTime'
+import { formatTimestamp } from '@/utils/formatTime'
 import { checkPermi } from '@/utils/permission'
 
 defineOptions({ name: 'TkTiktokAccountStats' })
@@ -441,8 +441,7 @@ const recentVideoTitle = (video: NonNullable<TkTiktokAccountStatsVO['recentVideo
 
 const formatCount = (value?: number | null) =>
   value == null ? '--' : new Intl.NumberFormat('en-US').format(value)
-const formatDateTime = (value?: string | null) => (value ? formatDate(value) : '--')
-const formatVideoTime = (value?: number | null) => (value == null ? '--' : formatDate(value * 1000))
+const formatVideoTime = (value?: number | null) => formatTimestamp(value, undefined, '--')
 const rankClass = (rank: number) => (rank <= 3 ? `rank-${rank}` : '')
 const toggleRanking = (ranking: keyof typeof expandedRankings) => {
   expandedRankings[ranking] = !expandedRankings[ranking]

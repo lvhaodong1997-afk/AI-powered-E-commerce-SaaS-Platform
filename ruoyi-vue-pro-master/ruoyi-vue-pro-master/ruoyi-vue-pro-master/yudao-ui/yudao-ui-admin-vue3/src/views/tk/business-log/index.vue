@@ -75,7 +75,9 @@
       <el-table-column label="操作人" prop="operatorId" width="110" />
       <el-table-column label="消息" prop="message" min-width="260" show-overflow-tooltip />
       <el-table-column label="详情" prop="detailJson" min-width="260" show-overflow-tooltip />
-      <el-table-column label="创建时间" prop="createTime" width="180" />
+      <el-table-column label="创建时间" width="180">
+        <template #default="{ row }">{{ formatTimestamp(row.createTime) }}</template>
+      </el-table-column>
     </el-table>
     <Pagination
       :total="total"
@@ -89,6 +91,7 @@
 <script setup lang="ts">
 import { TkBusinessLogApi } from '@/api/tk/businessLog'
 import type { TkBusinessLogVO } from '@/api/tk/businessLog'
+import { formatTimestamp } from '@/utils/formatTime'
 
 defineOptions({ name: 'TkBusinessLog' })
 

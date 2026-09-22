@@ -213,7 +213,9 @@
       <el-table-column label="失败原因" min-width="180" show-overflow-tooltip>
         <template #default="scope">{{ scope.row.status === 'FAILED' ? scope.row.failReason || '-' : '-' }}</template>
       </el-table-column>
-      <el-table-column label="创建时间" prop="createTime" min-width="170" />
+      <el-table-column label="创建时间" min-width="170">
+        <template #default="{ row }">{{ formatTimestamp(row.createTime) }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="90" fixed="right">
         <template #default="scope">
           <el-button link type="primary" @click="goReplayFromAnalysis(scope.row)">回溯</el-button>
@@ -550,6 +552,7 @@ import {
   buildGenerationOutputDisplayName,
   buildGenerationOutputDownloadName
 } from '@/utils/tkGenerationOutputName'
+import { formatTimestamp } from '@/utils/formatTime'
 import { buildClipPlanDetails, buildClipSectionSummary, ClipPlanDetailItem } from './clipPlan'
 
 defineOptions({ name: 'TkGeneration' })

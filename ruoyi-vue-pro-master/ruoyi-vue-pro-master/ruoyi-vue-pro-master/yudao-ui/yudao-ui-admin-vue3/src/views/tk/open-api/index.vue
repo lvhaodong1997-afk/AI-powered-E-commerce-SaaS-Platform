@@ -117,8 +117,8 @@
               />
             </template>
           </el-table-column>
-          <el-table-column :label="tt('openApi.client.updatedAt')" prop="updateTime" width="180">
-            <template #default="{ row }">{{ valueOrDash(row.updateTime) }}</template>
+          <el-table-column :label="tt('openApi.client.updatedAt')" width="180">
+            <template #default="{ row }">{{ formatTimestamp(row.updateTime) }}</template>
           </el-table-column>
           <el-table-column :label="tt('openApi.actions')" width="180" fixed="right">
             <template #default="{ row }">
@@ -219,7 +219,7 @@
             prop="requestDate"
             min-width="150"
           >
-            <template #default="{ row }">{{ valueOrDash(row.requestDate) }}</template>
+            <template #default="{ row }">{{ formatTimestamp(row.requestDate, 'YYYY-MM-DD') }}</template>
           </el-table-column>
           <el-table-column :label="tt('openApi.usage.clientId')" prop="clientId" min-width="220">
             <template #default="{ row }">{{ valueOrDash(row.clientId) }}</template>
@@ -342,8 +342,8 @@
               }}</div>
             </template>
           </el-table-column>
-          <el-table-column :label="tt('openApi.events.createdAt')" prop="createTime" width="180">
-            <template #default="{ row }">{{ valueOrDash(row.createTime) }}</template>
+          <el-table-column :label="tt('openApi.events.createdAt')" width="180">
+            <template #default="{ row }">{{ formatTimestamp(row.createTime) }}</template>
           </el-table-column>
           <el-table-column :label="tt('openApi.actions')" width="110" fixed="right">
             <template #default="{ row }">
@@ -561,16 +561,16 @@
             {{ eventDetail.lastHttpStatus ? `HTTP ${eventDetail.lastHttpStatus}` : '-' }}
           </el-descriptions-item>
           <el-descriptions-item :label="tt('openApi.detail.nextRetry')">{{
-            valueOrDash(eventDetail.nextRetryTime)
+            formatTimestamp(eventDetail.nextRetryTime)
           }}</el-descriptions-item>
           <el-descriptions-item :label="tt('openApi.detail.deliveredAt')">{{
-            valueOrDash(eventDetail.deliveredTime)
+            formatTimestamp(eventDetail.deliveredTime)
           }}</el-descriptions-item>
           <el-descriptions-item :label="tt('openApi.detail.lastError')">{{
             valueOrDash(eventDetail.lastError)
           }}</el-descriptions-item>
           <el-descriptions-item :label="tt('openApi.detail.createdAt')">{{
-            valueOrDash(eventDetail.createTime)
+            formatTimestamp(eventDetail.createTime)
           }}</el-descriptions-item>
         </el-descriptions>
         <section class="payload-section">
@@ -594,6 +594,7 @@ import {
   type OpenApiUsageVO
 } from '@/api/tk/openApi'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
+import { formatTimestamp } from '@/utils/formatTime'
 
 defineOptions({ name: 'TkOpenApi' })
 

@@ -113,7 +113,9 @@
             <code class="config-preview">{{ summarizeConfig(row.routeConfig) }}</code>
           </template>
         </el-table-column>
-        <el-table-column :label="copy.updatedAt" prop="updateTime" width="180" />
+        <el-table-column :label="copy.updatedAt" width="180">
+          <template #default="{ row }">{{ formatTimestamp(row.updateTime) }}</template>
+        </el-table-column>
         <el-table-column :label="copy.actions" width="170" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)" v-hasPermi="['tk:generation:create']">
@@ -213,7 +215,9 @@
         </el-table-column>
         <el-table-column :label="copy.weight" prop="trafficWeight" width="100" />
         <el-table-column :label="copy.abGroup" prop="abGroup" width="120" />
-        <el-table-column :label="copy.changedAt" prop="createTime" width="180" />
+        <el-table-column :label="copy.changedAt" width="180">
+          <template #default="{ row }">{{ formatTimestamp(row.createTime) }}</template>
+        </el-table-column>
         <el-table-column :label="copy.changeReason" prop="changeReason" min-width="180" />
         <el-table-column :label="copy.routeConfig" min-width="260">
           <template #default="{ row }">
@@ -235,6 +239,7 @@
 import { useLocaleStore } from '@/store/modules/locale'
 import { TkGenerationRouteApi, type TkGenerationRouteHistoryVO, type TkGenerationRouteStatisticsVO, type TkGenerationRouteVO } from '@/api/tk/generationRoute'
 import type { FormRules } from 'element-plus'
+import { formatTimestamp } from '@/utils/formatTime'
 
 defineOptions({ name: 'TkGenerationRoute' })
 

@@ -156,7 +156,7 @@
 <script setup lang="ts">
 import { TkTiktokAccountApi, TkTiktokContentDisplayApi } from '@/api/tk/videoPublishCenter'
 import type { TkTiktokAccountVO, TkTiktokContentVideoVO } from '@/api/tk/videoPublishCenter'
-import { formatDate } from '@/utils/formatTime'
+import { formatTimestamp } from '@/utils/formatTime'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 
 defineOptions({ name: 'TkTiktokContentDisplay' })
@@ -199,9 +199,6 @@ const statusLabel = (status?: string) =>
     : status === 'NO_LONGER_PUBLIC'
       ? tt('contentDisplay.noLongerPublic')
       : status || '-'
-const formatTimestamp = (value?: number) =>
-  value ? formatDate(value < 1_000_000_000_000 ? value * 1000 : value) : '-'
-
 const loadAccounts = async () => {
   const data = await TkTiktokAccountApi.getPage({
     pageNo: 1,

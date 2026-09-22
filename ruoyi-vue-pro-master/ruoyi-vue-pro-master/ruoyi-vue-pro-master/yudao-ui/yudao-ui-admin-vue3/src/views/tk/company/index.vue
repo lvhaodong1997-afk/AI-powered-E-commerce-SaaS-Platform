@@ -44,7 +44,9 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="创建时间" prop="createTime" width="180" />
+      <el-table-column label="创建时间" width="180">
+        <template #default="{ row }">{{ formatTimestamp(row.createTime) }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="150" fixed="right">
         <template #default="scope">
           <el-button link type="primary" @click="openForm(scope.row)" v-hasPermi="['tk:company:update']">
@@ -93,6 +95,7 @@
 import { TkCompanyApi } from '@/api/tk/videoPublishCenter'
 import type { TkCompanyVO } from '@/api/tk/videoPublishCenter'
 import type { FormRules } from 'element-plus'
+import { formatTimestamp } from '@/utils/formatTime'
 
 defineOptions({ name: 'TkCompany' })
 

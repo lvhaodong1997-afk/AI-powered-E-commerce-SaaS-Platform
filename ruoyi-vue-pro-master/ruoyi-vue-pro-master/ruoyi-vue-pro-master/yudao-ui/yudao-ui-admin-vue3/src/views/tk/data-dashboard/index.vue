@@ -242,7 +242,9 @@
           <el-table-column prop="title" :label="copy.titleColumn" min-width="150" show-overflow-tooltip />
           <el-table-column prop="currentStep" :label="copy.failureStep" width="130" />
           <el-table-column prop="failCode" :label="copy.failureCode" width="150" show-overflow-tooltip />
-          <el-table-column prop="createTime" :label="copy.createdTime" width="170" />
+          <el-table-column :label="copy.createdTime" width="170">
+            <template #default="{ row }">{{ formatTimestamp(row.createTime) }}</template>
+          </el-table-column>
           <el-table-column :label="copy.actions" width="120" fixed="right">
             <template #default="{ row }">
               <el-button text type="primary" @click="goGenerationTask(row.id)">
@@ -312,6 +314,7 @@ import type {
 } from '@/api/tk/dashboard'
 import { TkMaterialApi } from '@/api/tk/material'
 import { useLocaleStore } from '@/store/modules/locale'
+import { formatTimestamp } from '@/utils/formatTime'
 
 defineOptions({ name: 'TkDataDashboard' })
 

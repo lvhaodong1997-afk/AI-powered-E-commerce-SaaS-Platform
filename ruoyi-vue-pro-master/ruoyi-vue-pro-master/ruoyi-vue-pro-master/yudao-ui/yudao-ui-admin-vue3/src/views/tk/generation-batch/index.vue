@@ -69,7 +69,7 @@
           <template #default="{ row }">
             <div class="batch-title">{{ row.name || row.batchNo || `${copy.batchId} ${row.id}` }}</div>
             <div class="muted-line">{{ row.batchNo || '-' }}</div>
-            <div class="muted-line">{{ copy.createdTime }} {{ row.createTime || '-' }}</div>
+            <div class="muted-line">{{ copy.createdTime }} {{ formatTimestamp(row.createTime) }}</div>
           </template>
         </el-table-column>
         <el-table-column :label="copy.plan" min-width="170">
@@ -218,6 +218,7 @@
 import { TkGenerationBatchApi, type TkGenerationBatchDetailVO, type TkGenerationBatchVO } from '@/api/tk/generationBatch'
 import { TkMaterialApi } from '@/api/tk/material'
 import { useLocaleStore } from '@/store/modules/locale'
+import { formatTimestamp } from '@/utils/formatTime'
 
 defineOptions({ name: 'TkGenerationBatch' })
 

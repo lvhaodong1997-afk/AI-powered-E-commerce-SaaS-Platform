@@ -603,7 +603,7 @@ import {
 } from '@/api/tk/videoPublishCenter'
 import { uploadTikTokMediaInChunks } from '@/utils/tiktokMediaUpload'
 import { getTkUploadErrorMessage } from '@/utils/tkChunkUpload'
-import { formatDate } from '@/utils/formatTime'
+import { formatDate, formatTimestamp } from '@/utils/formatTime'
 import type {
   TkTiktokAccountGroupVO,
   TkTiktokAccountVO,
@@ -1226,14 +1226,6 @@ const displayVideoFileName = (url?: string) => {
   } catch {
     return fileName
   }
-}
-const formatTimestamp = (value?: string | number) => {
-  if (value === undefined || value === null || value === '') return '-'
-  const parsedValue = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value
-  const normalizedValue = typeof parsedValue === 'number' && parsedValue < 1_000_000_000_000
-    ? parsedValue * 1000
-    : parsedValue
-  return formatDate(normalizedValue) || '-'
 }
 const accountDisplayName = (account: Partial<TkTiktokAccountVO>) => account.displayName || account.username || account.openId || ('Account #' + account.id)
 const accountInitial = (row: TkTiktokAccountVO) => accountDisplayName(row).slice(0, 1).toUpperCase()
