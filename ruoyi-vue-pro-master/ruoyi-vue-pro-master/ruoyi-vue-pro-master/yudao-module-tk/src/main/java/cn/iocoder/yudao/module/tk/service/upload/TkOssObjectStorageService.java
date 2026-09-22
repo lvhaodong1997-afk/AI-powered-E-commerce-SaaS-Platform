@@ -20,6 +20,7 @@ import java.util.Arrays;
 import java.util.Locale;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.nio.file.Files;
@@ -59,19 +60,65 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
             String resource = "/" + oss.getBucket() + "/" + objectKey;
             String date = OSS_GMT_DATE_FORMATTER.format(Instant.now());
             String signature = TkOssRestSigner.sign("DELETE", "", "", date, resource, oss.getAccessKeySecret());
-            try (HttpResponse response = HttpRequest.delete(uploadUrl(oss) + "/" + encodePath(objectKey))
-                    .header("Date", date)
-                    .header("Authorization", "OSS " + oss.getAccessKeyId() + ":" + signature)
-                    .timeout(OSS_HTTP_TIMEOUT_MILLIS)
-                    .execute()) {
-                int status = response.getStatus();
+            HttpURLConnection connection = null;
+            try {
+                connection = openDeleteConnection(uploadUrl(oss) + "/" + encodePath(objectKey));
+                connection.setRequestProperty("Date", date);
+                connection.setRequestProperty("Authorization", "OSS " + oss.getAccessKeyId() + ":" + signature);
+                int status = connection.getResponseCode();
                 if (status == 204 || status == 404) {
                     return;
                 }
-                String body = StrUtil.trim(response.body());
+                String body = StrUtil.trim(readResponseBody(connection, status));
                 if (attempt == OSS_DELETE_MAX_ATTEMPTS || !isRetryableDeleteStatus(status)) {
                     throw new IllegalStateException(StrUtil.format("删除 OSS 文件失败，HTTP {}：{}，响应：{}",
                             status, objectKey, StrUtil.sub(body, 0, 500)));
+                }
+            } catch (IOException ex) {
+                if (attempt == OSS_DELETE_MAX_ATTEMPTS) {
+                    throw new IllegalStateException("删除 OSS 文件失败，网络异常：" + objectKey, ex);
+                }
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        }
+    }
+
+    static HttpURLConnection openDeleteConnection(String url) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        connection.setInstanceFollowRedirects(false);
+        connection.setConnectTimeout(15_000);
+        connection.setReadTimeout(OSS_HTTP_TIMEOUT_MILLIS);
+        connection.setRequestMethod("DELETE");
+        return connection;
+    }
+
+    private String readResponseBody(HttpURLConnection connection, int status) {
+        InputStream input = null;
+        try {
+            input = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            if (input == null) {
+                return "";
+            }
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[512];
+            int total = 0;
+            int count;
+            while (total < 500 && (count = input.read(buffer, 0, Math.min(buffer.length, 500 - total))) != -1) {
+                output.write(buffer, 0, count);
+                total += count;
+            }
+            return output.toString(StandardCharsets.UTF_8.name());
+        } catch (IOException ignored) {
+            return "";
+        } finally {
+            if (input != null) {
+                try {
+                    input.close();
+                } catch (IOException ignored) {
+                    // Ignore response cleanup failures after the status is known.
                 }
             }
         }

@@ -213,6 +213,15 @@ class TkFileCleanupServiceTest {
     }
 
     @Test
+    void cleanupLogUrlOmitsSignedQueryParameters() {
+        String signedUrl = "https://oss.example.com/tk/1/2/generation-tasks/143/output.mp4"
+                + "?OSSAccessKeyId=secret&Expires=2101103749&Signature=signature";
+
+        assertEquals("https://oss.example.com/tk/1/2/generation-tasks/143/output.mp4",
+                TkFileCleanupService.urlForLog(signedUrl));
+    }
+
+    @Test
     void cleanupExpiredPublishMediaDeletesOssObjectBeforeMediaRecord() {
         TkFileCleanupService service = createService();
         TkTiktokPublishMediaMapper mediaMapper = (TkTiktokPublishMediaMapper)

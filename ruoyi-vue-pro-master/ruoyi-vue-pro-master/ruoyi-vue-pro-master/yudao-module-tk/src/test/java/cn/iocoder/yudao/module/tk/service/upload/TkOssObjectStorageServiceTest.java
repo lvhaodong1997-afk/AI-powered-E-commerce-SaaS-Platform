@@ -1,10 +1,16 @@
 package cn.iocoder.yudao.module.tk.service.upload;
 
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.util.concurrent.atomic.AtomicReference;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TkOssObjectStorageServiceTest {
@@ -57,6 +63,31 @@ class TkOssObjectStorageServiceTest {
         TkOssObjectStorageService service = new TkOssObjectStorageService();
 
         assertEquals("https://example.com/opening.mp4", service.resolveReadUrl("https://example.com/opening.mp4"));
+    }
+
+    @Test
+    void deleteRequestDoesNotAddUnsignedDefaultContentType() throws Exception {
+        AtomicReference<String> contentType = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/object.mp4", exchange -> {
+            contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            HttpURLConnection connection = TkOssObjectStorageService.openDeleteConnection(
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/object.mp4");
+            try {
+                assertEquals(204, connection.getResponseCode());
+            } finally {
+                connection.disconnect();
+            }
+        } finally {
+            server.stop(0);
+        }
+
+        assertNull(contentType.get());
     }
 
 }

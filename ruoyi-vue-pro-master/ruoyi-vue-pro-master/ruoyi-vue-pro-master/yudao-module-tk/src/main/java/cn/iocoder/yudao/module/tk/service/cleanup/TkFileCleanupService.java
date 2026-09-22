@@ -52,6 +52,11 @@ public class TkFileCleanupService {
             "subtitle_layout_url",
             "subtitle_ass_url");
 
+    static String urlForLog(String url) {
+        String value = StrUtil.blankToDefault(url, "");
+        return StrUtil.subBefore(StrUtil.subBefore(value, "?", false), "#", false);
+    }
+
     @Resource
     private TkGenerationProperties generationProperties;
     @Resource
@@ -424,7 +429,8 @@ public class TkFileCleanupService {
                 ossUploadService.deleteByUrl(url);
                 deletedUrls.add(url);
             } catch (Exception ex) {
-                log.warn("[deleteManagedOssGenerationUrls][url({}) TK 过期生成文件 OSS 删除失败]", url, ex);
+                log.warn("[deleteManagedOssGenerationUrls][url({}) TK 过期生成文件 OSS 删除失败]",
+                        urlForLog(url), ex);
             }
         }
         return deletedUrls;
