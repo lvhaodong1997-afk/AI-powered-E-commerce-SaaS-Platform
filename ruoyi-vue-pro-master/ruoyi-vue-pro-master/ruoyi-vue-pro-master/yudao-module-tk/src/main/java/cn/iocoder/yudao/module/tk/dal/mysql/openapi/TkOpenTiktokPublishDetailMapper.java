@@ -3,7 +3,10 @@ package cn.iocoder.yudao.module.tk.dal.mysql.openapi;
 import cn.iocoder.yudao.framework.mybatis.core.mapper.BaseMapperX;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishDetailDO;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,13 +26,14 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
                 .orderByAsc(TkOpenTiktokPublishDetailDO::getId));
     }
 
-    default List<TkOpenTiktokPublishDetailDO> selectListByClientAndTaskIdForUpdate(String clientId, String taskId) {
-        return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
-                .eq(TkOpenTiktokPublishDetailDO::getClientId, clientId)
-                .eq(TkOpenTiktokPublishDetailDO::getTaskId, taskId)
-                .orderByAsc(TkOpenTiktokPublishDetailDO::getId)
-                .last("FOR UPDATE"));
-    }
+    // This @TenantIgnore table is scoped by client_id, not tenant/department permissions.
+    // JSqlParser 4.9 reorders ORDER BY ... FOR UPDATE into invalid MySQL syntax;
+    // keep this dedicated locking statement out of both SQL-rewriting interceptors.
+    @InterceptorIgnore(tenantLine = "true", dataPermission = "true")
+    @Select("SELECT * FROM tk_open_tiktok_publish_detail WHERE deleted = 0 "
+            + "AND client_id = #{clientId} AND task_id = #{taskId} ORDER BY id ASC FOR UPDATE")
+    List<TkOpenTiktokPublishDetailDO> selectListByClientAndTaskIdForUpdate(
+            @Param("clientId") String clientId, @Param("taskId") String taskId);
 
     default List<TkOpenTiktokPublishDetailDO> selectStalePending(LocalDateTime deadline, int limit) {
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
