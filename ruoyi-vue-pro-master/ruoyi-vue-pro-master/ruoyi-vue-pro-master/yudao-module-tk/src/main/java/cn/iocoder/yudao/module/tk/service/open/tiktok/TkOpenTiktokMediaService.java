@@ -24,6 +24,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -196,6 +197,16 @@ public class TkOpenTiktokMediaService {
         }
         try {
             Files.deleteIfExists(path);
+            Path mediaDirectory = root.resolve(safeSegment(media.getClientId()))
+                    .resolve(safeSegment(media.getMediaId())).normalize();
+            if (mediaDirectory.equals(path.getParent())
+                    && mediaDirectory.getNameCount() == root.getNameCount() + 2) {
+                try {
+                    Files.deleteIfExists(mediaDirectory);
+                } catch (DirectoryNotEmptyException ignored) {
+                    // Preserve any other files; never recursively delete the directory.
+                }
+            }
             mediaMapper.updateById(new TkOpenTiktokMediaDO().setId(media.getId())
                     .setScheduledDownloadStatus("CLEANED").setScheduledDownloadFailReason(null));
         } catch (Exception ex) {

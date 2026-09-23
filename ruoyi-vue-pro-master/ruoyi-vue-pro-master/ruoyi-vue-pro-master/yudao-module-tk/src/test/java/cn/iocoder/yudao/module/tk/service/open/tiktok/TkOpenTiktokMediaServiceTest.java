@@ -173,9 +173,57 @@ class TkOpenTiktokMediaServiceTest {
         service.cleanupScheduledPublishMedia(media);
 
         assertFalse(Files.exists(file));
+        assertFalse(Files.exists(file.getParent()));
+        assertTrue(Files.isDirectory(root.resolve("client_b")));
         ArgumentCaptor<TkOpenTiktokMediaDO> update = ArgumentCaptor.forClass(TkOpenTiktokMediaDO.class);
         verify(mapper).updateById(update.capture());
         assertEquals("CLEANED", update.getValue().getScheduledDownloadStatus());
+        assertDoesNotThrow(() -> service.cleanupScheduledPublishMedia(media));
+        verify(mapper, times(2)).updateById(any(TkOpenTiktokMediaDO.class));
+    }
+
+    @Test
+    void shouldPreserveOtherFilesInScheduledMediaDirectory(@TempDir Path root) throws Exception {
+        TkOpenTiktokMediaMapper mapper = mock(TkOpenTiktokMediaMapper.class);
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getUpload().setScheduledPublishRootDir(root.toString());
+        Path file = root.resolve("client_b/media_1/video.mp4");
+        Files.createDirectories(file.getParent());
+        Files.write(file, new byte[]{1});
+        Path other = file.resolveSibling("other.mp4");
+        Files.write(other, new byte[]{2, 3});
+        TkOpenTiktokMediaDO media = TkOpenTiktokMediaDO.builder().id(9L).mediaId("media_1")
+                .clientId("client_b").scheduledLocalPath(file.toString()).build();
+        TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, null, properties,
+                mock(TkOssObjectStorageClient.class));
+
+        service.cleanupScheduledPublishMedia(media);
+
+        assertFalse(Files.exists(file));
+        assertArrayEquals(new byte[]{2, 3}, Files.readAllBytes(other));
+        ArgumentCaptor<TkOpenTiktokMediaDO> update = ArgumentCaptor.forClass(TkOpenTiktokMediaDO.class);
+        verify(mapper).updateById(update.capture());
+        assertEquals("CLEANED", update.getValue().getScheduledDownloadStatus());
+    }
+
+    @Test
+    void shouldNotRemoveParentForLegacyScheduledPath(@TempDir Path root) throws Exception {
+        TkOpenTiktokMediaMapper mapper = mock(TkOpenTiktokMediaMapper.class);
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getUpload().setScheduledPublishRootDir(root.toString());
+        Path file = root.resolve("client_b/video.mp4");
+        Files.createDirectories(file.getParent());
+        Files.write(file, new byte[]{1});
+        TkOpenTiktokMediaDO media = TkOpenTiktokMediaDO.builder().id(9L).mediaId("media_1")
+                .clientId("client_b").scheduledLocalPath(file.toString()).build();
+        TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, null, properties,
+                mock(TkOssObjectStorageClient.class));
+
+        service.cleanupScheduledPublishMedia(media);
+
+        assertFalse(Files.exists(file));
+        assertTrue(Files.isDirectory(file.getParent()));
+        assertTrue(Files.isDirectory(root));
     }
 
     @Test
