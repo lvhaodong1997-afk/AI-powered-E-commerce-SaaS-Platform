@@ -478,13 +478,14 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 ? null : publishMediaMapper.selectById(detail.getUploadedVideoId());
         String videoMimeType = uploadedVideo == null
                 ? inferVideoMimeType(videoUrl) : uploadedVideo.getMimeType();
+        UploadSource uploadSource = null;
         try {
             TkTiktokApiClient.CreatorInfo creatorInfo = queryCreatorInfoWithRetry(account.getId());
             if (!creatorInfo.isSuccess()) {
                 failDetail(detail, creatorInfo.getFailReason());
                 return;
             }
-            UploadSource uploadSource = resolveUploadSource(videoUrl, videoMimeType);
+            uploadSource = resolveUploadSource(videoUrl, videoMimeType);
             try {
                 TkTiktokApiClient.PublishResult result = initVideoPostWithRetry(account.getId(), detail.getPostMode(),
                         buildPublishPayload(detail, publishTask.getTitle(), publishTask.getCaption(), videoUrl, uploadSource, creatorInfo));
@@ -515,6 +516,10 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             }
         } catch (Exception ex) {
             if (StrUtil.isNotBlank(detail.getPublishId()) && isUploadFailure(ex)) {
+                if (reconcileExpiredUpload(detail, account.getId(), ex,
+                        uploadSource == null ? null : uploadSource.getVideoSize())) {
+                    return;
+                }
                 markUploadPending(detail, ex);
                 return;
             }
@@ -543,6 +548,61 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             current = current.getCause();
         }
         return false;
+    }
+
+    static boolean isConfirmedExpiredUpload(TkTiktokApiClient.UploadException uploadError,
+                                            TkTiktokApiClient.PostStatusResult status,
+                                            long fileSize) {
+        return uploadError != null && uploadError.isUploadUrlExpired()
+                && status != null && status.isSuccess()
+                && StrUtil.equals(status.getStatus(), "PROCESSING_UPLOAD")
+                && status.getUploadedBytes() != null
+                && status.getUploadedBytes() >= 0
+                && status.getUploadedBytes() < fileSize;
+    }
+
+    private boolean reconcileExpiredUpload(TkTiktokPublishDetailDO detail, Long accountId,
+                                           Throwable throwable, Long fileSize) {
+        TkTiktokApiClient.UploadException uploadError = findUploadException(throwable);
+        if (uploadError == null || !uploadError.isUploadUrlExpired() || fileSize == null || fileSize <= 0) {
+            return false;
+        }
+        try {
+            TkTiktokApiClient.PostStatusResult status = fetchPostStatusWithRetry(accountId, detail.getPublishId());
+            if (!status.isSuccess()) return false;
+            if (isConfirmedExpiredUpload(uploadError, status, fileSize)) {
+                failExpiredUpload(detail, status.getUploadedBytes(), fileSize);
+                return true;
+            }
+            applyPostStatusResult(detail, accountId, status);
+            return true;
+        } catch (Exception statusError) {
+            log.warn("[reconcileExpiredUpload][detailId({}) TikTok 状态查询失败]", detail.getId(), statusError);
+            return false;
+        }
+    }
+
+    private TkTiktokApiClient.UploadException findUploadException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof TkTiktokApiClient.UploadException) {
+                return (TkTiktokApiClient.UploadException) current;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private void failExpiredUpload(TkTiktokPublishDetailDO detail, long uploadedBytes, long fileSize) {
+        detail.setStatus(STATUS_FAILED);
+        detail.setTiktokStatus("PROCESSING_UPLOAD");
+        detail.setFailReason(StrUtils.maxLength(StrUtil.format(
+                "TikTok 分片上传地址已过期，上传未完成（{}/{} 字节）", uploadedBytes, fileSize), 512));
+        detail.setLastSyncTime(LocalDateTime.now());
+        publishDetailMapper.updateById(detail);
+        businessLogService.error(detail.getBusinessTraceId(), "TIKTOK_PUBLISH", detail.getPublishTaskId(),
+                "DETAIL_UPLOAD_EXPIRED", STATUS_FAILED,
+                StrUtil.format("账号 {} 上传地址已过期且未完成上传", detail.getAccountDisplayName()), detail);
     }
 
     private void markUploadPending(TkTiktokPublishDetailDO detail, Exception ex) {
@@ -605,11 +665,23 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 failDetail(detail, result.getFailReason());
                 return;
             }
+            applyPostStatusResult(detail, account.getId(), result);
+        } catch (Exception ex) {
+            if (isUploadPending(detail)) {
+                markUploadPending(detail, "TikTok 状态同步暂未确认：" + ex.getMessage());
+                return;
+            }
+            failDetail(detail, "TikTok 状态同步失败：" + ex.getMessage());
+        }
+    }
+
+    private void applyPostStatusResult(TkTiktokPublishDetailDO detail, Long accountId,
+                                       TkTiktokApiClient.PostStatusResult result) {
             String tiktokStatus = StrUtil.blankToDefault(result.getStatus(), STATUS_PROCESSING);
             detail.setTiktokStatus(tiktokStatus);
             detail.setLastSyncTime(LocalDateTime.now());
             if (isTikTokPublishSuccess(tiktokStatus)) {
-                PublicLinkCaptureResult captureResult = capturePublishUrl(detail, account.getId(), result);
+                PublicLinkCaptureResult captureResult = capturePublishUrl(detail, accountId, result);
                 if (shouldWaitForPublicPost(detail, result)) {
                     if (scheduleLinkRetry(detail, null)) {
                         detail.setStatus(STATUS_PROCESSING);
@@ -639,13 +711,6 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             } else {
                 publishDetailMapper.updateById(detail);
             }
-        } catch (Exception ex) {
-            if (isUploadPending(detail)) {
-                markUploadPending(detail, "TikTok 状态同步暂未确认：" + ex.getMessage());
-                return;
-            }
-            failDetail(detail, "TikTok 状态同步失败：" + ex.getMessage());
-        }
     }
 
     private boolean shouldWaitForPublicPost(TkTiktokPublishDetailDO detail,

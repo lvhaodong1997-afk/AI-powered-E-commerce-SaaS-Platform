@@ -357,6 +357,24 @@ class TkTiktokPublishServiceImplTest {
     }
 
     @Test
+    void onlyIncompleteProcessingUploadConfirmsExpiredUploadFailure() {
+        TkTiktokApiClient.UploadException expired = new TkTiktokApiClient.UploadException(403);
+        TkTiktokApiClient.PostStatusResult incomplete = new TkTiktokApiClient.PostStatusResult(
+                true, "PROCESSING_UPLOAD", null, null, Collections.emptyList(), 40L);
+        TkTiktokApiClient.PostStatusResult completed = new TkTiktokApiClient.PostStatusResult(
+                true, "PUBLISH_COMPLETE", null, null, Collections.singletonList("post-1"), 100L);
+        TkTiktokApiClient.PostStatusResult unavailable = new TkTiktokApiClient.PostStatusResult(
+                false, "FAILED", "network unavailable", "network_error");
+
+        assertTrue(TkTiktokPublishServiceImpl.isConfirmedExpiredUpload(expired, incomplete, 100L));
+        assertFalse(TkTiktokPublishServiceImpl.isConfirmedExpiredUpload(expired, completed, 100L));
+        assertFalse(TkTiktokPublishServiceImpl.isConfirmedExpiredUpload(expired, unavailable, 100L));
+        assertFalse(TkTiktokPublishServiceImpl.isConfirmedExpiredUpload(
+                new TkTiktokApiClient.UploadException(500), incomplete, 100L));
+        assertFalse(TkTiktokPublishServiceImpl.isConfirmedExpiredUpload(expired, incomplete, 40L));
+    }
+
+    @Test
     void successfulPublicPostAutomaticallyPersistsShareUrl() {
         TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
         TkTiktokTokenService tokenService = mock(TkTiktokTokenService.class);

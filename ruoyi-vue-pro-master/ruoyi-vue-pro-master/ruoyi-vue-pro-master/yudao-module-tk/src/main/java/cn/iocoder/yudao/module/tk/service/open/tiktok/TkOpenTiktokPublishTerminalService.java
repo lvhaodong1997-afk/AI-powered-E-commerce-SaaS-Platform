@@ -63,6 +63,39 @@ public class TkOpenTiktokPublishTerminalService {
         return confirmInternal(expected, "FAILED", null, reason, evidenceSource, ownerToken);
     }
 
+    /**
+     * A TikTok upload URL expiry is authoritative only when the current worker owns the upload attempt,
+     * the persisted upload error is HTTP 403, and TikTok still reports fewer uploaded bytes than the file size.
+     * The original TikTok status remains PROCESSING_UPLOAD while the local outcome becomes FAILED.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean confirmUploadExpired(TkOpenTiktokPublishDetailDO expected, String ownerToken,
+                                        long uploadedBytes, String reason) {
+        if (!validSnapshot(expected) || StrUtil.isBlank(ownerToken) || uploadedBytes < 0) return false;
+        TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskIdForUpdate(
+                expected.getClientId(), expected.getTaskId());
+        if (task == null) return false;
+        TkOpenTiktokPublishDetailDO detail = lockDetail(expected);
+        if (!sameAttempt(expected, detail) || !"PROCESSING".equals(detail.getStatus())
+                || StrUtil.isBlank(detail.getPublishId())) return false;
+        TkOpenTiktokPublishAttemptDO attempt = lockAttempt(detail);
+        if (!validExpiredUploadAttempt(detail, attempt, ownerToken, uploadedBytes)) return false;
+
+        LocalDateTime now = LocalDateTime.now();
+        String failReason = StrUtil.maxLength(StrUtil.blankToDefault(reason,
+                "TikTok upload URL expired before all bytes were uploaded"), 1000);
+        if (detailMapper.update(null, detailUpdateGuard(detail)
+                .set(TkOpenTiktokPublishDetailDO::getStatus, "FAILED")
+                .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "PROCESSING_UPLOAD")
+                .set(TkOpenTiktokPublishDetailDO::getFailReason, failReason)
+                .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, now)) != 1) return false;
+        detail.setStatus("FAILED").setTiktokStatus("PROCESSING_UPLOAD")
+                .setFailReason(failReason).setLastSyncTime(now);
+        recordEvidence(detail, attempt, "UPLOAD_EXPIRED_CONFIRMED", now);
+        aggregateAndEnqueue(detail, task);
+        return true;
+    }
+
     private boolean confirmInternal(TkOpenTiktokPublishDetailDO expected, String platformStatus, String postId,
                                     String reason, String evidenceSource, String ownerToken) {
         String outcome = "PUBLISH_COMPLETE".equals(platformStatus) ? "SUCCESS"
@@ -162,6 +195,19 @@ public class TkOpenTiktokPublishTerminalService {
                 : "INIT_REJECTED".equals(source) && "INIT_SENT".equals(attempt.getPhase());
     }
 
+    private boolean validExpiredUploadAttempt(TkOpenTiktokPublishDetailDO detail,
+                                              TkOpenTiktokPublishAttemptDO attempt,
+                                              String ownerToken, long uploadedBytes) {
+        return attempt != null
+                && Objects.equals(ownerToken, attempt.getOwnerToken())
+                && compatibleAttempt(detail, attempt)
+                && "UPLOADING".equals(attempt.getPhase())
+                && "FILE_UPLOAD".equals(attempt.getUploadSource())
+                && attempt.getFileSize() != null
+                && attempt.getFileSize() > uploadedBytes
+                && StrUtil.containsIgnoreCase(attempt.getLastError(), "HTTP 403");
+    }
+
     private boolean hasRepairEvidence(TkOpenTiktokPublishDetailDO detail, TkOpenTiktokPublishAttemptDO attempt) {
         if (attempt == null) {
             // Legacy failure writers collapsed local exceptions and heuristic guesses into FAILED.
@@ -211,6 +257,8 @@ public class TkOpenTiktokPublishTerminalService {
                 .set(TkOpenTiktokPublishAttemptDO::getLastError, detail.getFailReason())
                 .set(TkOpenTiktokPublishAttemptDO::getNextReconcileTime, null));
         if (changed != 1) throw new IllegalStateException("Publish attempt changed during terminal confirmation");
+        attempt.setPhase("CONFIRMED_TERMINAL").setTerminalSource(source).setTerminalTime(now)
+                .setLastError(detail.getFailReason()).setNextReconcileTime(null);
     }
 
     private void aggregateAndEnqueue(TkOpenTiktokPublishDetailDO detail, TkOpenTiktokPublishTaskDO task) {

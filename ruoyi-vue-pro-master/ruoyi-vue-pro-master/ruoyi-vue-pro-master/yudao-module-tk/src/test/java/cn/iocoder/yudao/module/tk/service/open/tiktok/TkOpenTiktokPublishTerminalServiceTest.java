@@ -224,6 +224,45 @@ class TkOpenTiktokPublishTerminalServiceTest {
     }
 
     @Test
+    void confirmsExpiredUploadOnlyWithOwnedIncompleteUploadEvidence() {
+        TkOpenTiktokPublishAttemptDO attempt = TkOpenTiktokPublishAttemptDO.builder()
+                .id(3L).clientId("c").taskId("t").detailId("d").attemptNo(0)
+                .ownerToken("owner").phase("UPLOADING").publishId("publish")
+                .uploadSource("FILE_UPLOAD")
+                .fileSize(100L).lastError("TikTok 分片上传失败，HTTP 403").build();
+        when(attempts.selectOne(any(Wrapper.class))).thenReturn(attempt);
+        when(attempts.update(isNull(), any(Wrapper.class))).thenReturn(1);
+
+        assertTrue(service.confirmUploadExpired(expected, "owner", 40L,
+                "TikTok publish failed: upload URL expired before all bytes were uploaded"));
+
+        assertEquals("FAILED", current.getStatus());
+        assertEquals("PROCESSING_UPLOAD", current.getTiktokStatus());
+        assertEquals("UPLOAD_EXPIRED_CONFIRMED", attempt.getTerminalSource());
+        verify(callbacks).enqueueOnce(eq("c"), eq("publish.failed"), eq("PUBLISH_DETAIL"),
+                eq("d"), anyMap(), eq(0));
+    }
+
+    @Test
+    void rejectsExpiredUploadWithoutExactOwnedIncompleteEvidence() {
+        TkOpenTiktokPublishAttemptDO attempt = TkOpenTiktokPublishAttemptDO.builder()
+                .id(3L).clientId("c").taskId("t").detailId("d").attemptNo(0)
+                .ownerToken("owner").phase("UPLOADING").publishId("publish")
+                .uploadSource("FILE_UPLOAD")
+                .fileSize(100L).lastError("TikTok 分片上传失败，HTTP 500").build();
+        when(attempts.selectOne(any(Wrapper.class))).thenReturn(attempt);
+
+        assertFalse(service.confirmUploadExpired(expected, "owner", 40L, "expired"));
+        attempt.setLastError("TikTok 分片上传失败，HTTP 403");
+        assertFalse(service.confirmUploadExpired(expected, "stale-owner", 40L, "expired"));
+        assertFalse(service.confirmUploadExpired(expected, "owner", 100L, "expired"));
+
+        assertEquals("PROCESSING", current.getStatus());
+        verify(details, never()).update(isNull(), any(Wrapper.class));
+        verifyNoInteractions(callbacks);
+    }
+
+    @Test
     void missingTaskOrDetailDoesNotWriteAnything() {
         when(tasks.selectByClientAndTaskIdForUpdate("c", "t")).thenReturn(null);
         assertFalse(service.confirm(expected, "FAILED", null, "reason", "STATUS_API"));
