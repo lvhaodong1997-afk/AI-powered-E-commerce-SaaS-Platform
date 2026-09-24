@@ -169,6 +169,11 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
         return StrUtil.isBlank(objectKey) ? url : toReadUrl(objectKey);
     }
 
+    /** Returns whether the URL belongs to the currently configured OSS public base URL. */
+    public boolean isOwnedObjectUrl(String url) {
+        return StrUtil.isNotBlank(url) && StrUtil.isNotBlank(toObjectKey(url));
+    }
+
     /** Resolve only URLs belonging to configured OSS; never fetch a URL supplied by the browser. */
     public String requireOwnedObjectKey(String url, Long tenantId, Long companyId) {
         String key = toObjectKey(url);
@@ -345,18 +350,32 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
 
     private String toObjectKey(String url) {
         TkGenerationProperties.Oss oss = getOss();
-        if (oss == null || StrUtil.isBlank(oss.getPublicBaseUrl())) {
+        if (oss == null || StrUtil.isBlank(url)) {
             return null;
         }
-        String publicBaseUrl = StrUtil.removeSuffix(oss.getPublicBaseUrl(), "/");
+        String objectKey = toObjectKey(url, oss.getPublicBaseUrl());
+        if (StrUtil.isNotBlank(objectKey)) {
+            return objectKey;
+        }
+        if (StrUtil.hasBlank(oss.getBucket(), oss.getEndpoint())) {
+            return null;
+        }
+        return toObjectKey(url, uploadUrl(oss));
+    }
+
+    private String toObjectKey(String url, String baseUrl) {
+        if (StrUtil.isBlank(baseUrl)) {
+            return null;
+        }
+        String normalizedBaseUrl = StrUtil.removeSuffix(baseUrl, "/");
         String normalizedUrl = StrUtil.subBefore(url, "?", false);
-        if (!StrUtil.startWithIgnoreCase(normalizedUrl, publicBaseUrl + "/")) {
+        if (!StrUtil.startWithIgnoreCase(normalizedUrl, normalizedBaseUrl + "/")) {
             return null;
         }
         try {
             URI uri = URI.create(normalizedUrl);
             String objectPath = uri.getRawPath();
-            String basePath = URI.create(publicBaseUrl).getRawPath();
+            String basePath = URI.create(normalizedBaseUrl).getRawPath();
             if (StrUtil.isNotBlank(basePath) && !"/".equals(basePath)) {
                 objectPath = StrUtil.removePrefix(objectPath, basePath);
             }

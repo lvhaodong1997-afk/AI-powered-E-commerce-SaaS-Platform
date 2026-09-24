@@ -6,6 +6,8 @@ import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService;
+import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient.ObjectMetadata;
+import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
@@ -25,14 +27,17 @@ public class TkTiktokScheduledMediaService {
 
     private final TkGenerationProperties generationProperties;
     private final TkLocalUploadStorageService localStorageService;
+    private final TkOssObjectStorageService ossObjectStorageService;
 
     public TkTiktokScheduledMediaService(TkGenerationProperties generationProperties,
-                                         TkLocalUploadStorageService localStorageService) {
+                                         TkLocalUploadStorageService localStorageService,
+                                         TkOssObjectStorageService ossObjectStorageService) {
         this.generationProperties = generationProperties;
         this.localStorageService = localStorageService;
+        this.ossObjectStorageService = ossObjectStorageService;
     }
 
-    public String persist(Long tenantId, String sourceUrl, Long uploadedVideoId, String mimeType) {
+    public String persist(Long tenantId, Long companyId, String sourceUrl, Long uploadedVideoId, String mimeType) {
         if (tenantId == null || StrUtil.isBlank(sourceUrl)) {
             throw new IllegalArgumentException("定时发布素材来源不能为空");
         }
@@ -40,22 +45,29 @@ public class TkTiktokScheduledMediaService {
         String extension = resolveExtension(sourceUrl, mimeType);
         String fileName = UUID.randomUUID().toString().replace("-", "") + extension;
         Path target = root.resolve(String.valueOf(tenantId)).resolve(fileName).normalize();
+        Path partial = target.resolveSibling(target.getFileName().toString() + ".part");
         ensureManaged(target);
+        ensureManaged(partial);
         try {
             Files.createDirectories(target.getParent());
             ensureOwnedFile(target);
+            Files.deleteIfExists(partial);
             Optional<Path> local = localStorageService.resolveLocalPath(sourceUrl);
             if (local.isPresent() && Files.isRegularFile(local.get())) {
-                Files.copy(local.get(), target, StandardCopyOption.REPLACE_EXISTING);
+                Files.copy(local.get(), partial, StandardCopyOption.REPLACE_EXISTING);
+            } else if (ossObjectStorageService.isOwnedObjectUrl(sourceUrl)) {
+                downloadOwnedOss(tenantId, companyId, sourceUrl, partial);
             } else {
-                download(sourceUrl, target);
+                download(sourceUrl, partial);
             }
-            if (!Files.isRegularFile(target) || Files.size(target) <= 0L) {
+            if (!Files.isRegularFile(partial, LinkOption.NOFOLLOW_LINKS) || Files.size(partial) <= 0L) {
                 throw new IllegalStateException("定时发布素材保存后为空");
             }
+            Files.move(partial, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             return target.toString();
         } catch (Exception ex) {
             try {
+                Files.deleteIfExists(partial);
                 Files.deleteIfExists(target);
             } catch (Exception ignored) {
                 // Preserve the original persistence failure.
@@ -65,6 +77,26 @@ public class TkTiktokScheduledMediaService {
             }
             throw new IllegalStateException("保存定时发布素材失败：" + ex.getMessage(), ex);
         }
+    }
+
+    private void downloadOwnedOss(Long tenantId, Long companyId, String sourceUrl, Path partial) throws Exception {
+        String objectKey = ossObjectStorageService.requireOwnedObjectKey(sourceUrl, tenantId, companyId);
+        ObjectMetadata expected = ossObjectStorageService.headObject(objectKey);
+        long maxBytes = maxFileSizeBytes();
+        if (expected == null || expected.getContentLength() <= 0L || expected.getContentLength() > maxBytes) {
+            throw new IllegalArgumentException("OSS 定时发布素材大小无效");
+        }
+        ossObjectStorageService.downloadToFile(objectKey, partial, expected, maxBytes);
+        if (!Files.isRegularFile(partial, LinkOption.NOFOLLOW_LINKS)
+                || Files.size(partial) != expected.getContentLength()) {
+            throw new IllegalStateException("OSS 定时发布素材大小校验失败");
+        }
+        TkOssObjectStorageService.requireIdentity(expected, ossObjectStorageService.headObject(objectKey));
+    }
+
+    private long maxFileSizeBytes() {
+        Long configured = generationProperties.getUpload().getMaxFileSizeBytes();
+        return configured == null || configured <= 0L ? 1_000_000_000L : configured;
     }
 
     public Path resolve(String storedPath) {

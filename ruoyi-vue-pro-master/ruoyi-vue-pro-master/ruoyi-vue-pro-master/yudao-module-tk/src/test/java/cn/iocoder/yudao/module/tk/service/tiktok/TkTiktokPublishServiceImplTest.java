@@ -376,7 +376,7 @@ class TkTiktokPublishServiceImplTest {
         generationTask.setTenantId(8L);
         TkTiktokAccountDO account = TkTiktokAccountDO.builder()
                 .id(10L).displayName("demo").authStatus("AUTHORIZED").build();
-        when(scheduledMediaService.persist(8L, "https://oss.example.com/video.mp4", null, null))
+        when(scheduledMediaService.persist(8L, 20L, "https://oss.example.com/video.mp4", null, null))
                 .thenReturn("/tk-publish-media/app/8/video.mp4");
 
         TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
@@ -413,6 +413,7 @@ class TkTiktokPublishServiceImplTest {
                 && "SCHEDULED".equals(detail.getTiktokStatus())));
         verify(taskMapper, never()).selectById(201L);
         verify(accountMapper, never()).selectById(10L);
+        verify(scheduledMediaService).persist(8L, 20L, "https://oss.example.com/video.mp4", null, null);
     }
 
     @Test
@@ -428,7 +429,7 @@ class TkTiktokPublishServiceImplTest {
         generationTask.setTenantId(8L);
         TkTiktokAccountDO account = TkTiktokAccountDO.builder()
                 .id(10L).displayName("demo").authStatus("AUTHORIZED").build();
-        when(scheduledMediaService.persist(8L, "https://oss.example.com/video.mp4", null, null))
+        when(scheduledMediaService.persist(8L, 20L, "https://oss.example.com/video.mp4", null, null))
                 .thenReturn("/tk-publish-media/app/8/rollback.mp4");
         doThrow(new IllegalStateException("database unavailable"))
                 .when(taskMapper).insert(any(TkTiktokPublishTaskDO.class));

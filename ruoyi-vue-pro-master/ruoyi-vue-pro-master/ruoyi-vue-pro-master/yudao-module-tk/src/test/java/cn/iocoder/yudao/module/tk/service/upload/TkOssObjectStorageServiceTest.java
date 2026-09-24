@@ -66,6 +66,24 @@ class TkOssObjectStorageServiceTest {
     }
 
     @Test
+    void identifiesOnlyConfiguredOssObjectUrls() {
+        TkOssObjectStorageService service = new TkOssObjectStorageService();
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getUpload().getOss().setBucket("tk-material-factory");
+        properties.getUpload().getOss().setEndpoint("oss-cn-beijing.aliyuncs.com");
+        properties.getUpload().getOss().setPublicBaseUrl("https://cdn.example.com");
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+
+        assertTrue(service.isOwnedObjectUrl("https://cdn.example.com/tk/100/200/video.mp4"));
+        assertTrue(service.isOwnedObjectUrl(
+                "https://tk-material-factory.oss-cn-beijing.aliyuncs.com/tk/100/200/video.mp4"));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                service.isOwnedObjectUrl("https://external.example.com/video.mp4"));
+        org.junit.jupiter.api.Assertions.assertFalse(service.isOwnedObjectUrl(
+                "https://other-bucket.oss-cn-beijing.aliyuncs.com/tk/100/200/video.mp4"));
+    }
+
+    @Test
     void deleteRequestDoesNotAddUnsignedDefaultContentType() throws Exception {
         AtomicReference<String> contentType = new AtomicReference<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

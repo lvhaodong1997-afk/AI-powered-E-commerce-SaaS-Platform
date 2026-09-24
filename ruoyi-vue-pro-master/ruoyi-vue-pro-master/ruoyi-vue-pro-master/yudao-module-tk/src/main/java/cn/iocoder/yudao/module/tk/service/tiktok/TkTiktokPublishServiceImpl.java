@@ -524,7 +524,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         String defaultTitle = uploaded ? uploadedVideo.getFileName() : generationTask.getTitle();
         LocalDateTime scheduledAt = validateScheduledRequest(reqVO, accounts.size(), LocalDateTime.now());
         boolean scheduled = scheduledAt != null;
-        String scheduledLocalPath = scheduled ? scheduledMediaService.persist(tenantId, videoUrl,
+        String scheduledLocalPath = scheduled ? scheduledMediaService.persist(tenantId, companyId, videoUrl,
                 uploaded ? uploadedVideo.getId() : null, uploaded ? uploadedVideo.getMimeType() : null) : null;
         registerScheduledMediaRollbackCleanup(scheduledLocalPath);
         TkTiktokPublishTaskDO publishTask = TkTiktokPublishTaskDO.builder()
