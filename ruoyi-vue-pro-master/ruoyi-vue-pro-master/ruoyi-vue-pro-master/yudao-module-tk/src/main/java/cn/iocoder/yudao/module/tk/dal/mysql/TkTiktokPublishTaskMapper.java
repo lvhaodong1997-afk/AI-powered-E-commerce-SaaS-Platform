@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.dal.mysql;
 
 import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.mybatis.core.mapper.BaseMapperX;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
@@ -47,9 +48,10 @@ public interface TkTiktokPublishTaskMapper extends BaseMapperX<TkTiktokPublishTa
                 .in(TkTiktokPublishTaskDO::getStatus, java.util.Arrays.asList("FAILED", "PARTIAL_SUCCESS")));
     }
 
+    @InterceptorIgnore(tenantLine = "true", dataPermission = "true")
     @Select("SELECT * FROM tk_tiktok_publish_task WHERE deleted = b'0' "
             + "AND status = 'SCHEDULED' AND schedule_status = 'SCHEDULED' "
-            + "AND scheduled_at IS NOT NULL AND scheduled_at &lt;= #{now} "
+            + "AND scheduled_at IS NOT NULL AND scheduled_at <= #{now} "
             + "ORDER BY scheduled_at ASC, id ASC LIMIT #{limit}")
     List<TkTiktokPublishTaskDO> selectDueScheduled(@Param("now") LocalDateTime now,
                                                    @Param("limit") int limit);
@@ -58,7 +60,7 @@ public interface TkTiktokPublishTaskMapper extends BaseMapperX<TkTiktokPublishTa
             + "schedule_version = schedule_version + 1, started_at = #{now}, updater = 'tk-scheduler', "
             + "update_time = NOW() WHERE id = #{id} AND deleted = b'0' AND status = 'SCHEDULED' "
             + "AND schedule_status = 'SCHEDULED' AND schedule_version = #{version} "
-            + "AND scheduled_at &lt;= #{now}")
+            + "AND scheduled_at <= #{now}")
     int claimScheduled(@Param("id") Long id, @Param("version") Integer version,
                        @Param("now") LocalDateTime now);
 
