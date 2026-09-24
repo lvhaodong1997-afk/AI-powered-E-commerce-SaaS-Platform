@@ -24,7 +24,11 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionSynchronization;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.OutputStream;
@@ -412,6 +416,48 @@ class TkTiktokPublishServiceImplTest {
     }
 
     @Test
+    void scheduledMediaIsCleanedWhenCreationTransactionRollsBack() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkBusinessLogService businessLogService = mock(TkBusinessLogService.class);
+        TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
+        TkTiktokScheduledMediaService scheduledMediaService = mock(TkTiktokScheduledMediaService.class);
+        TkGenerationTaskDO generationTask = TkGenerationTaskDO.builder()
+                .id(100L).companyId(20L).businessTraceId("TRACE-ROLLBACK")
+                .title("Scheduled video").outputUrl("https://oss.example.com/video.mp4").build();
+        generationTask.setTenantId(8L);
+        TkTiktokAccountDO account = TkTiktokAccountDO.builder()
+                .id(10L).displayName("demo").authStatus("AUTHORIZED").build();
+        when(scheduledMediaService.persist(8L, "https://oss.example.com/video.mp4", null, null))
+                .thenReturn("/tk-publish-media/app/8/rollback.mp4");
+        doThrow(new IllegalStateException("database unavailable"))
+                .when(taskMapper).insert(any(TkTiktokPublishTaskDO.class));
+
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "publishTaskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        ReflectionTestUtils.setField(service, "businessLogService", businessLogService);
+        ReflectionTestUtils.setField(service, "apiClient", apiClient);
+        ReflectionTestUtils.setField(service, "scheduledMediaService", scheduledMediaService);
+        TkTiktokPublishCreateReqVO reqVO = new TkTiktokPublishCreateReqVO();
+        reqVO.setPostMode("DIRECT_POST");
+        reqVO.setAccountIds(Collections.singletonList(10L));
+        reqVO.setScheduledAt("2099-09-26T18:00:00+08:00");
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThrows(IllegalStateException.class, () -> ReflectionTestUtils.invokeMethod(service,
+                    "createPublishTaskWithinTenant", reqVO, generationTask, null,
+                    Collections.singletonList(account)));
+            TransactionSynchronizationManager.getSynchronizations().forEach(
+                    synchronization -> synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+            verify(scheduledMediaService).cleanup("/tk-publish-media/app/8/rollback.mp4");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
     void dispatchesDueScheduledTaskOnlyAfterAtomicClaim() {
         TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
         TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
@@ -440,6 +486,90 @@ class TkTiktokPublishServiceImplTest {
     }
 
     @Test
+    void invalidScheduledTaskDoesNotBlockLaterDueTasks() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "publishTaskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        TkTiktokPublishTaskDO invalid = TkTiktokPublishTaskDO.builder().id(201L).status("SCHEDULED")
+                .scheduleStatus("SCHEDULED").scheduleVersion(2)
+                .scheduledAt(LocalDateTime.now().minusMinutes(2)).build();
+        invalid.setTenantId(8L);
+        TkTiktokPublishTaskDO valid = TkTiktokPublishTaskDO.builder().id(202L).status("SCHEDULED")
+                .scheduleStatus("SCHEDULED").scheduleVersion(4)
+                .scheduledAt(LocalDateTime.now().minusMinutes(1)).build();
+        valid.setTenantId(8L);
+        when(taskMapper.selectDueScheduled(any(LocalDateTime.class), eq(50)))
+                .thenReturn(Arrays.asList(invalid, valid));
+        when(taskMapper.claimScheduled(eq(201L), eq(2), any(LocalDateTime.class))).thenReturn(1);
+        when(taskMapper.claimScheduled(eq(202L), eq(4), any(LocalDateTime.class))).thenReturn(1);
+        when(detailMapper.activateScheduled(201L)).thenReturn(0);
+        when(detailMapper.activateScheduled(202L)).thenReturn(1);
+        when(taskMapper.failClaimedScheduled(eq(201L), eq(3), anyString(), any(LocalDateTime.class)))
+                .thenReturn(1);
+        when(detailMapper.selectListByTaskId(202L)).thenReturn(Collections.emptyList());
+        when(taskMapper.selectById(202L)).thenReturn(null);
+
+        try {
+            assertEquals(1, service.dispatchDueScheduled(50));
+            verify(taskMapper).failClaimedScheduled(eq(201L), eq(3), anyString(), any(LocalDateTime.class));
+            verify(detailMapper).activateScheduled(202L);
+            verify(detailMapper, timeout(2000)).selectListByTaskId(202L);
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void terminalScheduledTaskCleansMediaOnlyAfterCommitAndFinalizesSchedule() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkBusinessLogService businessLogService = mock(TkBusinessLogService.class);
+        TkTiktokScheduledMediaService scheduledMediaService = mock(TkTiktokScheduledMediaService.class);
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        TransactionStatus transactionStatus = mock(TransactionStatus.class);
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "publishTaskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        ReflectionTestUtils.setField(service, "businessLogService", businessLogService);
+        ReflectionTestUtils.setField(service, "scheduledMediaService", scheduledMediaService);
+        ReflectionTestUtils.setField(service, "transactionManager", transactionManager);
+        when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(transactionStatus);
+        TkTiktokPublishTaskDO task = TkTiktokPublishTaskDO.builder().id(201L).status("PENDING")
+                .scheduleStatus("RUNNING").scheduledAt(LocalDateTime.now().minusMinutes(1))
+                .scheduledLocalPath("/managed/video.mp4")
+                .scheduledMediaStatus("READY").build();
+        TkTiktokPublishDetailDO detail = TkTiktokPublishDetailDO.builder().status("SUCCESS").build();
+        when(taskMapper.selectById(201L)).thenReturn(task);
+        when(detailMapper.selectListByTaskId(201L)).thenReturn(Collections.singletonList(detail));
+
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            ReflectionTestUtils.invokeMethod(service, "refreshTaskSummary", 201L);
+
+            assertEquals("SUCCESS", task.getStatus());
+            assertEquals("SUCCESS", task.getScheduleStatus());
+            assertNotNull(task.getFinishedAt());
+            verify(scheduledMediaService, never()).cleanup(anyString());
+
+            TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+            verify(scheduledMediaService).cleanup("/managed/video.mp4");
+            ArgumentCaptor<TransactionDefinition> transactionCaptor =
+                    ArgumentCaptor.forClass(TransactionDefinition.class);
+            verify(transactionManager).getTransaction(transactionCaptor.capture());
+            assertEquals(TransactionDefinition.PROPAGATION_REQUIRES_NEW,
+                    transactionCaptor.getValue().getPropagationBehavior());
+            verify(taskMapper).updateScheduledMediaCleanup(201L, "CLEANED", null);
+            verify(transactionManager).commit(transactionStatus);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    @Test
     void scheduledRulesRequireFutureSingleAccountAndDirectPost() {
         TkTiktokPublishCreateReqVO reqVO = new TkTiktokPublishCreateReqVO();
         reqVO.setScheduledAt("2099-09-26T18:00:00+08:00");
@@ -459,6 +589,25 @@ class TkTiktokPublishServiceImplTest {
         assertThrows(IllegalArgumentException.class, () ->
                 TkTiktokPublishServiceImpl.validateScheduledRequest(reqVO, 1,
                         LocalDateTime.of(2026, 9, 24, 10, 0)));
+    }
+
+    @Test
+    void scheduledTaskCannotBeManuallySyncedBeforeDispatch() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        TkTiktokPublishServiceImpl service = createService(taskMapper, detailMapper, null, dataScopeService);
+        TkTiktokPublishTaskDO task = TkTiktokPublishTaskDO.builder().id(201L).companyId(20L)
+                .status("SCHEDULED").scheduleStatus("SCHEDULED")
+                .scheduledAt(LocalDateTime.now().plusHours(1)).build();
+        task.setTenantId(8L);
+        when(taskMapper.selectById(201L)).thenReturn(task);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> service.syncStatus(201L));
+
+        assertTrue(error.getMessage().contains("尚未到执行时间"));
+        verify(detailMapper, never()).selectListByTaskId(any());
+        verify(taskMapper, never()).updateById(any(TkTiktokPublishTaskDO.class));
     }
 
     @Test
@@ -759,6 +908,7 @@ class TkTiktokPublishServiceImplTest {
         TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
         TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
         TkTiktokPublishServiceImpl service = createService(taskMapper, detailMapper, null, dataScopeService);
+        ReflectionTestUtils.setField(service, "businessLogService", mock(TkBusinessLogService.class));
         TkTiktokPublishDetailDO detail = TkTiktokPublishDetailDO.builder()
                 .id(30L)
                 .companyId(20L)
@@ -770,7 +920,13 @@ class TkTiktokPublishServiceImplTest {
                 .build();
         detail.setTenantId(8L);
         when(detailMapper.selectById(30L)).thenReturn(detail);
-        when(taskMapper.selectById(31L)).thenReturn(null);
+        TkTiktokPublishTaskDO task = TkTiktokPublishTaskDO.builder()
+                .id(31L)
+                .companyId(20L)
+                .status("FAILED")
+                .build();
+        task.setTenantId(8L);
+        when(taskMapper.selectById(31L)).thenReturn(task);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
                 TkTiktokPublishDetailDO.class);
 
@@ -789,6 +945,38 @@ class TkTiktokPublishServiceImplTest {
         assertNull(detail.getPublishUrlRegisteredTime());
         assertEquals("PENDING", detail.getStatus());
         verify(detailMapper).update(any(), any());
+    }
+
+    @Test
+    void retryRejectsScheduledTaskAfterPersistedMediaWasCleaned() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        TkTiktokPublishServiceImpl service = createService(taskMapper, detailMapper, null, dataScopeService);
+        TkTiktokPublishDetailDO detail = TkTiktokPublishDetailDO.builder()
+                .id(40L)
+                .companyId(20L)
+                .publishTaskId(41L)
+                .status("FAILED")
+                .build();
+        detail.setTenantId(8L);
+        TkTiktokPublishTaskDO task = TkTiktokPublishTaskDO.builder()
+                .id(41L)
+                .companyId(20L)
+                .status("FAILED")
+                .scheduleStatus("FAILED")
+                .scheduledLocalPath("/tk-publish-media/app/8/video.mp4")
+                .scheduledMediaStatus("CLEANED")
+                .build();
+        task.setTenantId(8L);
+        when(detailMapper.selectById(40L)).thenReturn(detail);
+        when(taskMapper.selectById(41L)).thenReturn(task);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> service.retry(40L));
+
+        assertTrue(error.getMessage().contains("定时发布素材已清理"));
+        verify(detailMapper, never()).update(any(), any());
+        verify(taskMapper, never()).updateById(any(TkTiktokPublishTaskDO.class));
     }
 
     @Test

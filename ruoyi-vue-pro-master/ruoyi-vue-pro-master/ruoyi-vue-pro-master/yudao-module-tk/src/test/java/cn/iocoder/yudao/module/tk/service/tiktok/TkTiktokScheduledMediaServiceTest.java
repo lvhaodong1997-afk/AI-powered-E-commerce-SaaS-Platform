@@ -48,4 +48,31 @@ class TkTiktokScheduledMediaServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.cleanup(outside.toString()));
         assertTrue(Files.exists(outside));
     }
+
+    @Test
+    void rejectsRootAndFilesNotOwnedByScheduledMediaService() throws Exception {
+        TkGenerationProperties properties = new TkGenerationProperties();
+        Path scheduledRoot = tempDir.resolve("scheduled");
+        properties.getUpload().setScheduledPublishRootDir(scheduledRoot.toString());
+        TkTiktokScheduledMediaService service = new TkTiktokScheduledMediaService(properties,
+                new TkLocalUploadStorageService(properties));
+        Files.createDirectories(scheduledRoot);
+        Path arbitrary = scheduledRoot.resolve("8").resolve("manual-name.mp4");
+        Files.createDirectories(arbitrary.getParent());
+        Files.write(arbitrary, "do-not-delete".getBytes(StandardCharsets.UTF_8));
+
+        assertThrows(IllegalArgumentException.class, () -> service.cleanup(scheduledRoot.toString()));
+        assertThrows(IllegalArgumentException.class, () -> service.cleanup(arbitrary.toString()));
+        assertTrue(Files.exists(scheduledRoot));
+        assertTrue(Files.exists(arbitrary));
+    }
+
+    @Test
+    void scheduledMediaRootMustBeExplicitlyConfigured() {
+        TkGenerationProperties properties = new TkGenerationProperties();
+
+        String configured = properties.getUpload().getScheduledPublishRootDir();
+
+        assertTrue(configured == null || configured.trim().isEmpty());
+    }
 }

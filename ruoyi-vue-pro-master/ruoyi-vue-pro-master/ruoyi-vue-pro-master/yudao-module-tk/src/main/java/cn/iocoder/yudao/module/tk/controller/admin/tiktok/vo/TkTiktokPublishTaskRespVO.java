@@ -34,7 +34,6 @@ public class TkTiktokPublishTaskRespVO {
     private Integer scheduleVersion;
     private LocalDateTime startedAt;
     private LocalDateTime finishedAt;
-    private String scheduledLocalPath;
     private String scheduledMediaStatus;
     private String scheduledMediaFailReason;
     private LocalDateTime createTime;

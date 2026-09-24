@@ -62,6 +62,19 @@ public interface TkTiktokPublishTaskMapper extends BaseMapperX<TkTiktokPublishTa
     int claimScheduled(@Param("id") Long id, @Param("version") Integer version,
                        @Param("now") LocalDateTime now);
 
+    @Update("UPDATE tk_tiktok_publish_task SET status = 'FAILED', schedule_status = 'FAILED', "
+            + "fail_reason = #{reason}, failed_count = account_count, pending_count = 0, finished_at = #{now}, "
+            + "updater = 'tk-scheduler', update_time = NOW() WHERE id = #{id} AND deleted = b'0' "
+            + "AND status = 'PENDING' AND schedule_status = 'RUNNING' AND schedule_version = #{claimedVersion}")
+    int failClaimedScheduled(@Param("id") Long id, @Param("claimedVersion") Integer claimedVersion,
+                             @Param("reason") String reason, @Param("now") LocalDateTime now);
+
+    @Update("UPDATE tk_tiktok_publish_task SET scheduled_media_status = #{status}, "
+            + "scheduled_media_fail_reason = #{failReason}, updater = 'tk-scheduler', update_time = NOW() "
+            + "WHERE id = #{id} AND deleted = b'0'")
+    int updateScheduledMediaCleanup(@Param("id") Long id, @Param("status") String status,
+                                    @Param("failReason") String failReason);
+
     @Update("UPDATE tk_tiktok_publish_task SET scheduled_at = #{scheduledAt}, "
             + "schedule_version = schedule_version + 1, updater = 'tk-scheduler', update_time = NOW() "
             + "WHERE id = #{id} AND deleted = b'0' AND status = 'SCHEDULED' "

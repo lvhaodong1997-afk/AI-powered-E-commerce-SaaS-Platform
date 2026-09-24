@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.tk.controller.admin.tiktok;
 
 import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishPostPageReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishScheduleReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishTaskRespVO;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,5 +40,11 @@ class TkTiktokPublishControllerMappingTest {
                 TkTiktokPublishController.class.getDeclaredMethod(
                         "reschedule", TkTiktokPublishScheduleReqVO.class)
                         .getAnnotation(PreAuthorize.class).value());
+    }
+
+    @Test
+    void publishTaskResponseDoesNotExposeScheduledLocalPath() {
+        assertThrows(NoSuchFieldException.class,
+                () -> TkTiktokPublishTaskRespVO.class.getDeclaredField("scheduledLocalPath"));
     }
 }

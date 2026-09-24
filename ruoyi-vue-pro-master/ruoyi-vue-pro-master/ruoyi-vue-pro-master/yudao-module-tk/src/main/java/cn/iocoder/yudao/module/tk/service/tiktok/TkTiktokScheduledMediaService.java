@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.LinkOption;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -42,6 +43,7 @@ public class TkTiktokScheduledMediaService {
         ensureManaged(target);
         try {
             Files.createDirectories(target.getParent());
+            ensureOwnedFile(target);
             Optional<Path> local = localStorageService.resolveLocalPath(sourceUrl);
             if (local.isPresent() && Files.isRegularFile(local.get())) {
                 Files.copy(local.get(), target, StandardCopyOption.REPLACE_EXISTING);
@@ -70,8 +72,8 @@ public class TkTiktokScheduledMediaService {
             throw new IllegalArgumentException("定时发布素材路径不能为空");
         }
         Path path = Paths.get(storedPath).toAbsolutePath().normalize();
-        ensureManaged(path);
-        if (!Files.isRegularFile(path)) {
+        ensureOwnedFile(path);
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalStateException("定时发布素材不存在");
         }
         return path;
@@ -82,7 +84,7 @@ public class TkTiktokScheduledMediaService {
             return;
         }
         Path path = Paths.get(storedPath).toAbsolutePath().normalize();
-        ensureManaged(path);
+        ensureOwnedFile(path);
         try {
             Files.deleteIfExists(path);
             Path parent = path.getParent();
@@ -118,8 +120,10 @@ public class TkTiktokScheduledMediaService {
     }
 
     private Path getRootDir() {
-        String configured = StrUtil.blankToDefault(
-                generationProperties.getUpload().getScheduledPublishRootDir(), "/tk-publish-media");
+        String configured = generationProperties.getUpload().getScheduledPublishRootDir();
+        if (StrUtil.isBlank(configured)) {
+            throw new IllegalStateException("未配置定时发布素材根目录");
+        }
         configured = configured.replace("${java.io.tmpdir}", System.getProperty("java.io.tmpdir"));
         return Paths.get(configured).toAbsolutePath().normalize();
     }
@@ -127,6 +131,32 @@ public class TkTiktokScheduledMediaService {
     private void ensureManaged(Path path) {
         if (!path.startsWith(getRootDir())) {
             throw new IllegalArgumentException("定时发布素材路径超出配置根目录");
+        }
+    }
+
+    private void ensureOwnedFile(Path path) {
+        Path root = getRootDir();
+        ensureManaged(path);
+        if (Files.isSymbolicLink(root)) {
+            throw new IllegalArgumentException("定时发布素材根目录不能是符号链接");
+        }
+        Path relative = root.relativize(path);
+        if (relative.getNameCount() != 2 || !relative.getName(0).toString().matches("[0-9]+")
+                || !relative.getFileName().toString().matches("[0-9a-fA-F]{32}\\.(mp4|mov|webm)")) {
+            throw new IllegalArgumentException("定时发布素材路径不是系统托管文件");
+        }
+        if (Files.isSymbolicLink(path) || Files.isSymbolicLink(path.getParent())) {
+            throw new IllegalArgumentException("定时发布素材路径不能包含符号链接");
+        }
+        try {
+            Path existingParent = path.getParent();
+            if (Files.exists(existingParent, LinkOption.NOFOLLOW_LINKS)
+                    && !existingParent.toRealPath(LinkOption.NOFOLLOW_LINKS)
+                    .startsWith(root.toRealPath(LinkOption.NOFOLLOW_LINKS))) {
+                throw new IllegalArgumentException("定时发布素材真实路径超出配置根目录");
+            }
+        } catch (java.io.IOException ex) {
+            throw new IllegalStateException("校验定时发布素材路径失败：" + ex.getMessage(), ex);
         }
     }
 

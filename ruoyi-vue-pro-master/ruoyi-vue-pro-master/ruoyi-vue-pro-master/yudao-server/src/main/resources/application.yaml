@@ -164,6 +164,8 @@ debug: false
 
 tk:
   generation:
+    upload:
+      scheduled-publish-root-dir: ${TK_SCHEDULED_PUBLISH_ROOT_DIR:}
     minimax:
       worker-url: ${MINIMAX_WORKER_URL:http://127.0.0.1:8001}
       internal-token: ${TTS_INTERNAL_TOKEN:}
