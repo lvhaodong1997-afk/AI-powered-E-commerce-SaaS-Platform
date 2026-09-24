@@ -32,4 +32,10 @@ public interface TkTiktokPublishService {
 
     int resumePendingPublishTasks(int limit);
 
+    void reschedule(TkTiktokPublishScheduleReqVO reqVO);
+
+    void cancelScheduled(Long taskId);
+
+    int dispatchDueScheduled(int limit);
+
 }

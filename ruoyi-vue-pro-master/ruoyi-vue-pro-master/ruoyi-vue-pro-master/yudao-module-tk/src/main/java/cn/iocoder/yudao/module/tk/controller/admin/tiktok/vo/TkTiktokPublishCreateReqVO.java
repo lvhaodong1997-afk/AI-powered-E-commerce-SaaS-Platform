@@ -27,5 +27,6 @@ public class TkTiktokPublishCreateReqVO {
     private Boolean commercialContent;
     private Boolean brandContent;
     private Boolean aigcContent;
+    private String scheduledAt;
 
 }

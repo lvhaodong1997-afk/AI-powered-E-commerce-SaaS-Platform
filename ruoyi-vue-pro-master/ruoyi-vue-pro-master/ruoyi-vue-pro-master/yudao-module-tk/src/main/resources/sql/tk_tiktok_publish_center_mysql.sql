@@ -127,6 +127,14 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_task` (
   `pending_count` int NOT NULL DEFAULT 0 COMMENT '寰呭鐞嗘暟閲?',
   `status` varchar(32) NOT NULL COMMENT '鐘舵€?',
   `fail_reason` varchar(512) DEFAULT NULL COMMENT '澶辫触鍘熷洜',
+  `scheduled_at` datetime DEFAULT NULL COMMENT '计划发布时间',
+  `schedule_status` varchar(32) DEFAULT NULL COMMENT '定时发布状态',
+  `schedule_version` int NOT NULL DEFAULT 0 COMMENT '定时发布版本号',
+  `started_at` datetime DEFAULT NULL COMMENT '实际开始时间',
+  `finished_at` datetime DEFAULT NULL COMMENT '实际完成时间',
+  `scheduled_local_path` varchar(1024) DEFAULT NULL COMMENT '定时发布持久化素材路径',
+  `scheduled_media_status` varchar(32) DEFAULT NULL COMMENT '定时发布素材状态',
+  `scheduled_media_fail_reason` varchar(512) DEFAULT NULL COMMENT '定时发布素材失败原因',
   `creator` varchar(64) DEFAULT '' COMMENT '鍒涘缓鑰?',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '鍒涘缓鏃堕棿',
   `updater` varchar(64) DEFAULT '' COMMENT '鏇存柊鑰?',
@@ -137,6 +145,7 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_task` (
   KEY `idx_tk_tiktok_publish_task_company` (`tenant_id`, `company_id`),
   KEY `idx_tk_tiktok_publish_task_generation` (`generation_task_id`)
   ,KEY `idx_tk_tiktok_publish_task_uploaded_video` (`tenant_id`, `uploaded_video_id`)
+  ,KEY `idx_tk_tiktok_publish_task_schedule` (`status`, `schedule_status`, `scheduled_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='TK TikTok鍙戝竷浠诲姟';
 
 CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_detail` (

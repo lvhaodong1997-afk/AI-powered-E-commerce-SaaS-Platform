@@ -31,6 +31,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -50,6 +54,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
     private static final String STATUS_PARTIAL_SUCCESS = "PARTIAL_SUCCESS";
+    private static final String STATUS_SCHEDULED = "SCHEDULED";
+    private static final String STATUS_CANCELLED = "CANCELLED";
     private static final String TIKTOK_STATUS_UPLOAD_PENDING = "UPLOAD_PENDING";
     private static final String POST_MODE_MANUAL_REGISTER = "MANUAL_REGISTER";
     private static final String MANUAL_REGISTER_ACCOUNT_NAME = "手动登记";
@@ -95,6 +101,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     private TkBusinessLogService businessLogService;
     @Resource
     private TkTiktokPublishMediaUploadService mediaUploadService;
+    @Resource
+    private TkTiktokScheduledMediaService scheduledMediaService;
 
     @Override
     public TkTiktokOverviewRespVO getOverview() {
@@ -150,6 +158,44 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         return media != null
                 && StrUtil.isNotBlank(media.getFileUrl())
                 && "READY".equalsIgnoreCase(media.getStatus());
+    }
+
+    static LocalDateTime validateScheduledRequest(TkTiktokPublishCreateReqVO reqVO, int accountCount,
+                                                  LocalDateTime now) {
+        LocalDateTime scheduledAt = parseScheduledAt(reqVO == null ? null : reqVO.getScheduledAt());
+        if (scheduledAt == null) {
+            return null;
+        }
+        if (!scheduledAt.isAfter(now)) {
+            throw new IllegalArgumentException("计划发布时间必须晚于当前时间");
+        }
+        if (accountCount != 1) {
+            throw new IllegalArgumentException("定时发布首版只支持单个 TikTok 账号");
+        }
+        if (!"DIRECT_POST".equals(reqVO.getPostMode())) {
+            throw new IllegalArgumentException("定时发布首版只支持 DIRECT_POST");
+        }
+        return scheduledAt;
+    }
+
+    static LocalDateTime parseScheduledAt(String raw) {
+        if (StrUtil.isBlank(raw)) {
+            return null;
+        }
+        String value = raw.trim();
+        try {
+            return OffsetDateTime.parse(value).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime();
+        } catch (DateTimeParseException ignored) {
+            try {
+                return ZonedDateTime.parse(value).withZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime();
+            } catch (DateTimeParseException ignoredAgain) {
+                try {
+                    return LocalDateTime.parse(value);
+                } catch (DateTimeParseException invalid) {
+                    throw new IllegalArgumentException("scheduledAt 必须是 ISO-8601 日期时间", invalid);
+                }
+            }
+        }
     }
 
     @Override
@@ -358,6 +404,81 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         return submitted;
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void reschedule(TkTiktokPublishScheduleReqVO reqVO) {
+        LocalDateTime scheduledAt = parseScheduledAt(reqVO.getScheduledAt());
+        if (scheduledAt == null || !scheduledAt.isAfter(LocalDateTime.now())) {
+            throw new IllegalArgumentException("计划发布时间必须晚于当前时间");
+        }
+        TkTiktokPublishTaskDO task = publishTaskMapper.selectById(reqVO.getTaskId());
+        if (task == null) {
+            throw exception(TK_TIKTOK_PUBLISH_TASK_NOT_EXISTS);
+        }
+        dataScopeService.validateWritable(task.getTenantId(), task.getCompanyId());
+        if (!STATUS_SCHEDULED.equals(task.getStatus()) || !STATUS_SCHEDULED.equals(task.getScheduleStatus())) {
+            throw new IllegalStateException("定时任务已开始执行，不能改期");
+        }
+        int version = task.getScheduleVersion() == null ? 0 : task.getScheduleVersion();
+        if (publishTaskMapper.rescheduleScheduled(task.getId(), version, scheduledAt) != 1) {
+            throw new IllegalStateException("定时任务已开始执行，不能改期");
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelScheduled(Long taskId) {
+        TkTiktokPublishTaskDO task = publishTaskMapper.selectById(taskId);
+        if (task == null) {
+            throw exception(TK_TIKTOK_PUBLISH_TASK_NOT_EXISTS);
+        }
+        dataScopeService.validateWritable(task.getTenantId(), task.getCompanyId());
+        if (!STATUS_SCHEDULED.equals(task.getStatus()) || !STATUS_SCHEDULED.equals(task.getScheduleStatus())) {
+            throw new IllegalStateException("定时任务已开始执行，不能取消");
+        }
+        int version = task.getScheduleVersion() == null ? 0 : task.getScheduleVersion();
+        LocalDateTime now = LocalDateTime.now();
+        if (publishTaskMapper.cancelScheduled(task.getId(), version, now) != 1) {
+            throw new IllegalStateException("定时任务已开始执行，不能取消");
+        }
+        if (publishDetailMapper.cancelScheduled(task.getId(), now) < 1) {
+            throw new IllegalStateException("定时任务明细已开始执行，不能取消");
+        }
+        task.setStatus(STATUS_CANCELLED);
+        cleanupScheduledMediaAfterCommit(task);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int dispatchDueScheduled(int limit) {
+        LocalDateTime now = LocalDateTime.now();
+        List<TkTiktokPublishTaskDO> due = publishTaskMapper.selectDueScheduled(now,
+                Math.max(1, Math.min(limit, 200)));
+        List<TkTiktokPublishTaskDO> claimed = new ArrayList<>();
+        for (TkTiktokPublishTaskDO task : due) {
+            int version = task.getScheduleVersion() == null ? 0 : task.getScheduleVersion();
+            if (publishTaskMapper.claimScheduled(task.getId(), version, now) != 1) {
+                continue;
+            }
+            if (publishDetailMapper.activateScheduled(task.getId()) < 1) {
+                throw new IllegalStateException("定时发布任务缺少可激活明细");
+            }
+            claimed.add(task);
+        }
+        Runnable submit = () -> claimed.forEach(task -> submitPublishTask(task.getTenantId(), task.getId()));
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    submit.run();
+                }
+            });
+        } else {
+            submit.run();
+        }
+        return claimed.size();
+    }
+
     private Long createPublishTaskWithinTenant(TkTiktokPublishCreateReqVO reqVO, TkGenerationTaskDO generationTask,
                                                TkTiktokPublishMediaDO uploadedVideo, List<TkTiktokAccountDO> accounts) {
         String postMode = StrUtil.blankToDefault(reqVO.getPostMode(), apiClient.getDefaultPostMode());
@@ -369,6 +490,10 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 : generationTask.getBusinessTraceId();
         String videoUrl = uploaded ? uploadedVideo.getFileUrl() : generationTask.getOutputUrl();
         String defaultTitle = uploaded ? uploadedVideo.getFileName() : generationTask.getTitle();
+        LocalDateTime scheduledAt = validateScheduledRequest(reqVO, accounts.size(), LocalDateTime.now());
+        boolean scheduled = scheduledAt != null;
+        String scheduledLocalPath = scheduled ? scheduledMediaService.persist(tenantId, videoUrl,
+                uploaded ? uploadedVideo.getId() : null, uploaded ? uploadedVideo.getMimeType() : null) : null;
         TkTiktokPublishTaskDO publishTask = TkTiktokPublishTaskDO.builder()
                 .businessTraceId(businessTraceId)
                 .companyId(companyId)
@@ -386,11 +511,16 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 .successCount(0)
                 .failedCount(0)
                 .pendingCount(accounts.size())
-                .status(STATUS_PENDING)
+                .status(scheduled ? STATUS_SCHEDULED : STATUS_PENDING)
+                .scheduledAt(scheduledAt)
+                .scheduleStatus(scheduled ? STATUS_SCHEDULED : null)
+                .scheduleVersion(scheduled ? 0 : null)
+                .scheduledLocalPath(scheduledLocalPath)
+                .scheduledMediaStatus(scheduled ? "READY" : null)
                 .build();
         publishTask.setTenantId(tenantId);
         publishTaskMapper.insert(publishTask);
-        businessLogService.info(businessTraceId, "TIKTOK_PUBLISH", publishTask.getId(), "CREATE", STATUS_PENDING,
+        businessLogService.info(businessTraceId, "TIKTOK_PUBLISH", publishTask.getId(), "CREATE", publishTask.getStatus(),
                 StrUtil.format("创建 TikTok 发布任务：{} 个账号", accounts.size()), publishTask);
 
         for (TkTiktokAccountDO account : accounts) {
@@ -403,8 +533,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                     .sourceType(uploaded ? SOURCE_UPLOADED : SOURCE_GENERATED)
                     .accountId(account.getId())
                     .accountDisplayName(StrUtil.blankToDefault(account.getDisplayName(), account.getUsername()))
-                    .status(STATUS_PENDING)
-                    .tiktokStatus("LOCAL_PENDING")
+                    .status(scheduled ? STATUS_SCHEDULED : STATUS_PENDING)
+                    .tiktokStatus(scheduled ? STATUS_SCHEDULED : "LOCAL_PENDING")
                     .postMode(postMode)
                     .privacyLevel(StrUtil.blankToDefault(reqVO.getPrivacyLevel(), account.getDefaultPrivacyLevel()))
                     .coverUrl(uploaded ? uploadedVideo.getCoverUrl() : null)
@@ -422,8 +552,10 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             detail.setTenantId(tenantId);
             publishDetailMapper.insert(detail);
         }
-        refreshTaskSummary(publishTask.getId());
-        submitPublishTaskAfterCommit(tenantId, publishTask.getId());
+        if (!scheduled) {
+            refreshTaskSummary(publishTask.getId());
+            submitPublishTaskAfterCommit(tenantId, publishTask.getId());
+        }
         return publishTask.getId();
     }
 
@@ -451,7 +583,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         TkTiktokPublishTaskDO publishTask = publishTaskMapper.selectById(detail.getPublishTaskId());
         TkGenerationTaskDO generationTask = detail.getGenerationTaskId() == null
                 ? null : generationTaskMapper.selectById(detail.getGenerationTaskId());
-        String videoUrl = publishTask == null ? null : publishTask.getVideoUrl();
+        String videoUrl = publishTask == null ? null : StrUtil.blankToDefault(
+                publishTask.getScheduledLocalPath(), publishTask.getVideoUrl());
         if (StrUtil.isBlank(videoUrl) && generationTask != null) {
             videoUrl = generationTask.getOutputUrl();
         }
@@ -1096,6 +1229,11 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             task.setStatus(STATUS_PROCESSING);
         }
         publishTaskMapper.updateById(task);
+        if (StrUtil.equalsAny(task.getStatus(), STATUS_SUCCESS, STATUS_FAILED, STATUS_PARTIAL_SUCCESS)
+                && StrUtil.isNotBlank(task.getScheduledLocalPath())
+                && !"CLEANED".equals(task.getScheduledMediaStatus())) {
+            cleanupTerminalScheduledMedia(task);
+        }
         if (STATUS_FAILED.equals(task.getStatus()) || STATUS_PARTIAL_SUCCESS.equals(task.getStatus())) {
             businessLogService.warn(task.getBusinessTraceId(), "TIKTOK_PUBLISH", task.getId(), "SUMMARY", task.getStatus(),
                     StrUtil.format("发布任务异常：成功 {}，失败 {}，待处理 {}", success, failed, pending), task);
@@ -1173,6 +1311,17 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     }
 
     private UploadSource resolveUploadSource(String outputUrl, String contentType) {
+        if (scheduledMediaService != null && StrUtil.isNotBlank(outputUrl)
+                && !StrUtil.startWithIgnoreCase(outputUrl, "http://")
+                && !StrUtil.startWithIgnoreCase(outputUrl, "https://")) {
+            Path persistentFile = scheduledMediaService.resolve(outputUrl);
+            try {
+                return UploadSource.persistentFileUpload(persistentFile, Files.size(persistentFile),
+                        normalizeVideoMimeType(contentType, outputUrl));
+            } catch (Exception ex) {
+                throw new IllegalStateException("读取定时发布素材失败：" + ex.getMessage(), ex);
+            }
+        }
         if (isVerifiedPullUrl(outputUrl)) {
             return UploadSource.pullFromUrl(normalizeVideoMimeType(contentType, outputUrl));
         }
@@ -1269,25 +1418,33 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         private final long chunkSize;
         private final int totalChunkCount;
         private final String mimeType;
+        private final boolean temporary;
 
         private UploadSource(boolean pullFromUrl, Path videoFile, long videoSize, long chunkSize,
-                             int totalChunkCount, String mimeType) {
+                             int totalChunkCount, String mimeType, boolean temporary) {
             this.pullFromUrl = pullFromUrl;
             this.videoFile = videoFile;
             this.videoSize = videoSize;
             this.chunkSize = chunkSize;
             this.totalChunkCount = totalChunkCount;
             this.mimeType = mimeType;
+            this.temporary = temporary;
         }
 
         private static UploadSource pullFromUrl(String mimeType) {
-            return new UploadSource(true, null, 0L, 0L, 0, mimeType);
+            return new UploadSource(true, null, 0L, 0L, 0, mimeType, false);
         }
 
         private static UploadSource fileUpload(Path videoFile, long videoSize, String mimeType) {
             TkTiktokUploadPlanner.UploadPlan plan = TkTiktokUploadPlanner.plan(videoSize);
             return new UploadSource(false, videoFile, videoSize, plan.getChunkSize(),
-                    plan.getTotalChunkCount(), mimeType);
+                    plan.getTotalChunkCount(), mimeType, true);
+        }
+
+        private static UploadSource persistentFileUpload(Path videoFile, long videoSize, String mimeType) {
+            TkTiktokUploadPlanner.UploadPlan plan = TkTiktokUploadPlanner.plan(videoSize);
+            return new UploadSource(false, videoFile, videoSize, plan.getChunkSize(),
+                    plan.getTotalChunkCount(), mimeType, false);
         }
 
         private boolean isPullFromUrl() {
@@ -1315,11 +1472,44 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         }
 
         private void cleanup() {
-            if (videoFile != null) {
+            if (temporary && videoFile != null) {
                 deleteTempFile(videoFile);
             }
         }
 
+    }
+
+    private void cleanupScheduledMediaAfterCommit(TkTiktokPublishTaskDO task) {
+        Runnable cleanup = () -> cleanupTerminalScheduledMedia(task);
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    cleanup.run();
+                }
+            });
+        } else {
+            cleanup.run();
+        }
+    }
+
+    private void cleanupTerminalScheduledMedia(TkTiktokPublishTaskDO task) {
+        if (scheduledMediaService == null || StrUtil.isBlank(task.getScheduledLocalPath())) {
+            return;
+        }
+        try {
+            scheduledMediaService.cleanup(task.getScheduledLocalPath());
+            task.setScheduledMediaStatus("CLEANED");
+            task.setScheduledMediaFailReason(null);
+        } catch (RuntimeException ex) {
+            task.setScheduledMediaStatus("CLEANUP_FAILED");
+            task.setScheduledMediaFailReason(StrUtils.maxLength(ex.getMessage(), 512));
+            log.warn("[cleanupTerminalScheduledMedia][taskId({}) cleanup failed]", task.getId(), ex);
+        }
+        if (!STATUS_CANCELLED.equals(task.getStatus())) {
+            task.setFinishedAt(LocalDateTime.now());
+        }
+        publishTaskMapper.updateById(task);
     }
 
     private static void deleteTempFile(Path file) {

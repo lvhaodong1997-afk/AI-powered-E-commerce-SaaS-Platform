@@ -98,6 +98,22 @@ public class TkTiktokPublishController {
         return success(publishService.createPublishTask(reqVO));
     }
 
+    @PostMapping("/reschedule")
+    @Operation(summary = "修改 TikTok 定时发布时间")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<Boolean> reschedule(@Valid @RequestBody TkTiktokPublishScheduleReqVO reqVO) {
+        publishService.reschedule(reqVO);
+        return success(true);
+    }
+
+    @PostMapping("/cancel")
+    @Operation(summary = "取消 TikTok 定时发布任务")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<Boolean> cancelScheduled(@RequestParam("taskId") Long taskId) {
+        publishService.cancelScheduled(taskId);
+        return success(true);
+    }
+
     @GetMapping("/task-page")
     @Operation(summary = "获得 TikTok 发布任务分页")
     @PreAuthorize("@ss.hasPermission('tk:video-publish-center:query')")

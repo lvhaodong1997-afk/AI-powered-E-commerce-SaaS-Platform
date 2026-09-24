@@ -8,6 +8,8 @@ import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishDeta
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkTiktokPublishDetailDO;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -96,6 +98,16 @@ public interface TkTiktokPublishDetailMapper extends BaseMapperX<TkTiktokPublish
                 .orderByAsc(TkTiktokPublishDetailDO::getUpdateTime)
                 .last("LIMIT " + Math.max(1, limit)));
     }
+
+    @Update("UPDATE tk_tiktok_publish_detail SET status = 'PENDING', tiktok_status = 'LOCAL_PENDING', "
+            + "fail_reason = NULL, updater = 'tk-scheduler', update_time = NOW() "
+            + "WHERE publish_task_id = #{taskId} AND deleted = b'0' AND status = 'SCHEDULED'")
+    int activateScheduled(@Param("taskId") Long taskId);
+
+    @Update("UPDATE tk_tiktok_publish_detail SET status = 'CANCELLED', tiktok_status = 'CANCELLED', "
+            + "fail_reason = NULL, last_sync_time = #{now}, updater = 'tk-scheduler', update_time = NOW() "
+            + "WHERE publish_task_id = #{taskId} AND deleted = b'0' AND status = 'SCHEDULED'")
+    int cancelScheduled(@Param("taskId") Long taskId, @Param("now") LocalDateTime now);
 
 }
 

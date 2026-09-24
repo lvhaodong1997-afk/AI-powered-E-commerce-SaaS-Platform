@@ -31,6 +31,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Arrays;
@@ -46,6 +47,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -354,6 +356,160 @@ class TkTiktokPublishServiceImplTest {
         assertEquals("PROCESSING", detail.getStatus());
         assertEquals("UPLOAD_PENDING", detail.getTiktokStatus());
         assertEquals("publish_id 尚未可查询", detail.getFailReason());
+    }
+
+    @Test
+    void scheduledTaskPersistsMediaAndDoesNotEnterImmediateQueue() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkTiktokAccountMapper accountMapper = mock(TkTiktokAccountMapper.class);
+        TkBusinessLogService businessLogService = mock(TkBusinessLogService.class);
+        TkTiktokApiClient apiClient = mock(TkTiktokApiClient.class);
+        TkTiktokScheduledMediaService scheduledMediaService = mock(TkTiktokScheduledMediaService.class);
+        TkGenerationTaskDO generationTask = TkGenerationTaskDO.builder()
+                .id(100L).companyId(20L).businessTraceId("TRACE-SCHEDULED")
+                .title("Scheduled video").outputUrl("https://oss.example.com/video.mp4").build();
+        generationTask.setTenantId(8L);
+        TkTiktokAccountDO account = TkTiktokAccountDO.builder()
+                .id(10L).displayName("demo").authStatus("AUTHORIZED").build();
+        when(scheduledMediaService.persist(8L, "https://oss.example.com/video.mp4", null, null))
+                .thenReturn("/tk-publish-media/app/8/video.mp4");
+
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "publishTaskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        ReflectionTestUtils.setField(service, "accountMapper", accountMapper);
+        ReflectionTestUtils.setField(service, "businessLogService", businessLogService);
+        ReflectionTestUtils.setField(service, "apiClient", apiClient);
+        ReflectionTestUtils.setField(service, "scheduledMediaService", scheduledMediaService);
+        doAnswer(invocation -> {
+            ((TkTiktokPublishTaskDO) invocation.getArgument(0)).setId(201L);
+            return 1;
+        }).when(taskMapper).insert(any(TkTiktokPublishTaskDO.class));
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkTiktokPublishDetailDO.class);
+
+        TkTiktokPublishCreateReqVO reqVO = new TkTiktokPublishCreateReqVO();
+        reqVO.setTitle("Scheduled video");
+        reqVO.setPostMode("DIRECT_POST");
+        reqVO.setAccountIds(Collections.singletonList(10L));
+        reqVO.setScheduledAt("2099-09-26T18:00:00+08:00");
+
+        Long taskId = ReflectionTestUtils.invokeMethod(service, "createPublishTaskWithinTenant",
+                reqVO, generationTask, null, Collections.singletonList(account));
+
+        assertEquals(201L, taskId);
+        ArgumentCaptor<TkTiktokPublishTaskDO> taskCaptor = ArgumentCaptor.forClass(TkTiktokPublishTaskDO.class);
+        verify(taskMapper).insert(taskCaptor.capture());
+        assertEquals("SCHEDULED", taskCaptor.getValue().getStatus());
+        assertEquals("SCHEDULED", taskCaptor.getValue().getScheduleStatus());
+        assertEquals("READY", taskCaptor.getValue().getScheduledMediaStatus());
+        assertNotNull(taskCaptor.getValue().getScheduledAt());
+        verify(detailMapper).insert(argThat((TkTiktokPublishDetailDO detail) -> "SCHEDULED".equals(detail.getStatus())
+                && "SCHEDULED".equals(detail.getTiktokStatus())));
+        verify(taskMapper, never()).selectById(201L);
+        verify(accountMapper, never()).selectById(10L);
+    }
+
+    @Test
+    void dispatchesDueScheduledTaskOnlyAfterAtomicClaim() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "publishTaskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        TkTiktokPublishTaskDO task = TkTiktokPublishTaskDO.builder().id(201L).status("SCHEDULED")
+                .scheduleStatus("SCHEDULED").scheduleVersion(2)
+                .scheduledAt(java.time.LocalDateTime.now().minusMinutes(1)).build();
+        task.setTenantId(8L);
+        when(taskMapper.selectDueScheduled(any(java.time.LocalDateTime.class), eq(50)))
+                .thenReturn(Collections.singletonList(task));
+        when(taskMapper.claimScheduled(eq(201L), eq(2), any(java.time.LocalDateTime.class))).thenReturn(1);
+        when(detailMapper.activateScheduled(eq(201L))).thenReturn(1);
+        when(detailMapper.selectListByTaskId(eq(201L))).thenReturn(Collections.emptyList());
+        when(taskMapper.selectById(eq(201L))).thenReturn(null);
+
+        try {
+            assertEquals(1, service.dispatchDueScheduled(50));
+            verify(taskMapper).claimScheduled(eq(201L), eq(2), any(java.time.LocalDateTime.class));
+            verify(detailMapper).activateScheduled(eq(201L));
+            verify(detailMapper, timeout(2000)).selectListByTaskId(eq(201L));
+        } finally {
+            service.destroy();
+        }
+    }
+
+    @Test
+    void scheduledRulesRequireFutureSingleAccountAndDirectPost() {
+        TkTiktokPublishCreateReqVO reqVO = new TkTiktokPublishCreateReqVO();
+        reqVO.setScheduledAt("2099-09-26T18:00:00+08:00");
+        reqVO.setPostMode("DIRECT_POST");
+
+        assertNotNull(TkTiktokPublishServiceImpl.validateScheduledRequest(reqVO, 1,
+                LocalDateTime.of(2099, 9, 26, 9, 0)));
+        assertThrows(IllegalArgumentException.class, () ->
+                TkTiktokPublishServiceImpl.validateScheduledRequest(reqVO, 2,
+                        LocalDateTime.of(2099, 9, 26, 9, 0)));
+        reqVO.setPostMode("UPLOAD_TO_INBOX");
+        assertThrows(IllegalArgumentException.class, () ->
+                TkTiktokPublishServiceImpl.validateScheduledRequest(reqVO, 1,
+                        LocalDateTime.of(2099, 9, 26, 9, 0)));
+        reqVO.setPostMode("DIRECT_POST");
+        reqVO.setScheduledAt("2026-09-24T09:00:00+08:00");
+        assertThrows(IllegalArgumentException.class, () ->
+                TkTiktokPublishServiceImpl.validateScheduledRequest(reqVO, 1,
+                        LocalDateTime.of(2026, 9, 24, 10, 0)));
+    }
+
+    @Test
+    void rescheduleIncrementsVersionOnlyBeforeClaim() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "publishTaskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "dataScopeService", dataScopeService);
+        TkTiktokPublishTaskDO task = TkTiktokPublishTaskDO.builder().id(201L).companyId(20L)
+                .status("SCHEDULED").scheduleStatus("SCHEDULED").scheduleVersion(2)
+                .scheduledAt(LocalDateTime.now().plusHours(1)).build();
+        task.setTenantId(8L);
+        when(taskMapper.selectById(eq(201L))).thenReturn(task);
+        when(taskMapper.rescheduleScheduled(eq(201L), eq(2), any(LocalDateTime.class))).thenReturn(1);
+        cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishScheduleReqVO reqVO =
+                new cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishScheduleReqVO();
+        reqVO.setTaskId(201L);
+        reqVO.setScheduledAt("2099-09-26T18:00:00+08:00");
+
+        service.reschedule(reqVO);
+
+        verify(dataScopeService).validateWritable(8L, 20L);
+        verify(taskMapper).rescheduleScheduled(eq(201L), eq(2), any(LocalDateTime.class));
+    }
+
+    @Test
+    void cancelScheduledPreventsExecutionAndCleansMedia() {
+        TkTiktokPublishTaskMapper taskMapper = mock(TkTiktokPublishTaskMapper.class);
+        TkTiktokPublishDetailMapper detailMapper = mock(TkTiktokPublishDetailMapper.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        TkTiktokScheduledMediaService scheduledMediaService = mock(TkTiktokScheduledMediaService.class);
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "publishTaskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
+        ReflectionTestUtils.setField(service, "dataScopeService", dataScopeService);
+        ReflectionTestUtils.setField(service, "scheduledMediaService", scheduledMediaService);
+        TkTiktokPublishTaskDO task = TkTiktokPublishTaskDO.builder().id(201L).companyId(20L)
+                .status("SCHEDULED").scheduleStatus("SCHEDULED").scheduleVersion(0)
+                .scheduledLocalPath("/managed/video.mp4").build();
+        task.setTenantId(8L);
+        when(taskMapper.selectById(eq(201L))).thenReturn(task);
+        when(taskMapper.cancelScheduled(eq(201L), eq(0), any(LocalDateTime.class))).thenReturn(1);
+        when(detailMapper.cancelScheduled(eq(201L), any(LocalDateTime.class))).thenReturn(1);
+
+        service.cancelScheduled(201L);
+
+        verify(taskMapper).cancelScheduled(eq(201L), eq(0), any(LocalDateTime.class));
+        verify(detailMapper).cancelScheduled(eq(201L), any(LocalDateTime.class));
+        verify(scheduledMediaService).cleanup(eq("/managed/video.mp4"));
+        verify(taskMapper, never()).claimScheduled(any(), any(), any());
     }
 
     @Test

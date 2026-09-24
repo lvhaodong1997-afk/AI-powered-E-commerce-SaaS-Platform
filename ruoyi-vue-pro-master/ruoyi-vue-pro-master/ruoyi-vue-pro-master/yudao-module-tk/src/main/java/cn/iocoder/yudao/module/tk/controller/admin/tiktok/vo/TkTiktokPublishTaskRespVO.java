@@ -29,6 +29,14 @@ public class TkTiktokPublishTaskRespVO {
     private Integer pendingCount;
     private String status;
     private String failReason;
+    private LocalDateTime scheduledAt;
+    private String scheduleStatus;
+    private Integer scheduleVersion;
+    private LocalDateTime startedAt;
+    private LocalDateTime finishedAt;
+    private String scheduledLocalPath;
+    private String scheduledMediaStatus;
+    private String scheduledMediaFailReason;
     private LocalDateTime createTime;
 
 }

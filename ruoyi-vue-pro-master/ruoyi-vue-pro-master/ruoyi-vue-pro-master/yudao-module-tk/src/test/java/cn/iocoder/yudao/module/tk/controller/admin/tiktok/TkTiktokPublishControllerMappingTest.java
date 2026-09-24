@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.controller.admin.tiktok;
 
 import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishPostPageReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishScheduleReqVO;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +21,23 @@ class TkTiktokPublishControllerMappingTest {
                 TkTiktokPublishPostPageReqVO.class).getAnnotation(GetMapping.class).value()).contains("/post-page"));
         assertEquals("@ss.hasPermission('tk:video-publish-center:query')",
                 TkTiktokPublishController.class.getDeclaredMethod("syncPublishLinks", Long.class)
+                        .getAnnotation(PreAuthorize.class).value());
+    }
+
+    @Test
+    void exposesScheduledPublishCreateRescheduleAndCancelContracts() throws Exception {
+        assertNotNull(Class.forName(
+                "cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishCreateReqVO")
+                .getDeclaredField("scheduledAt"));
+        assertTrue(Arrays.asList(TkTiktokPublishController.class.getDeclaredMethod(
+                "reschedule", TkTiktokPublishScheduleReqVO.class)
+                .getAnnotation(PostMapping.class).value()).contains("/reschedule"));
+        assertTrue(Arrays.asList(TkTiktokPublishController.class.getDeclaredMethod(
+                "cancelScheduled", Long.class)
+                .getAnnotation(PostMapping.class).value()).contains("/cancel"));
+        assertEquals("@ss.hasPermission('tk:tiktok-publish:create')",
+                TkTiktokPublishController.class.getDeclaredMethod(
+                        "reschedule", TkTiktokPublishScheduleReqVO.class)
                         .getAnnotation(PreAuthorize.class).value());
     }
 }

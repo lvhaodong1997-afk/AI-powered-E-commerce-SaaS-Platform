@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.*;
 
+import java.time.LocalDateTime;
+
 @TableName("tk_tiktok_publish_task")
 @KeySequence("tk_tiktok_publish_task_seq")
 @Data
@@ -38,5 +40,13 @@ public class TkTiktokPublishTaskDO extends TenantBaseDO {
     private Integer pendingCount;
     private String status;
     private String failReason;
+    private LocalDateTime scheduledAt;
+    private String scheduleStatus;
+    private Integer scheduleVersion;
+    private LocalDateTime startedAt;
+    private LocalDateTime finishedAt;
+    private String scheduledLocalPath;
+    private String scheduledMediaStatus;
+    private String scheduledMediaFailReason;
 
 }
