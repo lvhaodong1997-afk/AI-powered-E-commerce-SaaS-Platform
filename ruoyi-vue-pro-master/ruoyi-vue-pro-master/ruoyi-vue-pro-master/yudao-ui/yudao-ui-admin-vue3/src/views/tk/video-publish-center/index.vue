@@ -254,16 +254,30 @@
             <el-tag :type="publishStatusType(scope.row.status)">{{ publishStatusLabel(scope.row.status) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="计划发布时间" width="180">
+          <template #default="scope">{{ formatTimestamp(scope.row.scheduledAt) }}</template>
+        </el-table-column>
         <el-table-column label="失败原因" min-width="200" show-overflow-tooltip>
           <template #default="scope">{{ failReasonLabel(scope.row) }}</template>
         </el-table-column>
         <el-table-column label="创建时间" width="170">
           <template #default="scope">{{ formatTimestamp(scope.row.createTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="openTaskDetails(scope.row)">明细</el-button>
-            <el-button link type="success" @click="syncTask(scope.row.id)">同步</el-button>
+            <el-button
+              v-if="scope.row.status !== 'SCHEDULED'"
+              link
+              type="success"
+              @click="syncTask(scope.row.id)"
+            >
+              同步
+            </el-button>
+            <template v-if="scope.row.status === 'SCHEDULED'">
+              <el-button link type="primary" @click="openRescheduleDialog(scope.row)">改期</el-button>
+              <el-button link type="danger" @click="cancelScheduledTask(scope.row)">取消</el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
@@ -470,6 +484,23 @@
         <el-form-item label="发布模式" prop="postMode">
           <el-segmented v-model="publishForm.postMode" :options="postModeOptions" />
         </el-form-item>
+        <el-form-item label="发布时间">
+          <el-segmented
+            v-model="publishForm.scheduleMode"
+            :options="[{ label: '立即发布', value: 'IMMEDIATE' }, { label: '定时发布', value: 'SCHEDULED' }]"
+            @change="handleScheduleModeChange"
+          />
+        </el-form-item>
+        <el-form-item v-if="publishForm.scheduleMode === 'SCHEDULED'" label="计划时间" prop="scheduledAt">
+          <el-date-picker
+            v-model="publishForm.scheduledAt"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm:ssZ"
+            placeholder="请选择未来发布时间"
+            class="!w-full"
+          />
+          <div class="sub-text">定时发布首版仅支持单个账号和直接发布，提交后可在发布任务中改期或取消。</div>
+        </el-form-item>
         <el-form-item label="隐私" prop="privacyLevel">
           <el-select v-model="publishForm.privacyLevel" clearable class="!w-full" placeholder="默认使用账号配置">
             <el-option label="Self only" value="SELF_ONLY" />
@@ -498,6 +529,24 @@
         <el-button type="primary" :loading="publishLoading" :disabled="publishUploadLoading" @click="submitPublish">开始发布</el-button>
       </template>
     </el-drawer>
+
+    <el-dialog v-model="rescheduleDialogVisible" title="修改计划发布时间" width="460px">
+      <el-form label-width="100px">
+        <el-form-item label="计划时间">
+          <el-date-picker
+            v-model="rescheduleForm.scheduledAt"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm:ssZ"
+            placeholder="请选择未来发布时间"
+            class="!w-full"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="rescheduleDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="rescheduleSubmitting" @click="rescheduleTask">保存</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog title="TikTok 二维码授权" v-model="qrDialogVisible" width="420px">
       <div class="qr-box">
@@ -711,6 +760,8 @@ const publishForm = reactive({
   title: '',
   caption: '',
   postMode: 'DIRECT_POST',
+  scheduleMode: 'IMMEDIATE' as 'IMMEDIATE' | 'SCHEDULED',
+  scheduledAt: undefined as string | undefined,
   privacyLevel: 'SELF_ONLY',
   allowComment: true,
   allowDuet: false,
@@ -723,6 +774,12 @@ const publishRules = {
   title: [{ required: true, message: '发布标题不能为空', trigger: 'blur' }],
   postMode: [{ required: true, message: '请选择发布模式', trigger: 'change' }]
 }
+const rescheduleDialogVisible = ref(false)
+const rescheduleSubmitting = ref(false)
+const rescheduleForm = reactive({
+  taskId: undefined as number | undefined,
+  scheduledAt: undefined as string | undefined
+})
 const postModeOptions = [
   { label: '直接发布', value: 'DIRECT_POST' },
   { label: '发送草稿箱', value: 'UPLOAD_TO_INBOX' }
@@ -753,7 +810,7 @@ const groupRules = {
   name: [{ required: true, message: '鍒嗙粍鍚嶇О涓嶈兘涓虹┖', trigger: 'blur' }]
 }
 
-const publishStatuses = ['PENDING', 'PROCESSING', 'SUCCESS', 'PARTIAL_SUCCESS', 'FAILED']
+const publishStatuses = ['SCHEDULED', 'PENDING', 'PROCESSING', 'SUCCESS', 'PARTIAL_SUCCESS', 'FAILED', 'CANCELLED']
 const redirectAuthWindow = ref<Window | null>(null)
 
 const copyBusinessTraceId = async (businessTraceId?: string) => {
@@ -921,6 +978,8 @@ const openPublishDrawer = (row: TkGenerationTaskVO) => {
   publishForm.caption = row.scriptText || row.scriptTitle || row.title || ''
   publishForm.accountIds = []
   publishForm.groupIds = []
+  publishForm.scheduleMode = 'IMMEDIATE'
+  publishForm.scheduledAt = undefined
   publishDrawerVisible.value = true
 }
 
@@ -931,6 +990,8 @@ const openUploadPublishDrawer = () => {
   publishForm.uploadedVideoId = undefined
   publishForm.title = ''
   publishForm.caption = ''
+  publishForm.scheduleMode = 'IMMEDIATE'
+  publishForm.scheduledAt = undefined
   uploadedPublishMedia.value = undefined
   publishDrawerVisible.value = true
 }
@@ -979,6 +1040,17 @@ const resetPublishSource = () => {
   if (publishFileInput.value) publishFileInput.value.value = ''
 }
 
+const handleScheduleModeChange = () => {
+  if (publishForm.scheduleMode === 'SCHEDULED') {
+    publishForm.groupIds = []
+    publishForm.postMode = 'DIRECT_POST'
+  } else {
+    publishForm.scheduledAt = undefined
+  }
+}
+
+const isFutureSchedule = (scheduledAt?: string) => Boolean(scheduledAt && Date.parse(scheduledAt) > Date.now())
+
 const submitPublish = async () => {
   await publishFormRef.value?.validate()
   if (!publishForm.accountIds.length && !publishForm.groupIds.length) {
@@ -989,10 +1061,28 @@ const submitPublish = async () => {
     message.warning('请先上传视频')
     return
   }
+  if (publishForm.scheduleMode === 'SCHEDULED') {
+    if (!isFutureSchedule(publishForm.scheduledAt)) {
+      message.warning('请选择未来的计划发布时间')
+      return
+    }
+    if (publishForm.accountIds.length !== 1 || publishForm.groupIds.length) {
+      message.warning('定时发布仅支持选择一个账号，不能选择账号分组')
+      return
+    }
+    if (publishForm.postMode !== 'DIRECT_POST') {
+      message.warning('定时发布仅支持直接发布模式')
+      return
+    }
+  }
   publishLoading.value = true
   try {
-    await TkTiktokPublishApi.create(publishForm)
-    message.success('发布任务已加入队列')
+    const { scheduleMode, ...payload } = publishForm
+    await TkTiktokPublishApi.create({
+      ...payload,
+      scheduledAt: scheduleMode === 'SCHEDULED' ? publishForm.scheduledAt : undefined
+    })
+    message.success(scheduleMode === 'SCHEDULED' ? '定时发布任务已创建' : '发布任务已加入队列')
     publishDrawerVisible.value = false
     await refreshAll()
   } finally {
@@ -1184,6 +1274,38 @@ const syncTask = async (id: number) => {
   await refreshAll()
 }
 
+const openRescheduleDialog = (row: TkTiktokPublishTaskVO) => {
+  rescheduleForm.taskId = row.id
+  rescheduleForm.scheduledAt = row.scheduledAt
+  rescheduleDialogVisible.value = true
+}
+
+const rescheduleTask = async () => {
+  if (!rescheduleForm.taskId || !isFutureSchedule(rescheduleForm.scheduledAt)) {
+    message.warning('请选择未来的计划发布时间')
+    return
+  }
+  rescheduleSubmitting.value = true
+  try {
+    await TkTiktokPublishApi.reschedule({
+      taskId: rescheduleForm.taskId,
+      scheduledAt: rescheduleForm.scheduledAt as string
+    })
+    message.success('计划发布时间已更新')
+    rescheduleDialogVisible.value = false
+    await getTaskList()
+  } finally {
+    rescheduleSubmitting.value = false
+  }
+}
+
+const cancelScheduledTask = async (row: TkTiktokPublishTaskVO) => {
+  await message.confirm(`确认取消定时发布任务「${row.title || row.id}」？取消后不会再自动发布。`)
+  await TkTiktokPublishApi.cancelScheduled(row.id)
+  message.success('定时发布任务已取消')
+  await refreshAll()
+}
+
 const setRetryingDetail = (id: number, retrying: boolean) => {
   const ids = new Set(retryingDetailIds.value)
   retrying ? ids.add(id) : ids.delete(id)
@@ -1235,7 +1357,7 @@ const authStatusLabel = (status?: string) => ({ AUTHORIZED: 'Authorized', UNAUTH
 const tokenStatusLabel = (status?: string) => ({ VALID: '有效', AUTO_REFRESH: '自动刷新中', EXPIRED: '需重新授权' })[status || ''] || status || '-'
 const tokenStatusType = (status?: string) => ({ VALID: 'success', AUTO_REFRESH: 'warning', EXPIRED: 'danger' }[status || ''] || 'info') as 'success' | 'warning' | 'danger' | 'info'
 const postModeLabel = (mode?: string) => ({ DIRECT_POST: 'Direct post', UPLOAD_TO_INBOX: 'Upload to inbox', MANUAL_REGISTER: 'Manual register' })[mode || ''] || mode || '-'
-const publishStatusLabel = (status?: string) => ({ PENDING: 'Pending', PROCESSING: 'Processing', SUCCESS: 'Success', PARTIAL_SUCCESS: 'Partial success', FAILED: 'Failed' })[status || ''] || status || '-'
+const publishStatusLabel = (status?: string) => ({ SCHEDULED: '等待定时发布', PENDING: 'Pending', PROCESSING: 'Processing', SUCCESS: 'Success', PARTIAL_SUCCESS: 'Partial success', FAILED: 'Failed', CANCELLED: '已取消' })[status || ''] || status || '-'
 const tiktokStatusLabel = (status?: string) => ({
   UPLOAD_PENDING: '上传待确认',
   PROCESSING: '平台处理中',
@@ -1263,7 +1385,7 @@ const publicPostStatusLabel = (status?: string) => ({
 const publishStatusType = (status?: string) => {
   if (status === 'SUCCESS') return 'success'
   if (status === 'FAILED') return 'danger'
-  if (status === 'PARTIAL_SUCCESS') return 'warning'
+  if (status === 'PARTIAL_SUCCESS' || status === 'SCHEDULED') return 'warning'
   return 'info'
 }
 const qrStatusType = (status?: string) => (status === 'SUCCESS' ? 'success' : status === 'FAILED' || status === 'CONFIG_REQUIRED' ? 'danger' : 'info')

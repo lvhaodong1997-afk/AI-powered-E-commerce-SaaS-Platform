@@ -86,6 +86,13 @@ export interface TkTiktokPublishTaskVO {
   failedCount: number
   pendingCount: number
   status: string
+  scheduledAt?: string
+  scheduleStatus?: string
+  scheduleVersion?: number
+  startedAt?: string
+  finishedAt?: string
+  scheduledMediaStatus?: string
+  scheduledMediaFailReason?: string
   failReasonCode?: string
   failReason?: string
   createTime?: string
@@ -285,8 +292,15 @@ export const TkTiktokPublishApi = {
     commercialContent?: boolean
     brandContent?: boolean
     aigcContent?: boolean
+    scheduledAt?: string
   }) => {
     return await request.post({ url: '/tk/tiktok-publish/create', data })
+  },
+  reschedule: async (data: { taskId: number; scheduledAt: string }) => {
+    return await request.post({ url: '/tk/tiktok-publish/reschedule', data })
+  },
+  cancelScheduled: async (taskId: number) => {
+    return await request.post({ url: '/tk/tiktok-publish/cancel', params: { taskId } })
   },
   getTaskPage: async (params: any) => {
     return await request.get({ url: '/tk/tiktok-publish/task-page', params })
