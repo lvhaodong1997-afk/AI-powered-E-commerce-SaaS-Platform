@@ -91,5 +91,22 @@ public interface TkTiktokPublishTaskMapper extends BaseMapperX<TkTiktokPublishTa
     int cancelScheduled(@Param("id") Long id, @Param("version") Integer version,
                         @Param("now") LocalDateTime now);
 
+    @InterceptorIgnore(tenantLine = "true", dataPermission = "true")
+    @Select("SELECT * FROM tk_tiktok_publish_task WHERE deleted = b'0' "
+            + "AND scheduled_local_path IS NOT NULL AND scheduled_local_path <> '' "
+            + "AND (scheduled_media_status IS NULL OR scheduled_media_status IN ('READY', 'CLEANUP_FAILED') "
+            + "OR (scheduled_media_status = 'CLEANING' AND update_time < DATE_SUB(NOW(), INTERVAL 30 MINUTE))) "
+            + "AND status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS', 'CANCELLED') "
+            + "ORDER BY id ASC LIMIT #{limit}")
+    List<TkTiktokPublishTaskDO> selectScheduledMediaCleanupCandidates(@Param("limit") int limit);
+
+    @Update("UPDATE tk_tiktok_publish_task SET scheduled_media_status = 'CLEANING', "
+            + "scheduled_media_fail_reason = NULL, updater = 'tk-cleanup', update_time = NOW() "
+            + "WHERE id = #{id} AND deleted = b'0' "
+            + "AND status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS', 'CANCELLED') "
+            + "AND (scheduled_media_status IS NULL OR scheduled_media_status IN ('READY', 'CLEANUP_FAILED') "
+            + "OR (scheduled_media_status = 'CLEANING' AND update_time < DATE_SUB(NOW(), INTERVAL 30 MINUTE)))")
+    int claimScheduledMediaCleanup(@Param("id") Long id);
+
 }
 
