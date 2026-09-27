@@ -130,7 +130,8 @@ class TkOpenTiktokPublishServiceTest {
                 connectionMapper, idempotencyMapper, mediaService);
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-scheduled-create");
         TkOpenTiktokPublishVO.TaskCreateReq request = request();
-        request.setScheduledAt("2099-09-26T18:00:00+08:00");
+        request.setScheduledAt("2099-09-26T18:00:00");
+        request.setRegionCode("US");
 
         TkOpenTiktokPublishVO.TaskResp response = service.create(request, "scheduled-create");
 
@@ -139,7 +140,12 @@ class TkOpenTiktokPublishServiceTest {
         assertTrue(response.getCanReschedule());
         assertTrue(response.getCanCancel());
         verify(mediaService).prepareForScheduledPublish(media);
-        verify(taskMapper).insert(any(TkOpenTiktokPublishTaskDO.class));
+        ArgumentCaptor<TkOpenTiktokPublishTaskDO> taskCaptor = ArgumentCaptor.forClass(TkOpenTiktokPublishTaskDO.class);
+        verify(taskMapper).insert(taskCaptor.capture());
+        assertEquals("US", taskCaptor.getValue().getScheduleRegionCode());
+        assertEquals("America/Los_Angeles", taskCaptor.getValue().getScheduleTimezone());
+        assertEquals(LocalDateTime.of(2099, 9, 27, 1, 0), taskCaptor.getValue().getScheduleUtcTime());
+        assertEquals(LocalDateTime.of(2099, 9, 27, 9, 0), taskCaptor.getValue().getScheduleBeijingTime());
         verifyNoMoreInteractions(mediaService);
         service.destroy();
     }
@@ -219,7 +225,7 @@ class TkOpenTiktokPublishServiceTest {
                 .scheduledAt(LocalDateTime.now().minusMinutes(1)).scheduleVersion(3).build();
         TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder().id(8L)
                 .taskId("task_due").clientId("client_b").status("SCHEDULED").build();
-        when(taskMapper.selectDueScheduled(any(), eq(100))).thenReturn(Collections.singletonList(task));
+        when(taskMapper.selectDueScheduled(any(), any(), eq(100))).thenReturn(Collections.singletonList(task));
         when(taskMapper.selectByClientAndTaskIdForUpdate("client_b", "task_due")).thenReturn(task);
         when(detailMapper.selectListByClientAndTaskIdForUpdate("client_b", "task_due"))
                 .thenReturn(Collections.singletonList(detail));

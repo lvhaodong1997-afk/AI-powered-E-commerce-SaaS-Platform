@@ -30,8 +30,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.*;
@@ -65,6 +67,7 @@ public class TkOpenTiktokPublishService {
     private final TkOpenApiSecretCipher secretCipher;
     private final TkLocalUploadStorageService localStorageService;
     private final TkOpenTiktokMediaService mediaService;
+    private final TkOpenTiktokScheduleTimeService scheduleTimeService;
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
     private final ScheduledExecutorService heartbeats = Executors.newScheduledThreadPool(1);
     @Resource private TkOpenTiktokPublishAttemptService attemptService;
@@ -82,7 +85,21 @@ public class TkOpenTiktokPublishService {
                                       TkOpenApiSecretCipher secretCipher,
                                       TkLocalUploadStorageService localStorageService) {
         this(taskMapper, detailMapper, mediaMapper, connectionMapper, idempotencyMapper, platformRegistry,
-                callbackService, secretCipher, localStorageService, null);
+                callbackService, secretCipher, localStorageService, null, null);
+    }
+
+    public TkOpenTiktokPublishService(TkOpenTiktokPublishTaskMapper taskMapper,
+                                      TkOpenTiktokPublishDetailMapper detailMapper,
+                                      TkOpenTiktokMediaMapper mediaMapper,
+                                      TkOpenTiktokConnectionMapper connectionMapper,
+                                      TkOpenApiIdempotencyMapper idempotencyMapper,
+                                      TkOpenPublishPlatformRegistry platformRegistry,
+                                      TkOpenApiCallbackService callbackService,
+                                      TkOpenApiSecretCipher secretCipher,
+                                      TkLocalUploadStorageService localStorageService,
+                                      TkOpenTiktokMediaService mediaService) {
+        this(taskMapper, detailMapper, mediaMapper, connectionMapper, idempotencyMapper, platformRegistry,
+                callbackService, secretCipher, localStorageService, mediaService, null);
     }
 
     @Autowired
@@ -95,7 +112,8 @@ public class TkOpenTiktokPublishService {
                                       TkOpenApiCallbackService callbackService,
                                       TkOpenApiSecretCipher secretCipher,
                                       TkLocalUploadStorageService localStorageService,
-                                      TkOpenTiktokMediaService mediaService) {
+                                      TkOpenTiktokMediaService mediaService,
+                                      TkOpenTiktokScheduleTimeService scheduleTimeService) {
         this.taskMapper = taskMapper;
         this.detailMapper = detailMapper;
         this.mediaMapper = mediaMapper;
@@ -106,6 +124,8 @@ public class TkOpenTiktokPublishService {
         this.secretCipher = secretCipher;
         this.localStorageService = localStorageService;
         this.mediaService = mediaService;
+        this.scheduleTimeService = scheduleTimeService == null
+                ? new TkOpenTiktokScheduleTimeService() : scheduleTimeService;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -154,6 +174,7 @@ public class TkOpenTiktokPublishService {
         taskRequest.setAigcContent(request.getAigcContent());
         taskRequest.setExternalRequestId(request.getExternalRequestId());
         taskRequest.setScheduledAt(request.getScheduledAt());
+        taskRequest.setRegionCode(request.getRegionCode());
         return createInternal(taskRequest, idempotencyKey, hash);
     }
 
@@ -169,10 +190,12 @@ public class TkOpenTiktokPublishService {
             }
             idempotencyMapper.deleteExpired(clientId, idempotencyKey, now);
         }
-        LocalDateTime scheduledAt = parseScheduledAt(request.getScheduledAt());
+        TkOpenTiktokScheduleTimeService.ScheduleTime scheduleTime =
+                scheduleTimeService.resolve(request.getScheduledAt(), request.getRegionCode());
+        LocalDateTime scheduledAt = scheduleTime == null ? null : scheduleTime.scheduledDateTime();
         int requestedAccountCount = request.getConnectionIds() == null ? 0
                 : new LinkedHashSet<>(request.getConnectionIds()).size();
-        validateSchedule(request, scheduledAt, requestedAccountCount);
+        validateSchedule(request, scheduleTime, requestedAccountCount);
         TkOpenTiktokMediaDO media = mediaMapper.selectByClientAndMediaId(clientId, request.getMediaId());
         if (media == null) throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "media does not exist");
         if (!"READY".equals(media.getStatus())) throw TkOpenApiException.badRequest("MEDIA_NOT_READY", "media is not ready");
@@ -223,6 +246,12 @@ public class TkOpenTiktokPublishService {
                 .accountCount(connections.size()).successCount(0).failedCount(0).pendingCount(connections.size())
                 .status(scheduled ? "SCHEDULED" : "PENDING")
                 .scheduledAt(scheduledAt)
+                .scheduleRegionCode(scheduled ? scheduleTime.regionCode() : null)
+                .scheduleRegionName(scheduled ? scheduleTime.regionName() : null)
+                .scheduleTimezone(scheduled ? scheduleTime.timezone().getId() : null)
+                .scheduleUtcTime(scheduled ? scheduleTime.utcDateTime() : null)
+                .scheduleBeijingTime(scheduled ? scheduleTime.beijingDateTime() : null)
+                .scheduleUtcOffset(scheduled ? scheduleTime.utcOffset() : null)
                 .scheduleStatus(scheduled ? "SCHEDULED" : null)
                 .scheduleVersion(0)
                 .build();
@@ -248,12 +277,19 @@ public class TkOpenTiktokPublishService {
 
     @Transactional(rollbackFor = Exception.class)
     public TkOpenTiktokPublishVO.TaskResp reschedule(String taskId, String scheduledAt, String idempotencyKey) {
+        return reschedule(taskId, scheduledAt, null, idempotencyKey);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public TkOpenTiktokPublishVO.TaskResp reschedule(String taskId, String scheduledAt,
+                                                     String regionCode, String idempotencyKey) {
         validateOptionalIdempotencyKey(idempotencyKey);
         String clientId = currentClient();
-        LocalDateTime nextTime = parseScheduledAt(scheduledAt);
-        if (nextTime == null || !nextTime.isAfter(LocalDateTime.now())) {
+        TkOpenTiktokScheduleTimeService.ScheduleTime nextSchedule = scheduleTimeService.resolve(scheduledAt, regionCode);
+        if (nextSchedule == null || !nextSchedule.instant().isAfter(Instant.now())) {
             throw TkOpenApiException.badRequest("SCHEDULE_TIME_INVALID", "scheduledAt is required");
         }
+        LocalDateTime nextTime = nextSchedule.scheduledDateTime();
         TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskIdForUpdate(clientId, taskId);
         if (task == null) throw TkOpenApiException.notFound("PUBLISH_TASK_NOT_FOUND", "publish task does not exist");
         if (!"SCHEDULED".equals(task.getStatus()) || task.getScheduledAt() == null) {
@@ -268,10 +304,23 @@ public class TkOpenTiktokPublishService {
                 .eq(TkOpenTiktokPublishTaskDO::getId, task.getId())
                 .eq(TkOpenTiktokPublishTaskDO::getStatus, "SCHEDULED")
                 .set(TkOpenTiktokPublishTaskDO::getScheduledAt, nextTime)
+                .set(TkOpenTiktokPublishTaskDO::getScheduleRegionCode, nextSchedule.regionCode())
+                .set(TkOpenTiktokPublishTaskDO::getScheduleRegionName, nextSchedule.regionName())
+                .set(TkOpenTiktokPublishTaskDO::getScheduleTimezone, nextSchedule.timezone().getId())
+                .set(TkOpenTiktokPublishTaskDO::getScheduleUtcTime, nextSchedule.utcDateTime())
+                .set(TkOpenTiktokPublishTaskDO::getScheduleBeijingTime, nextSchedule.beijingDateTime())
+                .set(TkOpenTiktokPublishTaskDO::getScheduleUtcOffset, nextSchedule.utcOffset())
                 .set(TkOpenTiktokPublishTaskDO::getScheduleStatus, "SCHEDULED")
                 .set(TkOpenTiktokPublishTaskDO::getScheduleVersion, version + 1));
         if (changed != 1) throw TkOpenApiException.conflict("SCHEDULE_ALREADY_RUNNING", "scheduled task execution has already started");
-        task.setScheduledAt(nextTime).setScheduleStatus("SCHEDULED").setScheduleVersion(version + 1);
+        task.setScheduledAt(nextTime)
+                .setScheduleRegionCode(nextSchedule.regionCode())
+                .setScheduleRegionName(nextSchedule.regionName())
+                .setScheduleTimezone(nextSchedule.timezone().getId())
+                .setScheduleUtcTime(nextSchedule.utcDateTime())
+                .setScheduleBeijingTime(nextSchedule.beijingDateTime())
+                .setScheduleUtcOffset(nextSchedule.utcOffset())
+                .setScheduleStatus("SCHEDULED").setScheduleVersion(version + 1);
         return toTaskResp(task);
     }
 
@@ -603,14 +652,18 @@ public class TkOpenTiktokPublishService {
 
     @Transactional(rollbackFor = Exception.class)
     public int dispatchDueScheduled(int limit) {
-        List<TkOpenTiktokPublishTaskDO> due = taskMapper.selectDueScheduled(LocalDateTime.now(),
+        LocalDateTime utcNow = LocalDateTime.now(ZoneOffset.UTC);
+        LocalDateTime legacyNow = LocalDateTime.now();
+        List<TkOpenTiktokPublishTaskDO> due = taskMapper.selectDueScheduled(utcNow, legacyNow,
                 Math.max(1, Math.min(limit, 200)));
         List<String> submitted = new ArrayList<>();
         for (TkOpenTiktokPublishTaskDO candidate : due) {
             TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskIdForUpdate(
                     candidate.getClientId(), candidate.getTaskId());
-            if (task == null || !"SCHEDULED".equals(task.getStatus()) || task.getScheduledAt() == null
-                    || task.getScheduledAt().isAfter(LocalDateTime.now())) continue;
+            boolean taskDue = task != null && (task.getScheduleUtcTime() != null
+                    ? !task.getScheduleUtcTime().isAfter(utcNow)
+                    : task.getScheduledAt() != null && !task.getScheduledAt().isAfter(legacyNow));
+            if (task == null || !"SCHEDULED".equals(task.getStatus()) || !taskDue) continue;
             List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectListByClientAndTaskIdForUpdate(
                     task.getClientId(), task.getTaskId());
             if (details.isEmpty() || details.stream().anyMatch(detail -> !"SCHEDULED".equals(detail.getStatus()))) continue;
@@ -1198,6 +1251,12 @@ public class TkOpenTiktokPublishService {
         response.setStatus(task.getStatus()); response.setAccountCount(task.getAccountCount()); response.setSuccessCount(task.getSuccessCount());
         response.setFailedCount(task.getFailedCount()); response.setPendingCount(task.getPendingCount()); response.setFailReason(task.getFailReason());
         response.setScheduledAt(task.getScheduledAt());
+        response.setRegionCode(task.getScheduleRegionCode());
+        response.setRegionName(task.getScheduleRegionName());
+        response.setScheduleTimezone(task.getScheduleTimezone());
+        response.setScheduleUtcTime(task.getScheduleUtcTime());
+        response.setScheduleBeijingTime(task.getScheduleBeijingTime());
+        response.setScheduleUtcOffset(task.getScheduleUtcOffset());
         response.setScheduleStatus(task.getScheduleStatus());
         boolean mutableSchedule = "SCHEDULED".equals(task.getStatus()) && task.getScheduledAt() != null;
         response.setCanReschedule(mutableSchedule);
@@ -1225,9 +1284,9 @@ public class TkOpenTiktokPublishService {
     }
 
     private void validateSchedule(TkOpenTiktokPublishVO.TaskCreateReq request,
-                                  LocalDateTime scheduledAt, int accountCount) {
-        if (scheduledAt == null) return;
-        if (!scheduledAt.isAfter(LocalDateTime.now())) {
+                                  TkOpenTiktokScheduleTimeService.ScheduleTime scheduleTime, int accountCount) {
+        if (scheduleTime == null) return;
+        if (!scheduleTime.instant().isAfter(Instant.now())) {
             throw TkOpenApiException.badRequest("SCHEDULE_TIME_INVALID", "scheduledAt must be in the future");
         }
         if (accountCount != 1) {

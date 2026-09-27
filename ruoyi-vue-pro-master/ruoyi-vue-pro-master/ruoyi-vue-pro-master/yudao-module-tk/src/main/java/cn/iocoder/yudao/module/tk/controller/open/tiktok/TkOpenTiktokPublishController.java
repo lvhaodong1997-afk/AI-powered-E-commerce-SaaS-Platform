@@ -39,7 +39,8 @@ public class TkOpenTiktokPublishController {
             @PathVariable String taskId,
             @Valid @RequestBody TkOpenTiktokPublishVO.ScheduleReq request,
             @RequestHeader(value = "Idempotency-Key", required = false) String key) {
-        return TkOpenApiResponse.success(publishService.reschedule(taskId, request.getScheduledAt(), key));
+        return TkOpenApiResponse.success(publishService.reschedule(taskId, request.getScheduledAt(),
+                request.getRegionCode(), key));
     }
 
     @PostMapping("/tasks/{taskId}/cancel")

@@ -39,6 +39,8 @@ public final class TkOpenTiktokPublishVO {
         /** ISO-8601 time with an optional offset, for example 2026-09-26T18:00:00+08:00. */
         @Size(max = 64)
         private String scheduledAt;
+        @Size(max = 16)
+        private String regionCode;
     }
 
     @Data
@@ -72,6 +74,8 @@ public final class TkOpenTiktokPublishVO {
         private String externalRequestId;
         @Size(max = 64)
         private String scheduledAt;
+        @Size(max = 16)
+        private String regionCode;
     }
 
     @Data
@@ -86,6 +90,12 @@ public final class TkOpenTiktokPublishVO {
         private Integer pendingCount;
         private String failReason;
         private LocalDateTime scheduledAt;
+        private String regionCode;
+        private String regionName;
+        private String scheduleTimezone;
+        private LocalDateTime scheduleUtcTime;
+        private LocalDateTime scheduleBeijingTime;
+        private String scheduleUtcOffset;
         private String scheduleStatus;
         private Boolean canReschedule;
         private Boolean canCancel;
@@ -98,6 +108,8 @@ public final class TkOpenTiktokPublishVO {
         @NotBlank
         @Size(max = 64)
         private String scheduledAt;
+        @Size(max = 16)
+        private String regionCode;
     }
 
     @Data

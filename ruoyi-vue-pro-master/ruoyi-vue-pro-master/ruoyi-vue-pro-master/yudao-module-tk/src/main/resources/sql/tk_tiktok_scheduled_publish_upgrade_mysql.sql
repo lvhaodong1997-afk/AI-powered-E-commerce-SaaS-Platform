@@ -54,6 +54,66 @@ DEALLOCATE PREPARE tk_scheduled_task_at_stmt;
 SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name
                        AND table_name = 'tk_open_tiktok_publish_task')
         AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name
+                        AND table_name = 'tk_open_tiktok_publish_task' AND column_name = 'schedule_region_code'),
+    'ALTER TABLE `tk_open_tiktok_publish_task` ADD COLUMN `schedule_region_code` varchar(16) DEFAULT NULL COMMENT ''计划发布区域编码'' AFTER `scheduled_at`',
+    'SELECT 1');
+PREPARE tk_scheduled_region_code_stmt FROM @sql;
+EXECUTE tk_scheduled_region_code_stmt;
+DEALLOCATE PREPARE tk_scheduled_region_code_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name
+                       AND table_name = 'tk_open_tiktok_publish_task')
+        AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name
+                        AND table_name = 'tk_open_tiktok_publish_task' AND column_name = 'schedule_region_name'),
+    'ALTER TABLE `tk_open_tiktok_publish_task` ADD COLUMN `schedule_region_name` varchar(64) DEFAULT NULL COMMENT ''计划发布区域名称'' AFTER `schedule_region_code`',
+    'SELECT 1');
+PREPARE tk_scheduled_region_name_stmt FROM @sql;
+EXECUTE tk_scheduled_region_name_stmt;
+DEALLOCATE PREPARE tk_scheduled_region_name_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name
+                       AND table_name = 'tk_open_tiktok_publish_task')
+        AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name
+                        AND table_name = 'tk_open_tiktok_publish_task' AND column_name = 'schedule_timezone'),
+    'ALTER TABLE `tk_open_tiktok_publish_task` ADD COLUMN `schedule_timezone` varchar(64) DEFAULT NULL COMMENT ''计划发布时区'' AFTER `schedule_region_name`',
+    'SELECT 1');
+PREPARE tk_scheduled_timezone_stmt FROM @sql;
+EXECUTE tk_scheduled_timezone_stmt;
+DEALLOCATE PREPARE tk_scheduled_timezone_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name
+                       AND table_name = 'tk_open_tiktok_publish_task')
+        AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name
+                        AND table_name = 'tk_open_tiktok_publish_task' AND column_name = 'schedule_utc_time'),
+    'ALTER TABLE `tk_open_tiktok_publish_task` ADD COLUMN `schedule_utc_time` datetime DEFAULT NULL COMMENT ''计划发布 UTC 时间'' AFTER `schedule_timezone`',
+    'SELECT 1');
+PREPARE tk_scheduled_utc_time_stmt FROM @sql;
+EXECUTE tk_scheduled_utc_time_stmt;
+DEALLOCATE PREPARE tk_scheduled_utc_time_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name
+                       AND table_name = 'tk_open_tiktok_publish_task')
+        AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name
+                        AND table_name = 'tk_open_tiktok_publish_task' AND column_name = 'schedule_beijing_time'),
+    'ALTER TABLE `tk_open_tiktok_publish_task` ADD COLUMN `schedule_beijing_time` datetime DEFAULT NULL COMMENT ''计划发布北京时间'' AFTER `schedule_utc_time`',
+    'SELECT 1');
+PREPARE tk_scheduled_beijing_time_stmt FROM @sql;
+EXECUTE tk_scheduled_beijing_time_stmt;
+DEALLOCATE PREPARE tk_scheduled_beijing_time_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name
+                       AND table_name = 'tk_open_tiktok_publish_task')
+        AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name
+                        AND table_name = 'tk_open_tiktok_publish_task' AND column_name = 'schedule_utc_offset'),
+    'ALTER TABLE `tk_open_tiktok_publish_task` ADD COLUMN `schedule_utc_offset` varchar(8) DEFAULT NULL COMMENT ''计划发布 UTC 偏移量'' AFTER `schedule_beijing_time`',
+    'SELECT 1');
+PREPARE tk_scheduled_utc_offset_stmt FROM @sql;
+EXECUTE tk_scheduled_utc_offset_stmt;
+DEALLOCATE PREPARE tk_scheduled_utc_offset_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name
+                       AND table_name = 'tk_open_tiktok_publish_task')
+        AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = @schema_name
                         AND table_name = 'tk_open_tiktok_publish_task' AND column_name = 'schedule_status'),
     'ALTER TABLE `tk_open_tiktok_publish_task` ADD COLUMN `schedule_status` varchar(32) DEFAULT NULL COMMENT ''计划发布状态'' AFTER `scheduled_at`',
     'SELECT 1');
@@ -80,3 +140,13 @@ SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schem
 PREPARE tk_scheduled_task_index_stmt FROM @sql;
 EXECUTE tk_scheduled_task_index_stmt;
 DEALLOCATE PREPARE tk_scheduled_task_index_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name
+                       AND table_name = 'tk_open_tiktok_publish_task')
+        AND NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = @schema_name
+                        AND table_name = 'tk_open_tiktok_publish_task' AND index_name = 'idx_tk_open_publish_task_schedule_utc'),
+    'ALTER TABLE `tk_open_tiktok_publish_task` ADD KEY `idx_tk_open_publish_task_schedule_utc` (`status`, `schedule_utc_time`)',
+    'SELECT 1');
+PREPARE tk_scheduled_task_utc_index_stmt FROM @sql;
+EXECUTE tk_scheduled_task_utc_index_stmt;
+DEALLOCATE PREPARE tk_scheduled_task_utc_index_stmt;

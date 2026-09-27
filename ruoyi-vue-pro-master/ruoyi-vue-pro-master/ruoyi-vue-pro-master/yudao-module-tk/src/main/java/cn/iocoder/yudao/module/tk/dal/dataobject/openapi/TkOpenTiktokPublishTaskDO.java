@@ -43,6 +43,12 @@ public class TkOpenTiktokPublishTaskDO extends BaseDO {
     private String status;
     private String failReason;
     private LocalDateTime scheduledAt;
+    private String scheduleRegionCode;
+    private String scheduleRegionName;
+    private String scheduleTimezone;
+    private LocalDateTime scheduleUtcTime;
+    private LocalDateTime scheduleBeijingTime;
+    private String scheduleUtcOffset;
     private String scheduleStatus;
     private Integer scheduleVersion;
 }

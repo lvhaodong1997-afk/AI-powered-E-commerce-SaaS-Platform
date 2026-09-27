@@ -146,6 +146,12 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_task` (
   `status` varchar(32) NOT NULL,
   `fail_reason` varchar(1024) DEFAULT NULL,
   `scheduled_at` datetime DEFAULT NULL COMMENT '计划发布时间',
+  `schedule_region_code` varchar(16) DEFAULT NULL COMMENT '计划发布区域编码',
+  `schedule_region_name` varchar(64) DEFAULT NULL COMMENT '计划发布区域名称',
+  `schedule_timezone` varchar(64) DEFAULT NULL COMMENT '计划发布时区',
+  `schedule_utc_time` datetime DEFAULT NULL COMMENT '计划发布 UTC 时间',
+  `schedule_beijing_time` datetime DEFAULT NULL COMMENT '计划发布北京时间',
+  `schedule_utc_offset` varchar(8) DEFAULT NULL COMMENT '计划发布 UTC 偏移量',
   `schedule_status` varchar(32) DEFAULT NULL COMMENT '计划发布状态',
   `schedule_version` int NOT NULL DEFAULT 0 COMMENT '计划发布版本号',
   `creator` varchar(64) DEFAULT '',
@@ -157,6 +163,7 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_task` (
   UNIQUE KEY `uk_tk_open_publish_task_id` (`task_id`),
   KEY `idx_tk_open_publish_task_client` (`client_id`, `create_time`),
   KEY `idx_tk_open_publish_task_schedule` (`status`, `scheduled_at`),
+  KEY `idx_tk_open_publish_task_schedule_utc` (`status`, `schedule_utc_time`),
   KEY `idx_tk_open_publish_task_external` (`client_id`, `external_request_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
