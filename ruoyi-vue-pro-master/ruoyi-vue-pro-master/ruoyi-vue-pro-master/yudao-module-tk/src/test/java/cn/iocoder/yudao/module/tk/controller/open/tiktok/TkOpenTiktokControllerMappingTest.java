@@ -70,4 +70,13 @@ class TkOpenTiktokControllerMappingTest {
 
         assertTrue(Arrays.asList(mapping.value()).contains("/connections/{connectionId}/profile/refresh"));
     }
+
+    @Test
+    void authControllerKeepsConnectionsRouteWithUsernameFilter() throws Exception {
+        GetMapping mapping = TkOpenTiktokAuthController.class
+                .getDeclaredMethod("getConnections", String.class, String.class, String.class)
+                .getAnnotation(GetMapping.class);
+
+        assertTrue(Arrays.asList(mapping.value()).contains("/connections"));
+    }
 }

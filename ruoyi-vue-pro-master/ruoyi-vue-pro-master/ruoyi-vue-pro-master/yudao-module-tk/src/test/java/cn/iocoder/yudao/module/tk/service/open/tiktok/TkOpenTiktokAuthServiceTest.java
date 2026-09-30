@@ -48,7 +48,7 @@ class TkOpenTiktokAuthServiceTest {
     void shouldRejectBlankOauthStateBeforeDatabaseLookup() {
         TkOpenTiktokAuthSessionMapper sessionMapper = mock(TkOpenTiktokAuthSessionMapper.class);
         TkOpenTiktokAuthService service = new TkOpenTiktokAuthService(sessionMapper,
-                null, null, null, null,
+                null, null, null, null, null,
                 "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/callback",
                 "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions");
 
@@ -71,7 +71,7 @@ class TkOpenTiktokAuthServiceTest {
                 .expireTime(LocalDateTime.now().plusMinutes(5)).build();
         when(sessionMapper.selectByOauthStateForUpdate("state-1")).thenReturn(session);
         TkOpenTiktokAuthService service = new TkOpenTiktokAuthService(sessionMapper,
-                connectionMapper, platformRegistry, secretCipher, callbackService,
+                connectionMapper, platformRegistry, secretCipher, callbackService, null,
                 "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/callback",
                 "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions");
 
@@ -92,7 +92,7 @@ class TkOpenTiktokAuthServiceTest {
         when(sessionMapper.selectByClientAndSessionIdForUpdate("client_a", "auth_1")).thenReturn(session);
         TkOpenTiktokAuthService service = new TkOpenTiktokAuthService(sessionMapper,
                 mock(TkOpenTiktokConnectionMapper.class), mock(TkOpenPublishPlatformRegistry.class),
-                mock(TkOpenApiSecretCipher.class), mock(TkOpenApiCallbackService.class),
+                mock(TkOpenApiSecretCipher.class), mock(TkOpenApiCallbackService.class), null,
                 "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/callback",
                 "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions");
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_a", "A", "auth"), "req-1");
@@ -115,7 +115,7 @@ class TkOpenTiktokAuthServiceTest {
                 true, "qr-token", "https://www.tiktok.com/qr?client_ticket=tobefilled", null));
         TkOpenTiktokAuthService service = new TkOpenTiktokAuthService(sessionMapper,
                 mock(TkOpenTiktokConnectionMapper.class), platformRegistry, mock(TkOpenApiSecretCipher.class),
-                mock(TkOpenApiCallbackService.class),
+                mock(TkOpenApiCallbackService.class), null,
                 "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/callback",
                 "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions");
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_a", "A", "auth"), "req-auto");
@@ -153,7 +153,7 @@ class TkOpenTiktokAuthServiceTest {
                 true, "waiting", null, "ticket-other", null));
         TkOpenTiktokAuthService service = new TkOpenTiktokAuthService(sessionMapper,
                 mock(TkOpenTiktokConnectionMapper.class), platformRegistry, mock(TkOpenApiSecretCipher.class),
-                callbackService,
+                callbackService, null,
                 "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/callback",
                 "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions");
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_a", "A", "auth"), "req-ticket");

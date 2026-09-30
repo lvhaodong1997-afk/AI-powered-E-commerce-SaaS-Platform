@@ -76,5 +76,16 @@ public final class TkOpenTiktokAuthVO {
         private String authStatus;
         private String tokenStatus;
         private LocalDateTime lastAuthTime;
+        private VideoRegionResp videoRegion;
+    }
+
+    @Data
+    public static class VideoRegionResp {
+        private String status;
+        private String locationCreated;
+        private String countryName;
+        private String sourceVideoId;
+        private String sourceVideoUrl;
+        private LocalDateTime fetchedAt;
     }
 }

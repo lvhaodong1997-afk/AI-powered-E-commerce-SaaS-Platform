@@ -89,7 +89,8 @@ class TkOpenTiktokAccountProfileTest {
         when(adapter.queryUserInfo("access-token")).thenReturn(user);
         TkOpenTiktokAuthService service = new TkOpenTiktokAuthService(
                 mock(TkOpenTiktokAuthSessionMapper.class), connectionMapper, registry, cipher,
-                mock(TkOpenApiCallbackService.class), "https://callback", "https://launch");
+                mock(TkOpenApiCallbackService.class), mock(TkOpenTiktokVideoRegionService.class),
+                "https://callback", "https://launch");
         TkOpenApiContext.set(new TkOpenApiPrincipal("client-a", "A", "profile"), "req-profile");
 
         Object response = TkOpenTiktokAuthService.class.getMethod("refreshProfile", String.class)

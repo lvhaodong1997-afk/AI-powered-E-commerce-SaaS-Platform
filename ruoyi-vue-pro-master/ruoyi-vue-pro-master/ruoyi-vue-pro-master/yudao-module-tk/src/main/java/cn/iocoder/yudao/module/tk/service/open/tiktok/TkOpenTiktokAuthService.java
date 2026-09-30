@@ -12,6 +12,7 @@ import cn.iocoder.yudao.module.tk.service.open.api.TkOpenApiCallbackService;
 import cn.iocoder.yudao.module.tk.service.open.platform.TkOpenPublishPlatformAdapter;
 import cn.iocoder.yudao.module.tk.service.open.platform.TkOpenPublishPlatformRegistry;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @Service
+@Slf4j
 public class TkOpenTiktokAuthService {
 
     private static final int SESSION_MINUTES = 15;
@@ -29,6 +31,7 @@ public class TkOpenTiktokAuthService {
     private final TkOpenPublishPlatformRegistry platformRegistry;
     private final TkOpenApiSecretCipher secretCipher;
     private final TkOpenApiCallbackService callbackService;
+    private final TkOpenTiktokVideoRegionService videoRegionService;
     private final String redirectUri;
     private final String launchBaseUrl;
 
@@ -37,6 +40,7 @@ public class TkOpenTiktokAuthService {
                                    TkOpenPublishPlatformRegistry platformRegistry,
                                    TkOpenApiSecretCipher secretCipher,
                                    TkOpenApiCallbackService callbackService,
+                                   TkOpenTiktokVideoRegionService videoRegionService,
                                    @Value("${tk.open-api.tiktok-redirect-uri:https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/callback}")
                                    String redirectUri,
                                    @Value("${tk.open-api.tiktok-launch-base-url:https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions}")
@@ -46,6 +50,7 @@ public class TkOpenTiktokAuthService {
         this.platformRegistry = platformRegistry;
         this.secretCipher = secretCipher;
         this.callbackService = callbackService;
+        this.videoRegionService = videoRegionService;
         this.redirectUri = redirectUri;
         this.launchBaseUrl = StrUtil.removeSuffix(launchBaseUrl, "/");
     }
@@ -146,11 +151,33 @@ public class TkOpenTiktokAuthService {
                         : session.getStatus(), session.getAuthorizeUrl(), imageUrl, statusUrl);
     }
 
-    public List<TkOpenTiktokAuthVO.ConnectionResp> getConnections(String externalAccountId, String status) {
+    public List<TkOpenTiktokAuthVO.ConnectionResp> getConnections(String externalAccountId, String status,
+                                                                   String username) {
+        if (username != null && !username.matches("[A-Za-z0-9._]{1,32}")) {
+            throw TkOpenApiException.badRequest("INVALID_USERNAME", "username must be a TikTok username without @");
+        }
         String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
+        String effectiveStatus = username != null && status == null ? "AUTHORIZED" : status;
         List<TkOpenTiktokAuthVO.ConnectionResp> result = new ArrayList<>();
-        for (TkOpenTiktokConnectionDO connection : connectionMapper.selectListByClient(clientId, externalAccountId, status)) {
-            result.add(toConnectionResp(connection));
+        TkOpenTiktokAuthVO.VideoRegionResp region = null;
+        for (TkOpenTiktokConnectionDO connection : connectionMapper.selectListByClient(
+                clientId, externalAccountId, effectiveStatus, username)) {
+            TkOpenTiktokAuthVO.ConnectionResp response = toConnectionResp(connection);
+            if (username != null && "AUTHORIZED".equals(connection.getAuthStatus())) {
+                if (region == null) {
+                    try {
+                        region = videoRegionService.lookup(connection.getUsername());
+                    } catch (Exception ex) {
+                        log.warn("[getConnections][video region unavailable for username({}): {}]",
+                                connection.getUsername(), ex.toString());
+                        region = new TkOpenTiktokAuthVO.VideoRegionResp();
+                        region.setStatus("UNAVAILABLE");
+                        region.setFetchedAt(LocalDateTime.now());
+                    }
+                }
+                response.setVideoRegion(region);
+            }
+            result.add(response);
         }
         return result;
     }

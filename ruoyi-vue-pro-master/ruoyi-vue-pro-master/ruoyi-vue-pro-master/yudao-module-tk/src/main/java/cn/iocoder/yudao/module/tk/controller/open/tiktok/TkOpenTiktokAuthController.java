@@ -51,8 +51,9 @@ public class TkOpenTiktokAuthController {
     @GetMapping("/connections")
     public TkOpenApiResponse<List<TkOpenTiktokAuthVO.ConnectionResp>> getConnections(
             @RequestParam(required = false) String externalAccountId,
-            @RequestParam(required = false) String status) {
-        return TkOpenApiResponse.success(authService.getConnections(externalAccountId, status));
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String username) {
+        return TkOpenApiResponse.success(authService.getConnections(externalAccountId, status, username));
     }
 
     @PostMapping("/connections/{connectionId}/profile/refresh")

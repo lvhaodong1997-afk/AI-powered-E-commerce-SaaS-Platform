@@ -23,11 +23,12 @@ public interface TkOpenTiktokConnectionMapper extends BaseMapperX<TkOpenTiktokCo
     }
 
     default List<TkOpenTiktokConnectionDO> selectListByClient(String clientId, String externalAccountId,
-                                                               String authStatus) {
+                                                               String authStatus, String username) {
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokConnectionDO>()
                 .eq(TkOpenTiktokConnectionDO::getClientId, clientId)
                 .eqIfPresent(TkOpenTiktokConnectionDO::getExternalAccountId, externalAccountId)
                 .eqIfPresent(TkOpenTiktokConnectionDO::getAuthStatus, authStatus)
+                .eqIfPresent(TkOpenTiktokConnectionDO::getUsername, username)
                 .orderByDesc(TkOpenTiktokConnectionDO::getId));
     }
 
