@@ -38,8 +38,12 @@ public class TkOpenTiktokScheduleTimeService {
         try {
             OffsetDateTime offsetDateTime = OffsetDateTime.parse(value);
             Instant instant = offsetDateTime.toInstant();
+            ZoneOffset regionOffset = region.zoneId.getRules().getOffset(instant);
+            if (!regionOffset.equals(offsetDateTime.getOffset())) {
+                throw invalidTime("scheduledAt offset does not match the selected region");
+            }
             return fromInstant(normalizedRegion, region, instant,
-                    instant.atZone(ZoneId.systemDefault()).toLocalDateTime(), offsetDateTime.getOffset());
+                    instant.atZone(region.zoneId).toLocalDateTime(), regionOffset);
         } catch (DateTimeParseException ignored) {
             // The offset-free form is interpreted in the requested region below.
         }

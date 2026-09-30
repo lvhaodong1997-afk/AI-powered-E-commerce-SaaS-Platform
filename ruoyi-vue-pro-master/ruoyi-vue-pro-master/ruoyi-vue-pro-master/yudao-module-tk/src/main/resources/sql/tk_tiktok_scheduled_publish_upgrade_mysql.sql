@@ -150,3 +150,13 @@ SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schem
 PREPARE tk_scheduled_task_utc_index_stmt FROM @sql;
 EXECUTE tk_scheduled_task_utc_index_stmt;
 DEALLOCATE PREPARE tk_scheduled_task_utc_index_stmt;
+
+SET @sql := IF(EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = @schema_name
+                       AND table_name = 'tk_open_tiktok_publish_task')
+        AND NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = @schema_name
+                        AND table_name = 'tk_open_tiktok_publish_task' AND index_name = 'idx_tk_open_publish_task_schedule_beijing'),
+    'ALTER TABLE `tk_open_tiktok_publish_task` ADD KEY `idx_tk_open_publish_task_schedule_beijing` (`status`, `schedule_beijing_time`)',
+    'SELECT 1');
+PREPARE tk_scheduled_task_beijing_index_stmt FROM @sql;
+EXECUTE tk_scheduled_task_beijing_index_stmt;
+DEALLOCATE PREPARE tk_scheduled_task_beijing_index_stmt;

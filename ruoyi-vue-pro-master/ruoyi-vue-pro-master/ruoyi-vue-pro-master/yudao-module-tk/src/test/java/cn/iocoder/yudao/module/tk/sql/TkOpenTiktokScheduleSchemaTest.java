@@ -21,6 +21,8 @@ class TkOpenTiktokScheduleSchemaTest {
         }
         assertTrue(fresh.contains("idx_tk_open_publish_task_schedule_utc"));
         assertTrue(upgrade.contains("idx_tk_open_publish_task_schedule_utc"));
+        assertTrue(fresh.contains("idx_tk_open_publish_task_schedule_beijing"));
+        assertTrue(upgrade.contains("idx_tk_open_publish_task_schedule_beijing"));
     }
 
     private String read(String resource) throws IOException {

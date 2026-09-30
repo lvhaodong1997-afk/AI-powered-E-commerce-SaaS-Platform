@@ -40,6 +40,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 class TkOpenTiktokPublishServiceTest {
 
@@ -245,12 +246,14 @@ class TkOpenTiktokPublishServiceTest {
     }
 
     @Test
-    void shouldActivateDueScheduledTaskExactlyOnce() {
+    void shouldActivateDueScheduledTaskByBeijingTimeExactlyOnce() {
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
         TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
         TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder().id(7L).taskId("task_due")
                 .clientId("client_b").status("SCHEDULED").scheduleStatus("SCHEDULED")
-                .scheduledAt(LocalDateTime.now().minusMinutes(1)).scheduleVersion(3).build();
+                .scheduledAt(LocalDateTime.now().plusHours(1))
+                .scheduleBeijingTime(LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(1))
+                .scheduleVersion(3).build();
         TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder().id(8L)
                 .taskId("task_due").clientId("client_b").status("SCHEDULED").build();
         when(taskMapper.selectDueScheduled(any(), any(), eq(100))).thenReturn(Collections.singletonList(task));
@@ -266,6 +269,26 @@ class TkOpenTiktokPublishServiceTest {
         assertEquals(1, service.dispatchDueScheduled(100));
         verify(detailMapper).update(any(), any());
         verify(taskMapper).update(any(), any());
+        service.destroy();
+    }
+
+    @Test
+    void shouldNotActivateFutureScheduledTaskByBeijingTime() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder().id(7L).taskId("task_future")
+                .clientId("client_b").status("SCHEDULED").scheduleStatus("SCHEDULED")
+                .scheduledAt(LocalDateTime.now().plusHours(1))
+                .scheduleBeijingTime(LocalDateTime.now(ZoneId.of("Asia/Shanghai")).plusMinutes(5))
+                .scheduleVersion(3).build();
+        when(taskMapper.selectDueScheduled(any(), any(), eq(100))).thenReturn(Collections.singletonList(task));
+        when(taskMapper.selectByClientAndTaskIdForUpdate("client_b", "task_future")).thenReturn(task);
+        TkOpenTiktokPublishService service = newService(taskMapper, mock(TkOpenApiIdempotencyMapper.class));
+        ReflectionTestUtils.setField(service, "detailMapper", detailMapper);
+
+        assertEquals(0, service.dispatchDueScheduled(100));
+        verify(detailMapper, never()).selectListByClientAndTaskIdForUpdate(anyString(), anyString());
+        verify(taskMapper, never()).update(any(), any());
         service.destroy();
     }
 

@@ -52,6 +52,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class TkOpenTiktokPublishService {
 
+    private static final ZoneId BEIJING_ZONE = ZoneId.of("Asia/Shanghai");
     private static final int PENDING_RECOVERY_DELAY_MINUTES = 1;
     private static final int INITIALIZATION_LEASE_MINUTES = 15;
     private static final int STATUS_STALE_MINUTES = 2;
@@ -652,17 +653,16 @@ public class TkOpenTiktokPublishService {
 
     @Transactional(rollbackFor = Exception.class)
     public int dispatchDueScheduled(int limit) {
-        LocalDateTime utcNow = LocalDateTime.now(ZoneOffset.UTC);
-        LocalDateTime legacyNow = LocalDateTime.now();
-        List<TkOpenTiktokPublishTaskDO> due = taskMapper.selectDueScheduled(utcNow, legacyNow,
+        LocalDateTime beijingNow = LocalDateTime.now(BEIJING_ZONE);
+        List<TkOpenTiktokPublishTaskDO> due = taskMapper.selectDueScheduled(beijingNow, beijingNow,
                 Math.max(1, Math.min(limit, 200)));
         List<String> submitted = new ArrayList<>();
         for (TkOpenTiktokPublishTaskDO candidate : due) {
             TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskIdForUpdate(
                     candidate.getClientId(), candidate.getTaskId());
-            boolean taskDue = task != null && (task.getScheduleUtcTime() != null
-                    ? !task.getScheduleUtcTime().isAfter(utcNow)
-                    : task.getScheduledAt() != null && !task.getScheduledAt().isAfter(legacyNow));
+            boolean taskDue = task != null && (task.getScheduleBeijingTime() != null
+                    ? !task.getScheduleBeijingTime().isAfter(beijingNow)
+                    : task.getScheduledAt() != null && !task.getScheduledAt().isAfter(beijingNow));
             if (task == null || !"SCHEDULED".equals(task.getStatus()) || !taskDue) continue;
             List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectListByClientAndTaskIdForUpdate(
                     task.getClientId(), task.getTaskId());

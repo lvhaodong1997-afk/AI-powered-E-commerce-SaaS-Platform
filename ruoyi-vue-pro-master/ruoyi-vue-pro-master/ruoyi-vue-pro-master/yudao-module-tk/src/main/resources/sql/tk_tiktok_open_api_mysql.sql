@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_task` (
   KEY `idx_tk_open_publish_task_client` (`client_id`, `create_time`),
   KEY `idx_tk_open_publish_task_schedule` (`status`, `scheduled_at`),
   KEY `idx_tk_open_publish_task_schedule_utc` (`status`, `schedule_utc_time`),
+  KEY `idx_tk_open_publish_task_schedule_beijing` (`status`, `schedule_beijing_time`),
   KEY `idx_tk_open_publish_task_external` (`client_id`, `external_request_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

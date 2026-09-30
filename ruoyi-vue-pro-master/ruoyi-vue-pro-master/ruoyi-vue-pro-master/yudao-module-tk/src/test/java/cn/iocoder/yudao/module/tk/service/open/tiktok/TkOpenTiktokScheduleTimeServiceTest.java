@@ -128,4 +128,22 @@ class TkOpenTiktokScheduleTimeServiceTest {
         assertEquals(LocalDateTime.of(2026, 10, 5, 1, 0), result.utcDateTime());
         assertEquals(LocalDateTime.of(2026, 10, 5, 9, 0), result.scheduledDateTime());
     }
+
+    @Test
+    void keepsOffsetDateTimeInTheRequestedRegionBeforeConvertingToBeijing() {
+        TkOpenTiktokScheduleTimeService.ScheduleTime result =
+                service.resolve("2026-10-01T12:00:00+02:00", "DE");
+
+        assertEquals(LocalDateTime.of(2026, 10, 1, 12, 0), result.scheduledDateTime());
+        assertEquals(LocalDateTime.of(2026, 10, 1, 10, 0), result.utcDateTime());
+        assertEquals(LocalDateTime.of(2026, 10, 1, 18, 0), result.beijingDateTime());
+    }
+
+    @Test
+    void rejectsOffsetDateTimeThatDoesNotMatchTheSelectedRegion() {
+        TkOpenApiException error = assertThrows(TkOpenApiException.class,
+                () -> service.resolve("2026-10-01T12:00:00+01:00", "DE"));
+
+        assertEquals("SCHEDULE_TIME_INVALID", error.getCode());
+    }
 }

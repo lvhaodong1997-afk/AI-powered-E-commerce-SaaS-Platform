@@ -36,10 +36,10 @@ public interface TkOpenTiktokPublishTaskMapper extends BaseMapperX<TkOpenTiktokP
     @InterceptorIgnore(tenantLine = "true", dataPermission = "true")
     @Select("SELECT * FROM tk_open_tiktok_publish_task WHERE deleted = b'0' "
             + "AND status = 'SCHEDULED' "
-            + "AND ((schedule_utc_time IS NOT NULL AND schedule_utc_time <= #{utcNow}) "
-            + "OR (schedule_utc_time IS NULL AND scheduled_at IS NOT NULL AND scheduled_at <= #{legacyNow})) "
-            + "ORDER BY COALESCE(schedule_utc_time, scheduled_at) ASC, id ASC LIMIT #{limit}")
-    List<TkOpenTiktokPublishTaskDO> selectDueScheduled(@Param("utcNow") LocalDateTime utcNow,
+            + "AND ((schedule_beijing_time IS NOT NULL AND schedule_beijing_time <= #{beijingNow}) "
+            + "OR (schedule_beijing_time IS NULL AND scheduled_at IS NOT NULL AND scheduled_at <= #{legacyNow})) "
+            + "ORDER BY COALESCE(schedule_beijing_time, scheduled_at) ASC, id ASC LIMIT #{limit}")
+    List<TkOpenTiktokPublishTaskDO> selectDueScheduled(@Param("beijingNow") LocalDateTime beijingNow,
                                                        @Param("legacyNow") LocalDateTime legacyNow,
                                                        @Param("limit") int limit);
 }
