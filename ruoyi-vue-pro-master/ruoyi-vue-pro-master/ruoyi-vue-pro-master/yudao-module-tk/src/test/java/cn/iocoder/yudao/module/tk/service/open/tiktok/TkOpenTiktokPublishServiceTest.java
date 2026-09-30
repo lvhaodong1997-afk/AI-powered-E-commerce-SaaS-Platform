@@ -77,10 +77,38 @@ class TkOpenTiktokPublishServiceTest {
     void scheduledPublishExposesRescheduleAndCancelContract() throws Exception {
         assertNotNull(TkOpenTiktokPublishVO.TaskCreateReq.class.getDeclaredField("scheduledAt"));
         assertNotNull(TkOpenTiktokPublishVO.TaskResp.class.getDeclaredField("scheduleStatus"));
+        assertNotNull(TkOpenTiktokPublishVO.TaskResp.class.getDeclaredField("scheduleEpochMillis"));
         assertNotNull(TkOpenTiktokPublishVO.TaskResp.class.getDeclaredField("canReschedule"));
         assertNotNull(TkOpenTiktokPublishVO.TaskResp.class.getDeclaredField("canCancel"));
         assertNotNull(TkOpenTiktokPublishService.class.getMethod("reschedule", String.class, String.class, String.class));
         assertNotNull(TkOpenTiktokPublishService.class.getMethod("cancel", String.class));
+    }
+
+    @Test
+    void taskResponseExposesScheduleAsAnAbsoluteInstant() {
+        TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
+                .taskId("task_epoch")
+                .clientId("client_b")
+                .status("SCHEDULED")
+                .scheduledAt(LocalDateTime.of(2026, 9, 28, 17, 24, 29))
+                .scheduleUtcTime(LocalDateTime.of(2026, 9, 28, 15, 24, 29))
+                .scheduleRegionCode("DE")
+                .scheduleStatus("SCHEDULED")
+                .build();
+        when(taskMapper.selectByClientAndTaskId("client_b", "task_epoch")).thenReturn(task);
+        TkOpenTiktokPublishService service = newService(taskMapper, mock(TkOpenApiIdempotencyMapper.class));
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-epoch");
+
+        try {
+            TkOpenTiktokPublishVO.TaskResp response = service.getTask("task_epoch");
+
+            assertEquals(LocalDateTime.of(2026, 9, 28, 15, 24, 29)
+                            .toInstant(java.time.ZoneOffset.UTC).toEpochMilli(),
+                    response.getScheduleEpochMillis());
+        } finally {
+            service.destroy();
+        }
     }
 
     @Test

@@ -1256,6 +1256,8 @@ public class TkOpenTiktokPublishService {
         response.setScheduleTimezone(task.getScheduleTimezone());
         response.setScheduleUtcTime(task.getScheduleUtcTime());
         response.setScheduleBeijingTime(task.getScheduleBeijingTime());
+        response.setScheduleEpochMillis(task.getScheduleUtcTime() == null ? null
+                : task.getScheduleUtcTime().toInstant(ZoneOffset.UTC).toEpochMilli());
         response.setScheduleUtcOffset(task.getScheduleUtcOffset());
         response.setScheduleStatus(task.getScheduleStatus());
         boolean mutableSchedule = "SCHEDULED".equals(task.getStatus()) && task.getScheduledAt() != null;

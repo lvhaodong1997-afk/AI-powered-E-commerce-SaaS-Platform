@@ -95,6 +95,7 @@ public final class TkOpenTiktokPublishVO {
         private String scheduleTimezone;
         private LocalDateTime scheduleUtcTime;
         private LocalDateTime scheduleBeijingTime;
+        private Long scheduleEpochMillis;
         private String scheduleUtcOffset;
         private String scheduleStatus;
         private Boolean canReschedule;
