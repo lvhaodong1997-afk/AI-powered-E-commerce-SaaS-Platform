@@ -42,6 +42,7 @@ public class TkGenerationTaskCreateReqVO {
     @JsonAlias({"target_language", "language"})
     private String targetLanguage;
     private String materialPurpose;
+    private String scriptMode;
     private String productCategoryCode;
 
     @JsonAlias({"clip_plan_mode", "videoGenerationMode", "video_generation_mode"})

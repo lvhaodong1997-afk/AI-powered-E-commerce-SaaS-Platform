@@ -526,6 +526,63 @@ class TkGenerationTaskServiceImplTest {
     }
 
     @Test
+    void createManualEcommerceTaskUsesEnteredScriptWithoutSourceUrl() {
+        TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
+        TkGenerationTaskMapper taskMapper = mock(TkGenerationTaskMapper.class);
+        TkMaterialLibraryService libraryService = mock(TkMaterialLibraryService.class);
+        TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
+        TkGenerationPrecheckService precheckService = mock(TkGenerationPrecheckService.class);
+        TkCreditService creditService = mock(TkCreditService.class);
+        TkVoiceProfileService voiceProfileService = mock(TkVoiceProfileService.class);
+        ReflectionTestUtils.setField(service, "taskMapper", taskMapper);
+        ReflectionTestUtils.setField(service, "libraryService", libraryService);
+        ReflectionTestUtils.setField(service, "dataScopeService", dataScopeService);
+        ReflectionTestUtils.setField(service, "precheckService", precheckService);
+        ReflectionTestUtils.setField(service, "creditService", creditService);
+        ReflectionTestUtils.setField(service, "voiceProfileService", voiceProfileService);
+        ReflectionTestUtils.setField(service, "businessLogService", mock(TkBusinessLogService.class));
+        ReflectionTestUtils.setField(service, "generationPipelineService", mock(TkGenerationPipelineService.class));
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+
+        TkGenerationTaskCreateReqVO reqVO = new TkGenerationTaskCreateReqVO();
+        reqVO.setLibraryId(10L);
+        reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE);
+        reqVO.setScriptMode("MANUAL");
+        reqVO.setPromptText("  这款产品适合通勤使用。  ");
+        reqVO.setTtsProvider("DASHSCOPE");
+        reqVO.setVoiceCode("system-voice");
+        TkMaterialLibraryDO library = TkMaterialLibraryDO.builder().id(10L).companyId(20L).name("Shop").build();
+        library.setTenantId(8L);
+        TkGenerationPrecheckRespVO precheck = new TkGenerationPrecheckRespVO();
+        precheck.setPassed(true);
+        when(libraryService.validateMaterialLibraryReadable(10L)).thenReturn(library);
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(7L, 8L, "COMPANY_USER", 20L));
+        when(precheckService.precheck(reqVO)).thenReturn(precheck);
+        when(voiceProfileService.resolveVoiceSelection(null, "system-voice")).thenReturn("system-voice");
+
+        service.createGenerationTask(reqVO);
+
+        ArgumentCaptor<TkGenerationTaskDO> captor = ArgumentCaptor.forClass(TkGenerationTaskDO.class);
+        verify(taskMapper).insert(captor.capture());
+        assertEquals("manual-ecommerce://10", captor.getValue().getSourceUrl());
+        assertEquals("这款产品适合通勤使用。", captor.getValue().getPromptText());
+        assertTrue(TkGenerationRouteConfigSupport.isManualScript(captor.getValue().getGenerationRouteConfig()));
+        assertNull(captor.getValue().getScriptOptionId());
+    }
+
+    @Test
+    void createManualEcommerceTaskRejectsBlankScript() {
+        TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
+        TkGenerationTaskCreateReqVO reqVO = new TkGenerationTaskCreateReqVO();
+        reqVO.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE);
+        reqVO.setScriptMode("MANUAL");
+        reqVO.setPromptText("   ");
+
+        assertTrue(assertThrows(IllegalArgumentException.class,
+                () -> service.createGenerationTask(reqVO)).getMessage().contains("文案"));
+    }
+
+    @Test
     void createLeadGenerationManualTaskAllowsBlankPromptAndDisablesVoiceAndSubtitle() {
         TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
         TkGenerationTaskMapper taskMapper = mock(TkGenerationTaskMapper.class);

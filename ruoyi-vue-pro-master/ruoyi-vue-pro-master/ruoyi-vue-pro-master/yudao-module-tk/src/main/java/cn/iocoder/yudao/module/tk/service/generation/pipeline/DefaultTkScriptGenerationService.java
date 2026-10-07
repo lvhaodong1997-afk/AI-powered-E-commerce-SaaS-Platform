@@ -5,6 +5,7 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkMaterialLibraryDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkReferenceScriptOptionDO;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
+import cn.iocoder.yudao.module.tk.service.generation.TkGenerationRouteConfigSupport;
 import cn.iocoder.yudao.module.tk.service.reference.TkReferenceAnalysisService;
 import cn.iocoder.yudao.module.tk.service.config.TkApiKeyConfigService;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,11 @@ public class DefaultTkScriptGenerationService implements TkScriptGenerationServi
                     task.getReferenceAnalysisId());
             String scriptText = StrUtil.blankToDefault(option.getScriptText(), option.getTitle());
             return new TkGeneratedScript(option.getTitle(), scriptText, option.getSegmentTimeline(), targetDuration, targetDuration);
+        }
+        if (!TkGeminiPromptConfig.isLeadGeneration(task.getMaterialPurpose())
+                && TkGenerationRouteConfigSupport.isManualScript(task.getGenerationRouteConfig())) {
+            return new TkGeneratedScript(StrUtil.format("{} · 手动电商文案", library.getName()),
+                    task.getPromptText().trim(), null, targetDuration, targetDuration);
         }
         if (TkGeminiPromptConfig.isLeadGeneration(task.getMaterialPurpose())) {
             if (StrUtil.isNotBlank(task.getPromptText())) {

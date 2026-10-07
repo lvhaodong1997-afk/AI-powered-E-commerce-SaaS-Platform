@@ -77,6 +77,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     private static final String FAIL_CODE_SUBTITLE_FAILED = "SUBTITLE_FAILED";
     private static final String FAIL_REASON_ASR_TEXT_MISMATCH = "ASR_TEXT_MISMATCH";
     private static final String MANUAL_LEAD_GENERATION_SOURCE_PREFIX = "manual-lead-generation://";
+    private static final String MANUAL_ECOMMERCE_SOURCE_PREFIX = "manual-ecommerce://";
     private static final int MAX_VIDEOS_PER_SCRIPT = 5;
     private static final int MAX_BATCH_TASK_COUNT = 30;
     private static final int MAX_TASK_TITLE_LENGTH = 128;
@@ -115,12 +116,14 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     @Override
     public Long createGenerationTask(TkGenerationTaskCreateReqVO createReqVO) {
         validateRequestedReferenceDuration(createReqVO);
+        validateManualEcommerceScript(createReqVO);
         return createGenerationTask(createReqVO, null, true);
     }
 
     @Override
     public List<Long> createGenerationTasks(TkGenerationTaskCreateReqVO createReqVO) {
         validateRequestedReferenceDuration(createReqVO);
+        validateManualEcommerceScript(createReqVO);
         List<Long> scriptOptionIds = normalizeBatchScriptOptionIds(createReqVO);
         int videosPerScript = normalizeVideosPerScript(createReqVO.getVideosPerScript());
         int totalCount = scriptOptionIds.size() * videosPerScript;
@@ -149,6 +152,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     @Override
     public Long createGenerationTask(TkGenerationTaskCreateReqVO createReqVO, MultipartFile openingVideoFile) {
         validateRequestedReferenceDuration(createReqVO);
+        validateManualEcommerceScript(createReqVO);
         return createGenerationTask(createReqVO, openingVideoFile, true);
     }
 
@@ -159,6 +163,24 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         int maxDuration = resolveMaxReferenceDuration();
         if (createReqVO.getReferenceDuration() > maxDuration) {
             throw new IllegalArgumentException("目标时长不能超过系统上限 " + maxDuration + " 秒");
+        }
+    }
+
+    private boolean isManualEcommerceScript(TkGenerationTaskCreateReqVO request) {
+        return !TkGeminiPromptConfig.isLeadGeneration(request.getMaterialPurpose())
+                && "MANUAL".equals(request.getScriptMode());
+    }
+
+    private void validateManualEcommerceScript(TkGenerationTaskCreateReqVO request) {
+        if (!isManualEcommerceScript(request)) {
+            return;
+        }
+        String script = StrUtil.trimToEmpty(request.getPromptText());
+        if (script.isEmpty() || script.length() > 3000) {
+            throw new IllegalArgumentException("手动电商文案不能为空且不能超过3000字");
+        }
+        if (request.getScriptOptionId() != null || request.getScriptOptionIds() != null) {
+            throw new IllegalArgumentException("手动电商文案不能同时选择文案方案");
         }
     }
 
@@ -232,6 +254,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         target.setMimoVoiceSampleUrl(source.getMimoVoiceSampleUrl());
         target.setTargetLanguage(source.getTargetLanguage());
         target.setMaterialPurpose(source.getMaterialPurpose());
+        target.setScriptMode(source.getScriptMode());
         target.setProductCategoryCode(source.getProductCategoryCode());
         target.setClipPlanMode(source.getClipPlanMode());
         target.setReferenceAnalysisId(source.getReferenceAnalysisId());
@@ -447,6 +470,9 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
 
     private String resolveGenerationRouteConfig(TkGenerationTaskCreateReqVO createReqVO, String materialPurpose,
                                                 TkGenerationRoute generationRoute) {
+        if (isManualEcommerceScript(createReqVO)) {
+            return TkGenerationRouteConfigSupport.buildManualScriptConfig(createReqVO.getClipPlanMode());
+        }
         if (StrUtil.isNotBlank(createReqVO.getClipPlanMode())) {
             return TkGenerationRouteConfigSupport.buildClipPlanModeConfig(createReqVO.getClipPlanMode());
         }
@@ -459,13 +485,16 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
             return sourceUrl;
         }
         if (!TkGeminiPromptConfig.isLeadGeneration(materialPurpose)) {
+            if (isManualEcommerceScript(createReqVO)) {
+                return MANUAL_ECOMMERCE_SOURCE_PREFIX + createReqVO.getLibraryId();
+            }
             throw new IllegalArgumentException("TikTok 对标链接不能为空");
         }
         return MANUAL_LEAD_GENERATION_SOURCE_PREFIX + createReqVO.getLibraryId();
     }
 
     private String resolvePromptText(TkGenerationTaskCreateReqVO createReqVO, String materialPurpose) {
-        if (TkGeminiPromptConfig.isLeadGeneration(materialPurpose)) {
+        if (TkGeminiPromptConfig.isLeadGeneration(materialPurpose) || isManualEcommerceScript(createReqVO)) {
             return StrUtil.trimToEmpty(createReqVO.getPromptText());
         }
         return StrUtil.blankToDefault(createReqVO.getPromptText(), generationProperties.getPrompt());

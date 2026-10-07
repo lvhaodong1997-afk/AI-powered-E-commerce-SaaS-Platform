@@ -420,7 +420,7 @@
             </div>
           </section>
 
-          <section v-if="!isLeadGenerationManualMode" class="panel script-panel">
+          <section v-if="!isLeadGenerationManualMode && !isManualEcommerceMode" class="panel script-panel">
             <div class="panel-heading inline-heading">
               <div>
                 <span class="step-label">3</span>
@@ -585,6 +585,22 @@
                   <h2>{{ copy.chooseScript }}</h2>
                 </div>
               </div>
+              <div v-if="isEcommerceFlow" class="script-preview-tabs ecommerce-script-mode">
+                <button
+                  type="button"
+                  :class="{ active: ecommerceScriptMode === 'AI' }"
+                  @click="ecommerceScriptMode = 'AI'"
+                >
+                  {{ copy.chooseAiScript }}
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: ecommerceScriptMode === 'MANUAL' }"
+                  @click="ecommerceScriptMode = 'MANUAL'"
+                >
+                  {{ copy.manualEcommerceScriptTitle }}
+                </button>
+              </div>
               <div class="chosen-script">
                 <template v-if="isLeadGenerationManualMode">
                   <strong>{{ copy.manualScriptTitle }}</strong>
@@ -611,6 +627,24 @@
                       "
                     />
                     <span>{{ manualLeadVoiceDurationHint }}</span>
+                  </div>
+                  <Icon icon="ep:edit-pen" />
+                </template>
+                <template v-else-if="isManualEcommerceMode">
+                  <strong>{{ copy.manualEcommerceScriptTitle }}</strong>
+                  <span>{{ copy.manualEcommerceScriptHint }}</span>
+                  <el-input
+                    v-model="manualEcommerceScriptText"
+                    type="textarea"
+                    :autosize="{ minRows: 6, maxRows: 10 }"
+                    maxlength="3000"
+                    show-word-limit
+                    class="manual-script-input"
+                    :placeholder="copy.manualEcommerceScriptPlaceholder"
+                  />
+                  <div v-if="manualEcommerceVoiceDurationHint" class="manual-voice-duration-hint">
+                    <Icon icon="ep:info-filled" />
+                    <span>{{ manualEcommerceVoiceDurationHint }}</span>
                   </div>
                   <Icon icon="ep:edit-pen" />
                 </template>
@@ -1482,6 +1516,8 @@ interface GenerationSubmissionSnapshot {
   subtitlePayload: Partial<TkGenerationTaskVO>
   isLeadGenerationManualMode: boolean
   manualLeadScriptText: string
+  isManualEcommerceMode: boolean
+  manualEcommerceScriptText: string
   batchGenerationEnabled: boolean
   videosPerScript: number
 }
@@ -1548,6 +1584,7 @@ const CLIP_PLAN_MODE_SEGMENTED: ClipPlanMode = 'SEGMENTED'
 const CLIP_PLAN_MODE_FULL_POOL_RANDOM: ClipPlanMode = 'FULL_POOL_RANDOM'
 const DEFAULT_PRODUCT_CATEGORY_CODE: ProductCategoryCode = 'DEFAULT'
 const MANUAL_LEAD_GENERATION_SOURCE_PREFIX = 'manual-lead-generation://'
+const MANUAL_ECOMMERCE_SOURCE_PREFIX = 'manual-ecommerce://'
 const ANALYSIS_PROVIDER_GEMINI: AnalysisProvider = 'GEMINI'
 const ANALYSIS_PROVIDER_DASHSCOPE_VIDEO: AnalysisProvider = 'DASHSCOPE_VIDEO'
 const targetLanguageOptions = [
@@ -1787,6 +1824,12 @@ const copy = computed(() =>
         geminiAnalysis: 'Existing analysis',
         ecommerceMaterial: 'E-commerce material',
         leadGenerationMaterial: 'Lead-gen material',
+        chooseAiScript: 'Choose AI script',
+        manualEcommerceScriptTitle: 'Enter e-commerce script',
+        manualEcommerceScriptHint: 'Required in manual mode. The text is used directly for voiceover and subtitles.',
+        manualEcommerceScriptPlaceholder: 'Enter the script to use in the video.',
+        manualEcommerceScriptWarning: 'Enter an e-commerce script first.',
+        ecommerceManualLinkPlaceholder: 'Optional reference link. Your entered script will be used directly.',
         reanalyzeConfirmTitle: 'Re-analyze reference link',
         reanalyzeConfirmMessage:
           'A completed analysis already matches the current link and settings. Re-analyzing will consume credits again. Continue?',
@@ -2089,6 +2132,12 @@ const copy = computed(() =>
         geminiAnalysis: '现有分析',
         ecommerceMaterial: '电商素材',
         leadGenerationMaterial: '引流素材',
+        chooseAiScript: '选择 AI 文案',
+        manualEcommerceScriptTitle: '手动输入电商文案',
+        manualEcommerceScriptHint: '手动模式必填；输入内容将直接用于口播和字幕。',
+        manualEcommerceScriptPlaceholder: '请输入成片要使用的电商文案',
+        manualEcommerceScriptWarning: '请先输入电商文案',
+        ecommerceManualLinkPlaceholder: '可选填写对标链接；手动文案将直接用于成片',
         reanalyzeConfirmTitle: '重新分析对标链接',
         reanalyzeConfirmMessage: '当前链接和设置已有分析结果，重新分析会再次消耗积分，是否继续？',
         reanalyzeConfirmOk: '确认重新分析',
@@ -2507,6 +2556,8 @@ const hasActiveGenerationTasks = computed(() =>
 )
 const precheckFailure = ref<PrecheckFailureState>()
 const manualLeadScriptText = ref('')
+const ecommerceScriptMode = ref<'AI' | 'MANUAL'>('AI')
+const manualEcommerceScriptText = ref('')
 const voicePreviewAudio = ref<HTMLAudioElement>()
 const voicePreviewUrl = ref('')
 const voiceManagerVisible = ref(false)
@@ -2913,6 +2964,16 @@ const manualLeadVoiceDurationHint = computed(() => {
     return copy.value.manualVoiceDurationWarning(estimatedDuration, targetDuration)
   }
   return copy.value.manualVoiceDurationNormal(estimatedDuration, targetDuration)
+})
+const manualEcommerceVoiceDurationHint = computed(() => {
+  if (!isManualEcommerceMode.value) return ''
+  const estimated = estimateLeadVoiceDuration(manualEcommerceScriptText.value)
+  if (!estimated) return ''
+  const target = getTargetDuration()
+  const ratio = estimated / target
+  if (ratio > 1.35) return copy.value.manualVoiceDurationDanger(estimated, target)
+  if (ratio > 1.15 || ratio < 0.7) return copy.value.manualVoiceDurationWarning(estimated, target)
+  return copy.value.manualVoiceDurationNormal(estimated, target)
 })
 const isLeadBlankScriptMode = computed(
   () => isLeadGenerationManualMode.value && !hasManualLeadScriptText.value
@@ -3568,12 +3629,16 @@ const startGenerationBatchPolling = (taskIds: number[]) => {
 const resolvePromptTextForGeneration = (
   script: DashboardScriptOption,
   snapshot?: GenerationSubmissionSnapshot
-) =>
-  snapshot?.isLeadGenerationManualMode
-    ? snapshot.manualLeadScriptText
-    : isLeadGenerationManualMode.value
-      ? manualLeadScriptText.value.trim()
-      : script.scriptText || script.title
+) => {
+  if (snapshot) {
+    if (snapshot.isLeadGenerationManualMode) return snapshot.manualLeadScriptText
+    if (snapshot.isManualEcommerceMode) return snapshot.manualEcommerceScriptText
+    return script.scriptText || script.title
+  }
+  if (isLeadGenerationManualMode.value) return manualLeadScriptText.value.trim()
+  if (isManualEcommerceMode.value) return manualEcommerceScriptText.value.trim()
+  return script.scriptText || script.title
+}
 
 const createGenerationSubmissionSnapshot = (): GenerationSubmissionSnapshot => {
   const openingUploadCompleted =
@@ -3591,7 +3656,7 @@ const createGenerationSubmissionSnapshot = (): GenerationSubmissionSnapshot => {
     materialPurpose: createForm.materialPurpose,
     clipPlanMode: supportsClipPlanMode.value ? createForm.clipPlanMode : undefined,
     referenceDuration: getTargetDuration(),
-    referenceAnalysisId: referenceAnalysis.value?.id,
+    referenceAnalysisId: isManualEcommerceMode.value ? undefined : referenceAnalysis.value?.id,
     openingUploadId: openingUploadCompleted ? openingUpload.uploadId : undefined,
     openingVideoUrl,
     openingVideoName: openingUploadCompleted
@@ -3607,6 +3672,8 @@ const createGenerationSubmissionSnapshot = (): GenerationSubmissionSnapshot => {
     subtitlePayload: { ...getSubtitlePayload() },
     isLeadGenerationManualMode: isLeadGenerationManualMode.value,
     manualLeadScriptText: manualLeadScriptText.value.trim(),
+    isManualEcommerceMode: isManualEcommerceMode.value,
+    manualEcommerceScriptText: manualEcommerceScriptText.value.trim(),
     batchGenerationEnabled: batchGenerationEnabled.value,
     videosPerScript: Number(videosPerScript.value || 1)
   }
@@ -3624,6 +3691,7 @@ const createGenerationPayload = (
     voiceEnabled: snapshot.voiceEnabled,
     targetLanguage: snapshot.targetLanguage,
     materialPurpose: snapshot.materialPurpose,
+    ...(snapshot.isManualEcommerceMode ? { scriptMode: 'MANUAL' as const } : {}),
     productCategoryCode: DEFAULT_PRODUCT_CATEGORY_CODE,
     clipPlanMode: snapshot.clipPlanMode,
     referenceDuration: snapshot.referenceDuration,
@@ -3747,8 +3815,8 @@ const goFixPrecheckMaterials = () => {
 }
 
 const handleRecheckGeneration = async () => {
-  const script = selectedScript.value
-  if (!script?.id) {
+  const script = selectedScriptsForGeneration.value[0]
+  if (!script || (!isManualEcommerceMode.value && !isLeadGenerationManualMode.value && !script.id)) {
     message.warning(copy.value.selectScriptWarning)
     return
   }
@@ -3897,6 +3965,14 @@ function resolveClipPlanModeFromRouteConfig(routeConfig?: string): ClipPlanMode 
     return CLIP_PLAN_MODE_SEGMENTED
   }
 }
+function isManualScriptFromRouteConfig(routeConfig?: string): boolean {
+  if (!routeConfig) return false
+  try {
+    return JSON.parse(routeConfig)?.scriptMode === 'MANUAL'
+  } catch (error) {
+    return false
+  }
+}
 function normalizeAnalysisProvider(provider?: string): AnalysisProvider {
   if (provider === ANALYSIS_PROVIDER_DASHSCOPE_VIDEO) {
     return ANALYSIS_PROVIDER_GEMINI
@@ -3906,10 +3982,14 @@ function normalizeAnalysisProvider(provider?: string): AnalysisProvider {
 function isManualLeadGenerationSource(value?: string) {
   return Boolean(value?.startsWith(MANUAL_LEAD_GENERATION_SOURCE_PREFIX))
 }
+function isManualEcommerceSource(value?: string) {
+  return Boolean(value?.startsWith(MANUAL_ECOMMERCE_SOURCE_PREFIX))
+}
 const isLeadGenerationFlow = computed(
   () => createForm.materialPurpose === MATERIAL_PURPOSE_LEAD_GENERATION
 )
 const isEcommerceFlow = computed(() => createForm.materialPurpose === MATERIAL_PURPOSE_ECOMMERCE)
+const isManualEcommerceMode = computed(() => isEcommerceFlow.value && ecommerceScriptMode.value === 'MANUAL')
 const supportsClipPlanMode = computed(() => isEcommerceFlow.value || isLeadGenerationFlow.value)
 const isFullPoolRandomMode = computed(
   () => createForm.clipPlanMode === CLIP_PLAN_MODE_FULL_POOL_RANDOM
@@ -3924,10 +4004,14 @@ const analyzeDescText = computed(() =>
   isLeadGenerationFlow.value ? copy.value.leadAnalyzeDesc : copy.value.analyzeDesc
 )
 const linkPlaceholderText = computed(() =>
-  isLeadGenerationFlow.value ? copy.value.leadLinkPlaceholder : copy.value.linkPlaceholder
+  isLeadGenerationFlow.value
+    ? copy.value.leadLinkPlaceholder
+    : isManualEcommerceMode.value
+      ? copy.value.ecommerceManualLinkPlaceholder
+      : copy.value.linkPlaceholder
 )
 const optionalAnalyzeDisabled = computed(
-  () => isLeadGenerationFlow.value && !createForm.sourceUrl.trim()
+  () => (isLeadGenerationFlow.value || isManualEcommerceMode.value) && !createForm.sourceUrl.trim()
 )
 
 function isAnalysisMatchingCurrentForm(analysis: TkReferenceAnalysisVO | undefined) {
@@ -3953,7 +4037,7 @@ const hasCurrentSuccessfulAnalysis = computed(() => {
 const analyzeButtonText = computed(() =>
   hasCurrentSuccessfulAnalysis.value
     ? copy.value.reanalyze
-    : isLeadGenerationFlow.value
+    : isLeadGenerationFlow.value || isManualEcommerceMode.value
       ? copy.value.optionalAnalyze
       : copy.value.startAnalyze
 )
@@ -4020,6 +4104,24 @@ const manualLeadScriptOption = computed<DashboardScriptOption | undefined>(() =>
   }
 })
 
+const manualEcommerceScriptOption = computed<DashboardScriptOption | undefined>(() => {
+  const scriptText = manualEcommerceScriptText.value.trim()
+  if (!isManualEcommerceMode.value || !scriptText) return undefined
+  return {
+    title: copy.value.manualEcommerceScriptTitle,
+    points: copy.value.ecommerceMaterial,
+    originalTitle: copy.value.manualEcommerceScriptTitle,
+    originalPoints: copy.value.ecommerceMaterial,
+    displayTitleZh: copy.value.manualEcommerceScriptTitle,
+    displayPointsZh: copy.value.ecommerceMaterial,
+    rate: '-',
+    level: '-',
+    levelType: 'mid',
+    scriptText,
+    displayScriptZh: scriptText
+  }
+})
+
 const selectedScript = computed(
   () => scriptOptions.value[selectedScriptIndex.value] || scriptOptions.value[0]
 )
@@ -4027,6 +4129,9 @@ const selectedScript = computed(
 const selectedScriptsForGeneration = computed(() => {
   if (isLeadGenerationManualMode.value) {
     return manualLeadScriptOption.value ? [manualLeadScriptOption.value] : []
+  }
+  if (isManualEcommerceMode.value) {
+    return manualEcommerceScriptOption.value ? [manualEcommerceScriptOption.value] : []
   }
   if (!batchGenerationEnabled.value) {
     return selectedScript.value ? [selectedScript.value] : []
@@ -4393,6 +4498,7 @@ async function hydrateReplayFromAnalysis(analysis: TkReferenceAnalysisVO) {
       (createForm.ttsProvider === TTS_PROVIDER_MINIMAX ? getDefaultMiniMaxVoiceCode() : defaultVoiceCode)
     createForm.targetLanguage = analysis.targetLanguage || defaultTargetLanguage
     createForm.materialPurpose = normalizeMaterialPurpose(analysis.materialPurpose)
+    ecommerceScriptMode.value = 'AI'
     createForm.productCategoryCode = DEFAULT_PRODUCT_CATEGORY_CODE
     createForm.analysisProvider = normalizeAnalysisProvider(analysis.analysisProvider)
     createForm.openingVideoUrl = ''
@@ -4425,22 +4531,24 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     const manualLeadReplay =
       materialPurpose === MATERIAL_PURPOSE_LEAD_GENERATION &&
       (!taskSourceUrl || isManualLeadGenerationSource(taskSourceUrl))
+    const manualEcommerceReplay =
+      materialPurpose === MATERIAL_PURPOSE_ECOMMERCE &&
+      isManualScriptFromRouteConfig(task.generationRouteConfig)
 
-    if (!manualLeadReplay && !taskSourceUrl) {
+    if (!manualLeadReplay && !manualEcommerceReplay && !taskSourceUrl) {
       message.warning(copy.value.missingReplayGeneration)
       return
     }
 
-    createForm.sourceUrl = isManualLeadGenerationSource(task.sourceUrl) ? '' : (task.sourceUrl || '')
+    createForm.sourceUrl = isManualLeadGenerationSource(task.sourceUrl) || isManualEcommerceSource(task.sourceUrl)
+      ? '' : (task.sourceUrl || '')
     createForm.title = task.title || ''
     createForm.libraryId = task.libraryId
     createForm.targetLanguage = task.targetLanguage || defaultTargetLanguage
     createForm.materialPurpose = materialPurpose
+    ecommerceScriptMode.value = manualEcommerceReplay ? 'MANUAL' : 'AI'
     createForm.productCategoryCode = normalizeProductCategoryCode(task.productCategoryCode)
-    createForm.clipPlanMode =
-      materialPurpose === MATERIAL_PURPOSE_LEAD_GENERATION
-        ? resolveClipPlanModeFromRouteConfig(task.generationRouteConfig)
-        : CLIP_PLAN_MODE_SEGMENTED
+    createForm.clipPlanMode = resolveClipPlanModeFromRouteConfig(task.generationRouteConfig)
     createForm.analysisProvider = ANALYSIS_PROVIDER_GEMINI
     await restoreVoiceSelection(task)
     createForm.referenceDuration =
@@ -4456,13 +4564,18 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     openingVideoFile.value = undefined
     openingUploadRef.value?.clearFiles()
     manualLeadScriptText.value = ''
+    if (manualEcommerceReplay) {
+      manualEcommerceScriptText.value = (task.promptText || task.scriptText || '').trim()
+    }
     if (manualLeadReplay) {
       await loadBgmAssets()
     }
 
-    if (manualLeadReplay) {
+    if (manualLeadReplay || manualEcommerceReplay) {
       referenceAnalysis.value = undefined
-      manualLeadScriptText.value = (task.promptText || task.scriptText || '').trim()
+      if (manualLeadReplay) {
+        manualLeadScriptText.value = (task.promptText || task.scriptText || '').trim()
+      }
     } else if (task.referenceAnalysisId) {
       const latest = await TkReferenceApi.getLatest({
         libraryId: task.libraryId,
@@ -4484,7 +4597,7 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     }
 
     resetScriptDisplay(findScriptIndexById(task.scriptOptionId))
-    activeStep.value = referenceAnalysis.value || manualLeadReplay ? 4 : 0
+    activeStep.value = referenceAnalysis.value || manualLeadReplay || manualEcommerceReplay ? 4 : 0
     message.success(
       task.openingVideoUrl
         ? copy.value.replayGenerationSuccessWithUrl
@@ -4847,7 +4960,9 @@ const createBatchGenerationTaskIds = async (
   }
   const count = snapshot.batchGenerationEnabled ? snapshot.videosPerScript : 1
   const createIndividualTasks =
-    snapshot.isLeadGenerationManualMode || Boolean(snapshot.openingUploadId || snapshot.openingVideoUrl)
+    snapshot.isLeadGenerationManualMode ||
+    snapshot.isManualEcommerceMode ||
+    Boolean(snapshot.openingUploadId || snapshot.openingVideoUrl)
   if (createIndividualTasks) {
     const ids: number[] = []
     for (let scriptIndex = 0; scriptIndex < scripts.length; scriptIndex++) {
@@ -4945,9 +5060,15 @@ const handleCreateGeneration = async () => {
   if (generationSubmittingCount.value > 0) {
     return
   }
-  if (!createForm.libraryId || (!isLeadGenerationManualMode.value && !createForm.sourceUrl.trim())) {
+  if (isManualEcommerceMode.value && !manualEcommerceScriptText.value.trim()) {
+    message.warning(copy.value.manualEcommerceScriptWarning)
+    return
+  }
+  if (!createForm.libraryId || (!isLeadGenerationManualMode.value && !isManualEcommerceMode.value && !createForm.sourceUrl.trim())) {
     message.warning(
-      isLeadGenerationManualMode.value
+      isManualEcommerceMode.value
+        ? copy.value.selectLibraryWarning
+        : isLeadGenerationManualMode.value
         ? copy.value.leadGenerationMissingWarning
         : copy.value.generationMissingWarning
     )
@@ -4979,7 +5100,7 @@ const handleCreateGeneration = async () => {
   }
   let generationSubmissionStartedAt = 0
   try {
-    if (!submissionSnapshot.isLeadGenerationManualMode && !submissionSnapshot.referenceAnalysisId) {
+    if (!submissionSnapshot.isLeadGenerationManualMode && !submissionSnapshot.isManualEcommerceMode && !submissionSnapshot.referenceAnalysisId) {
       const analysis = await handleAnalyzeLink(false, true)
       submissionSnapshot.referenceAnalysisId = analysis?.id
     }
@@ -4988,7 +5109,7 @@ const handleCreateGeneration = async () => {
       : selectedScriptsForGeneration.value.map((script) => ({ ...script }))
     if (
       !scripts.length ||
-      (!submissionSnapshot.isLeadGenerationManualMode &&
+      (!submissionSnapshot.isLeadGenerationManualMode && !submissionSnapshot.isManualEcommerceMode &&
         (!submissionSnapshot.referenceAnalysisId || scripts.some((script) => !script?.id)))
     ) {
       message.warning(copy.value.selectScriptWarning)
@@ -5127,6 +5248,12 @@ watch(
     }
   }
 )
+
+watch(ecommerceScriptMode, (mode) => {
+  if (mode === 'MANUAL') {
+    analysisValidation.sourceUrl = false
+  }
+})
 
 watch(
   () => createForm.voiceEnabled,

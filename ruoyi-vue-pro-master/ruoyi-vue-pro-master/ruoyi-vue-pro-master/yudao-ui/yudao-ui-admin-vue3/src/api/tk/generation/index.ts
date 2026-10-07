@@ -23,6 +23,7 @@ export interface TkGenerationTaskVO {
   mimoVoiceSampleUrl?: string
   targetLanguage?: string
   materialPurpose?: string
+  scriptMode?: 'MANUAL'
   productCategoryCode?: string
   clipPlanMode?: string
   generationRouteCode?: string

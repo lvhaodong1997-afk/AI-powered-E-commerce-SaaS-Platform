@@ -73,6 +73,28 @@ class DefaultTkScriptGenerationServiceTest {
     }
 
     @Test
+    void generateScriptUsesManualEcommerceTextWithoutGeminiRewrite() {
+        DefaultTkScriptGenerationService service = new DefaultTkScriptGenerationService();
+        RecordingGeminiClient geminiClient = new RecordingGeminiClient();
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        ReflectionTestUtils.setField(service, "geminiClient", geminiClient);
+        ReflectionTestUtils.setField(service, "referenceAnalysisService", mock(TkReferenceAnalysisService.class));
+
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .materialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_ECOMMERCE)
+                .generationRouteConfig("{\"clipPlanMode\":\"SEGMENTED\",\"scriptMode\":\"MANUAL\"}")
+                .promptText("这款产品适合通勤使用。")
+                .referenceDuration(15)
+                .build();
+
+        TkGeneratedScript script = service.generateScript(task,
+                TkMaterialLibraryDO.builder().name("电商素材库").build());
+
+        assertEquals("这款产品适合通勤使用。", script.getContent());
+        assertEquals(false, geminiClient.called);
+    }
+
+    @Test
     void generateScriptUsesPureMaterialMixForBlankManualLeadGenerationPrompt() {
         DefaultTkScriptGenerationService service = new DefaultTkScriptGenerationService();
         RecordingGeminiClient geminiClient = new RecordingGeminiClient();

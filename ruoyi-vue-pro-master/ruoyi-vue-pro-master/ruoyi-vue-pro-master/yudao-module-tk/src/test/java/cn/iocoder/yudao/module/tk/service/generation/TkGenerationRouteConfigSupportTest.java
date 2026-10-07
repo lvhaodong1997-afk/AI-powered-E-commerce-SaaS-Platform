@@ -37,4 +37,15 @@ class TkGenerationRouteConfigSupportTest {
         assertEquals(TkGenerationRouteConfigSupport.ClipPlanMode.SEGMENTED,
                 TkGenerationRouteConfigSupport.normalizeClipPlanMode("bad-mode"));
     }
+
+    @Test
+    void manualScriptConfigPreservesClipPlanMode() {
+        String config = TkGenerationRouteConfigSupport.buildManualScriptConfig("FULL_POOL_RANDOM");
+
+        assertEquals(TkGenerationRouteConfigSupport.ClipPlanMode.FULL_POOL_RANDOM,
+                TkGenerationRouteConfigSupport.resolveClipPlanMode(config));
+        assertEquals(true, TkGenerationRouteConfigSupport.isManualScript(config));
+        assertEquals(false, TkGenerationRouteConfigSupport.isManualScript(
+                TkGenerationRouteConfigSupport.buildClipPlanModeConfig("FULL_POOL_RANDOM")));
+    }
 }
