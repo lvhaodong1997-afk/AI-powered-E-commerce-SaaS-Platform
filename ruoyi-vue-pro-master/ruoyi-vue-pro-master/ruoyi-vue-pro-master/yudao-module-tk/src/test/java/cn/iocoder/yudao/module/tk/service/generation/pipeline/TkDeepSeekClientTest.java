@@ -28,6 +28,18 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TkDeepSeekClientTest {
 
+    @Test
+    void translationNamesKeepCountrySpecificVariantsAndRejectUnknowns() {
+        TkDeepSeekClient client = new TkDeepSeekClient();
+        for (String locale : new String[] {"zh-cn", "en-us", "en-gb", "ja-jp", "ko-kr", "de-de", "fr-fr", "es-es", "it-it", "pt-br", "es-mx", "nl-nl", "tr-tr", "pt-pt", "vi-vn", "th-th"}) {
+            assertEquals(TkLanguageSupport.translationLanguageName(locale),
+                    ReflectionTestUtils.invokeMethod(client, "translationLanguageName", locale));
+        }
+        assertTrue(TkLanguageSupport.translationLanguageName("pt-br").contains("巴西"));
+        assertTrue(TkLanguageSupport.translationLanguageName("pt-pt").contains("葡萄牙"));
+        assertThrows(IllegalArgumentException.class, () -> client.translateText("原文", "xx"));
+    }
+
     private HttpServer server;
 
     @AfterEach

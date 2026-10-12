@@ -696,7 +696,21 @@
                       v-hasPermi="['tk:generation:create']"
                     />
                   </label>
-                  <span>{{ copy.manualTranslationTarget }}: {{ targetLanguageLabel }}</span>
+                  <label class="manual-translation-country">
+                    <span>{{ copy.manualTranslationTarget }}</span>
+                    <el-select
+                      v-model="createForm.targetLanguage"
+                      :aria-label="copy.manualTranslationTarget"
+                      :placeholder="copy.languagePlaceholder"
+                    >
+                      <el-option
+                        v-for="item in languageOptions"
+                        :key="item.value"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                  </label>
                 </div>
                 <p>{{ copy.manualTranslationHint }}</p>
                 <template v-if="manualTranslation.enabled">
@@ -1528,6 +1542,8 @@ import {
   failManualTranslation,
   readManualTranslationReplay,
   restoreManualTranslation,
+  targetCountryOptions,
+  resolveTargetCountry,
   selectManualCopy,
   setManualTranslationEnabled,
   updateManualTranslationContext
@@ -1648,15 +1664,27 @@ const MANUAL_LEAD_GENERATION_SOURCE_PREFIX = 'manual-lead-generation://'
 const MANUAL_ECOMMERCE_SOURCE_PREFIX = 'manual-ecommerce://'
 const ANALYSIS_PROVIDER_GEMINI: AnalysisProvider = 'GEMINI'
 const ANALYSIS_PROVIDER_DASHSCOPE_VIDEO: AnalysisProvider = 'DASHSCOPE_VIDEO'
-const targetLanguageOptions = [
-  { zh: '中文', en: 'Chinese', value: 'zh-cn' },
-  { zh: '英语', en: 'English', value: 'en' },
-  { zh: '美式英语', en: 'American English', value: 'en-us' },
-  { zh: '德语', en: 'German', value: 'de' },
-  { zh: '西班牙语', en: 'Spanish', value: 'es' },
-  { zh: '法语', en: 'French', value: 'fr' },
-  { zh: '荷兰语', en: 'Dutch', value: 'nl' }
-]
+const targetCountryLabels: Record<string, { zh: string; en: string }> = {
+  CN: { zh: '中国大陆', en: 'Mainland China' },
+  US: { zh: '美国', en: 'United States' },
+  GB: { zh: '英国', en: 'United Kingdom' },
+  JP: { zh: '日本', en: 'Japan' },
+  KR: { zh: '韩国', en: 'South Korea' },
+  DE: { zh: '德国', en: 'Germany' },
+  FR: { zh: '法国', en: 'France' },
+  ES: { zh: '西班牙', en: 'Spain' },
+  IT: { zh: '意大利', en: 'Italy' },
+  BR: { zh: '巴西', en: 'Brazil' },
+  MX: { zh: '墨西哥', en: 'Mexico' },
+  NL: { zh: '荷兰', en: 'Netherlands' },
+  TR: { zh: '土耳其', en: 'Türkiye' },
+  PT: { zh: '葡萄牙', en: 'Portugal' },
+  VN: { zh: '越南', en: 'Vietnam' },
+  TH: { zh: '泰国', en: 'Thailand' }
+}
+const targetLanguageOptions = targetCountryOptions.map((item) => ({
+  ...item, ...targetCountryLabels[item.country]
+}))
 const productCategoryItems: Array<{ zh: string; en: string; value: ProductCategoryCode }> = [
   { zh: '默认生成逻辑', en: 'Default route', value: 'DEFAULT' },
   { zh: '01 服饰鞋包', en: '01 Apparel, Shoes & Bags', value: '01' },
@@ -1890,15 +1918,15 @@ const copy = computed(() =>
         manualEcommerceScriptHint: 'Required in manual mode. Choose below whether to use the original text or a translation.',
         manualEcommerceScriptPlaceholder: 'Enter the script to use in the video.',
         manualEcommerceScriptWarning: 'Enter an e-commerce script first.',
-        manualTranslationToggle: 'Translate manual script with DeepSeek',
-        manualTranslationTarget: 'Target language',
+        manualTranslationToggle: 'Enable translation',
+        manualTranslationTarget: 'Target country',
         manualTranslationHint: 'Off uses your original text. On uses the translation for audio, voiceover, and subtitles.',
         manualTranslationPreview: 'Translation preview',
         manualTranslationRetry: 'Translate again',
         manualTranslationLoading: 'Translating. Please wait before generating audio or video.',
         manualTranslationPending: 'Translation is not ready. Click Translate again.',
         manualTranslationFailed: 'Translation failed. Retry or switch translation off to use the original.',
-        manualTranslationInvalid: 'The translation is empty, too long, or does not match the current text and language. Translate again.',
+        manualTranslationInvalid: 'The translation is empty, too long, or does not match the current text and country. Select a country and translate again.',
         manualTranslationRequired: 'Wait for a valid translation or switch translation off before generating.',
         manualScriptTooLong: 'The original script must be 3000 characters or fewer.',
         manualEffectiveCopy: 'Copy used for generation',
@@ -1973,8 +2001,8 @@ const copy = computed(() =>
         materialSearchPlaceholder: 'Type a material library name',
         materialNoMatch: 'No matching material libraries',
         materialNoData: 'No material libraries available',
-        languageRequired: 'Script/voiceover language (required)',
-        languagePlaceholder: 'Select script and voiceover language',
+        languageRequired: 'Target country (required)',
+        languagePlaceholder: 'Select target country',
         targetDurationLabel: 'Target video duration',
         targetDurationPlaceholder: '15',
         targetDurationHint: 'Leave empty to use 15 seconds. Supported range: 8-500 seconds.',
@@ -2110,7 +2138,7 @@ const copy = computed(() =>
         lowLevel: 'Low',
         scriptFallbackTitle: 'Script option ',
         scriptFallbackPoints: 'Core selling point | Scenario | Call to action',
-        languageFallback: 'Select language',
+        languageFallback: 'Select country',
         finishAnalysisWarning: 'Finish reference analysis first',
         missingReplayAnalysis: 'This analysis record is missing a link or material library.',
         replayAnalysisSuccess:
@@ -2212,15 +2240,15 @@ const copy = computed(() =>
         manualEcommerceScriptHint: '手动模式必填；可在下方选择使用原文或翻译文案。',
         manualEcommerceScriptPlaceholder: '请输入成片要使用的电商文案',
         manualEcommerceScriptWarning: '请先输入电商文案',
-        manualTranslationToggle: '使用 DeepSeek 翻译手动文案',
-        manualTranslationTarget: '翻译目标语言',
+        manualTranslationToggle: '启用翻译',
+        manualTranslationTarget: '翻译目标国家',
         manualTranslationHint: '关闭时使用原文；开启后使用译文生成音频、口播和字幕。',
         manualTranslationPreview: '译文预览',
         manualTranslationRetry: '重新翻译',
         manualTranslationLoading: '翻译中，请完成后再生成音频或视频。',
         manualTranslationPending: '译文未就绪，请点击重新翻译。',
         manualTranslationFailed: '翻译失败，请重试，或关闭翻译后使用原文。',
-        manualTranslationInvalid: '译文为空、超过 3000 字或与当前原文、语言不一致，请重新翻译。',
+        manualTranslationInvalid: '译文为空、超过 3000 字或与当前原文、国家不一致，请选择国家并重新翻译。',
         manualTranslationRequired: '请等待有效译文，或关闭翻译后再生成。',
         manualScriptTooLong: '原始文案不能超过 3000 字。',
         manualEffectiveCopy: '本次生成使用',
@@ -2291,8 +2319,8 @@ const copy = computed(() =>
         materialSearchPlaceholder: '输入素材库名称进行搜索',
         materialNoMatch: '没有匹配的素材库',
         materialNoData: '暂无可用素材库',
-        languageRequired: '文案/配音语言（必选）',
-        languagePlaceholder: '请选择文案和配音语言',
+        languageRequired: '目标国家（必选）',
+        languagePlaceholder: '请选择目标国家',
         targetDurationLabel: '目标视频时长',
         targetDurationPlaceholder: '15',
         targetDurationHint: '不填默认 15 秒，支持 8-500 秒',
@@ -2417,7 +2445,7 @@ const copy = computed(() =>
         lowLevel: '低',
         scriptFallbackTitle: '文案方案',
         scriptFallbackPoints: '核心卖点｜使用场景｜行动号召',
-        languageFallback: '选择语言',
+        languageFallback: '选择国家',
         finishAnalysisWarning: '请先完成对标分析',
         missingReplayAnalysis: '该分析记录缺少链接或素材库，无法回填',
         replayAnalysisSuccess: '已回填分析记录，可直接生成，也可配置可选开头素材',
@@ -4145,10 +4173,12 @@ function isAnalysisMatchingCurrentForm(analysis: TkReferenceAnalysisVO | undefin
   if (!analysis) {
     return false
   }
+  const analysisCountry = resolveTargetCountry(analysis.targetLanguage)
+  const selectedCountry = resolveTargetCountry(createForm.targetLanguage)
   return (
     (analysis.sourceUrl || '').trim() === createForm.sourceUrl.trim() &&
     analysis.libraryId === createForm.libraryId &&
-    analysis.targetLanguage === createForm.targetLanguage &&
+    Boolean(analysisCountry && selectedCountry && analysisCountry.value === selectedCountry.value) &&
     normalizeMaterialPurpose(analysis.materialPurpose) === createForm.materialPurpose &&
     normalizeAnalysisProvider(analysis.analysisProvider) === createForm.analysisProvider &&
     Number(analysis.referenceDuration || DEFAULT_TARGET_DURATION) === getTargetDuration()
@@ -4624,7 +4654,7 @@ async function hydrateReplayFromAnalysis(analysis: TkReferenceAnalysisVO) {
     createForm.referenceDuration = analysis.referenceDuration || DEFAULT_TARGET_DURATION
     createForm.voiceCode = createForm.voiceCode ||
       (createForm.ttsProvider === TTS_PROVIDER_MINIMAX ? getDefaultMiniMaxVoiceCode() : defaultVoiceCode)
-    createForm.targetLanguage = analysis.targetLanguage || defaultTargetLanguage
+    createForm.targetLanguage = resolveTargetCountry(analysis.targetLanguage || defaultTargetLanguage)?.value || ''
     createForm.materialPurpose = normalizeMaterialPurpose(analysis.materialPurpose)
     ecommerceScriptMode.value = 'AI'
     createForm.productCategoryCode = DEFAULT_PRODUCT_CATEGORY_CODE
@@ -4677,7 +4707,7 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     createForm.libraryId = task.libraryId
     createForm.targetLanguage = manualLeadReplay || manualEcommerceReplay
       ? manualReplay.targetLanguage
-      : task.targetLanguage || defaultTargetLanguage
+      : resolveTargetCountry(task.targetLanguage || defaultTargetLanguage)?.value || ''
     createForm.materialPurpose = materialPurpose
     ecommerceScriptMode.value = manualEcommerceReplay ? 'MANUAL' : 'AI'
     createForm.productCategoryCode = normalizeProductCategoryCode(task.productCategoryCode)
@@ -4717,7 +4747,7 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
       const latest = await TkReferenceApi.getLatest({
         libraryId: task.libraryId,
         sourceUrl: taskSourceUrl,
-        targetLanguage: createForm.targetLanguage,
+        targetLanguage: task.targetLanguage || defaultTargetLanguage,
         materialPurpose: createForm.materialPurpose,
         analysisProvider: createForm.analysisProvider
       })
@@ -4727,7 +4757,7 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
       referenceAnalysis.value = await TkReferenceApi.getLatest({
         libraryId: task.libraryId,
         sourceUrl: taskSourceUrl,
-        targetLanguage: createForm.targetLanguage,
+        targetLanguage: task.targetLanguage || defaultTargetLanguage,
         materialPurpose: createForm.materialPurpose,
         analysisProvider: createForm.analysisProvider
       })
@@ -7051,6 +7081,17 @@ onUnmounted(() => {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 12px;
   background: var(--el-fill-color-lighter);
+}
+
+.manual-translation-country {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.manual-translation-country .el-select {
+  width: 190px;
 }
 
 .manual-translation-heading,

@@ -15,11 +15,11 @@ const checks = [
   },
   {
     name: 'manual lead generation replay clears internal sourceUrl instead of showing it',
-    pattern: /createForm\.sourceUrl\s*=\s*isManualLeadGenerationSource\(task\.sourceUrl\)\s*\?\s*''\s*:\s*\(task\.sourceUrl\s*\|\|\s*''\)/,
+    pattern: /createForm\.sourceUrl\s*=\s*isManualLeadGenerationSource\(task\.sourceUrl\)\s*\|\|\s*isManualEcommerceSource\(task\.sourceUrl\)\s*\?\s*''\s*:\s*\(task\.sourceUrl\s*\|\|\s*''\)/,
   },
   {
     name: 'manual lead generation replay restores prompt or script text',
-    pattern: /manualLeadScriptText\.value\s*=\s*\(task\.promptText\s*\|\|\s*task\.scriptText\s*\|\|\s*''\)\.trim\(\)/,
+    pattern: /manualLeadScriptText\.value\s*=\s*manualReplay\.sourceText/,
   },
   {
     name: 'custom voice replay restores voiceProfileId selection',

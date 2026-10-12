@@ -196,7 +196,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
             throw new IllegalArgumentException("手动原文和译文不能为空且不能超过3000个字符");
         }
         String language = StrUtil.trimToEmpty(request.getTargetLanguage());
-        if (!java.util.Arrays.asList("zh-cn", "en", "en-us", "de", "es", "fr", "nl").contains(language)) {
+        if (!TkLanguageSupport.isSupportedTranslationLanguage(language)) {
             throw new IllegalArgumentException("不支持的翻译目标语言");
         }
     }

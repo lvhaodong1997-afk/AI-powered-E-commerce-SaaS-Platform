@@ -35,6 +35,7 @@ function harness(provider = 'MINIMAX') {
     ecommerceScriptMode: ref('AI'),
     manualTranslation: manualTranslationApi.createManualTranslationState(),
     setManualTranslationEnabled: manualTranslationApi.setManualTranslationEnabled,
+    resolveTargetCountry: manualTranslationApi.resolveTargetCountry,
     miniMaxVoiceOptions: ref([]), miniMaxVoiceLoading: ref(false), hydratingReplay: ref(false),
     isVoiceoverEnabled: ref(true), voiceConfigReady: ref(true), voiceConfigExpanded: ref(false),
     voicePreviewing: ref(false), voicePreviewUrl: ref(''), voicePreviewAudio: ref(undefined),

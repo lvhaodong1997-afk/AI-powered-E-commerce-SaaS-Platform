@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.generation;
 
 import cn.hutool.core.util.StrUtil;
+import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkLanguageSupport;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -79,9 +80,11 @@ public final class TkGenerationRouteConfigSupport {
         config.put("manualTranslationEnabled", enabled);
         config.put("manualOriginalText", StrUtil.trimToEmpty(originalText));
         if (enabled) {
-            config.put("manualTranslationTargetLanguage", targetLanguage);
+            config.put("manualTranslationTargetLanguage", TkLanguageSupport.normalize(targetLanguage));
+            config.put("manualTranslationTargetCountry", TkLanguageSupport.targetCountry(targetLanguage));
         } else {
             config.remove("manualTranslationTargetLanguage");
+            config.remove("manualTranslationTargetCountry");
         }
         return JsonUtils.toJsonString(config);
     }

@@ -6,21 +6,17 @@ import cn.iocoder.yudao.framework.common.exception.enums.GlobalErrorCodeConstant
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkManualScriptTranslationReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkManualScriptTranslationRespVO;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkDeepSeekClient;
-import org.springframework.stereotype.Service;
+import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkLanguageSupport;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
 
 @Service
 @Slf4j
 public class TkManualScriptTranslationService {
 
     private static final int MAX_SCRIPT_LENGTH = 3000;
-    private static final Set<String> SUPPORTED_LANGUAGES = new HashSet<>(
-            Arrays.asList("zh-cn", "en", "en-us", "de", "es", "fr", "nl"));
 
     @Resource
     private TkDeepSeekClient deepSeekClient;
@@ -31,7 +27,7 @@ public class TkManualScriptTranslationService {
             throw new ServiceException(GlobalErrorCodeConstants.BAD_REQUEST.getCode(), "原始文案需为 1 至 3000 字符");
         }
         String targetLanguage = StrUtil.trim(request.getTargetLanguage());
-        if (!SUPPORTED_LANGUAGES.contains(targetLanguage)) {
+        if (!TkLanguageSupport.isSupportedTranslationLanguage(targetLanguage)) {
             throw new ServiceException(GlobalErrorCodeConstants.BAD_REQUEST.getCode(), "不支持的目标语言");
         }
         String translatedText;

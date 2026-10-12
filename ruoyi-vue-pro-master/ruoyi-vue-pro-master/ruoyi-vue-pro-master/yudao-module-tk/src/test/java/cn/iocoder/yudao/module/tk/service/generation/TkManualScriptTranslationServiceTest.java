@@ -16,7 +16,7 @@ class TkManualScriptTranslationServiceTest {
 
     @Test
     void trimsSourceAndOutputAndReturnsLanguageForEverySupportedLanguage() throws Exception {
-        for (String language : new String[] {"zh-cn", "en", "en-us", "de", "es", "fr", "nl"}) {
+        for (String language : new String[] {"zh-cn", "en", "en-us", "de", "es", "fr", "nl", "en-gb", "ja-jp", "ko-kr", "de-de", "fr-fr", "es-es", "it-it", "pt-br", "es-mx", "nl-nl", "tr-tr", "pt-pt", "vi-vn", "th-th"}) {
             AtomicReference<String> sentSource = new AtomicReference<>();
             AtomicReference<String> sentLanguage = new AtomicReference<>();
             TkManualScriptTranslationService service = service("  translated text  ", new AtomicInteger(), sentSource, sentLanguage);

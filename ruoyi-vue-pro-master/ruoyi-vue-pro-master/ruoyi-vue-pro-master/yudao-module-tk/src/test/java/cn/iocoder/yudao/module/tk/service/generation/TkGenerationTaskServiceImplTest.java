@@ -46,6 +46,27 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TkGenerationTaskServiceImplTest {
+    @Test
+    void countryTranslationMetadataPreservesCanonicalLocaleAndManualClipConfig() {
+        for (String locale : new String[] {"en-gb", "ja-jp", "es-mx", "pt-br", "pt-pt", "th-th"}) {
+            TkGenerationTaskCreateReqVO request = new TkGenerationTaskCreateReqVO();
+            request.setMaterialPurpose("ECOMMERCE");
+            request.setScriptMode("MANUAL");
+            request.setClipPlanMode("FULL_POOL_RANDOM");
+            request.setTargetLanguage(locale);
+            request.setManualTranslationEnabled(true);
+            request.setManualOriginalText("原文");
+            request.setPromptText("Translated copy");
+            TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
+            ReflectionTestUtils.invokeMethod(service, "validateManualScriptTranslation", request);
+            String config = ReflectionTestUtils.invokeMethod(service, "resolveGenerationRouteConfig", request, "ECOMMERCE", null);
+            com.fasterxml.jackson.databind.JsonNode root = cn.iocoder.yudao.framework.common.util.json.JsonUtils.parseTree(config);
+            assertEquals(locale, root.path("manualTranslationTargetLanguage").asText());
+            assertEquals(locale.substring(3).toUpperCase(), root.path("manualTranslationTargetCountry").asText());
+            assertTrue(TkGenerationRouteConfigSupport.isFullPoolRandom(config));
+            assertTrue(TkGenerationRouteConfigSupport.isManualScript(config));
+        }
+    }
 
     @Test
     void translatedManualTaskKeepsFinalScriptAndOriginalSnapshot() {

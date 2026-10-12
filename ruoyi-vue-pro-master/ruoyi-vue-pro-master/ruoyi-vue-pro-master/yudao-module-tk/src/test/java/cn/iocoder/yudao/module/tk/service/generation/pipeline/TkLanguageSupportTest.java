@@ -6,6 +6,23 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TkLanguageSupportTest {
+    @Test
+    void countryVariantsSurviveAndHaveBaseSpeechCodes() {
+        for (String language : new String[] {"zh-cn", "en-us", "en-gb", "ja-jp", "ko-kr", "de-de", "fr-fr", "es-es", "it-it", "pt-br", "es-mx", "nl-nl", "tr-tr", "pt-pt", "vi-vn", "th-th"}) {
+            assertEquals(language, TkLanguageSupport.normalize(language));
+            assertEquals(language.substring(0, 2), TkLanguageSupport.ttsLanguageHint(language));
+            assertEquals(language.substring(0, 2), TkLanguageSupport.asrLanguageCode(language));
+            assertEquals(language.substring(3).toUpperCase(), TkLanguageSupport.targetCountry(language));
+            assertTrue(TkLanguageSupport.isSupportedTranslationLanguage(language));
+            assertTrue(TkLanguageSupport.translationLanguageName(language).contains(TkLanguageSupport.displayName(language).replace("美式英语", "美国英语").replace("中文", "简体中文")));
+        }
+        assertEquals("US", TkLanguageSupport.targetCountry("en"));
+        assertEquals("ja-jp", TkLanguageSupport.normalize("ja_JP"));
+        assertEquals("pt-br", TkLanguageSupport.normalize("pt_BR"));
+        assertEquals("pt-pt", TkLanguageSupport.normalize("pt_PT"));
+        assertTrue(TkLanguageSupport.ttsInstruction("en-gb").contains("英国"));
+        assertTrue(TkLanguageSupport.promptInstruction("es-mx").contains("墨西哥"));
+    }
 
     @Test
     void normalizeShouldSupportSpanishFrenchAndDutchAliases() {

@@ -146,7 +146,8 @@ def faster_whisper_timeline(args, keywords):
                     "keyword": False,
                 }
             )
-        text = "".join(text_parts) if args.language.startswith("zh") else " ".join(text_parts)
+        separator = "" if whisper_language(args.language) in {"zh", "ja", "th"} else " "
+        text = separator.join(text_parts)
         if not text:
             text = segment.text.strip()
         mark_keywords(words, keywords)
@@ -166,17 +167,9 @@ def faster_whisper_timeline(args, keywords):
 
 
 def whisper_language(language):
-    value = (language or "").lower()
-    if value.startswith("zh"):
-        return "zh"
-    if value.startswith("en"):
-        return "en"
-    if value.startswith("es"):
-        return "es"
-    if value.startswith("fr"):
-        return "fr"
-    if value.startswith("nl"):
-        return "nl"
+    value = (language or "").strip().lower().replace("_", "-").split("-", 1)[0]
+    if value in {"zh", "en", "ja", "ko", "de", "fr", "es", "it", "pt", "nl", "tr", "vi", "th"}:
+        return value
     return None
 
 

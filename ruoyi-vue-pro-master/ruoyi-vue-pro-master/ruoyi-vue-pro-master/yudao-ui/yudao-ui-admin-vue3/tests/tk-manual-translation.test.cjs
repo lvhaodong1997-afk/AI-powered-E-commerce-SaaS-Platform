@@ -121,7 +121,7 @@ test('replay restores original separately from final copy and binds saved langua
   const state = m.createManualTranslationState()
   m.restoreManualTranslation(state, { ...replay, flow: 'ECOMMERCE' })
   assert.equal(state.sourceText, 'Saved original')
-  assert.equal(state.targetLanguage, 'de')
+  assert.equal(state.targetLanguage, 'de-de')
   assert.equal(m.selectManualCopy(state).promptText, 'Saved translation')
   m.setManualTranslationEnabled(state, false)
   assert.equal(m.selectManualCopy(state).promptText, 'Saved original')

@@ -35,7 +35,8 @@ async function harness(flow = 'ECOMMERCE') {
     manualLeadScriptText: ref(''), ecommerceScriptMode: ref('AI'),
     hydratingReplay: ref(false), activeStep: ref(0), openingUploadRef: ref(undefined),
     MATERIAL_PURPOSE_LEAD_GENERATION: 'LEAD_GENERATION', MATERIAL_PURPOSE_ECOMMERCE: 'ECOMMERCE',
-    ANALYSIS_PROVIDER_GEMINI: 'GEMINI', defaultTargetLanguage: 'zh-cn',
+    ANALYSIS_PROVIDER_GEMINI: 'GEMINI', TTS_PROVIDER_MINIMAX: 'MINIMAX', defaultVoiceCode: 'voice', defaultTargetLanguage: 'zh-cn',
+    getDefaultMiniMaxVoiceCode: () => 'voice', normalizeAnalysisProvider: () => 'GEMINI', analysisResultExpanded: ref(false),
     DEFAULT_TARGET_DURATION: 30, DEFAULT_OPENING_CLIP_START: 0, DEFAULT_OPENING_CLIP_DURATION: 3,
     normalizeMaterialPurpose: (value) => value,
     normalizeProductCategoryCode: (value) => value || 'DEFAULT',
@@ -69,10 +70,11 @@ async function harness(flow = 'ECOMMERCE') {
     section('const resolvePromptTextForGeneration', 'const buildPrecheckFailureState'),
     section('const precheckGeneration = async', 'const goFixPrecheckMaterials'),
     section('const handleCreateGeneration = async', 'const handleRetryGeneration = async'),
-    section('async function hydrateReplayFromGeneration', 'async function hydrateReplayPayload')
+    section('async function hydrateReplayFromAnalysis', 'async function hydrateReplayPayload'),
+    section('function isAnalysisMatchingCurrentForm', 'const analyzeButtonText')
   ].join('\n')
   const js = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
-  vm.runInContext(js + '\nObject.assign(globalThis, { createGenerationSubmissionSnapshot, createGenerationPayload, handleCreateAudioExport, handleCreateGeneration, precheckGeneration, hydrateReplayFromGeneration })', ctx)
+  vm.runInContext(js + '\nObject.assign(globalThis, { createGenerationSubmissionSnapshot, createGenerationPayload, handleCreateAudioExport, handleCreateGeneration, precheckGeneration, hydrateReplayFromGeneration, hydrateReplayFromAnalysis, isAnalysisMatchingCurrentForm, hasCurrentSuccessfulAnalysis })', ctx)
   const script = { scriptText: '原始文案', title: 'Manual' }
   ctx.selectedScriptsForGeneration = ref([script])
   const translate = (text = 'Translated copy') => {
@@ -149,7 +151,7 @@ test('manual lead replay with a normal optional URL restores original and transl
   assert.equal(h.ctx.manualLeadScriptText.value, 'Saved original')
   assert.equal(h.state.translatedText, 'Saved translation')
   assert.equal(h.state.enabled, true)
-  assert.equal(h.ctx.createForm.targetLanguage, 'de')
+  assert.equal(h.ctx.createForm.targetLanguage, 'de-de')
   assert.equal(h.ctx.referenceAnalysis.value, undefined)
   assert.equal(h.ctx.createForm.sourceUrl, 'https://www.tiktok.com/@reference/video/123')
 })
@@ -184,5 +186,86 @@ test('lead replay preserves old manual URL detection and AI selection IDs', asyn
     assert.equal(ai.referenceRequests.length, 1)
     assert.equal(ai.ctx.manualLeadScriptText.value, '')
     assert.equal(ai.ctx.referenceAnalysis.value.id, 99)
+  }
+})
+
+test('old ecommerce manual replay restores saved copy and clears only internal source URL', async () => {
+  const h = await harness('ECOMMERCE')
+  await h.ctx.hydrateReplayFromGeneration({ libraryId: 1, materialPurpose: 'ECOMMERCE', targetLanguage: 'es',
+    sourceUrl: 'manual-ecommerce://1', promptText: 'Old ecommerce copy', generationRouteConfig: '{"scriptMode":"MANUAL"}' })
+  assert.equal(h.referenceRequests.length, 0)
+  assert.equal(h.ctx.createForm.sourceUrl, '')
+  assert.equal(h.ctx.createForm.targetLanguage, 'es-es')
+  assert.equal(h.ctx.manualEcommerceScriptText.value, 'Old ecommerce copy')
+  assert.equal(h.translation.selectManualCopy(h.state).promptText, 'Old ecommerce copy')
+  assert.equal(h.state.enabled, false)
+})
+
+test('changing country blocks audio video and precheck until new translation succeeds', async () => {
+  const h = await harness()
+  h.translate()
+  const stale = h.translation.beginManualTranslation(h.state)
+  h.ctx.createForm.targetLanguage = 'en-gb'
+  h.translation.updateManualTranslationContext(h.state, { flow: 'ECOMMERCE', sourceText: '原始文案', targetLanguage: 'en-gb' })
+  assert.equal(h.translation.completeManualTranslation(h.state, stale, { sourceText: '原始文案', targetLanguage: 'en', translatedText: 'Stale' }), false)
+  await h.ctx.handleCreateAudioExport()
+  await h.ctx.handleCreateGeneration()
+  await assert.rejects(h.ctx.precheckGeneration(h.script), /MANUAL_COPY_NOT_READY/)
+  assert.equal(h.audioRequests.length, 0)
+  assert.equal(h.precheckRequests.length, 0)
+  const request = h.translation.beginManualTranslation(h.state)
+  h.translation.completeManualTranslation(h.state, request, { sourceText: '原始文案', targetLanguage: 'en-gb', translatedText: 'UK copy' })
+  await h.ctx.handleCreateAudioExport()
+  await h.ctx.precheckGeneration(h.script)
+  assert.equal(h.audioRequests[0].scriptText, 'UK copy')
+  assert.equal(h.precheckRequests[0].promptText, 'UK copy')
+})
+
+test('historical AI replay keeps exact analysis lookup locale while country selection is canonical', async () => {
+  for (const [legacy, canonical] of [['en', 'en-us'], ['de', 'de-de']]) {
+    for (const selection of [{ referenceAnalysisId: 99, scriptOptionId: 42 }, { scriptOptionId: 42 }]) {
+      const h = await harness('LEAD_GENERATION')
+      const savedAnalysis = { id: 99, targetLanguage: legacy, scriptOptions: [{ id: 42, scriptText: 'Historical AI script' }] }
+      h.ctx.TkReferenceApi.getLatest = async (request) => {
+        h.referenceRequests.push(request)
+        return request.targetLanguage === legacy ? savedAnalysis : undefined
+      }
+      const restoredSelections = []
+      h.ctx.findScriptIndexById = (id) => {
+        const index = h.ctx.referenceAnalysis.value?.scriptOptions.findIndex((script) => script.id === id) ?? -1
+        restoredSelections.push({ id, index })
+        return index
+      }
+      const displayIndexes = []
+      h.ctx.resetScriptDisplay = (index) => displayIndexes.push(index)
+      await h.ctx.hydrateReplayFromGeneration({ libraryId: 1, sourceUrl: 'https://example/reference',
+        materialPurpose: 'LEAD_GENERATION', targetLanguage: legacy, promptText: 'Historical AI script', ...selection })
+      assert.equal(h.referenceRequests[0].targetLanguage, legacy)
+      assert.equal(h.ctx.createForm.targetLanguage, canonical)
+      assert.equal(h.ctx.referenceAnalysis.value, savedAnalysis)
+      assert.deepEqual(restoredSelections, [{ id: 42, index: 0 }])
+      assert.deepEqual(displayIndexes, [0])
+      assert.equal(h.ctx.activeStep.value, 4)
+      assert.equal(h.ctx.manualLeadScriptText.value, '')
+    }
+  }
+})
+
+test('direct successful analysis replay matches canonical country while preserving regional distinctions', async () => {
+  for (const [saved, selected] of [['en', 'en-us'], ['de', 'de-de'], ['fr', 'fr-fr']]) {
+    const h = await harness()
+    const analysis = { id: 99, status: 'SUCCESS', sourceUrl: 'https://example/reference', libraryId: 1,
+      targetLanguage: saved, materialPurpose: 'ECOMMERCE', analysisProvider: 'GEMINI', referenceDuration: 30 }
+    await h.ctx.hydrateReplayFromAnalysis(analysis)
+    assert.equal(h.ctx.createForm.targetLanguage, selected)
+    assert.equal(h.ctx.hasCurrentSuccessfulAnalysis.value, true)
+  }
+  const h = await harness()
+  const analysis = { id: 99, status: 'SUCCESS', sourceUrl: 'https://example/reference', libraryId: 1,
+    materialPurpose: 'ECOMMERCE', analysisProvider: 'GEMINI', referenceDuration: 30 }
+  for (const [saved, selected] of [['en-gb', 'en-us'], ['es-mx', 'es-es'], ['pt-br', 'pt-pt'], ['unknown', 'unknown']]) {
+    await h.ctx.hydrateReplayFromAnalysis({ ...analysis, targetLanguage: saved })
+    h.ctx.createForm.targetLanguage = selected
+    assert.equal(h.ctx.hasCurrentSuccessfulAnalysis.value, false)
   }
 })

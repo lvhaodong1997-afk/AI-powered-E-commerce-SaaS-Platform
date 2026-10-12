@@ -1,3 +1,28 @@
+export const targetCountryOptions = Object.freeze([
+  { country: 'CN', value: 'zh-cn' },
+  { country: 'US', value: 'en-us' },
+  { country: 'GB', value: 'en-gb' },
+  { country: 'JP', value: 'ja-jp' },
+  { country: 'KR', value: 'ko-kr' },
+  { country: 'DE', value: 'de-de' },
+  { country: 'FR', value: 'fr-fr' },
+  { country: 'ES', value: 'es-es' },
+  { country: 'IT', value: 'it-it' },
+  { country: 'BR', value: 'pt-br' },
+  { country: 'MX', value: 'es-mx' },
+  { country: 'NL', value: 'nl-nl' },
+  { country: 'TR', value: 'tr-tr' },
+  { country: 'PT', value: 'pt-pt' },
+  { country: 'VN', value: 'vi-vn' },
+  { country: 'TH', value: 'th-th' }
+].map((item) => Object.freeze(item)))
+
+const legacyLanguages = { en: 'en-us', de: 'de-de', es: 'es-es', fr: 'fr-fr', nl: 'nl-nl' }
+export const resolveTargetCountry = (language) => {
+  const code = typeof language === 'string' ? language.trim().toLowerCase() : ''
+  return targetCountryOptions.find((item) => item.value === (legacyLanguages[code] || code))
+}
+
 const MAX_SCRIPT_LENGTH = 3000
 const normalizeText = (text) => (typeof text === 'string' ? text.trim() : '')
 
@@ -37,7 +62,7 @@ export const setManualTranslationEnabled = (state, enabled) => {
 }
 
 export const beginManualTranslation = (state) => {
-  if (!state.enabled || !state.sourceText || state.sourceText.length > MAX_SCRIPT_LENGTH) {
+  if (!state.enabled || !resolveTargetCountry(state.targetLanguage) || !state.sourceText || state.sourceText.length > MAX_SCRIPT_LENGTH) {
     return undefined
   }
   invalidateTranslation(state)
@@ -81,7 +106,7 @@ export const completeManualTranslation = (state, request, response) => {
 
 export const selectManualCopy = (state) => {
   const validSource = state.sourceText.length <= MAX_SCRIPT_LENGTH
-  const ready = validSource && (!state.enabled || (
+  const ready = validSource && Boolean(resolveTargetCountry(state.targetLanguage)) && (!state.enabled || (
     state.status === 'ready' && Boolean(state.translatedText) &&
     state.translatedText.length <= MAX_SCRIPT_LENGTH
   ))
@@ -102,19 +127,24 @@ export const captureManualCopy = (state) => {
 export const readManualTranslationReplay = (task, defaultLanguage) => {
   let metadata
   try {
-    metadata = JSON.parse(task.generationRouteConfig || '{}')
+    metadata = JSON.parse(task.generationRouteConfig || '{}') || {}
   } catch {
     metadata = {}
   }
   const enabled = metadata?.manualTranslationEnabled === true
   const finalText = normalizeText(task.promptText || task.scriptText)
+  const savedLanguage = metadata.manualTranslationTargetLanguage || task.targetLanguage || defaultLanguage
+  const country = resolveTargetCountry(savedLanguage)
+  const consistentCountry = !metadata.manualTranslationTargetCountry || metadata.manualTranslationTargetCountry === country?.country
+  const validCountry = country && consistentCountry
   return {
     hasManualTranslationMetadata: typeof metadata?.manualTranslationEnabled === 'boolean' &&
       typeof metadata?.manualOriginalText === 'string',
     enabled,
     sourceText: enabled ? normalizeText(metadata.manualOriginalText) : finalText,
     translatedText: enabled ? finalText : '',
-    targetLanguage: (enabled && metadata.manualTranslationTargetLanguage) || task.targetLanguage || defaultLanguage
+    targetLanguage: validCountry ? country.value : '',
+    targetCountry: validCountry ? country.country : ''
   }
 }
 
@@ -122,7 +152,7 @@ export const restoreManualTranslation = (state, replay) => {
   updateManualTranslationContext(state, replay)
   setManualTranslationEnabled(state, replay.enabled)
   // Corrupt translated tasks must remain blocked, never substitute the saved final text as the original.
-  if (replay.enabled && !state.sourceText) {
+  if (replay.enabled && (!state.sourceText || !resolveTargetCountry(state.targetLanguage))) {
     state.enabled = true
     state.status = 'error'
     state.error = 'INVALID_RESULT'

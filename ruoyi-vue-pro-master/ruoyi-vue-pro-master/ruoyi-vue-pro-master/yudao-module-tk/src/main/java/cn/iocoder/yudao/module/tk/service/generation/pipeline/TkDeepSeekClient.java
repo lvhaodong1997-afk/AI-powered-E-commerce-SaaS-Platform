@@ -114,19 +114,7 @@ public class TkDeepSeekClient {
     }
 
     private String translationLanguageName(String targetLanguage) {
-        if (targetLanguage == null) {
-            throw new IllegalArgumentException("Unsupported translation language");
-        }
-        switch (targetLanguage) {
-            case "zh-cn": return "简体中文";
-            case "en": return "英语";
-            case "en-us": return "美国英语";
-            case "de": return "德语";
-            case "es": return "西班牙语";
-            case "fr": return "法语";
-            case "nl": return "荷兰语";
-            default: throw new IllegalArgumentException("Unsupported translation language");
-        }
+        return TkLanguageSupport.translationLanguageName(targetLanguage);
     }
 
     private Map<String, Object> buildTranslationRequest(String model, String sourceText, String languageName) {

@@ -132,7 +132,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
                     StrUtil.blankToDefault(asr.getPython(), "py"),
                     scriptFile.getAbsolutePath(),
                     "--audio", audioFile.getAbsolutePath(),
-                    "--language", StrUtil.blankToDefault(task.getTargetLanguage(), ""),
+                    "--language", TkLanguageSupport.asrLanguageCode(task.getTargetLanguage()),
                     "--text", StrUtil.blankToDefault(scriptText, ""),
                     "--keywords", JsonUtils.toJsonString(keywords),
                     "--model", StrUtil.blankToDefault(model, "small")
