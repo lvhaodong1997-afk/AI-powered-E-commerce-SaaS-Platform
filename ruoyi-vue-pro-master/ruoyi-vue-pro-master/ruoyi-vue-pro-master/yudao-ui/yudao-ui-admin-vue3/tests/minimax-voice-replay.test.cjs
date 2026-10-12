@@ -25,12 +25,16 @@ const functions = [
 
 const ref = (value) => ({ value })
 const noop = () => {}
+let manualTranslationApi
 function harness(provider = 'MINIMAX') {
   let paidPreviews = 0
   const context = vm.createContext({
     TTS_PROVIDER_MINIMAX: 'MINIMAX', TTS_PROVIDER_DASHSCOPE: 'DASHSCOPE', TTS_PROVIDER_MIMO: 'MIMO',
     MIMO_VOICE_MODE_PRESET: 'PRESET', MIMO_VOICE_MODE_DESIGN: 'VOICE_DESIGN', MIMO_VOICE_MODE_CLONE: 'VOICE_CLONE',
     createForm: { ttsProvider: provider, voiceCode: '' },
+    ecommerceScriptMode: ref('AI'),
+    manualTranslation: manualTranslationApi.createManualTranslationState(),
+    setManualTranslationEnabled: manualTranslationApi.setManualTranslationEnabled,
     miniMaxVoiceOptions: ref([]), miniMaxVoiceLoading: ref(false), hydratingReplay: ref(false),
     isVoiceoverEnabled: ref(true), voiceConfigReady: ref(true), voiceConfigExpanded: ref(false),
     voicePreviewing: ref(false), voicePreviewUrl: ref(''), voicePreviewAudio: ref(undefined),
@@ -52,6 +56,7 @@ function harness(provider = 'MINIMAX') {
 }
 
 async function main() {
+  manualTranslationApi = await import('../src/views/tk/dashboard/manualTranslation.mjs')
   const providerOptions = section('const voiceProviderOptions = [', 'const getTtsProviderLabel')
   assert.doesNotMatch(providerOptions, /TTS_PROVIDER_MIMO/, 'New tasks must hide the MiMo provider')
   const chineseCopy = source.slice(source.indexOf("analysisSettingsMoved: '素材库、语言、时长已在分析前设置'"))

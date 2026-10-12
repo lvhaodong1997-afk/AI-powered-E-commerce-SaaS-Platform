@@ -116,6 +116,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     @Override
     public Long createGenerationTask(TkGenerationTaskCreateReqVO createReqVO) {
         validateRequestedReferenceDuration(createReqVO);
+        validateManualScriptTranslation(createReqVO);
         validateManualEcommerceScript(createReqVO);
         return createGenerationTask(createReqVO, null, true);
     }
@@ -123,6 +124,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     @Override
     public List<Long> createGenerationTasks(TkGenerationTaskCreateReqVO createReqVO) {
         validateRequestedReferenceDuration(createReqVO);
+        validateManualScriptTranslation(createReqVO);
         validateManualEcommerceScript(createReqVO);
         List<Long> scriptOptionIds = normalizeBatchScriptOptionIds(createReqVO);
         int videosPerScript = normalizeVideosPerScript(createReqVO.getVideosPerScript());
@@ -152,6 +154,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     @Override
     public Long createGenerationTask(TkGenerationTaskCreateReqVO createReqVO, MultipartFile openingVideoFile) {
         validateRequestedReferenceDuration(createReqVO);
+        validateManualScriptTranslation(createReqVO);
         validateManualEcommerceScript(createReqVO);
         return createGenerationTask(createReqVO, openingVideoFile, true);
     }
@@ -171,11 +174,38 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
                 && "MANUAL".equals(request.getScriptMode());
     }
 
+    private boolean isManualScriptRequest(TkGenerationTaskCreateReqVO request) {
+        return (isManualEcommerceScript(request) || TkGeminiPromptConfig.isLeadGeneration(request.getMaterialPurpose()))
+                && request.getReferenceAnalysisId() == null && request.getScriptOptionId() == null
+                && (request.getScriptOptionIds() == null || request.getScriptOptionIds().isEmpty());
+    }
+
+    private void validateManualScriptTranslation(TkGenerationTaskCreateReqVO request) {
+        if (!Boolean.TRUE.equals(request.getManualTranslationEnabled())) {
+            if (isManualScriptRequest(request) && StrUtil.length(request.getManualOriginalText()) > 3000) {
+                throw new IllegalArgumentException("手动原文不能超过3000个字符");
+            }
+            return;
+        }
+        if (!isManualScriptRequest(request)) {
+            throw new IllegalArgumentException("翻译只能用于手动文案，不能同时选择分析或文案方案");
+        }
+        String original = StrUtil.trimToEmpty(request.getManualOriginalText());
+        String translated = StrUtil.trimToEmpty(request.getPromptText());
+        if (original.isEmpty() || original.length() > 3000 || translated.isEmpty() || translated.length() > 3000) {
+            throw new IllegalArgumentException("手动原文和译文不能为空且不能超过3000个字符");
+        }
+        String language = StrUtil.trimToEmpty(request.getTargetLanguage());
+        if (!java.util.Arrays.asList("zh-cn", "en", "en-us", "de", "es", "fr", "nl").contains(language)) {
+            throw new IllegalArgumentException("不支持的翻译目标语言");
+        }
+    }
+
     private void validateManualEcommerceScript(TkGenerationTaskCreateReqVO request) {
         if (!isManualEcommerceScript(request)) {
             return;
         }
-        String script = StrUtil.trimToEmpty(request.getPromptText());
+        String script = resolvePromptText(request, request.getMaterialPurpose());
         if (script.isEmpty() || script.length() > 3000) {
             throw new IllegalArgumentException("手动电商文案不能为空且不能超过3000字");
         }
@@ -255,6 +285,8 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         target.setTargetLanguage(source.getTargetLanguage());
         target.setMaterialPurpose(source.getMaterialPurpose());
         target.setScriptMode(source.getScriptMode());
+        target.setManualTranslationEnabled(source.getManualTranslationEnabled());
+        target.setManualOriginalText(source.getManualOriginalText());
         target.setProductCategoryCode(source.getProductCategoryCode());
         target.setClipPlanMode(source.getClipPlanMode());
         target.setReferenceAnalysisId(source.getReferenceAnalysisId());
@@ -470,13 +502,21 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
 
     private String resolveGenerationRouteConfig(TkGenerationTaskCreateReqVO createReqVO, String materialPurpose,
                                                 TkGenerationRoute generationRoute) {
+        String config;
         if (isManualEcommerceScript(createReqVO)) {
-            return TkGenerationRouteConfigSupport.buildManualScriptConfig(createReqVO.getClipPlanMode());
+            config = TkGenerationRouteConfigSupport.buildManualScriptConfig(createReqVO.getClipPlanMode());
+        } else if (StrUtil.isNotBlank(createReqVO.getClipPlanMode())) {
+            config = TkGenerationRouteConfigSupport.buildClipPlanModeConfig(createReqVO.getClipPlanMode());
+        } else {
+            config = generationRoute == null ? null : generationRoute.getRouteConfig();
         }
-        if (StrUtil.isNotBlank(createReqVO.getClipPlanMode())) {
-            return TkGenerationRouteConfigSupport.buildClipPlanModeConfig(createReqVO.getClipPlanMode());
+        if (isManualScriptRequest(createReqVO) && (createReqVO.getManualOriginalText() != null
+                || Boolean.TRUE.equals(createReqVO.getManualTranslationEnabled()))) {
+            config = TkGenerationRouteConfigSupport.withManualTranslationConfig(config,
+                    Boolean.TRUE.equals(createReqVO.getManualTranslationEnabled()),
+                    createReqVO.getManualOriginalText(), TkLanguageSupport.normalize(createReqVO.getTargetLanguage()));
         }
-        return generationRoute == null ? null : generationRoute.getRouteConfig();
+        return config;
     }
 
     private String resolveSourceUrl(TkGenerationTaskCreateReqVO createReqVO, String materialPurpose) {
@@ -495,6 +535,10 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
 
     private String resolvePromptText(TkGenerationTaskCreateReqVO createReqVO, String materialPurpose) {
         if (TkGeminiPromptConfig.isLeadGeneration(materialPurpose) || isManualEcommerceScript(createReqVO)) {
+            if (isManualScriptRequest(createReqVO) && !Boolean.TRUE.equals(createReqVO.getManualTranslationEnabled())
+                    && createReqVO.getManualOriginalText() != null) {
+                return StrUtil.trimToEmpty(createReqVO.getManualOriginalText());
+            }
             return StrUtil.trimToEmpty(createReqVO.getPromptText());
         }
         return StrUtil.blankToDefault(createReqVO.getPromptText(), generationProperties.getPrompt());

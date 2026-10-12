@@ -684,6 +684,54 @@
                   <span>{{ copy.finishAnalysisFirst }}</span>
                 </template>
               </div>
+              <div v-if="manualTranslationFlow" class="manual-translation-panel">
+                <div class="manual-translation-heading">
+                  <label class="manual-translation-switch">
+                    <span>{{ copy.manualTranslationToggle }}</span>
+                    <el-switch
+                      :model-value="manualTranslation.enabled"
+                      :disabled="!manualOriginalScriptText.trim()"
+                      :aria-label="copy.manualTranslationToggle"
+                      @change="handleManualTranslationToggle"
+                      v-hasPermi="['tk:generation:create']"
+                    />
+                  </label>
+                  <span>{{ copy.manualTranslationTarget }}: {{ targetLanguageLabel }}</span>
+                </div>
+                <p>{{ copy.manualTranslationHint }}</p>
+                <template v-if="manualTranslation.enabled">
+                  <div class="manual-translation-heading">
+                    <strong>{{ copy.manualTranslationPreview }}</strong>
+                    <el-button
+                      plain
+                      size="small"
+                      :loading="manualTranslation.status === 'loading'"
+                      :disabled="manualTranslation.status === 'loading'"
+                      @click="handleTranslateManualScript"
+                      v-hasPermi="['tk:generation:create']"
+                    >
+                      {{ copy.manualTranslationRetry }}
+                    </el-button>
+                  </div>
+                  <el-input
+                    :model-value="manualTranslation.translatedText"
+                    type="textarea"
+                    readonly
+                    :autosize="{ minRows: 4, maxRows: 10 }"
+                    maxlength="3000"
+                    show-word-limit
+                    :placeholder="manualTranslation.status === 'loading' ? copy.manualTranslationLoading : copy.manualTranslationPending"
+                  />
+                  <p v-if="manualTranslation.status === 'error'" class="manual-translation-error" role="alert">
+                    {{ manualTranslation.error === 'INVALID_RESULT' ? copy.manualTranslationInvalid : copy.manualTranslationFailed }}
+                  </p>
+                  <p v-else-if="manualTranslation.status === 'loading'" role="status">{{ copy.manualTranslationLoading }}</p>
+                  <p v-else-if="!manualCopy.ready">{{ copy.manualTranslationPending }}</p>
+                </template>
+                <strong class="manual-effective-copy">
+                  {{ copy.manualEffectiveCopy }}: {{ manualTranslation.enabled ? (manualCopy.ready ? copy.manualEffectiveTranslation : copy.manualTranslationPending) : copy.manualEffectiveOriginal }}
+                </strong>
+              </div>
             </div>
 
             <div class="config-box">
@@ -1249,7 +1297,7 @@
                       <Icon icon="ep:folder-opened" />
                       {{ copy.fixMaterials }}
                     </el-button>
-                    <el-button @click="handleRecheckGeneration" :loading="precheckingGeneration">
+                    <el-button @click="handleRecheckGeneration" :loading="precheckingGeneration" :disabled="manualSubmissionBlocked">
                       <Icon icon="ep:refresh-right" />
                       {{ copy.recheck }}
                     </el-button>
@@ -1306,7 +1354,7 @@
                   <el-button
                     plain
                     :loading="audioExporting"
-                    :disabled="audioExporting"
+                    :disabled="audioExporting || manualSubmissionBlocked"
                     @click="handleCreateAudioExport"
                     v-hasPermi="['tk:generation:create']"
                   >
@@ -1315,6 +1363,7 @@
                   </el-button>
                   <el-button
                     type="primary"
+                    :disabled="manualSubmissionBlocked"
                     @click="handleCreateGeneration"
                     v-hasPermi="['tk:generation:create']"
                   >
@@ -1329,7 +1378,7 @@
                 <el-button
                   class="generate-audio-button"
                   :loading="audioExporting"
-                  :disabled="audioExporting"
+                  :disabled="audioExporting || manualSubmissionBlocked"
                   @click="handleCreateAudioExport"
                   v-hasPermi="['tk:generation:create']"
                 >
@@ -1339,6 +1388,7 @@
                 <el-button
                   type="primary"
                   class="generate-button"
+                  :disabled="manualSubmissionBlocked"
                   @click="handleCreateGeneration"
                   v-hasPermi="['tk:generation:create']"
                 >
@@ -1471,6 +1521,18 @@ import {
   mergeGenerationTasks
 } from './generationTaskQueue.mjs'
 import {
+  beginManualTranslation,
+  captureManualCopy,
+  completeManualTranslation,
+  createManualTranslationState,
+  failManualTranslation,
+  readManualTranslationReplay,
+  restoreManualTranslation,
+  selectManualCopy,
+  setManualTranslationEnabled,
+  updateManualTranslationContext
+} from './manualTranslation.mjs'
+import {
   buildGenerationOutputDisplayName,
   buildGenerationOutputDownloadName
 } from '@/utils/tkGenerationOutputName'
@@ -1515,9 +1577,8 @@ interface GenerationSubmissionSnapshot {
   bgmVolume: number
   subtitlePayload: Partial<TkGenerationTaskVO>
   isLeadGenerationManualMode: boolean
-  manualLeadScriptText: string
   isManualEcommerceMode: boolean
-  manualEcommerceScriptText: string
+  manualCopy?: ReturnType<typeof captureManualCopy>
   batchGenerationEnabled: boolean
   videosPerScript: number
 }
@@ -1826,9 +1887,23 @@ const copy = computed(() =>
         leadGenerationMaterial: 'Lead-gen material',
         chooseAiScript: 'Choose AI script',
         manualEcommerceScriptTitle: 'Enter e-commerce script',
-        manualEcommerceScriptHint: 'Required in manual mode. The text is used directly for voiceover and subtitles.',
+        manualEcommerceScriptHint: 'Required in manual mode. Choose below whether to use the original text or a translation.',
         manualEcommerceScriptPlaceholder: 'Enter the script to use in the video.',
         manualEcommerceScriptWarning: 'Enter an e-commerce script first.',
+        manualTranslationToggle: 'Translate manual script with DeepSeek',
+        manualTranslationTarget: 'Target language',
+        manualTranslationHint: 'Off uses your original text. On uses the translation for audio, voiceover, and subtitles.',
+        manualTranslationPreview: 'Translation preview',
+        manualTranslationRetry: 'Translate again',
+        manualTranslationLoading: 'Translating. Please wait before generating audio or video.',
+        manualTranslationPending: 'Translation is not ready. Click Translate again.',
+        manualTranslationFailed: 'Translation failed. Retry or switch translation off to use the original.',
+        manualTranslationInvalid: 'The translation is empty, too long, or does not match the current text and language. Translate again.',
+        manualTranslationRequired: 'Wait for a valid translation or switch translation off before generating.',
+        manualScriptTooLong: 'The original script must be 3000 characters or fewer.',
+        manualEffectiveCopy: 'Copy used for generation',
+        manualEffectiveOriginal: 'Original text',
+        manualEffectiveTranslation: 'Translated text',
         ecommerceManualLinkPlaceholder: 'Optional reference link. Your entered script will be used directly.',
         reanalyzeConfirmTitle: 'Re-analyze reference link',
         reanalyzeConfirmMessage:
@@ -2134,9 +2209,23 @@ const copy = computed(() =>
         leadGenerationMaterial: '引流素材',
         chooseAiScript: '选择 AI 文案',
         manualEcommerceScriptTitle: '手动输入电商文案',
-        manualEcommerceScriptHint: '手动模式必填；输入内容将直接用于口播和字幕。',
+        manualEcommerceScriptHint: '手动模式必填；可在下方选择使用原文或翻译文案。',
         manualEcommerceScriptPlaceholder: '请输入成片要使用的电商文案',
         manualEcommerceScriptWarning: '请先输入电商文案',
+        manualTranslationToggle: '使用 DeepSeek 翻译手动文案',
+        manualTranslationTarget: '翻译目标语言',
+        manualTranslationHint: '关闭时使用原文；开启后使用译文生成音频、口播和字幕。',
+        manualTranslationPreview: '译文预览',
+        manualTranslationRetry: '重新翻译',
+        manualTranslationLoading: '翻译中，请完成后再生成音频或视频。',
+        manualTranslationPending: '译文未就绪，请点击重新翻译。',
+        manualTranslationFailed: '翻译失败，请重试，或关闭翻译后使用原文。',
+        manualTranslationInvalid: '译文为空、超过 3000 字或与当前原文、语言不一致，请重新翻译。',
+        manualTranslationRequired: '请等待有效译文，或关闭翻译后再生成。',
+        manualScriptTooLong: '原始文案不能超过 3000 字。',
+        manualEffectiveCopy: '本次生成使用',
+        manualEffectiveOriginal: '原始文案',
+        manualEffectiveTranslation: '翻译文案',
         ecommerceManualLinkPlaceholder: '可选填写对标链接；手动文案将直接用于成片',
         reanalyzeConfirmTitle: '重新分析对标链接',
         reanalyzeConfirmMessage: '当前链接和设置已有分析结果，重新分析会再次消耗积分，是否继续？',
@@ -2558,6 +2647,7 @@ const precheckFailure = ref<PrecheckFailureState>()
 const manualLeadScriptText = ref('')
 const ecommerceScriptMode = ref<'AI' | 'MANUAL'>('AI')
 const manualEcommerceScriptText = ref('')
+const manualTranslation = reactive(createManualTranslationState())
 const voicePreviewAudio = ref<HTMLAudioElement>()
 const voicePreviewUrl = ref('')
 const voiceManagerVisible = ref(false)
@@ -2932,7 +3022,7 @@ const estimateLeadVoiceDuration = (text: string) => {
 }
 const hasManualLeadScriptText = computed(() => manualLeadScriptText.value.trim().length > 0)
 const manualLeadEstimatedVoiceDuration = computed(() =>
-  estimateLeadVoiceDuration(manualLeadScriptText.value)
+  estimateLeadVoiceDuration(effectiveManualScriptText.value)
 )
 const manualLeadVoiceDurationLevel = computed<'normal' | 'warning' | 'danger'>(() => {
   if (!isLeadGenerationManualMode.value || !manualLeadEstimatedVoiceDuration.value) {
@@ -2954,6 +3044,7 @@ const manualLeadVoiceDurationHint = computed(() => {
   }
   const estimatedDuration = manualLeadEstimatedVoiceDuration.value
   if (!estimatedDuration) {
+    if (manualTranslation.enabled && !manualCopy.value.ready) return copy.value.manualTranslationPending
     return copy.value.manualVoiceDurationEmptyHint
   }
   const targetDuration = getTargetDuration()
@@ -2967,7 +3058,7 @@ const manualLeadVoiceDurationHint = computed(() => {
 })
 const manualEcommerceVoiceDurationHint = computed(() => {
   if (!isManualEcommerceMode.value) return ''
-  const estimated = estimateLeadVoiceDuration(manualEcommerceScriptText.value)
+  const estimated = estimateLeadVoiceDuration(effectiveManualScriptText.value)
   if (!estimated) return ''
   const target = getTargetDuration()
   const ratio = estimated / target
@@ -3631,12 +3722,10 @@ const resolvePromptTextForGeneration = (
   snapshot?: GenerationSubmissionSnapshot
 ) => {
   if (snapshot) {
-    if (snapshot.isLeadGenerationManualMode) return snapshot.manualLeadScriptText
-    if (snapshot.isManualEcommerceMode) return snapshot.manualEcommerceScriptText
+    if (snapshot.isLeadGenerationManualMode || snapshot.isManualEcommerceMode) return snapshot.manualCopy?.promptText || ''
     return script.scriptText || script.title
   }
-  if (isLeadGenerationManualMode.value) return manualLeadScriptText.value.trim()
-  if (isManualEcommerceMode.value) return manualEcommerceScriptText.value.trim()
+  if (manualTranslationFlow.value) return effectiveManualScriptText.value
   return script.scriptText || script.title
 }
 
@@ -3671,9 +3760,8 @@ const createGenerationSubmissionSnapshot = (): GenerationSubmissionSnapshot => {
     bgmVolume: createForm.bgmVolume,
     subtitlePayload: { ...getSubtitlePayload() },
     isLeadGenerationManualMode: isLeadGenerationManualMode.value,
-    manualLeadScriptText: manualLeadScriptText.value.trim(),
     isManualEcommerceMode: isManualEcommerceMode.value,
-    manualEcommerceScriptText: manualEcommerceScriptText.value.trim(),
+    manualCopy: manualTranslationFlow.value ? captureManualCopy(manualTranslation) : undefined,
     batchGenerationEnabled: batchGenerationEnabled.value,
     videosPerScript: Number(videosPerScript.value || 1)
   }
@@ -3692,6 +3780,10 @@ const createGenerationPayload = (
     targetLanguage: snapshot.targetLanguage,
     materialPurpose: snapshot.materialPurpose,
     ...(snapshot.isManualEcommerceMode ? { scriptMode: 'MANUAL' as const } : {}),
+    ...(snapshot.manualCopy ? {
+      manualTranslationEnabled: snapshot.manualCopy.manualTranslationEnabled,
+      manualOriginalText: snapshot.manualCopy.manualOriginalText
+    } : {}),
     productCategoryCode: DEFAULT_PRODUCT_CATEGORY_CODE,
     clipPlanMode: snapshot.clipPlanMode,
     referenceDuration: snapshot.referenceDuration,
@@ -3731,8 +3823,11 @@ const createAudioExportRequestId = () =>
     : `audio-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
 const handleCreateAudioExport = async () => {
+  if (!ensureManualCopyReady()) return
+  if (audioExporting.value) return
+  const snapshot = createGenerationSubmissionSnapshot()
   const script = selectedScriptsForGeneration.value[0]
-  const scriptText = script ? resolvePromptTextForGeneration(script).trim() : ''
+  const scriptText = script ? resolvePromptTextForGeneration(script, snapshot).trim() : ''
   if (!scriptText) {
     message.warning(copy.value.audioExportMissingScript)
     return
@@ -3745,11 +3840,11 @@ const handleCreateAudioExport = async () => {
   audioExportResult.value = undefined
   try {
     audioExportResult.value = await TkGenerationApi.createAudioExport({
-      companyId: selectedLibrary.value?.companyId,
+      companyId: snapshot.companyId,
       requestId: createAudioExportRequestId(),
       scriptText,
-      ...selectedVoicePayload(),
-      targetLanguage: createForm.targetLanguage
+      ...snapshot.voicePayload,
+      targetLanguage: snapshot.targetLanguage
     })
     if (audioExportResult.value.status !== 'SUCCESS' || !audioExportResult.value.audioUrl) {
       throw new Error(audioExportResult.value.failReason || copy.value.audioExportFailed)
@@ -3815,6 +3910,7 @@ const goFixPrecheckMaterials = () => {
 }
 
 const handleRecheckGeneration = async () => {
+  if (!ensureManualCopyReady()) return
   const script = selectedScriptsForGeneration.value[0]
   if (!script || (!isManualEcommerceMode.value && !isLeadGenerationManualMode.value && !script.id)) {
     message.warning(copy.value.selectScriptWarning)
@@ -3997,6 +4093,37 @@ const isFullPoolRandomMode = computed(
 const isLeadGenerationManualMode = computed(
   () => isLeadGenerationFlow.value && !referenceAnalysis.value?.id
 )
+const manualTranslationFlow = computed(() =>
+  isLeadGenerationManualMode.value ? 'LEAD_GENERATION' : isManualEcommerceMode.value ? 'ECOMMERCE' : ''
+)
+const manualOriginalScriptText = computed(() =>
+  isLeadGenerationManualMode.value ? manualLeadScriptText.value : isManualEcommerceMode.value ? manualEcommerceScriptText.value : ''
+)
+const manualCopy = computed(() => selectManualCopy(manualTranslation))
+const effectiveManualScriptText = computed(() => manualCopy.value.promptText)
+const manualSubmissionBlocked = computed(() => Boolean(manualTranslationFlow.value) && !manualCopy.value.ready)
+const ensureManualCopyReady = () => {
+  if (!manualTranslationFlow.value || manualCopy.value.ready) return true
+  message.warning(manualTranslation.sourceText.length > 3000 ? copy.value.manualScriptTooLong : copy.value.manualTranslationRequired)
+  return false
+}
+const handleTranslateManualScript = async () => {
+  const translationRequest = beginManualTranslation(manualTranslation)
+  if (!translationRequest) return
+  try {
+    const response = await TkGenerationApi.translateScript({
+      sourceText: translationRequest.sourceText,
+      targetLanguage: translationRequest.targetLanguage
+    })
+    completeManualTranslation(manualTranslation, translationRequest, response)
+  } catch {
+    failManualTranslation(manualTranslation, translationRequest)
+  }
+}
+const handleManualTranslationToggle = (enabled: string | number | boolean) => {
+  setManualTranslationEnabled(manualTranslation, enabled === true)
+  if (manualTranslation.enabled) void handleTranslateManualScript()
+}
 const analyzeTitleText = computed(() =>
   isLeadGenerationFlow.value ? copy.value.leadAnalyzeTitle : copy.value.analyzeTitle
 )
@@ -4085,7 +4212,7 @@ const scriptOptions = computed(() => {
 })
 
 const manualLeadScriptOption = computed<DashboardScriptOption | undefined>(() => {
-  const scriptText = manualLeadScriptText.value.trim()
+  const scriptText = effectiveManualScriptText.value
   if (!isLeadGenerationManualMode.value) {
     return undefined
   }
@@ -4105,7 +4232,7 @@ const manualLeadScriptOption = computed<DashboardScriptOption | undefined>(() =>
 })
 
 const manualEcommerceScriptOption = computed<DashboardScriptOption | undefined>(() => {
-  const scriptText = manualEcommerceScriptText.value.trim()
+  const scriptText = effectiveManualScriptText.value
   if (!isManualEcommerceMode.value || !scriptText) return undefined
   return {
     title: copy.value.manualEcommerceScriptTitle,
@@ -4489,6 +4616,7 @@ async function hydrateReplayFromAnalysis(analysis: TkReferenceAnalysisVO) {
   }
 
   hydratingReplay.value = true
+  setManualTranslationEnabled(manualTranslation, false)
   try {
     createForm.sourceUrl = analysis.sourceUrl
     createForm.title = analysis.title || ''
@@ -4525,12 +4653,15 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
   }
 
   hydratingReplay.value = true
+  setManualTranslationEnabled(manualTranslation, false)
   try {
     const materialPurpose = normalizeMaterialPurpose(task.materialPurpose)
     const taskSourceUrl = task.sourceUrl || ''
+    const manualReplay = readManualTranslationReplay(task, defaultTargetLanguage)
     const manualLeadReplay =
       materialPurpose === MATERIAL_PURPOSE_LEAD_GENERATION &&
-      (!taskSourceUrl || isManualLeadGenerationSource(taskSourceUrl))
+      (!taskSourceUrl || isManualLeadGenerationSource(taskSourceUrl) ||
+        (manualReplay.hasManualTranslationMetadata && !task.referenceAnalysisId && !task.scriptOptionId))
     const manualEcommerceReplay =
       materialPurpose === MATERIAL_PURPOSE_ECOMMERCE &&
       isManualScriptFromRouteConfig(task.generationRouteConfig)
@@ -4544,7 +4675,9 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
       ? '' : (task.sourceUrl || '')
     createForm.title = task.title || ''
     createForm.libraryId = task.libraryId
-    createForm.targetLanguage = task.targetLanguage || defaultTargetLanguage
+    createForm.targetLanguage = manualLeadReplay || manualEcommerceReplay
+      ? manualReplay.targetLanguage
+      : task.targetLanguage || defaultTargetLanguage
     createForm.materialPurpose = materialPurpose
     ecommerceScriptMode.value = manualEcommerceReplay ? 'MANUAL' : 'AI'
     createForm.productCategoryCode = normalizeProductCategoryCode(task.productCategoryCode)
@@ -4565,7 +4698,7 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     openingUploadRef.value?.clearFiles()
     manualLeadScriptText.value = ''
     if (manualEcommerceReplay) {
-      manualEcommerceScriptText.value = (task.promptText || task.scriptText || '').trim()
+      manualEcommerceScriptText.value = manualReplay.sourceText
     }
     if (manualLeadReplay) {
       await loadBgmAssets()
@@ -4574,8 +4707,12 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     if (manualLeadReplay || manualEcommerceReplay) {
       referenceAnalysis.value = undefined
       if (manualLeadReplay) {
-        manualLeadScriptText.value = (task.promptText || task.scriptText || '').trim()
+        manualLeadScriptText.value = manualReplay.sourceText
       }
+      restoreManualTranslation(manualTranslation, {
+        ...manualReplay,
+        flow: manualLeadReplay ? 'LEAD_GENERATION' : 'ECOMMERCE'
+      })
     } else if (task.referenceAnalysisId) {
       const latest = await TkReferenceApi.getLatest({
         libraryId: task.libraryId,
@@ -5060,6 +5197,7 @@ const handleCreateGeneration = async () => {
   if (generationSubmittingCount.value > 0) {
     return
   }
+  if (!ensureManualCopyReady()) return
   if (isManualEcommerceMode.value && !manualEcommerceScriptText.value.trim()) {
     message.warning(copy.value.manualEcommerceScriptWarning)
     return
@@ -5254,6 +5392,14 @@ watch(ecommerceScriptMode, (mode) => {
     analysisValidation.sourceUrl = false
   }
 })
+
+watch(
+  [manualTranslationFlow, manualOriginalScriptText, () => createForm.targetLanguage],
+  ([flow, sourceText, targetLanguage]) => {
+    updateManualTranslationContext(manualTranslation, { flow, sourceText, targetLanguage })
+  },
+  { immediate: true, flush: 'sync' }
+)
 
 watch(
   () => createForm.voiceEnabled,
@@ -6895,6 +7041,40 @@ onUnmounted(() => {
 .manual-script-input {
   width: 100%;
   margin-top: 10px;
+}
+
+.manual-translation-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  background: var(--el-fill-color-lighter);
+}
+
+.manual-translation-heading,
+.manual-translation-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.manual-translation-panel p {
+  margin: 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.manual-translation-panel .manual-translation-error {
+  color: var(--el-color-danger);
+}
+
+.manual-effective-copy {
+  font-size: 13px;
+  color: var(--el-text-color-primary);
 }
 
 .selling-card em {

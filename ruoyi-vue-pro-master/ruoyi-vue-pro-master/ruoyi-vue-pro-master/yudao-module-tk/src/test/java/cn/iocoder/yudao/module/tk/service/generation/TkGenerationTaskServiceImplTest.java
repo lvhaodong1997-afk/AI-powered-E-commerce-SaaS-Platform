@@ -48,6 +48,64 @@ import static org.mockito.Mockito.when;
 class TkGenerationTaskServiceImplTest {
 
     @Test
+    void translatedManualTaskKeepsFinalScriptAndOriginalSnapshot() {
+        TkGenerationTaskCreateReqVO request = cn.iocoder.yudao.framework.common.util.json.JsonUtils.parseObject(
+                "{\"materialPurpose\":\"ECOMMERCE\",\"scriptMode\":\"MANUAL\","
+                        + "\"clipPlanMode\":\"FULL_POOL_RANDOM\",\"targetLanguage\":\"en\","
+                        + "\"manualTranslationEnabled\":true,\"manualOriginalText\":\"  原始文案  \","
+                        + "\"promptText\":\"Translated copy\"}", TkGenerationTaskCreateReqVO.class);
+        TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
+        String config = ReflectionTestUtils.invokeMethod(service, "resolveGenerationRouteConfig", request,
+                "ECOMMERCE", null);
+        com.fasterxml.jackson.databind.JsonNode root = cn.iocoder.yudao.framework.common.util.json.JsonUtils.parseTree(config);
+        assertEquals("原始文案", root.path("manualOriginalText").asText());
+        assertTrue(root.path("manualTranslationEnabled").asBoolean());
+        assertEquals("en", root.path("manualTranslationTargetLanguage").asText());
+        assertTrue(TkGenerationRouteConfigSupport.isManualScript(config));
+        assertTrue(TkGenerationRouteConfigSupport.isFullPoolRandom(config));
+        assertEquals("Translated copy", ReflectionTestUtils.invokeMethod(service, "resolvePromptText", request, "ECOMMERCE"));
+        TkGenerationTaskCreateReqVO copy = ReflectionTestUtils.invokeMethod(service, "copyCreateReqVO", request);
+        com.fasterxml.jackson.databind.JsonNode copied = cn.iocoder.yudao.framework.common.util.json.JsonUtils.parseTree(
+                cn.iocoder.yudao.framework.common.util.json.JsonUtils.toJsonString(copy));
+        assertTrue(copied.path("manualTranslationEnabled").asBoolean());
+        assertEquals("  原始文案  ", copied.path("manualOriginalText").asText());
+    }
+
+    @Test
+    void disabledTranslationUsesOriginalAndOldManualRequestsStillUsePrompt() {
+        TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
+        TkGenerationTaskCreateReqVO request = cn.iocoder.yudao.framework.common.util.json.JsonUtils.parseObject(
+                "{\"materialPurpose\":\"ECOMMERCE\",\"scriptMode\":\"MANUAL\","
+                        + "\"manualTranslationEnabled\":false,\"manualOriginalText\":\"原始文案\","
+                        + "\"promptText\":\"Old translation\"}", TkGenerationTaskCreateReqVO.class);
+        assertEquals("原始文案", ReflectionTestUtils.invokeMethod(service, "resolvePromptText", request, "ECOMMERCE"));
+        TkGenerationTaskCreateReqVO oldRequest = new TkGenerationTaskCreateReqVO();
+        oldRequest.setScriptMode("MANUAL");
+        oldRequest.setPromptText("  Original copy  ");
+        assertEquals("Original copy", ReflectionTestUtils.invokeMethod(service, "resolvePromptText", oldRequest, "ECOMMERCE"));
+    }
+
+    @Test
+    void translationRejectsAiModeBeforeCreatingOrChargingTask() {
+        TkGenerationTaskCreateReqVO request = cn.iocoder.yudao.framework.common.util.json.JsonUtils.parseObject(
+                "{\"materialPurpose\":\"ECOMMERCE\",\"manualTranslationEnabled\":true,"
+                        + "\"manualOriginalText\":\"原始文案\",\"promptText\":\"Translated copy\"}",
+                TkGenerationTaskCreateReqVO.class);
+        assertThrows(IllegalArgumentException.class,
+                () -> new TkGenerationTaskServiceImpl().createGenerationTask(request));
+    }
+
+    @Test
+    void translatedLeadTaskRejectsBlankOriginalBeforeCreatingTask() {
+        TkGenerationTaskCreateReqVO request = cn.iocoder.yudao.framework.common.util.json.JsonUtils.parseObject(
+                "{\"materialPurpose\":\"LEAD_GENERATION\",\"manualTranslationEnabled\":true,"
+                        + "\"manualOriginalText\":\"   \",\"promptText\":\"Translated copy\"}",
+                TkGenerationTaskCreateReqVO.class);
+        assertThrows(IllegalArgumentException.class,
+                () -> new TkGenerationTaskServiceImpl().createGenerationTask(request));
+    }
+
+    @Test
     void batchTaskTitleIncludesScriptAndVideoIndexes() throws Exception {
         TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
         java.lang.reflect.Method method = TkGenerationTaskServiceImpl.class

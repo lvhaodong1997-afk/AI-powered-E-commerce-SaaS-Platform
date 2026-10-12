@@ -1,9 +1,12 @@
 package cn.iocoder.yudao.module.tk.controller.admin.generation;
 
 import cn.hutool.core.util.StrUtil;
+import cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog;
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
+import cn.iocoder.yudao.framework.ratelimiter.core.annotation.RateLimiter;
+import cn.iocoder.yudao.framework.ratelimiter.core.keyresolver.impl.ExpressionRateLimiterKeyResolver;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationPrecheckRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkAudioExportTaskCreateReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkAudioExportTaskRespVO;
@@ -16,10 +19,13 @@ import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTas
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskStatusRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskSummaryRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkVoicePreviewReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkManualScriptTranslationReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkManualScriptTranslationRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.tiktok.vo.TkTiktokPublishUrlRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.service.generation.TkGenerationPrecheckService;
 import cn.iocoder.yudao.module.tk.service.generation.TkGenerationTaskService;
+import cn.iocoder.yudao.module.tk.service.generation.TkManualScriptTranslationService;
 import cn.iocoder.yudao.module.tk.service.generation.TkAudioExportTaskService;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkDashScopeTtsClient;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkTtsProviderEnum;
@@ -88,6 +94,18 @@ public class TkGenerationTaskController {
     private TkGenerationOutputStorageService generationOutputStorageService;
     @Resource
     private TkGenerationOpeningUploadService generationOpeningUploadService;
+    @Resource
+    private TkManualScriptTranslationService manualScriptTranslationService;
+
+    @PostMapping("/translate-script")
+    @ApiAccessLog(requestEnable = false, responseEnable = false)
+    @Operation(summary = "翻译手动文案")
+    @PreAuthorize("@ss.hasPermission('tk:generation:create')")
+    @RateLimiter(time = 60, count = 10, keyResolver = ExpressionRateLimiterKeyResolver.class,
+            keyArg = "'tk:generation:translate-script:' + T(cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils).getLoginUserId()")
+    public CommonResult<TkManualScriptTranslationRespVO> translateScript(@Valid @RequestBody TkManualScriptTranslationReqVO reqVO) {
+        return success(manualScriptTranslationService.translate(reqVO));
+    }
 
     @PostMapping("/precheck")
     @Operation(summary = "生成任务预检")

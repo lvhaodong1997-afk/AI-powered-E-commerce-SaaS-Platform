@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.tk.service.generation;
 import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -68,6 +69,21 @@ public final class TkGenerationRouteConfigSupport {
         }
         JsonNode root = JsonUtils.parseTree(routeConfig);
         return root != null && root.isObject() && "MANUAL".equals(root.path(SCRIPT_MODE_FIELD).asText());
+    }
+
+    public static String withManualTranslationConfig(String routeConfig, boolean enabled,
+                                                     String originalText, String targetLanguage) {
+        JsonNode root = JsonUtils.parseTree(StrUtil.blankToDefault(routeConfig, "{}"));
+        ObjectNode config = root != null && root.isObject()
+                ? ((ObjectNode) root).deepCopy() : (ObjectNode) JsonUtils.parseTree("{}");
+        config.put("manualTranslationEnabled", enabled);
+        config.put("manualOriginalText", StrUtil.trimToEmpty(originalText));
+        if (enabled) {
+            config.put("manualTranslationTargetLanguage", targetLanguage);
+        } else {
+            config.remove("manualTranslationTargetLanguage");
+        }
+        return JsonUtils.toJsonString(config);
     }
 
     public enum ClipPlanMode {

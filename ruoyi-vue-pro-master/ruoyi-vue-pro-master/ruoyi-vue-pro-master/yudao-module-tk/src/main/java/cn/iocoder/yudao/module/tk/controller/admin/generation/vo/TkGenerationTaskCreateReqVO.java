@@ -43,6 +43,11 @@ public class TkGenerationTaskCreateReqVO {
     private String targetLanguage;
     private String materialPurpose;
     private String scriptMode;
+    @Schema(description = "手动文案是否使用译文，默认关闭")
+    private Boolean manualTranslationEnabled;
+    @Schema(description = "手动文案原文快照；promptText 为本次实际使用的文案")
+    @Size(max = 3000, message = "手动原文不能超过3000个字符")
+    private String manualOriginalText;
     private String productCategoryCode;
 
     @JsonAlias({"clip_plan_mode", "videoGenerationMode", "video_generation_mode"})

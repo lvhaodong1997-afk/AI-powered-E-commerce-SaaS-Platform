@@ -24,6 +24,8 @@ export interface TkGenerationTaskVO {
   targetLanguage?: string
   materialPurpose?: string
   scriptMode?: 'MANUAL'
+  manualTranslationEnabled?: boolean
+  manualOriginalText?: string
   productCategoryCode?: string
   clipPlanMode?: string
   generationRouteCode?: string
@@ -222,6 +224,12 @@ export interface TkAudioExportTaskCreateVO {
   targetLanguage?: string
 }
 
+export interface TkManualScriptTranslationVO {
+  sourceText: string
+  targetLanguage: string
+  translatedText: string
+}
+
 export interface TkGenerationPrecheckIssueVO {
   code: string
   message: string
@@ -265,6 +273,11 @@ export interface TkGenerationPrecheckRespVO {
 }
 
 export const TkGenerationApi = {
+  translateScript: async (
+    data: Pick<TkManualScriptTranslationVO, 'sourceText' | 'targetLanguage'>
+  ): Promise<TkManualScriptTranslationVO> => {
+    return await request.post({ url: '/tk/generation/translate-script', data, timeout: 90 * 1000 })
+  },
   createOpeningUploadSession: async (data: {
     libraryId: number
     fileName: string
