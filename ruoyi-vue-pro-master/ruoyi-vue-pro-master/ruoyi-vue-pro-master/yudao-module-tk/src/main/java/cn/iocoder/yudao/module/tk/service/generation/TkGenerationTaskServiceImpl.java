@@ -407,7 +407,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
             TkGenerationRoute generationRoute = resolveGenerationRoute(tenantId, materialPurpose,
                     createReqVO.getProductCategoryCode());
             String generationRouteConfig = resolveGenerationRouteConfig(createReqVO, materialPurpose, generationRoute);
-            BgmSelection bgmSelection = resolveBgmSelection(createReqVO, materialPurpose);
+            BgmSelection bgmSelection = resolveBgmSelection(createReqVO);
             String openingProcessMode = openingVideo == null ? null
                     : TkNativeOpeningSupport.normalizeMode(createReqVO.getOpeningProcessMode());
             TkGenerationTaskDO task = TkGenerationTaskDO.builder()
@@ -633,9 +633,8 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         return createReqVO.getVoiceEnabled() == null || createReqVO.getVoiceEnabled();
     }
 
-    private BgmSelection resolveBgmSelection(TkGenerationTaskCreateReqVO createReqVO, String materialPurpose) {
-        if (!TkGeminiPromptConfig.isLeadGeneration(materialPurpose)
-                || !Boolean.TRUE.equals(createReqVO.getBgmEnabled())
+    private BgmSelection resolveBgmSelection(TkGenerationTaskCreateReqVO createReqVO) {
+        if (!Boolean.TRUE.equals(createReqVO.getBgmEnabled())
                 || createReqVO.getBgmAssetId() == null) {
             return BgmSelection.disabled();
         }

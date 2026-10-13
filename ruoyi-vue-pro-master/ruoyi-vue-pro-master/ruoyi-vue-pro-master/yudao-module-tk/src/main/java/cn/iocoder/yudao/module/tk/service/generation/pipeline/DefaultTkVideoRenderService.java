@@ -401,9 +401,10 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
     private static String buildBgmMixFilter(Double bgmVolume, double videoDuration) {
         double volume = normalizeBgmVolume(bgmVolume);
         double fadeOutStart = Math.max(0D, videoDuration - 1D);
-        return StrUtil.format("[1:a]{}[voice];[2:a]volume={},afade=t=in:ss=0:d=1,afade=t=out:st={}:d=1[bgm];"
-                        + "[voice][bgm]amix=inputs=2:duration=first:dropout_transition=0[aout]",
-                FINAL_AUDIO_FILTER, formatDecimal(volume), formatDecimal(fadeOutStart));
+        return StrUtil.format("[1:a]{},apad,atrim=duration={}[voice];[2:a]volume={},afade=t=in:ss=0:d=1,afade=t=out:st={}:d=1,"
+                        + "atrim=duration={}[bgm];[voice][bgm]amix=inputs=2:duration=longest:dropout_transition=0[aout]",
+                FINAL_AUDIO_FILTER, formatDecimal(videoDuration), formatDecimal(volume), formatDecimal(fadeOutStart),
+                formatDecimal(videoDuration));
     }
 
     private static String buildBgmOnlyFilter(Double bgmVolume, double videoDuration) {

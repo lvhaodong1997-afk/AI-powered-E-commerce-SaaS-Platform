@@ -945,7 +945,7 @@
                 </div>
               </div>
 
-              <div v-if="isLeadGenerationFlow" class="config-drawer bgm-config-drawer">
+              <div class="config-drawer bgm-config-drawer">
                 <button
                   class="config-drawer-head bgm-config-head"
                   type="button"
@@ -2056,7 +2056,7 @@ const copy = computed(() =>
         subtitleHint:
           'Subtitles are burned into the final video with dynamic positions and ASS styling.',
         bgmTitle: 'Background music',
-        bgmDrawerHint: 'Lead-gen videos only. Can be used with or without voiceover.',
+        bgmDrawerHint: 'Choose system music or upload a track for e-commerce and lead-gen videos.',
         bgmEnabledSummary: 'On',
         bgmDisabledSummary: 'Off',
         bgmSelectLabel: 'Music track',
@@ -2371,7 +2371,7 @@ const copy = computed(() =>
         subtitleKeywordsPlaceholder: '手动关键词，用逗号分隔',
         subtitleHint: '字幕会以 ASS 样式烧录到最终视频，支持动态换位置和安全区避让。',
         bgmTitle: '背景音乐',
-        bgmDrawerHint: '仅引流素材视频生效，可配合口播使用，也可单独作为背景音乐。',
+        bgmDrawerHint: '电商与引流素材均支持，可选择系统曲库或上传音乐。',
         bgmEnabledSummary: '已开启',
         bgmDisabledSummary: '已关闭',
         bgmSelectLabel: '音乐曲目',
@@ -2716,11 +2716,8 @@ const getBgmDisplayName = (item?: TkBgmAssetVO) => {
   return item.name || copy.value.bgmNoAssets
 }
 const bgmConfigSummary = computed(() => {
-  if (!isLeadGenerationFlow.value) {
-    return copy.value.bgmDrawerHint
-  }
   if (!createForm.bgmEnabled) {
-    return copy.value.bgmDisabledSummary
+    return `${copy.value.bgmDisabledSummary} · ${copy.value.bgmDrawerHint}`
   }
   return getBgmDisplayName(selectedBgmAsset.value)
 })
@@ -3014,7 +3011,7 @@ const createForm = reactive<{
   subtitleActiveColor: '#35F27A',
   subtitleKeywordColor: '#FFD84D',
   subtitleFontSize: 'medium',
-  bgmEnabled: true,
+  bgmEnabled: false,
   bgmAssetId: undefined,
   bgmVolume: 0.1
 })
@@ -3783,7 +3780,7 @@ const createGenerationSubmissionSnapshot = (): GenerationSubmissionSnapshot => {
         : undefined,
     openingProcessMode:
       openingUploadCompleted || openingVideoUrl ? createForm.openingProcessMode : undefined,
-    bgmEnabled: isLeadGenerationFlow.value && createForm.bgmEnabled,
+    bgmEnabled: createForm.bgmEnabled,
     bgmAssetId: createForm.bgmAssetId,
     bgmVolume: createForm.bgmVolume,
     subtitlePayload: { ...getSubtitlePayload() },
@@ -4448,11 +4445,8 @@ function getSubtitlePayload() {
 }
 
 async function ensureBgmReadyForGeneration(snapshot?: GenerationSubmissionSnapshot) {
-  const leadGeneration = snapshot
-    ? snapshot.materialPurpose === MATERIAL_PURPOSE_LEAD_GENERATION
-    : isLeadGenerationFlow.value
   const bgmEnabled = snapshot ? snapshot.bgmEnabled : createForm.bgmEnabled
-  if (!leadGeneration || !bgmEnabled) {
+  if (!bgmEnabled) {
     return true
   }
   if (!bgmAssets.value.length) {
@@ -4723,16 +4717,14 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
       task.openingClipEndSecond ?? createForm.openingClipStartSecond + DEFAULT_OPENING_CLIP_DURATION
     createForm.bgmEnabled = Boolean(task.bgmEnabled)
     createForm.bgmAssetId = task.bgmAssetId
-    createForm.bgmVolume = task.bgmVolume || 0.1
+    createForm.bgmVolume = task.bgmVolume ?? 0.1
     openingVideoFile.value = undefined
     openingUploadRef.value?.clearFiles()
     manualLeadScriptText.value = ''
     if (manualEcommerceReplay) {
       manualEcommerceScriptText.value = manualReplay.sourceText
     }
-    if (manualLeadReplay) {
-      await loadBgmAssets()
-    }
+    await loadBgmAssets()
 
     if (manualLeadReplay || manualEcommerceReplay) {
       referenceAnalysis.value = undefined
@@ -5074,6 +5066,10 @@ const handleBgmUploadChange = async (file: any) => {
   if (!rawFile) {
     return
   }
+  if (!/\.(mp3|wav|m4a)$/i.test(rawFile.name) || rawFile.size > 20 * 1024 * 1024) {
+    message.warning(copy.value.bgmUploadHint)
+    return
+  }
   bgmUploading.value = true
   try {
     const id = Number(await TkBgmAssetApi.upload(rawFile.name, undefined, rawFile))
@@ -5407,13 +5403,13 @@ watch(
     createForm.analysisProvider = ANALYSIS_PROVIDER_GEMINI
     createForm.productCategoryCode = DEFAULT_PRODUCT_CATEGORY_CODE
     createForm.clipPlanMode = CLIP_PLAN_MODE_SEGMENTED
-    if (isLeadGenerationFlow.value) {
-      await loadBgmAssets()
-    } else {
+    stopBgmPreview()
+    createForm.bgmEnabled = isLeadGenerationFlow.value
+    if (!isLeadGenerationFlow.value) {
       createForm.voiceEnabled = true
       createForm.subtitleEnabled = true
-      stopBgmPreview()
     }
+    await loadBgmAssets()
   }
 )
 
@@ -5646,9 +5642,7 @@ onMounted(() => {
   getData()
   loadMiniMaxVoices().catch(() => undefined)
   loadCustomVoices().catch(() => undefined)
-  if (isLeadGenerationFlow.value) {
-    loadBgmAssets().catch(() => undefined)
-  }
+  loadBgmAssets().catch(() => undefined)
 })
 onUnmounted(() => {
   stopVoicePreview()

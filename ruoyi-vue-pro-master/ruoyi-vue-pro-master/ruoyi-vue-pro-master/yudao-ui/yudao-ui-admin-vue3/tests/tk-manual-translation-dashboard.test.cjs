@@ -85,6 +85,44 @@ async function harness(flow = 'ECOMMERCE') {
   return { ctx, state, translation, translate, script, audioRequests, precheckRequests, referenceRequests, warnings }
 }
 
+test('BGM selection survives asynchronous edits for ecommerce and lead AI and manual submissions', async () => {
+  for (const flow of ['ECOMMERCE', 'LEAD_GENERATION']) {
+    for (const manual of [false, true]) {
+      const h = await harness(flow)
+      h.ctx.isManualEcommerceMode.value = manual && flow === 'ECOMMERCE'
+      h.ctx.isLeadGenerationManualMode.value = manual && flow === 'LEAD_GENERATION'
+      Object.assign(h.ctx.createForm, { bgmEnabled: true, bgmAssetId: 88, bgmVolume: 0.12 })
+      const snapshot = h.ctx.createGenerationSubmissionSnapshot()
+      Object.assign(h.ctx.createForm, { bgmEnabled: false, bgmAssetId: 99, bgmVolume: 0.3 })
+      const payload = h.ctx.createGenerationPayload(h.script, snapshot)
+      assert.equal(payload.bgmEnabled, true)
+      assert.equal(payload.bgmAssetId, 88)
+      assert.equal(payload.bgmVolume, 0.12)
+      const disabled = h.ctx.createGenerationPayload(h.script, h.ctx.createGenerationSubmissionSnapshot())
+      assert.equal(disabled.bgmEnabled, undefined)
+      assert.equal(disabled.bgmAssetId, undefined)
+    }
+  }
+})
+
+test('BGM replay restores saved ecommerce and lead music settings and loads the shared library', async () => {
+  for (const flow of ['ECOMMERCE', 'LEAD_GENERATION']) {
+    const h = await harness(flow)
+    let loads = 0
+    h.ctx.loadBgmAssets = async () => { loads++ }
+    await h.ctx.hydrateReplayFromGeneration({
+      libraryId: 1, materialPurpose: flow, targetLanguage: 'en',
+      sourceUrl: flow === 'ECOMMERCE' ? 'manual-ecommerce://1' : 'manual-lead-generation://1',
+      promptText: 'Saved copy', generationRouteConfig: '{"scriptMode":"MANUAL"}',
+      bgmEnabled: true, bgmAssetId: 88, bgmVolume: 0.02
+    })
+    assert.equal(h.ctx.createForm.bgmEnabled, true)
+    assert.equal(h.ctx.createForm.bgmAssetId, 88)
+    assert.equal(h.ctx.createForm.bgmVolume, 0.02)
+    assert.equal(loads, 1)
+  }
+})
+
 test('dashboard audio precheck and generation payload select the same translated copy for both manual flows', async () => {
   for (const flow of ['ECOMMERCE', 'LEAD_GENERATION']) {
     const h = await harness(flow)

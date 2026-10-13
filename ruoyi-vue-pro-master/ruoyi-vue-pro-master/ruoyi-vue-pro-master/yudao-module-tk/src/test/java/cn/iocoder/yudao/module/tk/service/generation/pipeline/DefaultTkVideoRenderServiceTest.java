@@ -61,11 +61,12 @@ class DefaultTkVideoRenderServiceTest {
         assertTrue(command.stream().anyMatch(item -> item.endsWith("bgm.mp3")));
         assertTrue(command.contains("-filter_complex"));
         String joined = String.join(" ", command);
-        assertTrue(joined.contains("[1:a]loudnorm=I=-16:TP=-1.5:LRA=11[voice]"));
+        assertTrue(joined.contains("[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,apad,atrim=duration=26.000[voice]"));
         assertTrue(joined.contains("[2:a]volume=0.100"));
         assertTrue(joined.contains("afade=t=in:ss=0:d=1"));
         assertTrue(joined.contains("afade=t=out:st=25.000:d=1"));
-        assertTrue(joined.contains("[voice][bgm]amix=inputs=2:duration=first:dropout_transition=0[aout]"));
+        assertTrue(joined.contains("afade=t=out:st=25.000:d=1,atrim=duration=26.000[bgm]"));
+        assertTrue(joined.contains("[voice][bgm]amix=inputs=2:duration=longest:dropout_transition=0[aout]"));
         assertTrue(joined.contains("-map [aout]"));
         assertTrue(command.contains("192k"));
     }

@@ -888,7 +888,7 @@ class TkGenerationTaskServiceImplTest {
     }
 
     @Test
-    void createEcommerceTaskIgnoresBgmSelection() {
+    void createEcommerceTaskStoresReadableBgmSelection() {
         TkGenerationTaskServiceImpl service = new TkGenerationTaskServiceImpl();
         TkGenerationTaskMapper taskMapper = mock(TkGenerationTaskMapper.class);
         TkGenerationBatchMapper batchMapper = mock(TkGenerationBatchMapper.class);
@@ -932,14 +932,20 @@ class TkGenerationTaskServiceImplTest {
         when(creditService.freezeForGenerationTask(8L)).thenReturn(900L);
         when(voiceProfileService.resolveVoiceSelection(null, "system-voice")).thenReturn("system-voice");
 
+        TkBgmAssetDO bgmAsset = TkBgmAssetDO.builder()
+                .id(88L).sourceType("USER").fileUrl("https://example.com/ecommerce-bgm.mp3").build();
+        when(bgmAssetService.validateReadable(88L)).thenReturn(bgmAsset);
+
         service.createGenerationTask(reqVO);
 
         ArgumentCaptor<TkGenerationTaskDO> captor = ArgumentCaptor.forClass(TkGenerationTaskDO.class);
         verify(taskMapper).insert(captor.capture());
-        assertEquals(false, captor.getValue().getBgmEnabled());
-        assertNull(captor.getValue().getBgmAssetId());
-        assertNull(captor.getValue().getBgmUrl());
-        verify(bgmAssetService, never()).validateReadable(88L);
+        assertEquals(true, captor.getValue().getBgmEnabled());
+        assertEquals(88L, captor.getValue().getBgmAssetId());
+        assertEquals("USER", captor.getValue().getBgmSourceType());
+        assertEquals("https://example.com/ecommerce-bgm.mp3", captor.getValue().getBgmUrl());
+        assertEquals(0.10D, captor.getValue().getBgmVolume());
+        verify(bgmAssetService).validateReadable(88L);
     }
 
     @Test
