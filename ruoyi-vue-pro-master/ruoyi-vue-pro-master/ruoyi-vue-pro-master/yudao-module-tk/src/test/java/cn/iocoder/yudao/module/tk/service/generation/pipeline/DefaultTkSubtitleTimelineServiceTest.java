@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.tk.service.generation.pipeline;
 
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,183 @@ class DefaultTkSubtitleTimelineServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void buildTimelinePreservesSpeechAnchorsFromRealMangoNarration() throws Exception {
+        byte[] fixtureBytes;
+        try (java.io.InputStream stream = getClass().getResourceAsStream("/subtitle/mango-narration-asr.json")) {
+            fixtureBytes = stream.readAllBytes();
+        }
+        com.fasterxml.jackson.databind.JsonNode fixture = JsonUtils.parseTree(fixtureBytes);
+        Path script = tempDir.resolve("real-narration-asr.py");
+        Files.writeString(script, "print(" + JsonUtils.toJsonString(fixture.path("asr").toString()) + ")\n",
+                StandardCharsets.UTF_8);
+        ReflectionTestUtils.setField(service, "generationProperties", modelTestProperties(script));
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder().targetLanguage("zh-cn").targetDuration(38)
+                .subtitleKaraokeEnabled(true).build();
+
+        TkSubtitleTimeline timeline = service.buildTimeline(task, fixture.path("script").asText(), modelTestAudio(),
+                Collections.emptyList());
+
+        assertTrue(Files.readString(tempDir.resolve("subtitle-quality.json")).contains("\"mode\":\"ASR_EXACT\""));
+        assertEquals(37.9635D, timeline.getAudioDuration(), 0.001D);
+        assertEquals(12.18D, phraseStart(timeline, "试试我们家这款"), 0.10D);
+        assertEquals(16.58D, phraseStart(timeline, "高温烘干锁香"), 0.10D);
+        assertEquals(33.86D, phraseStart(timeline, "喜欢直接拍"), 0.10D);
+        assertEquals(fixture.path("script").asText().replaceAll("\\s+", ""),
+                String.join("", timeline.getSegments().stream().map(TkSubtitleSegment::getText)
+                        .toArray(String[]::new)).replaceAll("\\s+", ""));
+    }
+
+    private double phraseStart(TkSubtitleTimeline timeline, String phrase) {
+        List<TkSubtitleWord> words = new ArrayList<>();
+        for (TkSubtitleSegment segment : timeline.getSegments()) {
+            words.addAll(segment.getWords());
+        }
+        for (int i = 0; i < words.size(); i++) {
+            StringBuilder text = new StringBuilder();
+            for (int j = i; j < words.size() && text.length() < phrase.length(); j++) {
+                text.append(words.get(j).getText());
+            }
+            if (text.toString().startsWith(phrase)) {
+                return words.get(i).getStart();
+            }
+        }
+        throw new AssertionError("Missing narration phrase: " + phrase);
+    }
+
+    @Test
+    void buildTimelineUsesCachedModelAndPreservesSpeechTimestamps() throws Exception {
+        Path modelRoot = Files.createDirectory(tempDir.resolve("local models"));
+        Path model = Files.createDirectory(modelRoot.resolve("base"));
+        TkGenerationProperties properties = modelTestProperties(writeModelTestScript(false));
+        properties.getSubtitle().getAsr().setModel("base");
+        properties.getSubtitle().getAsr().setModelCacheDir(modelRoot.toString());
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+
+        TkSubtitleTimeline timeline = service.buildTimeline(modelTestTask(), "Buy this serum", modelTestAudio(),
+                Collections.emptyList());
+
+        assertEquals(model.toAbsolutePath().toString(), Files.readString(tempDir.resolve("model-used.txt")));
+        assertEquals(0.25D, timeline.getSegments().get(0).getStart(), 0.001D);
+        assertEquals(1.3D, timeline.getSegments().get(0).getWords().get(2).getStart(), 0.001D);
+        assertTrue(Files.readString(tempDir.resolve("subtitle-quality.json")).contains("\"mode\":\"ASR_EXACT\""));
+    }
+
+    @Test
+    void buildTimelineKeepsExplicitModelPathWhenCacheDirectoryIsConfigured() throws Exception {
+        Path model = Files.createDirectory(tempDir.resolve("explicit model"));
+        TkGenerationProperties properties = modelTestProperties(writeModelTestScript(false));
+        properties.getSubtitle().getAsr().setModel(model.toString());
+        properties.getSubtitle().getAsr().setModelCacheDir(tempDir.resolve("unused cache").toString());
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+
+        TkSubtitleTimeline timeline = service.buildTimeline(modelTestTask(), "Buy this serum", modelTestAudio(),
+                Collections.emptyList());
+
+        assertEquals(model.toAbsolutePath().toString(), Files.readString(tempDir.resolve("model-used.txt")));
+        assertEquals(0.25D, timeline.getSegments().get(0).getStart(), 0.001D);
+    }
+
+    @Test
+    void buildTimelineDoesNotDownloadMissingCachedModelAndReportsFailure() throws Exception {
+        TkGenerationProperties properties = modelTestProperties(writeModelTestScript(false));
+        properties.getSubtitle().getAsr().setModel("base");
+        properties.getSubtitle().getAsr().setModelCacheDir(tempDir.resolve("missing cache").toString());
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+
+        TkSubtitleTimeline timeline = service.buildTimeline(modelTestTask(), "Buy this serum", modelTestAudio(),
+                Collections.emptyList());
+
+        assertFalse(Files.exists(tempDir.resolve("model-used.txt")), "Missing local models must not trigger Hub downloads");
+        assertFalse(Boolean.TRUE.equals(timeline.getSegments().get(0).getWordTimingReliable()));
+        assertTrue(Files.readString(tempDir.resolve("subtitle-quality.json")).contains("ASR_MODEL_NOT_FOUND"));
+    }
+
+    @Test
+    void buildTimelineResolvesRetryModelFromSameCacheDirectory() throws Exception {
+        Path modelRoot = Files.createDirectory(tempDir.resolve("retry models"));
+        Files.createDirectory(modelRoot.resolve("base"));
+        Path retryModel = Files.createDirectory(modelRoot.resolve("medium"));
+        TkGenerationProperties properties = modelTestProperties(writeModelTestScript(true));
+        properties.getSubtitle().getAsr().setModel("base");
+        properties.getSubtitle().getAsr().setRetryModel("medium");
+        properties.getSubtitle().getAsr().setRetryEnabled(true);
+        properties.getSubtitle().getAsr().setModelCacheDir(modelRoot.toString());
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+
+        TkSubtitleTimeline timeline = service.buildTimeline(modelTestTask(), "Buy this serum", modelTestAudio(),
+                Collections.emptyList());
+
+        assertEquals(retryModel.toAbsolutePath().toString(), Files.readString(tempDir.resolve("model-used.txt")));
+        assertEquals(0.25D, timeline.getSegments().get(0).getStart(), 0.001D);
+        assertTrue(Files.readString(tempDir.resolve("subtitle-quality.json")).contains("\"mode\":\"ASR_RETRY_EXACT\""));
+    }
+
+    @Test
+    void buildTimelineKeepsAsrJsonSeparateFromProcessWarnings() throws Exception {
+        Path model = Files.createDirectory(tempDir.resolve("warning model"));
+        Path script = writeModelTestScript(false);
+        Files.writeString(script, "import sys\nprint('model warning', file=sys.stderr)\n"
+                + Files.readString(script), StandardCharsets.UTF_8);
+        TkGenerationProperties properties = modelTestProperties(script);
+        properties.getSubtitle().getAsr().setModel(model.toString());
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+
+        TkSubtitleTimeline timeline = service.buildTimeline(modelTestTask(), "Buy this serum", modelTestAudio(),
+                Collections.emptyList());
+
+        assertEquals(0.25D, timeline.getSegments().get(0).getStart(), 0.001D);
+        assertTrue(Files.readString(tempDir.resolve("subtitle-quality.json")).contains("\"mode\":\"ASR_EXACT\""));
+    }
+
+    @Test
+    void buildTimelineRecordsAsrExitCodeWithoutPublishingProcessOutput() throws Exception {
+        Path script = tempDir.resolve("failed-asr.py");
+        Files.writeString(script, "import sys\nprint('private diagnostic', file=sys.stderr)\nsys.exit(2)\n");
+        ReflectionTestUtils.setField(service, "generationProperties", modelTestProperties(script));
+
+        service.buildTimeline(modelTestTask(), "Buy this serum", modelTestAudio(), Collections.emptyList());
+
+        String quality = Files.readString(tempDir.resolve("subtitle-quality.json"));
+        assertTrue(quality.contains("ASR_PROCESS_EXIT_2"));
+        assertFalse(quality.contains("private diagnostic"));
+    }
+
+    private TkGenerationProperties modelTestProperties(Path script) {
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getSubtitle().setLeadSeconds(0D);
+        properties.getSubtitle().setDetectLeadingSilenceEnabled(false);
+        properties.getSubtitle().getAsr().setEnabled(true);
+        properties.getSubtitle().getAsr().setPython("py");
+        properties.getSubtitle().getAsr().setScriptPath(script.toString());
+        properties.getSubtitle().getAsr().setRetryEnabled(false);
+        return properties;
+    }
+
+    private Path writeModelTestScript(boolean mismatchPrimary) throws Exception {
+        Path script = tempDir.resolve("model-asr.py");
+        Files.writeString(script, "import json, pathlib, sys\n"
+                + "model = pathlib.Path(sys.argv[sys.argv.index('--model') + 1])\n"
+                + "pathlib.Path(__file__).with_name('model-used.txt').write_text(str(model), encoding='utf-8')\n"
+                + "if not model.is_dir(): sys.exit(2)\n"
+                + "text = 'unrelated narration' if " + (mismatchPrimary ? "model.name != 'medium'" : "False")
+                + " else 'Buy this serum'\n"
+                + "print(json.dumps({'language':'en-US','audioDuration':2.5,'segments':[{'text':text,'start':0.25,'end':2.5,"
+                + "'words':[{'text':'Buy','start':0.25,'end':0.7},{'text':'this','start':0.7,'end':1.3},"
+                + "{'text':'serum','start':1.3,'end':2.5}]}]}))\n", StandardCharsets.UTF_8);
+        return script;
+    }
+
+    private File modelTestAudio() throws Exception {
+        Path audio = tempDir.resolve("voice.mp3");
+        Files.write(audio, new byte[]{0});
+        return audio.toFile();
+    }
+
+    private TkGenerationTaskDO modelTestTask() {
+        return TkGenerationTaskDO.builder().targetLanguage("en-US").targetDuration(3).build();
+    }
 
     @Test
     void buildTimelineSplitsLongEnglishTextWithoutPunctuationIntoTimedCaptionChunks() throws Exception {

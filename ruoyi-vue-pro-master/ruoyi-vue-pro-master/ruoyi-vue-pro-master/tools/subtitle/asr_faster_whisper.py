@@ -127,7 +127,6 @@ def faster_whisper_timeline(args, keywords):
         args.audio,
         word_timestamps=True,
         language=whisper_language(args.language),
-        initial_prompt=args.text or None,
     )
     result_segments = []
     for segment in segments:

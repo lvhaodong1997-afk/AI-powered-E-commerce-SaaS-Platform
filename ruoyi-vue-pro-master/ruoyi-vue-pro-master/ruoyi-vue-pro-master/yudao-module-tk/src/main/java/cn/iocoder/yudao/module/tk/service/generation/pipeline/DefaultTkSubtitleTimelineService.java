@@ -58,6 +58,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
 
     @Override
     public TkSubtitleTimeline buildTimeline(TkGenerationTaskDO task, String scriptText, File audioFile, List<String> keywords) {
+        writeDiagnostic(audioFile, "asr-failure.txt", "");
         TkSubtitleTimeline asrTimeline = buildTimelineByAsr(task, scriptText, audioFile, keywords);
         if (isAsrTimelineTextAcceptable(asrTimeline, scriptText, minAsrTextSimilarity())) {
             TkSubtitleTimeline exactTimeline = rebuildExactTimelineWithScriptText(task, scriptText, asrTimeline, keywords);
@@ -125,6 +126,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         }
         File scriptFile = resolvePath(asr.getScriptPath());
         if (!scriptFile.isFile()) {
+            writeDiagnostic(audioFile, "asr-failure.txt", "ASR_SCRIPT_NOT_FOUND");
             return null;
         }
         try {
@@ -135,13 +137,69 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
                     "--language", TkLanguageSupport.asrLanguageCode(task.getTargetLanguage()),
                     "--text", StrUtil.blankToDefault(scriptText, ""),
                     "--keywords", JsonUtils.toJsonString(keywords),
-                    "--model", StrUtil.blankToDefault(model, "small")
+                    "--model", resolveAsrModel(asr, model)
             ));
-            String output = runCommand(command, asr.getTimeoutSeconds());
+            String output = runAsrCommand(command, asr.getTimeoutSeconds());
             writeDiagnostic(audioFile, diagnosticFileName, output);
-            return JsonUtils.parseObject(output, TkSubtitleTimeline.class);
-        } catch (Exception ignored) {
+            try {
+                TkSubtitleTimeline timeline = JsonUtils.parseObject(output, TkSubtitleTimeline.class);
+                if (timeline == null) {
+                    throw new IllegalStateException("ASR_EMPTY_OUTPUT");
+                }
+                return timeline;
+            } catch (Exception ex) {
+                throw new IllegalStateException("ASR_INVALID_JSON", ex);
+            }
+        } catch (Exception ex) {
+            String reason = ex instanceof IllegalStateException && ex.getMessage() != null
+                    && ex.getMessage().startsWith("ASR_") ? ex.getMessage() : "ASR_EXECUTION_FAILED";
+            writeDiagnostic(audioFile, "asr-failure.txt", reason);
             return null;
+        }
+    }
+
+    private String resolveAsrModel(TkGenerationProperties.Asr asr, String model) {
+        String configuredModel = StrUtil.blankToDefault(model, "small");
+        File modelFile = new File(configuredModel);
+        if (!modelFile.isAbsolute()) {
+            if (StrUtil.isBlank(asr.getModelCacheDir())) {
+                return configuredModel;
+            }
+            modelFile = new File(resolvePath(asr.getModelCacheDir()), configuredModel);
+        }
+        if (!modelFile.isDirectory()) {
+            throw new IllegalStateException("ASR_MODEL_NOT_FOUND");
+        }
+        return modelFile.getAbsolutePath();
+    }
+
+    private String runAsrCommand(List<String> command, Integer timeoutSeconds) throws Exception {
+        File outputFile = null;
+        File errorFile = null;
+        Process process = null;
+        try {
+            outputFile = File.createTempFile("tk-asr-output-", ".json");
+            errorFile = File.createTempFile("tk-asr-error-", ".log");
+            // JSON stays on stdout; model warnings on stderr must not invalidate the timeline.
+            process = new ProcessBuilder(command).redirectOutput(outputFile).redirectError(errorFile).start();
+            if (!process.waitFor(timeoutSeconds == null ? 300 : timeoutSeconds, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("ASR_PROCESS_TIMEOUT");
+            }
+            if (process.exitValue() != 0) {
+                throw new IllegalStateException("ASR_PROCESS_EXIT_" + process.exitValue());
+            }
+            return new String(Files.readAllBytes(outputFile.toPath()), StandardCharsets.UTF_8);
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+            }
+            if (outputFile != null) {
+                outputFile.delete();
+            }
+            if (errorFile != null) {
+                errorFile.delete();
+            }
         }
     }
 
@@ -251,6 +309,19 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         report.put("audioDuration", quality.audioDuration);
         report.put("firstSubtitleStart", quality.firstStart);
         report.put("lastSubtitleEnd", quality.lastEnd);
+        if (audioFile != null && audioFile.getParentFile() != null) {
+            File failureFile = new File(audioFile.getParentFile(), "asr-failure.txt");
+            try {
+                if (failureFile.isFile()) {
+                    String failureReason = new String(Files.readAllBytes(failureFile.toPath()), StandardCharsets.UTF_8);
+                    if (StrUtil.isNotBlank(failureReason)) {
+                        report.put("asrFailureReason", failureReason);
+                    }
+                }
+            } catch (Exception ignored) {
+                // Diagnostics must never interrupt video generation.
+            }
+        }
         writeDiagnostic(audioFile, "subtitle-quality.json", JsonUtils.toJsonString(report));
     }
 

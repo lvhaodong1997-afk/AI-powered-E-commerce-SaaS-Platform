@@ -13,6 +13,27 @@ spec.loader.exec_module(asr)
 
 
 class SubtitleLanguageTest(unittest.TestCase):
+    def test_full_narration_does_not_seed_recognition_with_unspoken_words(self):
+        calls = []
+
+        class FakeWhisperModel:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def transcribe(self, audio, **kwargs):
+                calls.append(kwargs)
+                words = [SimpleNamespace(word="试试我们家这款", start=12.18, end=13.5)]
+                return [SimpleNamespace(words=words, text="", start=12.18, end=13.5)], SimpleNamespace(duration=37.9635)
+
+        args = SimpleNamespace(model="base", audio="voice.wav", language="zh-cn", text="原始完整文案" * 40)
+        with patch.dict("sys.modules", {"faster_whisper": SimpleNamespace(WhisperModel=FakeWhisperModel)}):
+            result = asr.faster_whisper_timeline(args, [])
+
+        self.assertIsNone(calls[0].get("initial_prompt"))
+        self.assertEqual("试试我们家这款", result["segments"][0]["text"])
+        self.assertEqual(12.18, result["segments"][0]["words"][0]["start"])
+        self.assertEqual(37.96, result["audioDuration"])
+
     def test_country_locales_select_the_matching_asr_language(self):
         locales = {
             "zh-cn": "zh", "en-us": "en", "en-gb": "en", "ja-jp": "ja",
