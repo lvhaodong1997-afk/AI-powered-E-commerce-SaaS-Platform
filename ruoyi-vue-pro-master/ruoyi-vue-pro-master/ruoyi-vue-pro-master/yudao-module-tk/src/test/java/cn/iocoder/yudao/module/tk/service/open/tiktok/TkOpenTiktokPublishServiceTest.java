@@ -568,6 +568,7 @@ class TkOpenTiktokPublishServiceTest {
         TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
                 platformRegistry, null, secretCipher, null);
+        wireExecutionServices(service);
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "metrics"), "req-public-pending");
 
         TkOpenTiktokPublishVO.MetricsResp response = service.getMetrics("task_public_pending");
@@ -613,6 +614,7 @@ class TkOpenTiktokPublishServiceTest {
         TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
                 platformRegistry, null, secretCipher, null);
+        wireExecutionServices(service);
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "metrics"), "req-public-reauth");
 
         TkOpenTiktokPublishVO.MetricsResp response = service.getMetrics("task_public_reauth");
@@ -870,7 +872,7 @@ class TkOpenTiktokPublishServiceTest {
         TkOpenPublishPlatformAdapter.RecentVideo video = new TkOpenPublishPlatformAdapter.RecentVideo(
                 "post-reconcile", created.atZone(java.time.ZoneId.systemDefault()).toEpochSecond() + 30,
                 "Recovery title", null, 10, "https://tiktok/video/post-reconcile");
-        when(detailMapper.selectRecoveryRequired(100)).thenReturn(Collections.singletonList(detail));
+        when(detailMapper.selectRecoveryRequired(any(), eq(100))).thenReturn(Collections.singletonList(detail));
         when(taskMapper.selectByClientAndTaskId("client_b", "task-reconcile")).thenReturn(task);
         when(connectionMapper.selectByClientAndConnectionId("client_b", "conn-reconcile")).thenReturn(connection);
         when(detailMapper.selectListByClientAndTaskId("client_b", "task-reconcile"))
@@ -917,7 +919,7 @@ class TkOpenTiktokPublishServiceTest {
         TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
                 .id(15L).connectionId("conn-unresolved").clientId("client_b").authStatus("AUTHORIZED")
                 .accessTokenCipher("access-cipher").accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build();
-        when(detailMapper.selectRecoveryRequired(100)).thenReturn(Collections.singletonList(detail));
+        when(detailMapper.selectRecoveryRequired(any(), eq(100))).thenReturn(Collections.singletonList(detail));
         when(taskMapper.selectByClientAndTaskId("client_b", "task-unresolved")).thenReturn(task);
         when(connectionMapper.selectByClientAndConnectionId("client_b", "conn-unresolved")).thenReturn(connection);
         when(cipher.decrypt("access-cipher")).thenReturn("access-token");
@@ -962,7 +964,7 @@ class TkOpenTiktokPublishServiceTest {
         TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
                 .id(17L).connectionId("conn-expired").clientId("client_b").authStatus("AUTHORIZED")
                 .accessTokenCipher("access-cipher").accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build();
-        when(detailMapper.selectRecoveryRequired(100)).thenReturn(Collections.singletonList(detail));
+        when(detailMapper.selectRecoveryRequired(any(), eq(100))).thenReturn(Collections.singletonList(detail));
         when(taskMapper.selectByClientAndTaskId("client_b", "task-expired")).thenReturn(task);
         when(connectionMapper.selectByClientAndConnectionId("client_b", "conn-expired")).thenReturn(connection);
         when(cipher.decrypt("access-cipher")).thenReturn("access-token");
@@ -1224,7 +1226,7 @@ class TkOpenTiktokPublishServiceTest {
                 }
                 if ("timeout".equals(scenario)) {
                     assertEquals("INIT_SENT", attempt.getPhase());
-                    when(detailMapper.selectRecoveryRequired(100)).thenReturn(Collections.singletonList(detail));
+                    when(detailMapper.selectRecoveryRequired(any(), eq(100))).thenReturn(Collections.singletonList(detail));
                     assertEquals(0, service.reconcileRecoveryRequired(100));
                     service.processTask("client_b", "task_inbox");
                     verify(attempts, never()).saveResponse(any(), any(), anyString(), any());

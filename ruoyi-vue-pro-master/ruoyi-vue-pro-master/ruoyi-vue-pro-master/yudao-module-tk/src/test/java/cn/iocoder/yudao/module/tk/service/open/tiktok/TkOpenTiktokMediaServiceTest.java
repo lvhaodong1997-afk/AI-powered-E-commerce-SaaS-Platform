@@ -15,6 +15,13 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import org.mockito.ArgumentCaptor;
@@ -154,6 +161,73 @@ class TkOpenTiktokMediaServiceTest {
         assertArrayEquals(new byte[]{1, 2, 3, 4}, Files.readAllBytes(java.nio.file.Paths.get(media.getScheduledLocalPath())));
         assertEquals("READY", media.getScheduledDownloadStatus());
         verify(mapper).updateById(any(TkOpenTiktokMediaDO.class));
+    }
+
+    @Test
+    void concurrentSnapshotsReuseOneImmutableCopy(@TempDir Path root) throws Exception {
+        TkOpenTiktokMediaMapper mapper = mock(TkOpenTiktokMediaMapper.class);
+        TkLocalUploadStorageService storage = mock(TkLocalUploadStorageService.class);
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getUpload().setScheduledPublishRootDir(root.resolve("cache").toString());
+        Path source = root.resolve("source.mp4");
+        Files.write(source, new byte[]{1, 2, 3});
+        AtomicReference<TkOpenTiktokMediaDO> persisted = new AtomicReference<>();
+        when(mapper.selectByClientAndMediaId("c", "m")).thenAnswer(call -> persisted.get());
+        when(mapper.updateById(any(TkOpenTiktokMediaDO.class))).thenAnswer(call -> {
+            persisted.set(call.getArgument(0));
+            return 1;
+        });
+        CountDownLatch copying = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(storage.resolveLocalPath("https://example.com/video.mp4")).thenAnswer(call -> {
+            copying.countDown();
+            if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("copy blocked");
+            return Optional.of(source);
+        });
+        TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, storage, properties,
+                mock(TkOssObjectStorageClient.class));
+        TkOpenTiktokMediaDO first = TkOpenTiktokMediaDO.builder().id(1L).clientId("c").mediaId("m")
+                .fileName("video.mp4").fileUrl("https://example.com/video.mp4").build();
+        TkOpenTiktokMediaDO second = TkOpenTiktokMediaDO.builder().id(1L).clientId("c").mediaId("m")
+                .fileName("video.mp4").fileUrl("https://example.com/video.mp4").build();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> one = pool.submit(() -> service.prepareForScheduledPublish(first));
+            assertTrue(copying.await(5, TimeUnit.SECONDS));
+            Future<?> two = pool.submit(() -> service.prepareForScheduledPublish(second));
+            release.countDown();
+            one.get(5, TimeUnit.SECONDS);
+            two.get(5, TimeUnit.SECONDS);
+            assertEquals(first.getScheduledLocalPath(), second.getScheduledLocalPath());
+            assertArrayEquals(new byte[]{1, 2, 3}, Files.readAllBytes(java.nio.file.Paths.get(second.getScheduledLocalPath())));
+            verify(storage, times(1)).resolveLocalPath("https://example.com/video.mp4");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void terminalCleanupKeepsFileUsedByAnUnfinishedPublish(@TempDir Path root) throws Exception {
+        TkOpenTiktokMediaMapper mapper = mock(TkOpenTiktokMediaMapper.class);
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getUpload().setScheduledPublishRootDir(root.toString());
+        Path file = root.resolve("c/m/video.mp4");
+        Files.createDirectories(file.getParent());
+        Files.write(file, new byte[]{1, 2, 3});
+        TkOpenTiktokMediaDO media = TkOpenTiktokMediaDO.builder().id(1L).clientId("c").mediaId("m")
+                .scheduledLocalPath(file.toString()).build();
+        when(mapper.hasUnfinishedPublish("c", "m")).thenReturn(true);
+        TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, null, properties,
+                mock(TkOssObjectStorageClient.class));
+
+        service.cleanupScheduledPublishMedia(media);
+
+        assertTrue(Files.exists(file));
+        verify(mapper, never()).updateById(any(TkOpenTiktokMediaDO.class));
+        when(mapper.hasUnfinishedPublish("c", "m")).thenReturn(false);
+        service.cleanupScheduledPublishMedia(media);
+        assertFalse(Files.exists(file));
     }
 
     @Test

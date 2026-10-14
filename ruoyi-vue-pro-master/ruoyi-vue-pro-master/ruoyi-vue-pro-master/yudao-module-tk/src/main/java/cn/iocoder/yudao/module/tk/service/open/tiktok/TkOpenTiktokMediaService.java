@@ -40,12 +40,14 @@ public class TkOpenTiktokMediaService {
 
     private static final DateTimeFormatter DATE = DateTimeFormatter.BASIC_ISO_DATE;
     private static final String[] EXTENSIONS = {"mp4", "mov", "webm"};
+    private static final int PREPARATION_LOCK_STRIPES = 64;
     private static final TkSafeRemoteUrlValidator REMOTE_URL_VALIDATOR =
             new TkSafeRemoteUrlValidator(Collections.emptyList(), true);
     private final TkOpenTiktokMediaMapper mediaMapper;
     private final TkLocalUploadStorageService localStorageService;
     private final TkGenerationProperties properties;
     private final TkOssObjectStorageClient ossObjectStorageService;
+    private final Object[] scheduledPreparationLocks = createPreparationLocks();
 
     public TkOpenTiktokMediaService(TkOpenTiktokMediaMapper mediaMapper,
                                     TkLocalUploadStorageService localStorageService,
@@ -136,6 +138,15 @@ public class TkOpenTiktokMediaService {
      * scheduled task has finished or is cancelled.
      */
     public void prepareForScheduledPublish(TkOpenTiktokMediaDO media) {
+        String lockKey = StrUtil.blankToDefault(media == null ? null : media.getClientId(), "")
+                + "\n" + StrUtil.blankToDefault(media == null ? null : media.getMediaId(), "");
+        Object lock = scheduledPreparationLocks[Math.floorMod(lockKey.hashCode(), scheduledPreparationLocks.length)];
+        synchronized (lock) {
+            prepareForScheduledPublishLocked(media);
+        }
+    }
+
+    private void prepareForScheduledPublishLocked(TkOpenTiktokMediaDO media) {
         if (media == null || StrUtil.isBlank(media.getMediaId())) {
             throw TkOpenApiException.badRequest("MEDIA_NOT_READY", "media is not ready for scheduled publish");
         }
@@ -143,6 +154,21 @@ public class TkOpenTiktokMediaService {
             try {
                 Path existing = java.nio.file.Paths.get(media.getScheduledLocalPath()).toAbsolutePath().normalize();
                 if (Files.isRegularFile(existing) && Files.size(existing) > 0) return;
+            } catch (Exception ignored) {
+                // Rebuild the persisted copy when the previous path is stale.
+            }
+        }
+        TkOpenTiktokMediaDO persisted = mediaMapper.selectByClientAndMediaId(media.getClientId(), media.getMediaId());
+        if (persisted != null && StrUtil.isNotBlank(persisted.getScheduledLocalPath())) {
+            try {
+                Path existing = java.nio.file.Paths.get(persisted.getScheduledLocalPath()).toAbsolutePath().normalize();
+                if (Files.isRegularFile(existing) && Files.size(existing) > 0) {
+                    media.setScheduledLocalPath(persisted.getScheduledLocalPath())
+                            .setScheduledDownloadStatus(persisted.getScheduledDownloadStatus())
+                            .setScheduledDownloadedAt(persisted.getScheduledDownloadedAt())
+                            .setFileSize(persisted.getFileSize());
+                    return;
+                }
             } catch (Exception ignored) {
                 // Rebuild the persisted copy when the previous path is stale.
             }
@@ -190,6 +216,7 @@ public class TkOpenTiktokMediaService {
 
     public void cleanupScheduledPublishMedia(TkOpenTiktokMediaDO media) {
         if (media == null || StrUtil.isBlank(media.getScheduledLocalPath())) return;
+        if (mediaMapper.hasUnfinishedPublish(media.getClientId(), media.getMediaId())) return;
         Path root = scheduledPublishRoot();
         Path path = java.nio.file.Paths.get(media.getScheduledLocalPath()).toAbsolutePath().normalize();
         if (!path.startsWith(root)) {
@@ -472,6 +499,12 @@ public class TkOpenTiktokMediaService {
         return scheduledPublishRoot()
                 .resolve(safeSegment(media.getClientId())).resolve(safeSegment(media.getMediaId()))
                 .resolve(safeName(media.getFileName())).normalize();
+    }
+
+    private static Object[] createPreparationLocks() {
+        Object[] locks = new Object[PREPARATION_LOCK_STRIPES];
+        for (int index = 0; index < locks.length; index++) locks[index] = new Object();
+        return locks;
     }
 
     private Path scheduledPublishRoot() {

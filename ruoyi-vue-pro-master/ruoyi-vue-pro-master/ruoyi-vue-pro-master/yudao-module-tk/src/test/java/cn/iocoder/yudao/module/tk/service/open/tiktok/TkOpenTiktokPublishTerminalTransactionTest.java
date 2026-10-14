@@ -179,6 +179,49 @@ class TkOpenTiktokPublishTerminalTransactionTest {
     }
 
     @Test
+    void backgroundStatusScanSkipsAttemptsUntilTheirRetryTime() {
+        jdbc.update("UPDATE tk_open_tiktok_publish_detail SET last_sync_time=? WHERE id=1",
+                LocalDateTime.now().minusHours(1));
+        jdbc.update("UPDATE tk_open_tiktok_publish_attempt SET next_reconcile_time=? WHERE id=1",
+                LocalDateTime.now().plusMinutes(10));
+        assertTrue(details.selectStaleProcessing(LocalDateTime.now().minusMinutes(2), 100).isEmpty());
+        jdbc.update("UPDATE tk_open_tiktok_publish_attempt SET next_reconcile_time=? WHERE id=1",
+                LocalDateTime.now().minusSeconds(1));
+        assertEquals(1, details.selectStaleProcessing(LocalDateTime.now().minusMinutes(2), 100).size());
+    }
+
+    @Test
+    void dueBackoffIsScannedEvenWhenLastQueryWasRecent() {
+        jdbc.update("UPDATE tk_open_tiktok_publish_detail SET last_sync_time=? WHERE id=1", LocalDateTime.now());
+        jdbc.update("UPDATE tk_open_tiktok_publish_attempt SET next_reconcile_time=? WHERE id=1",
+                LocalDateTime.now().minusSeconds(1));
+        assertEquals(1, details.selectStaleProcessing(LocalDateTime.now().minusMinutes(2), 100).size());
+        jdbc.update("UPDATE tk_open_tiktok_publish_attempt SET next_reconcile_time=NULL WHERE id=1");
+        assertTrue(details.selectStaleProcessing(LocalDateTime.now().minusMinutes(2), 100).isEmpty());
+    }
+
+    @Test
+    void backgroundRecoveryScanSkipsFutureRetryAndIgnoresOldAttemptBackoff() {
+        jdbc.update("UPDATE tk_open_tiktok_publish_detail SET publish_id=NULL,tiktok_status='RECOVERY_REQUIRED' WHERE id=1");
+        jdbc.update("UPDATE tk_open_tiktok_publish_attempt SET next_reconcile_time=? WHERE id=1",
+                LocalDateTime.now().plusMinutes(10));
+        assertTrue(details.selectRecoveryRequired(LocalDateTime.now().minusMinutes(3), 100).isEmpty());
+        jdbc.update("UPDATE tk_open_tiktok_publish_detail SET retry_count=1 WHERE id=1");
+        assertEquals(1, details.selectRecoveryRequired(LocalDateTime.now().minusMinutes(3), 100).size());
+    }
+
+    @Test
+    void backgroundRecoveryScanSkipsActiveInitializationHeartbeat() {
+        jdbc.update("UPDATE tk_open_tiktok_publish_detail SET publish_id=NULL,tiktok_status='RECOVERY_REQUIRED' WHERE id=1");
+        jdbc.update("UPDATE tk_open_tiktok_publish_attempt SET next_reconcile_time=NULL,heartbeat_time=? WHERE id=1",
+                LocalDateTime.now());
+        assertTrue(details.selectRecoveryRequired(LocalDateTime.now().minusMinutes(3), 100).isEmpty());
+        jdbc.update("UPDATE tk_open_tiktok_publish_attempt SET heartbeat_time=? WHERE id=1",
+                LocalDateTime.now().minusMinutes(4));
+        assertEquals(1, details.selectRecoveryRequired(LocalDateTime.now().minusMinutes(3), 100).size());
+    }
+
+    @Test
     void commitsPrivateSuccessEvidenceSummaryAndSingleCallbackWithoutPublicId() {
         assertTrue(service.confirm(snapshot(), "PUBLISH_COMPLETE", null, null, "STATUS_API"));
         assertEquals("SUCCESS", snapshot().getStatus());

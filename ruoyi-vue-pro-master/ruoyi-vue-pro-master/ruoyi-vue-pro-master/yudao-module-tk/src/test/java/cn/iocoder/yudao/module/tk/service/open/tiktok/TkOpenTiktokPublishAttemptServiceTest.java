@@ -136,6 +136,22 @@ class TkOpenTiktokPublishAttemptServiceTest {
         verify(details, never()).update(isNull(), any());
     }
 
+    @Test void repeatedErrorsBackOffAndPersistReconcileCount() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        when(attempts.update(any(), any())).thenReturn(1);
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts,
+                mock(TkOpenTiktokPublishDetailMapper.class), mock(TkOpenTiktokPublishTaskMapper.class));
+        TkOpenTiktokPublishAttemptDO worker = attempt("UPLOADING", "owner").setReconcileCount(0);
+        int[] delays = {30, 60, 120, 300, 600, 600};
+        for (int index = 0; index < delays.length; index++) {
+            LocalDateTime before = LocalDateTime.now();
+            service.error(worker, "network timed out");
+            assertEquals(index + 1, worker.getReconcileCount());
+            assertFalse(worker.getNextReconcileTime().isBefore(before.plusSeconds(delays[index])));
+            assertFalse(worker.getNextReconcileTime().isAfter(LocalDateTime.now().plusSeconds(delays[index])));
+        }
+    }
+
     private TkOpenTiktokPublishTaskDO task() { return TkOpenTiktokPublishTaskDO.builder().id(1L).taskId("t").clientId("c").build(); }
     private TkOpenTiktokPublishDetailDO detail(String status, String publishId) { return TkOpenTiktokPublishDetailDO.builder().id(2L).detailId("d").taskId("t").clientId("c").retryCount(0).status(status).publishId(publishId).build(); }
     private TkOpenTiktokPublishAttemptDO attempt(String phase, String owner) { return TkOpenTiktokPublishAttemptDO.builder().id(3L).detailId("d").taskId("t").clientId("c").attemptNo(0).phase(phase).ownerToken(owner).heartbeatTime(LocalDateTime.now()).build(); }

@@ -55,11 +55,21 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
                 .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
     }
 
-    default List<TkOpenTiktokPublishDetailDO> selectRecoveryRequired(int limit) {
+    default List<TkOpenTiktokPublishDetailDO> selectRecoveryRequired(LocalDateTime workerDeadline, int limit) {
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                 .eq(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
                 .isNull(TkOpenTiktokPublishDetailDO::getPublishId)
                 .eq(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED")
+                .apply("(NOT EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt a"
+                        + " WHERE a.detail_id = tk_open_tiktok_publish_detail.detail_id"
+                        + " AND a.attempt_no = COALESCE(tk_open_tiktok_publish_detail.retry_count, 0)"
+                        + " AND a.deleted = 0)"
+                        + " OR EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt a"
+                        + " WHERE a.detail_id = tk_open_tiktok_publish_detail.detail_id"
+                        + " AND a.attempt_no = COALESCE(tk_open_tiktok_publish_detail.retry_count, 0)"
+                        + " AND a.deleted = 0"
+                        + " AND (a.next_reconcile_time IS NULL OR a.next_reconcile_time <= NOW())"
+                        + " AND (a.heartbeat_time IS NULL OR a.heartbeat_time <= {0})))", workerDeadline)
                 .orderByAsc(TkOpenTiktokPublishDetailDO::getLastSyncTime)
                 .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
     }
@@ -90,8 +100,15 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                 .eq(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
                 .isNotNull(TkOpenTiktokPublishDetailDO::getPublishId)
-                .and(wrapper -> wrapper.isNull(TkOpenTiktokPublishDetailDO::getLastSyncTime)
-                        .or().le(TkOpenTiktokPublishDetailDO::getLastSyncTime, deadline))
+                .apply("(((last_sync_time IS NULL OR last_sync_time <= {0})"
+                        + " AND NOT EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt a"
+                        + " WHERE a.detail_id = tk_open_tiktok_publish_detail.detail_id"
+                        + " AND a.attempt_no = COALESCE(tk_open_tiktok_publish_detail.retry_count, 0)"
+                        + " AND a.deleted = 0 AND a.next_reconcile_time > NOW()))"
+                        + " OR EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt a"
+                        + " WHERE a.detail_id = tk_open_tiktok_publish_detail.detail_id"
+                        + " AND a.attempt_no = COALESCE(tk_open_tiktok_publish_detail.retry_count, 0)"
+                        + " AND a.deleted = 0 AND a.next_reconcile_time <= NOW()))", deadline)
                 .orderByAsc(TkOpenTiktokPublishDetailDO::getLastSyncTime)
                 .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
     }

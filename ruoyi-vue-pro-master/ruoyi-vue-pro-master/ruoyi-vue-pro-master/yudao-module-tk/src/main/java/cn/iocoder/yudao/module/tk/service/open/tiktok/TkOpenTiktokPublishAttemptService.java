@@ -165,9 +165,27 @@ public class TkOpenTiktokPublishAttemptService {
 
     public void error(TkOpenTiktokPublishAttemptDO attempt, String reason) {
         if (attempt == null) return;
-        attempts.update(null, owned(attempt).ne(TkOpenTiktokPublishAttemptDO::getPhase, "CONFIRMED_TERMINAL")
+        int reconcileCount = number(attempt.getReconcileCount()) + 1;
+        long[] delays = {30L, 60L, 120L, 300L, 600L};
+        long delay = delays[Math.min(reconcileCount - 1, delays.length - 1)];
+        LocalDateTime next = LocalDateTime.now().plusSeconds(delay);
+        int changed = attempts.update(null, owned(attempt).ne(TkOpenTiktokPublishAttemptDO::getPhase, "CONFIRMED_TERMINAL")
                 .set(TkOpenTiktokPublishAttemptDO::getLastError, StrUtil.maxLength(reason, 1000))
-                .set(TkOpenTiktokPublishAttemptDO::getNextReconcileTime, LocalDateTime.now().plusMinutes(2)));
+                .set(TkOpenTiktokPublishAttemptDO::getReconcileCount, reconcileCount)
+                .set(TkOpenTiktokPublishAttemptDO::getNextReconcileTime, next));
+        if (changed == 1) attempt.setReconcileCount(reconcileCount).setNextReconcileTime(next)
+                .setLastError(StrUtil.maxLength(reason, 1000));
+    }
+
+    public void clearReconcileBackoff(TkOpenTiktokPublishAttemptDO attempt) {
+        if (attempt == null || attempt.getId() == null) return;
+        int changed = attempts.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishAttemptDO.class)
+                .eq(TkOpenTiktokPublishAttemptDO::getId, attempt.getId())
+                .ne(TkOpenTiktokPublishAttemptDO::getPhase, "CONFIRMED_TERMINAL")
+                .set(TkOpenTiktokPublishAttemptDO::getNextReconcileTime, null)
+                .set(TkOpenTiktokPublishAttemptDO::getReconcileCount, 0)
+                .set(TkOpenTiktokPublishAttemptDO::getLastError, null));
+        if (changed == 1) attempt.setNextReconcileTime(null).setReconcileCount(0).setLastError(null);
     }
 
     static boolean canRestart(String phase) {

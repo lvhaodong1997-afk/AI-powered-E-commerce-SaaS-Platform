@@ -24,6 +24,16 @@ public interface TkOpenTiktokMediaMapper extends BaseMapperX<TkOpenTiktokMediaDO
                 .eq(TkOpenTiktokMediaDO::getMediaId, mediaId));
     }
 
+    @Select("SELECT CASE WHEN EXISTS (SELECT 1 FROM tk_open_tiktok_publish_task t "
+            + "WHERE t.client_id = #{clientId} AND t.media_id = #{mediaId} AND t.deleted = b'0' "
+            + "AND t.status NOT IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS', 'CANCELLED')) "
+            + "OR EXISTS (SELECT 1 FROM tk_open_tiktok_publish_detail d "
+            + "INNER JOIN tk_open_tiktok_publish_task t ON t.client_id = d.client_id AND t.task_id = d.task_id "
+            + "WHERE t.client_id = #{clientId} AND t.media_id = #{mediaId} "
+            + "AND t.deleted = b'0' AND d.deleted = b'0' "
+            + "AND d.status NOT IN ('SUCCESS', 'FAILED', 'CANCELLED')) THEN 1 ELSE 0 END")
+    boolean hasUnfinishedPublish(@Param("clientId") String clientId, @Param("mediaId") String mediaId);
+
     @Select("SELECT DISTINCT m.* FROM tk_open_tiktok_media m "
             + "INNER JOIN tk_open_tiktok_publish_task t ON t.client_id = m.client_id AND t.media_id = m.media_id "
             + "WHERE m.deleted = b'0' AND t.deleted = b'0' "

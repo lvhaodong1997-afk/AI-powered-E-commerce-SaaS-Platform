@@ -255,10 +255,11 @@ public class TkOpenTiktokPublishTerminalService {
                 .set(TkOpenTiktokPublishAttemptDO::getTerminalSource, source)
                 .set(TkOpenTiktokPublishAttemptDO::getTerminalTime, now)
                 .set(TkOpenTiktokPublishAttemptDO::getLastError, detail.getFailReason())
+                .set(TkOpenTiktokPublishAttemptDO::getReconcileCount, 0)
                 .set(TkOpenTiktokPublishAttemptDO::getNextReconcileTime, null));
         if (changed != 1) throw new IllegalStateException("Publish attempt changed during terminal confirmation");
         attempt.setPhase("CONFIRMED_TERMINAL").setTerminalSource(source).setTerminalTime(now)
-                .setLastError(detail.getFailReason()).setNextReconcileTime(null);
+                .setLastError(detail.getFailReason()).setReconcileCount(0).setNextReconcileTime(null);
     }
 
     private void aggregateAndEnqueue(TkOpenTiktokPublishDetailDO detail, TkOpenTiktokPublishTaskDO task) {
@@ -297,7 +298,7 @@ public class TkOpenTiktokPublishTerminalService {
 
     private void cleanupScheduledMediaAfterCommit(TkOpenTiktokPublishDetailDO detail,
                                                   TkOpenTiktokPublishTaskDO task) {
-        if (mediaService == null || task == null || task.getScheduledAt() == null) return;
+        if (mediaService == null || task == null) return;
         Runnable cleanup = () -> {
             try {
                 mediaService.cleanupScheduledPublishMedia(detail.getClientId(), task.getMediaId());
