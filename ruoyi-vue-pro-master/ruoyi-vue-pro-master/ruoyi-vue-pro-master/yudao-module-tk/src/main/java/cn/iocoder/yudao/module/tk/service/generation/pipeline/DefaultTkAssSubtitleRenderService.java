@@ -7,14 +7,16 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderService {
 
     private static final int MAX_LINES = 2;
     private static final int MAX_ENGLISH_LINE_WEIGHT = 30;
-    private static final int MAX_CJK_LINE_WEIGHT = 18;
+    private static final int MAX_CJK_LINE_WEIGHT = TkSubtitleTextSegmentationSupport.CJK_LINE_WEIGHT;
 
     @Override
     public File render(TkGenerationTaskDO task, TkSubtitleLayout layout, File targetFile) {
@@ -74,8 +76,17 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
                 if (word.isKeyword()) {
                     text.append("{\\c").append(toAssColor(style.keywordColor)).append('}');
                 }
+                String wordText = word.getText() == null ? "" : word.getText();
+                if (!mostlyEnglish) {
+                    if (wordIndex == 0) {
+                        wordText = wordText.stripLeading();
+                    }
+                    if (wordIndex == line.size() - 1) {
+                        wordText = wordText.stripTrailing();
+                    }
+                }
                 text.append("{\\kf").append(centiseconds).append('}')
-                        .append(escapeAssText(word.getText()));
+                        .append(escapeAssText(wordText));
                 if (word.isKeyword()) {
                     text.append("{\\c").append(toAssColor(style.primaryColor)).append('}');
                 }
@@ -85,6 +96,9 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
     }
 
     private List<List<TkSubtitleWord>> splitWordsToLines(TkSubtitleSegment segment) {
+        if (!isMostlyEnglish(segment.getText())) {
+            return splitCjkWordsToLines(restoreCjkWordSpacing(segment));
+        }
         List<List<TkSubtitleWord>> lines = new ArrayList<>();
         List<TkSubtitleWord> line = new ArrayList<>();
         boolean mostlyEnglish = isMostlyEnglish(segment.getText());
@@ -103,6 +117,66 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
             }
             line.add(word);
             lineWeight += extraSpace + wordWeight;
+        }
+        lines.add(line);
+        return lines;
+    }
+
+    private List<TkSubtitleWord> restoreCjkWordSpacing(TkSubtitleSegment segment) {
+        String source = normalizeDisplayText(segment.getText());
+        List<TkSubtitleWord> displayWords = new ArrayList<>();
+        int cursor = 0;
+        for (TkSubtitleWord word : segment.getWords()) {
+            String wordText = word.getText() == null ? "" : word.getText();
+            int start = cursor;
+            for (int offset = 0; offset < wordText.length();) {
+                int cp = wordText.codePointAt(offset);
+                offset += Character.charCount(cp);
+                if (TkSubtitleTextSegmentationSupport.isWhitespace(cp)) {
+                    continue;
+                }
+                while (cursor < source.length()
+                        && TkSubtitleTextSegmentationSupport.isWhitespace(source.codePointAt(cursor))) {
+                    cursor += Character.charCount(source.codePointAt(cursor));
+                }
+                if (cursor >= source.length() || source.codePointAt(cursor) != cp) {
+                    return segment.getWords();
+                }
+                cursor += Character.charCount(cp);
+            }
+            displayWords.add(new TkSubtitleWord(source.substring(start, cursor), word.getStart(), word.getEnd(),
+                    word.isKeyword()));
+        }
+        return cursor == source.length() ? displayWords : segment.getWords();
+    }
+
+    private List<List<TkSubtitleWord>> splitCjkWordsToLines(List<TkSubtitleWord> words) {
+        StringBuilder text = new StringBuilder();
+        Set<Integer> wordEnds = new HashSet<>();
+        int compactCursor = 0;
+        for (TkSubtitleWord word : words) {
+            text.append(word.getText() == null ? "" : word.getText());
+            compactCursor += TkSubtitleTextSegmentationSupport.compactLength(word.getText());
+            wordEnds.add(compactCursor);
+        }
+        List<List<TkSubtitleWord>> lines = new ArrayList<>();
+        if (TkSubtitleTextSegmentationSupport.displayWeight(text.toString()) <= MAX_CJK_LINE_WEIGHT) {
+            lines.add(words);
+            return lines;
+        }
+        String source = text.toString();
+        int splitIndex = TkSubtitleTextSegmentationSupport.chooseLineSplitIndex(source, offset -> wordEnds.contains(
+                TkSubtitleTextSegmentationSupport.compactLength(source.substring(0, offset))));
+        int compactSplitIndex = TkSubtitleTextSegmentationSupport.compactLength(source.substring(0, splitIndex));
+        List<TkSubtitleWord> line = new ArrayList<>();
+        int cursor = 0;
+        for (TkSubtitleWord word : words) {
+            if (cursor >= compactSplitIndex && lines.isEmpty() && !line.isEmpty()) {
+                lines.add(line);
+                line = new ArrayList<>();
+            }
+            line.add(word);
+            cursor += TkSubtitleTextSegmentationSupport.compactLength(word.getText());
         }
         lines.add(line);
         return lines;
@@ -135,7 +209,7 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
     }
 
     private String renderPlainText(SubtitleStyle style, TkSubtitleSegment segment) {
-        String text = wrapPlainText(StrUtil.maxLength(segment.getText(), 80));
+        String text = wrapPlainText(segment);
         if (segment.getWords() == null || segment.getWords().stream().noneMatch(TkSubtitleWord::isKeyword)) {
             return text;
         }
@@ -150,6 +224,30 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
         return text;
     }
 
+    private String wrapPlainText(TkSubtitleSegment segment) {
+        String source = StrUtil.maxLength(segment.getText(), 80);
+        if (isMostlyEnglish(source) || segment.getWords() == null || segment.getWords().isEmpty()) {
+            return wrapPlainText(source);
+        }
+        List<TkSubtitleWord> displayWords = restoreCjkWordSpacing(segment);
+        StringBuilder wordText = new StringBuilder();
+        for (TkSubtitleWord word : displayWords) {
+            wordText.append(word.getText() == null ? "" : word.getText());
+        }
+        if (!normalizeDisplayText(source).equals(wordText.toString())) {
+            return wrapPlainText(source);
+        }
+        List<String> lines = new ArrayList<>();
+        for (List<TkSubtitleWord> words : splitCjkWordsToLines(displayWords)) {
+            StringBuilder line = new StringBuilder();
+            for (TkSubtitleWord word : words) {
+                line.append(word.getText() == null ? "" : word.getText());
+            }
+            lines.add(escapeAssText(line.toString().trim()));
+        }
+        return String.join("\\N", lines);
+    }
+
     private String wrapPlainText(String text) {
         List<String> lines = splitTextToLines(text);
         List<String> escapedLines = new ArrayList<>();
@@ -160,7 +258,7 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
     }
 
     private List<String> splitTextToLines(String text) {
-        String normalized = StrUtil.blankToDefault(text, "").trim().replaceAll("\\s+", " ");
+        String normalized = normalizeDisplayText(text);
         List<String> lines = new ArrayList<>();
         if (StrUtil.isBlank(normalized)) {
             lines.add("");
@@ -172,6 +270,10 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
             splitCjkLines(normalized, lines);
         }
         return lines;
+    }
+
+    private String normalizeDisplayText(String text) {
+        return StrUtil.blankToDefault(text, "").trim().replaceAll("\\s+", " ");
     }
 
     private void splitEnglishLines(String text, List<String> lines) {
@@ -197,21 +299,15 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
     }
 
     private void splitCjkLines(String text, List<String> lines) {
-        StringBuilder line = new StringBuilder();
-        int lineWeight = 0;
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
-            int charWeight = charWeight(ch);
-            if (line.length() > 0 && lineWeight + charWeight > MAX_CJK_LINE_WEIGHT
-                    && lines.size() < MAX_LINES - 1) {
-                lines.add(line.toString());
-                line.setLength(0);
-                lineWeight = 0;
-            }
-            line.append(ch);
-            lineWeight += charWeight;
+        if (TkSubtitleTextSegmentationSupport.displayWeight(text) <= MAX_CJK_LINE_WEIGHT) {
+            lines.add(text);
+            return;
         }
-        lines.add(line.toString());
+        int splitIndex = TkSubtitleTextSegmentationSupport.chooseLineSplitIndex(text, index -> true);
+        lines.add(text.substring(0, splitIndex).trim());
+        if (splitIndex < text.length()) {
+            lines.add(text.substring(splitIndex).trim());
+        }
     }
 
     private boolean isMostlyEnglish(String text) {
@@ -330,7 +426,7 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
     }
 
     private String escapeAssText(String text) {
-        return StrUtil.blankToDefault(text, "")
+        return (text == null ? "" : text)
                 .replace("\\", "\\\\")
                 .replace("{", "\\{")
                 .replace("}", "\\}")

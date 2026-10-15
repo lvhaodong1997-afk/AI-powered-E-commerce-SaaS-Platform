@@ -681,6 +681,198 @@ class DefaultTkSubtitleTimelineServiceTest {
     }
 
     @Test
+    void estimatedTimelinePreservesTask1250AuthoredLinesAndAllText() throws Exception {
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getSubtitle().setLeadSeconds(0D);
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .targetLanguage("zh-cn").subtitleStyle("classic_white").targetDuration(15).build();
+        List<String> lines = Arrays.asList("买芒果干", "先看配料表", "我家的芒果干", "配料干净到只有芒果",
+                "不用糖浆浸泡", "也不额外添加其他任何东西", "只选用成熟芒果厚切加上高温烘干",
+                "锁住芒果本味", "每一口都是自然的芒果香", "口感厚实又有嚼劲", "喜欢芒果干的，赶紧来一单");
+
+        TkSubtitleTimeline timeline = ReflectionTestUtils.invokeMethod(service, "buildEstimatedTimeline",
+                task, String.join("\n", lines), null, Collections.emptyList(), 18.9915D);
+
+        assertEquals("买芒果干", timeline.getSegments().get(0).getText());
+        assertEquals("先看配料表", timeline.getSegments().get(1).getText());
+        assertEquals("我家的芒果干", timeline.getSegments().get(2).getText());
+        StringBuilder actual = new StringBuilder();
+        double previousEnd = 0D;
+        for (TkSubtitleSegment caption : timeline.getSegments()) {
+            assertTrue(lines.stream().anyMatch(line -> line.contains(caption.getText())),
+                    "A caption must not borrow the beginning of the next authored line: " + caption.getText());
+            assertTrue(caption.getStart() >= previousEnd);
+            assertTrue(caption.getEnd() > caption.getStart());
+            assertFalse(caption.getWordTimingReliable());
+            assertReadableRenderedCaption(task, caption);
+            actual.append(caption.getText());
+            previousEnd = caption.getEnd();
+        }
+        assertEquals(String.join("", lines), actual.toString());
+        assertEquals(18.9915D, previousEnd, 0.01D);
+    }
+
+    @Test
+    void exactTimelineKeepsShortAuthoredLinesInsteadOfMergingAcrossNewlines() {
+        String script = "买芒果干\n先看配料表\n锁住芒果本味";
+        String spokenText = script.replace("\n", "");
+        List<TkSubtitleWord> words = new ArrayList<>();
+        for (int i = 0; i < spokenText.length(); i++) {
+            words.add(new TkSubtitleWord(spokenText.substring(i, i + 1), i * 0.08D, (i + 1) * 0.08D, false));
+        }
+        TkSubtitleTimeline asr = new TkSubtitleTimeline();
+        asr.setAudioDuration(spokenText.length() * 0.08D);
+        asr.setSegments(Collections.singletonList(new TkSubtitleSegment(spokenText, 0D,
+                asr.getAudioDuration(), null, 0, 0, words)));
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder().targetLanguage("zh-cn").build();
+
+        TkSubtitleTimeline timeline = ReflectionTestUtils.invokeMethod(service, "rebuildExactTimelineWithScriptText",
+                task, script, asr, Collections.emptyList());
+
+        assertEquals(Arrays.asList("买芒果干", "先看配料表", "锁住芒果本味"),
+                Arrays.asList(timeline.getSegments().stream().map(TkSubtitleSegment::getText).toArray(String[]::new)));
+        assertEquals(0.32D, timeline.getSegments().get(0).getEnd(), 0.001D);
+        assertEquals(0.32D, timeline.getSegments().get(1).getStart(), 0.001D);
+    }
+
+    @Test
+    void splitSentencesPreservesCrLfBlankLinesAndMixedLanguageText() {
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder().build();
+
+        List<String> captions = ReflectionTestUtils.invokeMethod(service, "splitSentences", task,
+                "新品 Mango 干\r\n\r\n先看配料表\r锁住芒果本味");
+
+        assertEquals(Arrays.asList("新品 Mango 干", "先看配料表", "锁住芒果本味"), captions);
+    }
+
+    @Test
+    void smoothRapidSegmentsDoesNotMergeAcrossSentenceEndingPunctuation() {
+        List<TkSubtitleSegment> captions = Arrays.asList(
+                segment("看配料表。", 0D, 0.3D), segment("只有芒果。", 0.3D, 0.7D));
+
+        List<TkSubtitleSegment> smoothed = ReflectionTestUtils.invokeMethod(service, "smoothRapidSegments", captions);
+
+        assertEquals(2, smoothed.size());
+    }
+
+    @Test
+    void smoothRapidSegmentsDoesNotPromoteEstimatedWordTimingToReliable() {
+        TkSubtitleSegment first = segment("A", 0D, 0.3D);
+        first.setWordTimingReliable(false);
+        List<TkSubtitleSegment> smoothed = ReflectionTestUtils.invokeMethod(service, "smoothRapidSegments",
+                Arrays.asList(first, segment("B", 0.3D, 1D)));
+
+        assertFalse(smoothed.get(0).getWordTimingReliable());
+    }
+
+    @Test
+    void exactTimelinePreservesUnicodeNextLineBoundaries() {
+        String script = "买芒果干\u0085先看配料表";
+        String spokenText = script.replace("\u0085", "");
+        List<TkSubtitleWord> words = new ArrayList<>();
+        for (int i = 0; i < spokenText.length(); i++) {
+            words.add(new TkSubtitleWord(spokenText.substring(i, i + 1), i * 0.08D, (i + 1) * 0.08D, false));
+        }
+        TkSubtitleTimeline asr = new TkSubtitleTimeline();
+        asr.setAudioDuration(spokenText.length() * 0.08D);
+        asr.setSegments(Collections.singletonList(new TkSubtitleSegment(spokenText, 0D,
+                asr.getAudioDuration(), null, 0, 0, words)));
+
+        TkSubtitleTimeline timeline = ReflectionTestUtils.invokeMethod(service, "rebuildExactTimelineWithScriptText",
+                TkGenerationTaskDO.builder().targetLanguage("zh-cn").build(), script, asr, Collections.emptyList());
+
+        assertEquals(2, timeline.getSegments().size());
+    }
+
+    @Test
+    void estimatedTimelineDoesNotMergeCaptionsThatCannotFitTwoReadableLines() {
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getSubtitle().setLeadSeconds(0D);
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        String script = "只选用成熟芒果再厚切高温烘干口感很好";
+
+        TkSubtitleTimeline timeline = ReflectionTestUtils.invokeMethod(service, "buildEstimatedTimeline",
+                TkGenerationTaskDO.builder().targetLanguage("zh-cn").subtitleStyle("classic_white").build(),
+                script, null, Collections.emptyList(), 0.8D);
+
+        assertEquals(2, timeline.getSegments().size(),
+                "The only equal-width split would divide the phrase 厚切");
+        assertEquals(script, String.join("", timeline.getSegments().stream()
+                .map(TkSubtitleSegment::getText).toArray(String[]::new)));
+    }
+
+    @Test
+    void exactTimelineKeepsQuotedLineWordsAndTheirAsrTimesTogether() {
+        List<String> lines = Arrays.asList("买芒果干", "“配料干净”", "赶紧来一单");
+        String spokenText = "买芒果干配料干净赶紧来一单";
+        List<TkSubtitleWord> words = new ArrayList<>();
+        for (int i = 0; i < spokenText.length(); i++) {
+            words.add(new TkSubtitleWord(spokenText.substring(i, i + 1), i * 0.08D, (i + 1) * 0.08D, false));
+        }
+        TkSubtitleTimeline asr = new TkSubtitleTimeline();
+        asr.setAudioDuration(spokenText.length() * 0.08D);
+        asr.setSegments(Collections.singletonList(new TkSubtitleSegment(spokenText, 0D,
+                asr.getAudioDuration(), null, 0, 0, words)));
+
+        TkSubtitleTimeline timeline = ReflectionTestUtils.invokeMethod(service, "rebuildExactTimelineWithScriptText",
+                TkGenerationTaskDO.builder().targetLanguage("zh-cn").build(), String.join("\n", lines),
+                asr, Collections.emptyList());
+
+        assertEquals(3, timeline.getSegments().size());
+        for (int i = 0; i < lines.size(); i++) {
+            TkSubtitleSegment caption = timeline.getSegments().get(i);
+            assertEquals(lines.get(i), String.join("", caption.getWords().stream()
+                    .map(TkSubtitleWord::getText).toArray(String[]::new)));
+            assertTrue(caption.getWordTimingReliable());
+        }
+        assertEquals(0.32D, timeline.getSegments().get(0).getEnd(), 0.001D);
+        assertEquals(0.32D, timeline.getSegments().get(1).getStart(), 0.001D);
+        assertEquals(0.64D, timeline.getSegments().get(1).getEnd(), 0.001D);
+        assertEquals(0.64D, timeline.getSegments().get(2).getStart(), 0.001D);
+    }
+
+    @Test
+    void exactTimelineDoesNotMergeAcrossTimedQuoteOrEmojiBoundaries() throws Exception {
+        for (String script : Arrays.asList("“这个芒果干很好吃”每口都有自然果香",
+                "这个芒果干真的好吃🤩每口都有自然果香")) {
+            String spokenText = script.replace("“", "").replace("”", "").replace("🤩", "");
+            List<TkSubtitleWord> words = new ArrayList<>();
+            for (int i = 0; i < spokenText.length(); i++) {
+                words.add(new TkSubtitleWord(spokenText.substring(i, i + 1), i * 0.08D, (i + 1) * 0.08D, false));
+            }
+            TkSubtitleTimeline asr = new TkSubtitleTimeline();
+            asr.setAudioDuration(spokenText.length() * 0.08D);
+            asr.setSegments(Collections.singletonList(new TkSubtitleSegment(spokenText, 0D,
+                    asr.getAudioDuration(), null, 0, 0, words)));
+            TkGenerationTaskDO task = TkGenerationTaskDO.builder().targetLanguage("zh-cn")
+                    .subtitleStyle("classic_white").subtitleKaraokeEnabled(true).build();
+
+            TkSubtitleTimeline timeline = ReflectionTestUtils.invokeMethod(service, "rebuildExactTimelineWithScriptText",
+                    task, script, asr, Collections.emptyList());
+
+            assertEquals(2, timeline.getSegments().size(), "Punctuation shares the preceding spoken word's timing");
+            for (TkSubtitleSegment caption : timeline.getSegments()) {
+                assertReadableRenderedCaption(task, caption);
+            }
+        }
+    }
+
+    private void assertReadableRenderedCaption(TkGenerationTaskDO task, TkSubtitleSegment caption) throws Exception {
+        File target = tempDir.resolve("readable-caption.ass").toFile();
+        new DefaultTkAssSubtitleRenderService().render(task,
+                new TkSubtitleLayout(Collections.singletonList(caption)), target);
+        String visible = Files.readString(target.toPath()).lines().filter(line -> line.startsWith("Dialogue:"))
+                .findFirst().orElseThrow().split(",", 10)[9].replaceAll("\\{[^}]*}", "");
+        String[] lines = visible.replace("\\N", "\n").split("\n");
+        assertTrue(lines.length <= 2);
+        for (String line : lines) {
+            assertTrue(line.codePoints().map(cp -> cp < 128 ? 1 : 2).sum() <= 18, line);
+        }
+        assertEquals(caption.getText().replace(" ", ""), visible.replace("\\N", "").replace(" ", ""));
+    }
+
+    @Test
     void applySubtitleLeadMovesSegmentsAndWordsEarlierWithoutNegativeTime() {
         TkSubtitleTimeline timeline = new TkSubtitleTimeline();
         timeline.setAudioDuration(6D);

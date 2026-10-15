@@ -2,12 +2,15 @@ package cn.iocoder.yudao.module.tk.service.generation.pipeline;
 
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.File;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -171,6 +174,90 @@ class DefaultTkAssSubtitleRenderServiceTest {
                 .filter(line -> line.startsWith("Style: Default,"))
                 .findFirst()
                 .orElse("");
+    }
+
+    @Test
+    void plainAndKaraokeCaptionsUseTheSameReadableChineseLineBreaks() throws Exception {
+        for (String text : Arrays.asList("买芒果干 先看配料表", "也不额外添加其他任何东西",
+                "每一口都是自然的芒果香", "只选用成熟芒果厚切加上高温烘干", "配料表 只有芒果不加任何糖")) {
+            String plain = renderChineseCaption(text, false);
+            String karaoke = renderChineseCaption(text, true);
+
+            assertEquals(plain, karaoke, "Timing reliability must not change the visible line breaks");
+            assertEquals(text.replace(" ", ""), plain.replace("\\N", "").replace(" ", ""));
+            assertFalse(plain.contains("配料\\N表") || plain.contains("任\\N何")
+                    || plain.contains("芒\\N果") || plain.contains("自\\N然"));
+            String[] lines = plain.replace("\\N", "\n").split("\n");
+            assertTrue(lines.length <= 2);
+            for (String line : lines) {
+                assertTrue(line.codePoints().map(cp -> cp < 128 ? 1 : 2).sum() <= 18,
+                        "Both lines must fit the existing safe width: " + line);
+            }
+        }
+        assertEquals("配料表\\N只有芒果不加任何糖", renderChineseCaption("配料表 只有芒果不加任何糖", true));
+    }
+
+    @Test
+    void plainChineseCaptionKeepsLatinWordsAndSupplementaryCharactersIntact() throws Exception {
+        String text = "新品 Mango 芒果干真好吃🤩";
+        String visible = renderChineseCaption(text, false);
+
+        assertEquals(text.replace(" ", ""), visible.replace("\\N", "").replace(" ", ""));
+        assertTrue(visible.contains("Mango"));
+        assertTrue(visible.contains("🤩"));
+    }
+
+    @Test
+    void plainAndKaraokeChineseCaptionsKeepCompleteLatinTokens() throws Exception {
+        String[] texts = {"这个品牌叫Tik-Tok芒果干很好", "配料含量为100%芒果无需添加", "你知道吗用it's来形容芒果干"};
+        String[] tokens = {"Tik-Tok", "100%", "it's"};
+        for (int i = 0; i < texts.length; i++) {
+            String plain = renderChineseCaption(texts[i], false);
+            String karaoke = renderChineseCaption(texts[i], true);
+
+            assertEquals(plain, karaoke);
+            assertTrue(plain.contains(tokens[i]), "A Latin token must stay on one line: " + plain);
+            assertEquals(texts[i], plain.replace("\\N", ""));
+        }
+    }
+
+    @Test
+    void overlongChineseCaptionUsesTheAvailableFirstLineWidth() throws Exception {
+        String visible = renderChineseCaption("只要套上这个提拉带，几秒钟就能轻松抬脚，老人日常走路更省力。", true);
+        String firstLine = visible.replace("\\N", "\n").split("\n")[0];
+
+        assertTrue(firstLine.codePointCount(0, firstLine.length()) >= 6,
+                "An oversized legacy caption should not collapse its first line to one character");
+    }
+
+    @Test
+    void chineseCaptionWithoutAnEqualWidthPhraseBoundaryUsesANearbyBreak() throws Exception {
+        String text = "只选用成熟芒果再厚切高温烘干口感很好";
+        for (boolean reliable : Arrays.asList(false, true)) {
+            String visible = renderChineseCaption(text, reliable);
+            String firstLine = visible.replace("\\N", "\n").split("\n")[0];
+
+            assertTrue(firstLine.codePointCount(0, firstLine.length()) >= 6);
+            assertTrue(firstLine.codePointCount(0, firstLine.length()) <= 9);
+            assertTrue(visible.contains("厚切"));
+            assertEquals(text, visible.replace("\\N", ""));
+        }
+    }
+
+    private String renderChineseCaption(String text, boolean reliableTiming) throws Exception {
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder()
+                .subtitleStyle("classic_white").subtitleFontSize("large").subtitleKaraokeEnabled(true).build();
+        List<TkSubtitleWord> words = ReflectionTestUtils.invokeMethod(new DefaultTkSubtitleTimelineService(),
+                "buildWords", text, 0D, 2D, Collections.emptyList());
+        TkSubtitleSegment caption = new TkSubtitleSegment(text, 0D, 2D,
+                "bottom_center", 540, 1450, words);
+        caption.setWordTimingReliable(reliableTiming);
+        File file = File.createTempFile("subtitle-readable", ".ass");
+        service.render(task, new TkSubtitleLayout(Collections.singletonList(caption)), file);
+        String dialogue = Files.readString(file.toPath()).lines()
+                .filter(line -> line.startsWith("Dialogue:")).findFirst().orElseThrow();
+        assertEquals(reliableTiming, dialogue.contains("{\\kf"));
+        return dialogue.split(",", 10)[9].replaceAll("\\{[^}]*}", "");
     }
 
     private String renderDialogue(String subtitleStyle, TkSubtitleWord word) throws Exception {

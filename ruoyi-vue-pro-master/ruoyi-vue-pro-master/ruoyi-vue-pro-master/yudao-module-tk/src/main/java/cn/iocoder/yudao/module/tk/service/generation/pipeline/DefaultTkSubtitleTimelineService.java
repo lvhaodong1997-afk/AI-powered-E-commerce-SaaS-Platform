@@ -16,9 +16,11 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -46,12 +48,6 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
     private static final String CJK_LEADING_PUNCTUATION = "，,、。！？!?；;：:";
     private static final Pattern SILENCE_START_PATTERN = Pattern.compile("silence_start:\\s*([0-9.]+)");
     private static final Pattern SILENCE_END_PATTERN = Pattern.compile("silence_end:\\s*([0-9.]+)");
-    private static final String[] PROTECTED_CJK_PHRASES = {
-            "系统能力", "执行按钮", "评论提效", "个人经验", "标准流程", "业务逻辑",
-            "低水平", "重复劳动", "中等质量", "多维表格", "自动化输出",
-            "低质视频", "高质量视频", "30条高质量视频", "多维表格提效", "提效",
-            "底层逻辑", "整理了一份", "98块"
-    };
 
     @Resource
     private TkGenerationProperties generationProperties;
@@ -213,7 +209,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         TkSubtitleTimeline timeline = new TkSubtitleTimeline();
         timeline.setLanguage(task.getTargetLanguage());
         timeline.setAudioDuration(duration);
-        timeline.setSegments(smoothRapidSegments(buildSegments(sentences, duration, keywords)));
+        timeline.setSegments(smoothRapidSegments(buildSegments(sentences, duration, keywords), scriptText));
         markWordTimingReliability(timeline.getSegments(), false);
         applySubtitleLead(timeline, resolveSubtitleLead(audioFile));
         return timeline;
@@ -238,13 +234,13 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         TkSubtitleTimeline timeline = new TkSubtitleTimeline();
         timeline.setLanguage(task.getTargetLanguage());
         timeline.setAudioDuration(duration);
-        List<TkSubtitleWord> exactWords = buildExactWords(scriptText, timingTimeline, keywords);
+        List<TkSubtitleWord> exactWords = buildExactWords(sentences, timingTimeline, keywords);
         if (exactWords.isEmpty()) {
             throw new IllegalStateException("字幕精准对齐失败：ASR 未返回可用逐字时间轴");
         }
         List<TkSubtitleSegment> segments = buildExactSegments(sentences, exactWords);
-        timeline.setSegments(smoothRapidSegments(segments));
-        markWordTimingReliability(timeline.getSegments(), hasExactWordTiming(scriptText, timingTimeline));
+        timeline.setSegments(smoothRapidSegments(segments, scriptText));
+        markWordTimingReliability(timeline.getSegments(), hasExactWordTiming(sentences, timingTimeline));
         return timeline;
     }
 
@@ -336,9 +332,9 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         }
     }
 
-    private List<TkSubtitleWord> buildExactWords(String scriptText, TkSubtitleTimeline timingTimeline,
+    private List<TkSubtitleWord> buildExactWords(List<String> sentences, TkSubtitleTimeline timingTimeline,
                                                  List<String> keywords) {
-        List<String> scriptUnits = buildSubtitleUnits(scriptText);
+        List<String> scriptUnits = buildScriptSubtitleUnits(sentences);
         List<TimingUnit> timingUnits = collectTimingUnits(timingTimeline);
         List<TkSubtitleWord> words = new ArrayList<>();
         if (scriptUnits.isEmpty() || timingUnits.isEmpty()) {
@@ -362,13 +358,21 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         return words;
     }
 
-    private boolean hasExactWordTiming(String scriptText, TkSubtitleTimeline timingTimeline) {
-        List<String> scriptUnits = buildSubtitleUnits(scriptText);
+    private boolean hasExactWordTiming(List<String> sentences, TkSubtitleTimeline timingTimeline) {
+        List<String> scriptUnits = buildScriptSubtitleUnits(sentences);
         List<TimingUnit> timingUnits = collectTimingUnits(timingTimeline);
         if (scriptUnits.isEmpty() || timingUnits.isEmpty()) {
             return false;
         }
         return countMatched(alignScriptUnitsToTimingUnits(scriptUnits, timingUnits)) == scriptUnits.size();
+    }
+
+    private List<String> buildScriptSubtitleUnits(List<String> sentences) {
+        List<String> units = new ArrayList<>();
+        for (String sentence : sentences) {
+            units.addAll(buildSubtitleUnits(sentence));
+        }
+        return units;
     }
 
     private void markWordTimingReliability(List<TkSubtitleSegment> segments, boolean reliable) {
@@ -576,16 +580,25 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
     }
 
     private List<TkSubtitleSegment> smoothRapidSegments(List<TkSubtitleSegment> segments) {
+        return smoothRapidSegments(segments, null);
+    }
+
+    private List<TkSubtitleSegment> smoothRapidSegments(List<TkSubtitleSegment> segments, String scriptText) {
         if (segments == null || segments.size() <= 1) {
             return segments;
         }
+        Set<Integer> sentenceBoundaries = TkSubtitleTextSegmentationSupport.sentenceBoundaryOffsets(scriptText);
         List<TkSubtitleSegment> smoothed = new ArrayList<>();
         int index = 0;
+        int textCursor = 0;
         while (index < segments.size()) {
             TkSubtitleSegment current = copySegment(segments.get(index));
+            textCursor += TkSubtitleTextSegmentationSupport.compactLength(current.getText());
             index++;
             while (index < segments.size() && shouldMergeRapidSegment(current)
+                    && !sentenceBoundaries.contains(textCursor)
                     && canMergeStableSegment(current, segments.get(index))) {
+                textCursor += TkSubtitleTextSegmentationSupport.compactLength(segments.get(index).getText());
                 current = mergeSegments(current, segments.get(index));
                 index++;
             }
@@ -601,7 +614,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
     }
 
     private boolean canMergeStableSegment(TkSubtitleSegment current, TkSubtitleSegment next) {
-        if (current == null || next == null) {
+        if (current == null || next == null || TkSubtitleTextSegmentationSupport.endsSentence(current.getText())) {
             return false;
         }
         double start = Math.min(current.getStart(), next.getStart());
@@ -610,7 +623,24 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
             return false;
         }
         String mergedText = StrUtil.blankToDefault(current.getText(), "") + StrUtil.blankToDefault(next.getText(), "");
-        return displayWeight(mergedText) <= MAX_MERGED_STABLE_SEGMENT_WEIGHT;
+        if (isMostlyEnglish(mergedText)) {
+            return displayWeight(mergedText) <= MAX_MERGED_STABLE_SEGMENT_WEIGHT;
+        }
+        Set<Integer> wordEnds = new HashSet<>();
+        int cursor = 0;
+        for (TkSubtitleSegment segment : new TkSubtitleSegment[]{current, next}) {
+            if (segment.getWords() != null) {
+                for (TkSubtitleWord word : segment.getWords()) {
+                    cursor += TkSubtitleTextSegmentationSupport.compactLength(word.getText());
+                    wordEnds.add(cursor);
+                }
+            }
+        }
+        if (cursor != TkSubtitleTextSegmentationSupport.compactLength(mergedText)) {
+            return TkSubtitleTextSegmentationSupport.canFitTwoLines(mergedText);
+        }
+        return TkSubtitleTextSegmentationSupport.canFitTwoLines(mergedText, offset -> wordEnds.contains(
+                TkSubtitleTextSegmentationSupport.compactLength(mergedText.substring(0, offset))));
     }
 
     private TkSubtitleSegment mergeSegments(TkSubtitleSegment current, TkSubtitleSegment next) {
@@ -626,6 +656,8 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
             words.addAll(next.getWords());
         }
         merged.setWords(words);
+        merged.setWordTimingReliable(Boolean.TRUE.equals(current.getWordTimingReliable())
+                && Boolean.TRUE.equals(next.getWordTimingReliable()));
         return merged;
     }
 
@@ -638,6 +670,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         copy.setX(source.getX());
         copy.setY(source.getY());
         copy.setWords(source.getWords() == null ? new ArrayList<>() : new ArrayList<>(source.getWords()));
+        copy.setWordTimingReliable(source.getWordTimingReliable());
         return copy;
     }
 
@@ -1094,8 +1127,8 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         if (StrUtil.isBlank(scriptText)) {
             return sentences;
         }
-        String normalized = scriptText.replace("\r", "").replace("\n", " ");
-        for (String item : normalized.split("(?<=[。！？!?；;])")) {
+        String normalized = scriptText.trim();
+        for (String item : normalized.split("(?<=[。！？!?；;])|\\R+")) {
             String sentence = StrUtil.trim(item);
             if (StrUtil.isNotBlank(sentence)) {
                 sentences.addAll(splitReadableChunks(task, sentence));
@@ -1207,74 +1240,11 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
     }
 
     private int chooseCjkSplitIndex(String text, int maxWeight) {
-        int splitIndex = indexByWeight(text, maxWeight);
-        splitIndex = includeFollowingPunctuation(text, splitIndex);
-        int protectedIndex = avoidProtectedPhraseSplit(text, splitIndex);
-        if (protectedIndex > 0 && protectedIndex != splitIndex) {
-            return protectedIndex;
-        }
-        int punctuationIndex = lastSoftPunctuationBefore(text, splitIndex);
-        if (punctuationIndex > 0 && displayWeight(text.substring(0, punctuationIndex)) >= maxWeight / 2) {
-            return punctuationIndex;
-        }
-        return Math.max(1, splitIndex);
-    }
-
-    private int avoidProtectedPhraseSplit(String text, int splitIndex) {
-        for (String phrase : PROTECTED_CJK_PHRASES) {
-            int phraseStart = text.indexOf(phrase);
-            while (phraseStart >= 0) {
-                int phraseEnd = phraseStart + phrase.length();
-                if (splitIndex > phraseStart && splitIndex < phraseEnd) {
-                    if (phraseStart > 0) {
-                        return phraseStart;
-                    }
-                    return phraseEnd;
-                }
-                phraseStart = text.indexOf(phrase, phraseStart + 1);
-            }
-        }
-        return splitIndex;
-    }
-
-    private int lastSoftPunctuationBefore(String text, int endExclusive) {
-        for (int i = Math.min(endExclusive, text.length()) - 1; i >= 0; i--) {
-            if (CJK_SOFT_PUNCTUATION.indexOf(text.charAt(i)) >= 0) {
-                return i + 1;
-            }
-        }
-        return -1;
-    }
-
-    private int includeFollowingPunctuation(String text, int splitIndex) {
-        if (splitIndex < text.length() && CJK_LEADING_PUNCTUATION.indexOf(text.charAt(splitIndex)) >= 0) {
-            return splitIndex + 1;
-        }
-        return splitIndex;
-    }
-
-    private int indexByWeight(String text, int maxWeight) {
-        int weight = 0;
-        for (int offset = 0; offset < text.length();) {
-            int codePoint = text.codePointAt(offset);
-            int charWeight = codePoint < 128 ? 1 : 2;
-            if (offset > 0 && weight + charWeight > maxWeight) {
-                return offset;
-            }
-            weight += charWeight;
-            offset += Character.charCount(codePoint);
-        }
-        return text.length();
+        return TkSubtitleTextSegmentationSupport.chooseChunkSplitIndex(text, maxWeight);
     }
 
     private int displayWeight(String text) {
-        int weight = 0;
-        for (int offset = 0; offset < text.length();) {
-            int codePoint = text.codePointAt(offset);
-            weight += codePoint < 128 ? 1 : 2;
-            offset += Character.charCount(codePoint);
-        }
-        return weight;
+        return TkSubtitleTextSegmentationSupport.displayWeight(text);
     }
 
     private boolean isCjkSoftPunctuation(String value) {
@@ -1325,7 +1295,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
                 ascii.append(value);
             } else {
                 flushAscii(tokens, ascii);
-                if (!Character.isWhitespace(codePoint)) {
+                if (!TkSubtitleTextSegmentationSupport.isWhitespace(codePoint)) {
                     tokens.add(value);
                 }
             }
@@ -1338,16 +1308,25 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
     private List<String> buildSubtitleUnits(String text) {
         List<String> tokens = splitTokens(text);
         List<String> units = new ArrayList<>();
+        StringBuilder leadingPunctuation = new StringBuilder();
         for (String token : tokens) {
             if (StrUtil.isBlank(token)) {
                 continue;
             }
-            if (isSubtitlePunctuation(token) && !units.isEmpty()) {
-                int lastIndex = units.size() - 1;
-                units.set(lastIndex, units.get(lastIndex) + token);
+            if (isSubtitlePunctuation(token)) {
+                if (units.isEmpty()) {
+                    leadingPunctuation.append(token);
+                } else {
+                    int lastIndex = units.size() - 1;
+                    units.set(lastIndex, units.get(lastIndex) + token);
+                }
             } else {
-                units.add(token);
+                units.add(leadingPunctuation.toString() + token);
+                leadingPunctuation.setLength(0);
             }
+        }
+        if (leadingPunctuation.length() > 0) {
+            units.add(leadingPunctuation.toString());
         }
         return units;
     }
@@ -1374,7 +1353,7 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
     }
 
     private boolean isAsciiWord(int codePoint) {
-        return codePoint < 128 && (Character.isLetterOrDigit(codePoint) || codePoint == '\'' || codePoint == '-' || codePoint == '%');
+        return TkSubtitleTextSegmentationSupport.isAsciiWord(codePoint);
     }
 
     private boolean isKeyword(String token, List<String> keywords) {
