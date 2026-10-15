@@ -5623,8 +5623,17 @@ watch(
 )
 
 watch(
-  () => [createForm.bgmAssetId, createForm.bgmVolume, createForm.bgmEnabled] as const,
+  () => [createForm.bgmAssetId, createForm.bgmEnabled] as const,
   () => stopBgmPreview()
+)
+
+watch(
+  () => createForm.bgmVolume,
+  (volume) => {
+    if (bgmPreviewAudio.value) {
+      bgmPreviewAudio.value.volume = Math.max(0.01, Math.min(0.3, volume))
+    }
+  }
 )
 
 watch(
