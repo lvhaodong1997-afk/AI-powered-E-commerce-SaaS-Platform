@@ -59,6 +59,35 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
     List<TkOpenTiktokPublishDetailDO> selectListByClientAndTaskIdForUpdate(
             @Param("clientId") String clientId, @Param("taskId") String taskId);
 
+    // Lease recovery must lock exactly one detail after its task row.  Keeping this
+    // statement explicit avoids a retry racing a worker that still owns the lease.
+    @InterceptorIgnore(tenantLine = "true", dataPermission = "true")
+    @Select("SELECT * FROM tk_open_tiktok_publish_detail WHERE deleted = 0 "
+            + "AND client_id = #{clientId} AND task_id = #{taskId} AND detail_id = #{detailId} "
+            + "LIMIT 1 FOR UPDATE")
+    TkOpenTiktokPublishDetailDO selectByClientAndDetailIdForUpdate(@Param("clientId") String clientId,
+                                                                    @Param("taskId") String taskId,
+                                                                    @Param("detailId") String detailId);
+
+    default List<TkOpenTiktokPublishDetailDO> selectExpiredLeases(LocalDateTime deadline, int limit) {
+        return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
+                .and(wrapper -> wrapper
+                        .apply("(status = 'PENDING' AND publish_id IS NOT NULL AND publish_id <> '')")
+                        .or()
+                        .apply("(status = 'PROCESSING' AND (tiktok_status IS NULL OR tiktok_status <> 'RECOVERY_REQUIRED')"
+                                + " AND (EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt a"
+                                + " WHERE a.detail_id = tk_open_tiktok_publish_detail.detail_id"
+                                + " AND a.attempt_no = COALESCE(tk_open_tiktok_publish_detail.retry_count, 0)"
+                                + " AND a.deleted = 0 AND (a.heartbeat_time IS NULL OR a.heartbeat_time <= {0}))"
+                                + " OR NOT EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt missing"
+                                + " WHERE missing.detail_id = tk_open_tiktok_publish_detail.detail_id"
+                                + " AND missing.attempt_no = COALESCE(tk_open_tiktok_publish_detail.retry_count, 0)"
+                                + " AND missing.deleted = 0)))",
+                                deadline))
+                .orderByAsc(TkOpenTiktokPublishDetailDO::getId)
+                .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
+    }
+
     default List<TkOpenTiktokPublishDetailDO> selectStalePending(LocalDateTime deadline, int limit) {
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                 .eq(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")

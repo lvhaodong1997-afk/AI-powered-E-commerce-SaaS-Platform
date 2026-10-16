@@ -28,7 +28,26 @@ public class TkOpenTiktokPublishAttemptService {
     @Transactional(rollbackFor = Exception.class)
     public TkOpenTiktokPublishAttemptDO claim(TkOpenTiktokPublishDetailDO expected) {
         TkOpenTiktokPublishDetailDO current = lock(expected);
-        if (current == null || !"PENDING".equals(current.getStatus()) || !sameAttempt(current, expected)) return null;
+        if (current == null || !sameAttempt(current, expected)) return null;
+        if (!"PENDING".equals(current.getStatus())) return null;
+        // A queued row with an official publish ID is recoverable work.  It must
+        // never enter the initialization lane and create a second TikTok post.
+        if (StrUtil.isNotBlank(current.getPublishId())) {
+            requireWrite(details.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                    .eq(TkOpenTiktokPublishDetailDO::getId, current.getId())
+                    .eq(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")
+                    .set(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
+                    .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED")
+                    .set(TkOpenTiktokPublishDetailDO::getFailReason,
+                            "Official TikTok publish ID exists; initialization is blocked")
+                    .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now())));
+            tasks.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
+                    .eq(TkOpenTiktokPublishTaskDO::getClientId, current.getClientId())
+                    .eq(TkOpenTiktokPublishTaskDO::getTaskId, current.getTaskId())
+                    .eq(TkOpenTiktokPublishTaskDO::getStatus, "PENDING")
+                    .set(TkOpenTiktokPublishTaskDO::getStatus, "PROCESSING"));
+            return null;
+        }
         TkOpenTiktokPublishAttemptDO attempt = current(current);
         if (attempt != null && !canRestart(attempt.getPhase())) return null;
         LocalDateTime now = LocalDateTime.now();
@@ -62,6 +81,80 @@ public class TkOpenTiktokPublishAttemptService {
         requireWrite(attempts.update(null, owned(attempt)
                 .ne(TkOpenTiktokPublishAttemptDO::getPhase, "CONFIRMED_TERMINAL")
                 .set(TkOpenTiktokPublishAttemptDO::getHeartbeatTime, LocalDateTime.now())));
+    }
+
+    /**
+     * Persist a recovery marker from a separate transaction after a worker loses
+     * its lease.  The old owner is fenced before the detail becomes eligible for
+     * the recovery/status lanes.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean recoverExpired(TkOpenTiktokPublishDetailDO expected, LocalDateTime deadline, String reason) {
+        TkOpenTiktokPublishTaskDO task = tasks.selectByClientAndTaskIdForUpdate(expected.getClientId(), expected.getTaskId());
+        if (task == null) return false;
+        TkOpenTiktokPublishDetailDO detail = details.selectByClientAndDetailIdForUpdate(
+                expected.getClientId(), expected.getTaskId(), expected.getDetailId());
+        if (detail == null || !sameAttempt(detail, expected)) return false;
+        boolean publishedPending = "PENDING".equals(detail.getStatus()) && StrUtil.isNotBlank(detail.getPublishId());
+        if (!publishedPending && !"PROCESSING".equals(detail.getStatus())) return false;
+        TkOpenTiktokPublishAttemptDO attempt = current(detail);
+        if (!publishedPending && attempt != null && active(attempt, deadline)) return false;
+        // No attempt row means no remote side effect was recorded.  Return the
+        // detail to the durable pending queue immediately so it cannot occupy a
+        // processing slot forever.
+        if (attempt == null && StrUtil.isBlank(detail.getPublishId())) {
+            requireWrite(details.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                    .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
+                    .eq(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
+                    .set(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")
+                    .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RESTART_PENDING")
+                    .set(TkOpenTiktokPublishDetailDO::getFailReason, StrUtil.maxLength(reason, 1000))
+                    .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now())));
+            tasks.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
+                    .eq(TkOpenTiktokPublishTaskDO::getClientId, detail.getClientId())
+                    .eq(TkOpenTiktokPublishTaskDO::getTaskId, detail.getTaskId())
+                    .eq(TkOpenTiktokPublishTaskDO::getStatus, "PROCESSING")
+                    .set(TkOpenTiktokPublishTaskDO::getStatus, "PENDING"));
+            return true;
+        }
+        if (attempt != null) {
+            String fencedOwner = UUID.randomUUID().toString();
+            LambdaUpdateWrapper<TkOpenTiktokPublishAttemptDO> fence = owned(attempt)
+                    .set(TkOpenTiktokPublishAttemptDO::getOwnerToken, fencedOwner)
+                    .set(TkOpenTiktokPublishAttemptDO::getHeartbeatTime, deadline)
+                    .set(TkOpenTiktokPublishAttemptDO::getLastError, StrUtil.maxLength(reason, 1000));
+            if (StrUtil.isNotBlank(detail.getPublishId())) {
+                fence.set(TkOpenTiktokPublishAttemptDO::getPhase, "RECOVERY_REQUIRED");
+            }
+            if (attempts.update(null, fence) != 1) return false;
+            attempt.setOwnerToken(fencedOwner).setHeartbeatTime(deadline);
+            if (StrUtil.isNotBlank(detail.getPublishId())) attempt.setPhase("RECOVERY_REQUIRED");
+        }
+        requireWrite(details.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
+                .eq(TkOpenTiktokPublishDetailDO::getStatus, detail.getStatus())
+                .set(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
+                .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED")
+                .set(TkOpenTiktokPublishDetailDO::getFailReason, StrUtil.maxLength(reason, 1000))
+                .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now())));
+        if ("PENDING".equals(detail.getStatus())) {
+            tasks.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
+                    .eq(TkOpenTiktokPublishTaskDO::getClientId, detail.getClientId())
+                    .eq(TkOpenTiktokPublishTaskDO::getTaskId, detail.getTaskId())
+                    .eq(TkOpenTiktokPublishTaskDO::getStatus, "PENDING")
+                    .set(TkOpenTiktokPublishTaskDO::getStatus, "PROCESSING"));
+        }
+        return true;
+    }
+
+    /** Called by the heartbeat lane when a renewal write failed. */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean recoverHeartbeatFailure(TkOpenTiktokPublishAttemptDO attempt, String reason) {
+        if (attempt == null) return false;
+        TkOpenTiktokPublishDetailDO detail = details.selectByClientAndDetailId(
+                attempt.getClientId(), attempt.getDetailId());
+        return detail != null && recoverExpired(detail,
+                LocalDateTime.now().minusMinutes(3), reason);
     }
 
     public void stage(TkOpenTiktokPublishAttemptDO attempt, String phase) {

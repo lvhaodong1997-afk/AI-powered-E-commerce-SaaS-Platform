@@ -38,6 +38,44 @@ class TkOpenTiktokPublishAttemptServiceTest {
         verify(tasks).update(isNull(), any());
     }
 
+    @Test void publishedPendingDetailIsMovedToRecoveryWithoutASecondClaim() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailDO detail = detail("PENDING", "official-id");
+        when(tasks.selectByClientAndTaskIdForUpdate("c", "t")).thenReturn(task());
+        when(details.selectOne(any())).thenReturn(detail);
+        when(details.update(isNull(), any())).thenReturn(1);
+        when(tasks.update(isNull(), any())).thenReturn(1);
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts, details, tasks);
+
+        assertNull(service.claim(detail));
+        verify(attempts, never()).insert(any(TkOpenTiktokPublishAttemptDO.class));
+        verify(attempts, never()).update(any(), any());
+        verify(details).update(isNull(), any());
+        verify(tasks).update(isNull(), any());
+    }
+
+    @Test void expiredPublishedWorkerIsFencedAndMarkedForStatusRecovery() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailDO detail = detail("PROCESSING", "official-id");
+        TkOpenTiktokPublishAttemptDO current = attempt("UPLOADING", "old-owner")
+                .setPublishId("official-id").setHeartbeatTime(LocalDateTime.now().minusMinutes(10));
+        when(tasks.selectByClientAndTaskIdForUpdate("c", "t")).thenReturn(task());
+        when(details.selectByClientAndDetailIdForUpdate("c", "t", "d")).thenReturn(detail);
+        when(attempts.selectCurrent("d", 0)).thenReturn(current);
+        when(attempts.update(isNull(), any())).thenReturn(1);
+        when(details.update(isNull(), any())).thenReturn(1);
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts, details, tasks);
+
+        assertTrue(service.recoverExpired(detail, LocalDateTime.now().minusMinutes(3), "lease expired"));
+        verify(attempts).update(isNull(), any());
+        verify(details).update(isNull(), any());
+        assertEquals("RECOVERY_REQUIRED", current.getPhase());
+    }
+
     @Test void fencedWorkerCannotReturnDetailToPending() {
         TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
         TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);

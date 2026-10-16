@@ -82,11 +82,14 @@ public class TkOpenTiktokPublishService {
     private final Set<String> inFlightRecoveryKeys = ConcurrentHashMap.newKeySet();
     private ExecutorService executor = newPublishExecutor(DEFAULT_PUBLISH_WORKER_COUNT, "tk-publish-prepare-");
     private ExecutorService uploadExecutor = newPublishExecutor(DEFAULT_PUBLISH_WORKER_COUNT, "tk-publish-upload-");
+    private ExecutorService recoveryExecutor = newPublishExecutor(1, "tk-publish-recovery-");
     private final ScheduledExecutorService heartbeats = Executors.newScheduledThreadPool(1);
     @Value("${tk.open-api.publish.worker-count:2}")
     private int publishWorkerCount = DEFAULT_PUBLISH_WORKER_COUNT;
     @Value("${tk.open-api.publish.upload-worker-count:2}")
     private int uploadWorkerCount = DEFAULT_PUBLISH_WORKER_COUNT;
+    @Value("${tk.open-api.publish.recovery-worker-count:1}")
+    private int recoveryWorkerCount = 1;
     @Resource private TkOpenTiktokPublishAttemptService attemptService;
     @Resource private TkOpenTiktokPublishTerminalService terminalService;
     @Resource private TkOpenTiktokPublishResponseJournal responseJournal;
@@ -99,6 +102,9 @@ public class TkOpenTiktokPublishService {
         previous.shutdownNow();
         previous = uploadExecutor;
         uploadExecutor = newPublishExecutor(uploadWorkerCount, "tk-publish-upload-");
+        previous.shutdownNow();
+        previous = recoveryExecutor;
+        recoveryExecutor = newPublishExecutor(recoveryWorkerCount, "tk-publish-recovery-");
         previous.shutdownNow();
     }
 
@@ -816,6 +822,25 @@ public class TkOpenTiktokPublishService {
         return count;
     }
 
+    /**
+     * Watchdog for workers whose lease expired without a durable state update.
+     * Recovery is fenced transactionally and never submits a second init request.
+     */
+    public int recoverExpiredLeases(int limit) {
+        int count = 0;
+        int boundedLimit = Math.max(1, Math.min(limit, 200));
+        LocalDateTime deadline = LocalDateTime.now().minusMinutes(WORKER_LEASE_MINUTES);
+        for (TkOpenTiktokPublishDetailDO detail : detailMapper.selectExpiredLeases(deadline, boundedLimit)) {
+            try {
+                if (attemptService.recoverExpired(detail, deadline,
+                        "Worker lease expired; moved to durable recovery")) count++;
+            } catch (Exception ex) {
+                log.warn("[recoverExpiredLeases][detailId({}) deferred]", detail.getDetailId(), ex);
+            }
+        }
+        return count;
+    }
+
     public int resumeStalePending(int limit) {
         List<TkOpenTiktokPublishDetailDO> pending = detailMapper.selectStalePending(
                 LocalDateTime.now(), Math.max(1, Math.min(limit, 200)));
@@ -958,7 +983,7 @@ public class TkOpenTiktokPublishService {
             if (initialized.isAccessTokenInvalid()) {
                 // An explicit invalid-token rejection has no accepted publish; one refreshed request is safe.
                 token = validAccessToken(connection, adapter, true);
-                attemptService.heartbeat(attempt);
+                heartbeatOrRecover(attempt);
                 initialized = adapter.initVideoPost(token, task.getPostMode(), payload);
             }
             if (!initialized.isSuccess()) {
@@ -988,7 +1013,7 @@ public class TkOpenTiktokPublishService {
                 if (StrUtil.isBlank(initialized.getUploadUrl())) throw new IllegalStateException("platform upload URL is missing");
                 attemptService.stage(attempt, "UPLOADING");
                 adapter.uploadVideo(initialized.getUploadUrl(), source.file, media.getContentType(),
-                        () -> attemptService.heartbeat(attempt));
+                        () -> heartbeatOrRecover(attempt));
             }
             attemptService.stage(attempt, "PLATFORM_PROCESSING");
             detail.setTiktokStatus("PROCESSING");
@@ -1014,7 +1039,7 @@ public class TkOpenTiktokPublishService {
                     if (initSent || StrUtil.isNotBlank(detail.getPublishId())) {
                         markRecoveryRequired(detail, attempt,
                                 "Awaiting authoritative TikTok result; execution interrupted");
-                    } else if (ex instanceof org.springframework.dao.DataAccessException) {
+                    } else if (isLeaseLoss(ex) || ex instanceof org.springframework.dao.DataAccessException) {
                         // Local DB outages before init are restartable, not proof of a publishing failure.
                         markRecoveryRequired(detail, attempt,
                                 "Preparing publish; local storage is temporarily unavailable");
@@ -1030,8 +1055,45 @@ public class TkOpenTiktokPublishService {
     private ScheduledFuture<?> startHeartbeat(TkOpenTiktokPublishAttemptDO attempt) {
         return heartbeats.scheduleAtFixedRate(() -> {
             try { attemptService.heartbeat(attempt); }
-            catch (Exception ex) { log.warn("[heartbeat][detailId({}) unable to renew execution]", attempt.getDetailId()); }
+            catch (Exception ex) {
+                log.warn("[heartbeat][detailId({}) unable to renew execution; durable recovery will be attempted]",
+                        attempt.getDetailId());
+                try {
+                    attemptService.recoverHeartbeatFailure(attempt,
+                            "Worker heartbeat failed; durable recovery will verify the TikTok result");
+                } catch (Exception recoveryFailure) {
+                    log.error("[heartbeat][detailId({}) recovery marker unavailable; watchdog will retry]",
+                            attempt.getDetailId(), recoveryFailure);
+                }
+            }
         }, 20, 20, TimeUnit.SECONDS);
+    }
+
+    private void heartbeatOrRecover(TkOpenTiktokPublishAttemptDO attempt) {
+        try {
+            attemptService.heartbeat(attempt);
+        } catch (RuntimeException failure) {
+            try {
+                attemptService.recoverHeartbeatFailure(attempt,
+                        "Worker heartbeat failed during upload; durable recovery will verify the TikTok result");
+            } catch (Exception recoveryFailure) {
+                log.error("[heartbeat][detailId({}) upload recovery marker unavailable]",
+                        attempt == null ? null : attempt.getDetailId(), recoveryFailure);
+            }
+            throw failure;
+        }
+    }
+
+    private boolean isLeaseLoss(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && (message.contains("lease or record changed")
+                    || message.contains("Execution ownership changed")
+                    || message.contains("Execution changed"))) return true;
+            current = current.getCause();
+        }
+        return false;
     }
 
     private void persistResponse(TkOpenTiktokPublishDetailDO detail, TkOpenTiktokPublishAttemptDO attempt,
@@ -1116,7 +1178,7 @@ public class TkOpenTiktokPublishService {
         String recoveryKey = recoveryKey(detail);
         if (!inFlightRecoveryKeys.add(recoveryKey)) return;
         try {
-            uploadExecutor.execute(() -> {
+            recoveryExecutor.execute(() -> {
                 TkOpenTiktokPublishAttemptDO attempt = null;
                 UploadSource source = null;
                 ScheduledFuture<?> heartbeat = null;
@@ -1146,10 +1208,10 @@ public class TkOpenTiktokPublishService {
                     TkOpenPublishPlatformAdapter.PublishStatusResult current = adapter.fetchPostStatus(
                             validAccessToken(connection, adapter, false), currentDetail.getPublishId());
                     if (current.isSuccess() && "PROCESSING_UPLOAD".equals(current.getStatus()) && current.getUploadedBytes() != null) {
-                        attemptService.heartbeat(attempt);
+                        heartbeatOrRecover(attempt);
                         TkOpenTiktokPublishAttemptDO activeAttempt = attempt;
                         adapter.resumeUploadVideo(secretCipher.decrypt(attempt.getUploadUrlCipher()), source.file,
-                                media.getContentType(), current.getUploadedBytes(), () -> attemptService.heartbeat(activeAttempt));
+                                media.getContentType(), current.getUploadedBytes(), () -> heartbeatOrRecover(activeAttempt));
                         attemptService.stage(attempt, "PLATFORM_PROCESSING");
                     } else if (current.isSuccess() && (isSuccess(current.getStatus()) || isFailed(current.getStatus()))) {
                         terminalService.confirm(currentDetail, current.getStatus(),
@@ -1675,9 +1737,10 @@ public class TkOpenTiktokPublishService {
         stopping = true;
         executor.shutdown();
         uploadExecutor.shutdown();
+        recoveryExecutor.shutdown();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(40);
         try {
-            for (ExecutorService lane : Arrays.asList(executor, uploadExecutor)) {
+            for (ExecutorService lane : Arrays.asList(executor, uploadExecutor, recoveryExecutor)) {
                 if (!lane.awaitTermination(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS))
                     lane.shutdownNow();
             }
@@ -1686,6 +1749,7 @@ public class TkOpenTiktokPublishService {
         finally {
             executor.shutdownNow();
             uploadExecutor.shutdownNow();
+            recoveryExecutor.shutdownNow();
             heartbeats.shutdownNow();
         }
     }

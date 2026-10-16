@@ -18,6 +18,7 @@ public class TkOpenTiktokPublishStatusJob {
     private final TkOpenTiktokPublishService publishService;
     private final ExecutorService status = lane("tk-publish-status");
     private final ExecutorService recovery = lane("tk-publish-recovery");
+    private final ExecutorService watchdog = lane("tk-publish-watchdog");
     private final ExecutorService callbacks = lane("tk-publish-callback-repair");
     public TkOpenTiktokPublishStatusJob(TkOpenTiktokPublishService publishService) { this.publishService = publishService; }
 
@@ -30,6 +31,12 @@ public class TkOpenTiktokPublishStatusJob {
         });
         submit(recovery, () -> run("recovery", () -> publishService.reconcileRecoveryRequired(100)));
         submit(callbacks, () -> run("callbacks", () -> publishService.reconcileTerminalCallbacks(100)));
+    }
+
+    @TenantIgnore
+    @Scheduled(fixedDelayString = "${tk.open-api.publish.watchdog-delay-ms:30000}", initialDelay = 30000)
+    public void watchdog() {
+        submit(watchdog, () -> run("watchdog", () -> publishService.recoverExpiredLeases(100)));
     }
 
     @TenantIgnore
@@ -50,7 +57,7 @@ public class TkOpenTiktokPublishStatusJob {
     }
 
     @PreDestroy public void destroy() {
-        for (ExecutorService lane : Arrays.asList(status, recovery, callbacks)) lane.shutdownNow();
+        for (ExecutorService lane : Arrays.asList(status, recovery, watchdog, callbacks)) lane.shutdownNow();
     }
     private void run(String phase, Runnable action) {
         try { action.run(); }
