@@ -1,8 +1,6 @@
 package cn.iocoder.yudao.module.tk.service.tiktok;
 
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.http.HttpRequest;
-import cn.hutool.http.HttpResponse;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.tk.service.config.TkApiKeyConfigService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -15,6 +13,7 @@ import javax.annotation.Resource;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.channels.Channels;
 import java.nio.channels.SeekableByteChannel;
@@ -47,11 +46,20 @@ public class TkTiktokApiClient {
             + "?fields=id,create_time,cover_image_url,share_url,video_description,duration,height,width,title,embed_html,embed_link,like_count,comment_count,share_count,view_count,is_aigc";
     private static final String USER_INFO_FIELDS = "open_id,union_id,avatar_url,display_name,username,bio_description,profile_deep_link,is_verified,follower_count,following_count,likes_count,video_count";
     private static final int UPLOAD_MAX_ATTEMPTS = 3;
-    private static final int UPLOAD_TIMEOUT_MILLIS = 10 * 60 * 1000;
     private static final long[] QUERY_RETRY_DELAYS_MILLIS = {5_000L, 15_000L, 30_000L};
 
     @Resource
     private TkApiKeyConfigService configService;
+
+    private final TkTiktokMediaTransfer mediaTransfer;
+
+    public TkTiktokApiClient() {
+        this(new TkTiktokMediaTransfer());
+    }
+
+    public TkTiktokApiClient(TkTiktokMediaTransfer mediaTransfer) {
+        this.mediaTransfer = java.util.Objects.requireNonNull(mediaTransfer);
+    }
 
     public boolean isConfigured() {
         return StrUtil.isAllNotBlank(getClientKey(), getClientSecret());
@@ -238,12 +246,14 @@ public class TkTiktokApiClient {
     }
 
     public void uploadVideoChunks(String uploadUrl, byte[] videoBytes, int chunkSize, int totalChunkCount) {
+        long deadline = mediaTransfer.newUploadDeadline();
         int total = videoBytes.length;
         int offset = 0;
         for (int chunkIndex = 0; chunkIndex < totalChunkCount; chunkIndex++) {
             int end = chunkIndex == totalChunkCount - 1 ? total - 1 : offset + chunkSize - 1;
             byte[] chunk = java.util.Arrays.copyOfRange(videoBytes, offset, end + 1);
-            uploadChunkWithRetry(uploadUrl, chunk, "video/mp4", offset, total, chunkIndex, totalChunkCount);
+            uploadChunkWithRetry(uploadUrl, chunk, "video/mp4", offset, total, chunkIndex, totalChunkCount,
+                    () -> { }, deadline);
             offset = end + 1;
         }
     }
@@ -268,6 +278,7 @@ public class TkTiktokApiClient {
             throw new IllegalArgumentException("TikTok 上传文件不存在");
         }
         String mimeType = normalizeVideoMimeType(contentType);
+        long deadline = mediaTransfer.newUploadDeadline();
         try {
             long total = Files.size(videoFile);
             TkTiktokUploadPlanner.UploadPlan plan = TkTiktokUploadPlanner.plan(total);
@@ -291,21 +302,25 @@ public class TkTiktokApiClient {
                  InputStream inputStream = Channels.newInputStream(channel)) {
                 channel.position(uploadedBytes);
                 for (int chunkIndex = firstChunk; chunkIndex < plan.getTotalChunkCount(); chunkIndex++) {
+                    mediaTransfer.checkUploadActive(deadline);
                     int length = Math.toIntExact(plan.chunkLength(chunkIndex));
-                    byte[] chunk = readChunk(inputStream, length);
+                    byte[] chunk = readChunk(inputStream, length, deadline);
                     uploadChunkWithRetry(uploadUrl, chunk, mimeType, plan.chunkOffset(chunkIndex), total,
-                            chunkIndex, plan.getTotalChunkCount(), beforeChunk);
+                            chunkIndex, plan.getTotalChunkCount(), beforeChunk, deadline);
                 }
             }
+        } catch (TkTiktokMediaTransfer.TransferStoppedException ex) {
+            throw new IllegalStateException(ex.getMessage(), ex);
         } catch (IOException ex) {
             throw new IllegalStateException("读取 TikTok 上传文件失败：" + ex.getMessage(), ex);
         }
     }
 
-    private byte[] readChunk(InputStream inputStream, int length) throws IOException {
+    private byte[] readChunk(InputStream inputStream, int length, long deadline) throws IOException {
         byte[] chunk = new byte[length];
         int offset = 0;
         while (offset < length) {
+            mediaTransfer.checkUploadActive(deadline);
             int read = inputStream.read(chunk, offset, length - offset);
             if (read < 0) {
                 throw new EOFException("上传文件在分片读取过程中提前结束");
@@ -316,26 +331,17 @@ public class TkTiktokApiClient {
     }
 
     private void uploadChunkWithRetry(String uploadUrl, byte[] chunk, String contentType,
-                                      long offset, long total, int chunkIndex, int totalChunkCount) {
-        uploadChunkWithRetry(uploadUrl, chunk, contentType, offset, total, chunkIndex, totalChunkCount, () -> { });
-    }
-
-    private void uploadChunkWithRetry(String uploadUrl, byte[] chunk, String contentType,
                                       long offset, long total, int chunkIndex, int totalChunkCount,
-                                      Runnable beforeChunk) {
+                                      Runnable beforeChunk, long deadline) {
         Throwable lastFailure = null;
         long end = offset + chunk.length - 1;
         for (int attempt = 0; attempt < UPLOAD_MAX_ATTEMPTS; attempt++) {
+            checkUploadActive(deadline);
             // A fenced worker must stop; never catch a lease failure as a retryable transport error.
             beforeChunk.run();
-            try (HttpResponse response = HttpRequest.put(uploadUrl)
-                    .header("Content-Type", normalizeVideoMimeType(contentType))
-                    .header("Content-Length", String.valueOf(chunk.length))
-                    .header("Content-Range", "bytes " + offset + "-" + end + "/" + total)
-                    .body(chunk)
-                    .timeout(UPLOAD_TIMEOUT_MILLIS)
-                    .execute()) {
-                int status = response.getStatus();
+            try {
+                int status = mediaTransfer.putChunk(uploadUrl, chunk, normalizeVideoMimeType(contentType),
+                        offset, total, deadline);
                 if (isSuccessfulUploadStatus(status)) {
                     return;
                 }
@@ -346,11 +352,14 @@ public class TkTiktokApiClient {
                 lastFailure = error;
             } catch (UploadException ex) {
                 throw ex;
+            } catch (TkTiktokMediaTransfer.TransferStoppedException ex) {
+                throw new IllegalStateException(ex.getMessage(), ex);
             } catch (Exception ex) {
                 lastFailure = ex;
             }
             if (attempt + 1 < UPLOAD_MAX_ATTEMPTS) {
-                sleepBeforeUploadRetry(attempt);
+                checkUploadActive(deadline);
+                sleepBeforeUploadRetry(attempt, deadline);
             }
         }
         throw new IllegalStateException(StrUtil.format(
@@ -358,9 +367,20 @@ public class TkTiktokApiClient {
                 chunkIndex + 1, totalChunkCount, offset, end), lastFailure);
     }
 
-    private void sleepBeforeUploadRetry(int attempt) {
+    private void checkUploadActive(long deadline) {
         try {
-            Thread.sleep(100L << attempt);
+            mediaTransfer.checkUploadActive(deadline);
+        } catch (TkTiktokMediaTransfer.TransferStoppedException ex) {
+            throw new IllegalStateException(ex.getMessage(), ex);
+        }
+    }
+
+    private void sleepBeforeUploadRetry(int attempt, long deadline) {
+        try {
+            long remainingMillis = Math.max(1L, java.util.concurrent.TimeUnit.NANOSECONDS
+                    .toMillis(deadline - System.nanoTime()));
+            Thread.sleep(Math.min(100L << attempt, remainingMillis));
+            checkUploadActive(deadline);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("TikTok 分片上传重试被中断", ex);
@@ -541,12 +561,10 @@ public class TkTiktokApiClient {
         String body = form.entrySet().stream()
                 .map(entry -> encodeForm(entry.getKey()) + "=" + encodeForm(String.valueOf(entry.getValue())))
                 .collect(Collectors.joining("&"));
-        try (HttpResponse response = HttpRequest.post(url)
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(body)
-                .timeout(30_000)
-                .execute()) {
-            return parseJsonResponse(response.getStatus(), response.header("Content-Type"), response.body());
+        try {
+            TkTiktokMediaTransfer.ApiResponse response = mediaTransfer.post(url, null,
+                    "application/x-www-form-urlencoded", body);
+            return parseJsonResponse(response.status, response.contentType, response.body);
         } catch (TikTokApiException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -555,7 +573,11 @@ public class TkTiktokApiClient {
     }
 
     private String encodeForm(String value) {
-        return URLEncoder.encode(StrUtil.blankToDefault(value, ""), StandardCharsets.UTF_8);
+        try {
+            return URLEncoder.encode(StrUtil.blankToDefault(value, ""), StandardCharsets.UTF_8.name());
+        } catch (UnsupportedEncodingException ex) {
+            throw new IllegalStateException("UTF-8 unavailable", ex);
+        }
     }
 
     private JsonNode postJson(String url, String accessToken, Map<String, Object> payload) {
@@ -563,17 +585,15 @@ public class TkTiktokApiClient {
     }
 
     private JsonNode postJson(String url, String accessToken, Map<String, Object> payload, String operation) {
-        try (HttpResponse response = HttpRequest.post(url)
-                .header("Authorization", "Bearer " + accessToken)
-                .header("Content-Type", "application/json; charset=UTF-8")
-                .body(JsonUtils.toJsonString(payload))
-                .timeout(30_000)
-                .execute()) {
-            return parseJsonResponse(response.getStatus(), response.header("Content-Type"), response.body());
+        try {
+            TkTiktokMediaTransfer.ApiResponse response = mediaTransfer.post(url, "Bearer " + accessToken,
+                    "application/json; charset=UTF-8", JsonUtils.toJsonString(payload));
+            return parseJsonResponse(response.status, response.contentType, response.body);
         } catch (TikTokApiException ex) {
             throw ex;
         } catch (Exception ex) {
-            throw new TikTokApiException(0, null, true, operation + " request failed: " + safeExceptionMessage(ex), ex);
+            throw new TikTokApiException(0, null, !Thread.currentThread().isInterrupted(),
+                    operation + " request failed: " + safeExceptionMessage(ex), ex);
         }
     }
 
@@ -582,15 +602,14 @@ public class TkTiktokApiClient {
     }
 
     private JsonNode getJson(String url, String accessToken, String operation) {
-        try (HttpResponse response = HttpRequest.get(url)
-                .header("Authorization", "Bearer " + accessToken)
-                .timeout(10_000)
-                .execute()) {
-            return parseJsonResponse(response.getStatus(), response.header("Content-Type"), response.body());
+        try {
+            TkTiktokMediaTransfer.ApiResponse response = mediaTransfer.get(url, "Bearer " + accessToken);
+            return parseJsonResponse(response.status, response.contentType, response.body);
         } catch (TikTokApiException ex) {
             throw ex;
         } catch (Exception ex) {
-            throw new TikTokApiException(0, null, true, operation + " request failed: " + safeExceptionMessage(ex), ex);
+            throw new TikTokApiException(0, null, !Thread.currentThread().isInterrupted(),
+                    operation + " request failed: " + safeExceptionMessage(ex), ex);
         }
     }
 
@@ -606,6 +625,9 @@ public class TkTiktokApiClient {
     static JsonNode executeQueryWithRetry(String operation, JsonRequest request, long[] retryDelaysMillis) {
         int maxAttempts = retryDelaysMillis.length + 1;
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new TikTokApiException(0, null, false, "query interrupted");
+            }
             try {
                 return request.execute();
             } catch (TikTokApiException ex) {

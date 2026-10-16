@@ -200,6 +200,64 @@ export interface TkTiktokPublishUrlVO {
   publishUrlRegisteredTime?: string
 }
 
+export interface TkOpenTiktokPublishQueueDetailVO {
+  id?: number
+  clientId: string
+  taskId: string
+  detailId: string
+  accountName?: string
+  taskTitle?: string
+  taskStatus?: string
+  status: string
+  tiktokStatus?: string
+  phase?: string
+  publishId?: string
+  failReason?: string
+  lastError?: string
+  retryCount?: number
+  heartbeatTime?: string
+  lastSyncTime?: string
+  updateTime?: string
+  ageSeconds: number
+  stale: boolean
+  canCancel: boolean
+  canRetry: boolean
+}
+
+export interface TkOpenTiktokPublishQueueSummaryVO {
+  date: string
+  pendingCount: number
+  runningCount: number
+  uploadingCount: number
+  recoveryCount: number
+  staleCount: number
+  scheduledCount: number
+  oldestPendingSeconds?: number
+  refreshedAt?: string
+  attention: TkOpenTiktokPublishQueueDetailVO[]
+}
+
+export const TkOpenTiktokPublishQueueApi = {
+  getSummary: async (date?: string): Promise<TkOpenTiktokPublishQueueSummaryVO> => {
+    return await request.get({ url: '/tk/open-tiktok-publish/queue/summary', params: { date, attentionLimit: 8 } })
+  },
+  getDetails: async (params: { date?: string; status?: string; limit?: number } = {}): Promise<TkOpenTiktokPublishQueueDetailVO[]> => {
+    return await request.get({ url: '/tk/open-tiktok-publish/queue/details', params })
+  },
+  resume: async (limit = 100): Promise<number> => {
+    return await request.post({ url: '/tk/open-tiktok-publish/queue/resume', params: { limit } })
+  },
+  sync: async (limit = 100): Promise<number> => {
+    return await request.post({ url: '/tk/open-tiktok-publish/queue/sync', params: { limit } })
+  },
+  retry: async (clientId: string, detailId: string): Promise<boolean> => {
+    return await request.post({ url: '/tk/open-tiktok-publish/queue/retry', params: { clientId, detailId } })
+  },
+  cancel: async (clientId: string, taskId: string): Promise<boolean> => {
+    return await request.post({ url: '/tk/open-tiktok-publish/queue/cancel', params: { clientId, taskId } })
+  }
+}
+
 export const TkVideoPublishCenterApi = {
   getOverview: async () => {
     return await request.get({ url: '/tk/video-publish-center/overview' })

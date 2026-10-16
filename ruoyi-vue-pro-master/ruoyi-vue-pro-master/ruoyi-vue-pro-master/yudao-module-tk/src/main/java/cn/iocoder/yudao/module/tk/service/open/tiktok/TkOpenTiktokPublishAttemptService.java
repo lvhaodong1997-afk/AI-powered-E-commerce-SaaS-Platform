@@ -123,6 +123,32 @@ public class TkOpenTiktokPublishAttemptService {
                 .setPhase(terminal ? "CONFIRMED_TERMINAL" : "PUBLISH_ID_SAVED");
     }
 
+    /** Return a prepared but unsent attempt to the database when the upload lane is full. */
+    @Transactional(rollbackFor = Exception.class)
+    public void deferUnsent(TkOpenTiktokPublishDetailDO expected, TkOpenTiktokPublishAttemptDO attempt) {
+        TkOpenTiktokPublishDetailDO detail = lock(expected);
+        if (detail == null || !sameAttempt(detail, expected) || !"PROCESSING".equals(detail.getStatus())
+                || StrUtil.isNotBlank(detail.getPublishId())) return;
+        // Only an owned, definitely unsent attempt may give its slot back. Fence its old worker.
+        requireWrite(attempts.update(null, owned(attempt)
+                .in(TkOpenTiktokPublishAttemptDO::getPhase, "MATERIAL_PREPARATION", "READY_TO_INIT")
+                .set(TkOpenTiktokPublishAttemptDO::getOwnerToken, UUID.randomUUID().toString())
+                .set(TkOpenTiktokPublishAttemptDO::getHeartbeatTime, LocalDateTime.now())));
+        requireWrite(details.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
+                .set(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")
+                .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "LOCAL_PENDING")
+                .set(TkOpenTiktokPublishDetailDO::getFailReason, null)));
+        if (details.selectListByClientAndTaskId(detail.getClientId(), detail.getTaskId()).stream()
+                .noneMatch(item -> "PROCESSING".equals(item.getStatus()))) {
+            tasks.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
+                    .eq(TkOpenTiktokPublishTaskDO::getClientId, detail.getClientId())
+                    .eq(TkOpenTiktokPublishTaskDO::getTaskId, detail.getTaskId())
+                    .eq(TkOpenTiktokPublishTaskDO::getStatus, "PROCESSING")
+                    .set(TkOpenTiktokPublishTaskDO::getStatus, "PENDING"));
+        }
+    }
+
     /** Fences a dead worker before making definitely unsent work runnable again. */
     @Transactional(rollbackFor = Exception.class)
     public boolean recoverUnsent(TkOpenTiktokPublishDetailDO expected, LocalDateTime deadline) {

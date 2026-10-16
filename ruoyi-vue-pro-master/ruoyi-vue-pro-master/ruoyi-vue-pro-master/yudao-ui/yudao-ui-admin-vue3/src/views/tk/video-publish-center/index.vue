@@ -12,6 +12,54 @@
       </ContentWrap>
     </div>
 
+    <ContentWrap v-if="hasPermission(['tk:open-tiktok-publish:queue-query'])" v-loading="queueLoading">
+      <div class="section-head queue-head">
+        <div>
+          <h3>Open TikTok 发布队列（{{ queueSummary.date || '今天' }}）</h3>
+          <span class="sub-text">最近刷新：{{ formatTimestamp(queueSummary.refreshedAt) }}</span>
+        </div>
+        <div class="toolbar-actions">
+          <el-button size="small" @click="loadQueue"><Icon icon="ep:refresh" class="mr-5px" />刷新队列</el-button>
+          <el-button size="small" type="primary" plain @click="resumeQueue" v-hasPermi="['tk:open-tiktok-publish:queue-resume']">恢复待执行</el-button>
+          <el-button size="small" type="warning" plain @click="syncQueue" v-hasPermi="['tk:open-tiktok-publish:queue-sync']">同步状态</el-button>
+        </div>
+      </div>
+      <div class="queue-summary-grid">
+        <div v-for="item in queueCards" :key="item.label" class="queue-summary-card">
+          <span>{{ item.label }}</span>
+          <strong>{{ item.value }}</strong>
+        </div>
+      </div>
+      <el-alert v-if="queueSummary.staleCount" type="warning" :closable="false" class="queue-alert">
+        有 {{ queueSummary.staleCount }} 条发布明细超过租约时间未更新，请先同步状态；已产生 Publish ID 的明细不会被重新初始化。
+      </el-alert>
+      <el-table :data="queueDetails" size="small" stripe max-height="320">
+        <el-table-column label="任务 / 明细" min-width="180">
+          <template #default="scope">
+            <div class="main-title">{{ scope.row.taskTitle || scope.row.taskId }}</div>
+            <div class="sub-text">{{ scope.row.detailId }} · {{ scope.row.accountName || scope.row.clientId }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="阶段" width="150">
+          <template #default="scope"><el-tag :type="scope.row.stale ? 'warning' : 'info'">{{ scope.row.phase || scope.row.status }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="状态" width="140" prop="tiktokStatus" />
+        <el-table-column label="年龄" width="100">
+          <template #default="scope">{{ formatAge(scope.row.ageSeconds) }}</template>
+        </el-table-column>
+        <el-table-column label="最近心跳" width="170">
+          <template #default="scope">{{ formatTimestamp(scope.row.heartbeatTime || scope.row.lastSyncTime) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="190" fixed="right">
+          <template #default="scope">
+            <el-button v-if="scope.row.canRetry" link type="primary" @click="retryQueueDetail(scope.row)" v-hasPermi="['tk:open-tiktok-publish:queue-resume']">重试</el-button>
+            <el-button v-if="scope.row.canCancel" link type="danger" @click="cancelQueueTask(scope.row)" v-hasPermi="['tk:open-tiktok-publish:queue-cancel']">终止</el-button>
+            <span v-if="!scope.row.canRetry && !scope.row.canCancel" class="sub-text">自动跟踪</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </ContentWrap>
+
     <ContentWrap>
       <div class="toolbar">
         <el-tabs v-model="activeTab" @tab-change="handleTabChange">
@@ -645,6 +693,7 @@ import { TkGenerationApi } from '@/api/tk/generation'
 import type { TkGenerationTaskVO } from '@/api/tk/generation'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import {
+  TkOpenTiktokPublishQueueApi,
   TkTiktokAccountApi,
   TkTiktokAccountGroupApi,
   TkTiktokPublishApi,
@@ -654,6 +703,8 @@ import { uploadTikTokMediaInChunks } from '@/utils/tiktokMediaUpload'
 import { getTkUploadErrorMessage } from '@/utils/tkChunkUpload'
 import { formatDate, formatTimestamp } from '@/utils/formatTime'
 import type {
+  TkOpenTiktokPublishQueueDetailVO,
+  TkOpenTiktokPublishQueueSummaryVO,
   TkTiktokAccountGroupVO,
   TkTiktokAccountVO,
   TkTiktokPublishDetailVO,
@@ -668,6 +719,16 @@ const { tt, tText } = useTkI18n()
 const { currentRoute } = useRouter()
 const TIKTOK_AUTH_MESSAGE_TYPE = 'TK_TIKTOK_AUTH_RESULT'
 const MAX_TIKTOK_VIDEO_SIZE = 1_000_000_000
+
+const formatAge = (seconds?: number) => {
+  if (seconds === undefined || seconds === null || seconds <= 0) return '-'
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ${minutes % 60}m`
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`
+}
 
 type TkTiktokAuthMessage = {
   source?: string
@@ -689,6 +750,31 @@ const overviewCards = computed(() => [
   { label: tt('publish.overview.pendingPublishes'), value: overview.pendingPublishCount, icon: 'ep:video-play' },
   { label: tt('publish.overview.failedTasks'), value: overview.failedPublishCount, icon: 'ep:warning-filled' },
   { label: tt('publish.overview.tokenIssues'), value: overview.tokenAbnormalCount, icon: 'ep:circle-close-filled' }
+])
+
+const queueLoading = ref(false)
+const queueActionLoading = ref(false)
+const queueDetails = ref<TkOpenTiktokPublishQueueDetailVO[]>([])
+const queueSummary = reactive<TkOpenTiktokPublishQueueSummaryVO>({
+  date: '',
+  pendingCount: 0,
+  runningCount: 0,
+  uploadingCount: 0,
+  recoveryCount: 0,
+  staleCount: 0,
+  scheduledCount: 0,
+  oldestPendingSeconds: undefined,
+  refreshedAt: undefined,
+  attention: []
+})
+const queueCards = computed(() => [
+  { label: '待执行', value: queueSummary.pendingCount },
+  { label: '执行中', value: queueSummary.runningCount },
+  { label: '上传中', value: queueSummary.uploadingCount },
+  { label: '待核验', value: queueSummary.recoveryCount },
+  { label: '卡顿', value: queueSummary.staleCount },
+  { label: '定时等待', value: queueSummary.scheduledCount },
+  { label: '最老待执行', value: formatAge(queueSummary.oldestPendingSeconds) }
 ])
 
 const videoLoading = ref(false)
@@ -824,6 +910,71 @@ const getOverview = async () => {
   Object.assign(overview, data)
 }
 
+const loadQueue = async () => {
+  if (!hasPermission(['tk:open-tiktok-publish:queue-query'])) return
+  queueLoading.value = true
+  try {
+    const [summary, details] = await Promise.all([
+      TkOpenTiktokPublishQueueApi.getSummary(),
+      TkOpenTiktokPublishQueueApi.getDetails({ limit: 200 })
+    ])
+    Object.assign(queueSummary, summary)
+    queueDetails.value = details || []
+  } finally {
+    queueLoading.value = false
+  }
+}
+
+const resumeQueue = async () => {
+  if (queueActionLoading.value) return
+  queueActionLoading.value = true
+  try {
+    const count = await TkOpenTiktokPublishQueueApi.resume()
+    message.success(`已恢复 ${count || 0} 条待执行明细`)
+    await loadQueue()
+  } finally {
+    queueActionLoading.value = false
+  }
+}
+
+const syncQueue = async () => {
+  if (queueActionLoading.value) return
+  queueActionLoading.value = true
+  try {
+    const count = await TkOpenTiktokPublishQueueApi.sync()
+    message.success(`已同步 ${count || 0} 条卡顿明细`)
+    await loadQueue()
+  } finally {
+    queueActionLoading.value = false
+  }
+}
+
+const retryQueueDetail = async (row: TkOpenTiktokPublishQueueDetailVO) => {
+  if (!row.canRetry || queueActionLoading.value) return
+  await message.confirm(`确认重试明细「${row.detailId}」？仅尚未产生 Publish ID 的失败明细允许重新初始化。`, '重试确认')
+  queueActionLoading.value = true
+  try {
+    await TkOpenTiktokPublishQueueApi.retry(row.clientId, row.detailId)
+    message.success('重试已加入队列')
+    await loadQueue()
+  } finally {
+    queueActionLoading.value = false
+  }
+}
+
+const cancelQueueTask = async (row: TkOpenTiktokPublishQueueDetailVO) => {
+  if (!row.canCancel || queueActionLoading.value) return
+  await message.confirm(`确认终止任务「${row.taskTitle || row.taskId}」？仅尚未发起远程请求的任务可以终止。`, '终止确认')
+  queueActionLoading.value = true
+  try {
+    await TkOpenTiktokPublishQueueApi.cancel(row.clientId, row.taskId)
+    message.success('发布任务已终止')
+    await refreshAll()
+  } finally {
+    queueActionLoading.value = false
+  }
+}
+
 const getVideoList = async () => {
   videoLoading.value = true
   try {
@@ -881,6 +1032,7 @@ const getDetailList = async () => {
 
 const pollPublishStatus = async () => {
   await getOverview()
+  await loadQueue()
   if (activeTab.value === 'details') {
     await getDetailList()
   } else if (activeTab.value === 'tasks') {
@@ -911,7 +1063,7 @@ const handleTabChange = () => {
 }
 
 const refreshAll = async () => {
-  await getOverview()
+  await Promise.all([getOverview(), loadQueue()])
   handleTabChange()
 }
 
@@ -1418,7 +1570,7 @@ const loadRouteGeneration = async () => {
 
 onMounted(async () => {
   window.addEventListener('message', handleRedirectAuthResult)
-  await Promise.all([getOverview(), getVideoList(), getAccountList(), getGroupList()])
+  await Promise.all([getOverview(), loadQueue(), getVideoList(), getAccountList(), getGroupList()])
   startPublishStatusPolling()
   await loadRouteGeneration()
 })
@@ -1541,6 +1693,43 @@ onBeforeUnmount(() => {
   font-size: 15px;
 }
 
+.queue-head {
+  align-items: flex-start;
+}
+
+.queue-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.queue-summary-card {
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background: var(--el-fill-color-lighter);
+}
+
+.queue-summary-card span {
+  display: block;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.queue-summary-card strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--el-text-color-primary);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.queue-alert {
+  margin-bottom: 12px;
+}
+
 .qr-box {
   display: flex;
   flex-direction: column;
@@ -1570,6 +1759,10 @@ onBeforeUnmount(() => {
   .toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .queue-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 </style>

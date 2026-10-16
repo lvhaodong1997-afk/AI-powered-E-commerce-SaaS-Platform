@@ -13,6 +13,44 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class TkOpenTiktokPublishAttemptServiceTest {
+    @Test void fullUploadLaneCanReturnOnlyOwnedUnsentWork() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailDO detail = detail("PROCESSING", null);
+        when(tasks.selectByClientAndTaskIdForUpdate("c", "t")).thenReturn(task());
+        when(details.selectOne(any())).thenReturn(detail);
+        when(attempts.update(any(), any())).thenReturn(1);
+        when(details.update(any(), any())).thenReturn(1);
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts, details, tasks);
+
+        service.deferUnsent(detail, attempt("READY_TO_INIT", "owner"));
+
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper> update =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(attempts).update(isNull(), update.capture());
+        String sql = update.getValue().getSqlSegment();
+        assertTrue(sql.contains("owner_token"));
+        assertTrue(sql.contains("phase IN"));
+        assertTrue(update.getValue().getParamNameValuePairs().containsValue("READY_TO_INIT"));
+        assertFalse(update.getValue().getParamNameValuePairs().containsValue("INIT_SENT"));
+        verify(details).update(isNull(), any());
+        verify(tasks).update(isNull(), any());
+    }
+
+    @Test void fencedWorkerCannotReturnDetailToPending() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailDO detail = detail("PROCESSING", null);
+        when(tasks.selectByClientAndTaskIdForUpdate("c", "t")).thenReturn(task());
+        when(details.selectOne(any())).thenReturn(detail);
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts, details, tasks);
+
+        assertThrows(IllegalStateException.class, () -> service.deferUnsent(detail, attempt("READY_TO_INIT", "old")));
+        verify(details, never()).update(any(), any());
+    }
+
     @org.junit.jupiter.api.BeforeEach
     void initMybatisLambdaMetadata() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),

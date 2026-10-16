@@ -10,9 +10,33 @@ import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTiktokPublishDetailDO> {
+    @InterceptorIgnore(tenantLine = "true", dataPermission = "true")
+    @Select("SELECT "
+            + "COALESCE(SUM(CASE WHEN d.status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pending_count, "
+            + "COALESCE(SUM(CASE WHEN d.status = 'PROCESSING' "
+            + "AND (d.tiktok_status IS NULL OR d.tiktok_status <> 'RECOVERY_REQUIRED') THEN 1 ELSE 0 END), 0) AS running_count, "
+            + "COALESCE(SUM(CASE WHEN d.status = 'PROCESSING' AND d.tiktok_status = 'RECOVERY_REQUIRED' THEN 1 ELSE 0 END), 0) AS recovery_count, "
+            + "COALESCE(SUM(CASE WHEN d.status = 'SCHEDULED' THEN 1 ELSE 0 END), 0) AS scheduled_count, "
+            + "COALESCE(SUM(CASE WHEN a.phase = 'UPLOADING' OR d.tiktok_status = 'UPLOAD_PENDING' THEN 1 ELSE 0 END), 0) AS uploading_count, "
+            + "COALESCE(SUM(CASE WHEN (d.status = 'PROCESSING' AND COALESCE(a.heartbeat_time, d.last_sync_time, d.update_time) < #{processingDeadline}) "
+            + "OR (d.status = 'PENDING' AND COALESCE(a.heartbeat_time, d.last_sync_time, d.update_time) < #{pendingDeadline}) "
+            + "THEN 1 ELSE 0 END), 0) AS stale_count, "
+            + "COALESCE(MAX(CASE WHEN d.status = 'PENDING' "
+            + "THEN TIMESTAMPDIFF(SECOND, d.create_time, #{now}) ELSE 0 END), 0) AS oldest_pending_seconds "
+            + "FROM tk_open_tiktok_publish_detail d "
+            + "LEFT JOIN tk_open_tiktok_publish_attempt a "
+            + "ON a.detail_id = d.detail_id AND a.attempt_no = COALESCE(d.retry_count, 0) AND a.deleted = 0 "
+            + "WHERE d.deleted = 0 AND d.create_time >= #{start} AND d.create_time < #{end}")
+    Map<String, Object> selectQueueSummary(@Param("start") LocalDateTime start,
+                                            @Param("end") LocalDateTime end,
+                                            @Param("now") LocalDateTime now,
+                                            @Param("processingDeadline") LocalDateTime processingDeadline,
+                                            @Param("pendingDeadline") LocalDateTime pendingDeadline);
+
     default TkOpenTiktokPublishDetailDO selectByClientAndDetailId(String clientId, String detailId) {
         return selectOne(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                 .eq(TkOpenTiktokPublishDetailDO::getClientId, clientId)

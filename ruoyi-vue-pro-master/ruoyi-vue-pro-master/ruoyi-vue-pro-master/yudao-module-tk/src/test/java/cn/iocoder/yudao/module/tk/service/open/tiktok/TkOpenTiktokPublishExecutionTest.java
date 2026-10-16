@@ -4,6 +4,7 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishDeta
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishAttemptDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokMediaDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokConnectionDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishTaskDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.*;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher;
 import cn.iocoder.yudao.module.tk.service.open.platform.TkOpenPublishPlatformAdapter;
@@ -36,6 +37,7 @@ class TkOpenTiktokPublishExecutionTest {
     private final TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
     private final TkOpenTiktokPublishAttemptService attempts = mock(TkOpenTiktokPublishAttemptService.class);
     private final CapturingExecutor executor = new CapturingExecutor();
+    private final CapturingExecutor uploads = new CapturingExecutor();
     private final TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(
             mock(TkOpenTiktokPublishTaskMapper.class), details, mock(TkOpenTiktokMediaMapper.class),
             mock(TkOpenTiktokConnectionMapper.class), mock(TkOpenApiIdempotencyMapper.class),
@@ -43,6 +45,7 @@ class TkOpenTiktokPublishExecutionTest {
 
     TkOpenTiktokPublishExecutionTest() {
         ReflectionTestUtils.setField(service, "executor", executor);
+        ReflectionTestUtils.setField(service, "uploadExecutor", uploads);
         ReflectionTestUtils.setField(service, "attemptService", attempts);
     }
 
@@ -60,8 +63,8 @@ class TkOpenTiktokPublishExecutionTest {
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail);
 
         verify(attempts, never()).claimUpload(any(), any());
-        assertEquals(1, executor.commands.size());
-        executor.runNext();
+        assertEquals(1, uploads.commands.size());
+        uploads.runNext();
         verify(attempts).claimUpload(eq(detail), any());
     }
 
@@ -71,13 +74,15 @@ class TkOpenTiktokPublishExecutionTest {
 
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail);
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail);
-        assertEquals(1, executor.commands.size());
-        executor.runNext();
+        assertEquals(1, uploads.commands.size());
+        uploads.runNext();
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail);
-        assertEquals(1, executor.commands.size());
+        assertEquals(1, uploads.commands.size());
     }
 
-    @Test void sameTaskIsQueuedOnceAndSlotIsReleasedAfterExecution() {
+    @Test void sameDetailIsAdmittedOnceAndSlotIsReleasedAfterExecution() {
+        when(details.selectListByClientAndTaskId("c", "t"))
+                .thenReturn(Collections.singletonList(detail().setStatus("PENDING").setPublishId(null)));
         ReflectionTestUtils.invokeMethod(service, "submitTask", "c", "t");
         ReflectionTestUtils.invokeMethod(service, "submitTask", "c", "t");
         assertEquals(1, executor.commands.size());
@@ -87,6 +92,8 @@ class TkOpenTiktokPublishExecutionTest {
     }
 
     @Test void rejectedTaskCanBeSubmittedByNextDurableScan() {
+        when(details.selectListByClientAndTaskId("c", "t"))
+                .thenReturn(Collections.singletonList(detail().setStatus("PENDING").setPublishId(null)));
         executor.reject = true;
         ReflectionTestUtils.invokeMethod(service, "submitTask", "c", "t");
         executor.reject = false;
@@ -95,19 +102,19 @@ class TkOpenTiktokPublishExecutionTest {
     }
 
     @Test void rejectedRecoveryDoesNotClaimLeaseAndCanBeQueuedAgain() {
-        executor.reject = true;
+        uploads.reject = true;
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail());
-        executor.reject = false;
+        uploads.reject = false;
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail());
         verify(attempts, never()).claimUpload(any(), any());
-        assertEquals(1, executor.commands.size());
+        assertEquals(1, uploads.commands.size());
     }
 
     @Test void changedRetryIsNotRecoveredUsingQueuedSnapshot() {
         TkOpenTiktokPublishDetailDO old = detail();
         when(details.selectByClientAndDetailId("c", "d")).thenReturn(detail().setRetryCount(1));
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", old);
-        executor.runNext();
+        uploads.runNext();
         verify(attempts, never()).claimUpload(any(), any());
     }
 
@@ -174,7 +181,7 @@ class TkOpenTiktokPublishExecutionTest {
         verify(attempts, never()).error(any(), anyString());
     }
 
-    @Test void defaultExecutorHasTwoWorkersAndBoundedQueue() {
+    @Test void defaultExecutorHasTwoWorkersAndNoWaitingQueue() {
         TkOpenTiktokPublishService defaults = new TkOpenTiktokPublishService(
                 null, null, null, null, null, null, null, null, null);
         try {
@@ -182,11 +189,94 @@ class TkOpenTiktokPublishExecutionTest {
             assertTrue(workers instanceof ThreadPoolExecutor);
             ThreadPoolExecutor pool = (ThreadPoolExecutor) workers;
             assertEquals(2, pool.getMaximumPoolSize());
-            assertEquals(32, pool.getQueue().remainingCapacity());
+            assertEquals(0, pool.getQueue().remainingCapacity());
             assertTrue(pool.getRejectedExecutionHandler() instanceof ThreadPoolExecutor.AbortPolicy);
         } finally {
             defaults.destroy();
         }
+    }
+
+    @Test void uploadExecutorIsSeparateAndHasNoWaitingQueue() {
+        TkOpenTiktokPublishService defaults = new TkOpenTiktokPublishService(
+                null, null, null, null, null, null, null, null, null);
+        try {
+            Object uploadWorkers = ReflectionTestUtils.getField(defaults, "uploadExecutor");
+            assertTrue(uploadWorkers instanceof ThreadPoolExecutor);
+            ThreadPoolExecutor pool = (ThreadPoolExecutor) uploadWorkers;
+            assertEquals(2, pool.getMaximumPoolSize());
+            assertEquals(0, pool.getQueue().remainingCapacity());
+            assertNotSame(ReflectionTestUtils.getField(defaults, "executor"), uploadWorkers);
+        } finally {
+            defaults.destroy();
+        }
+    }
+
+    @Test void preparationHandsOffBeforeRemoteInitAndDoesNotOwnTheUploadSlot(@TempDir Path directory) throws Exception {
+        TkOpenTiktokPublishDetailDO detail = detail().setStatus("PENDING").setPublishId(null).setConnectionId("conn");
+        TkOpenPublishPlatformAdapter adapter = prepareFixture(detail, directory);
+
+        assertEquals(true, ReflectionTestUtils.invokeMethod(service, "submitDetail", detail));
+        executor.runNext();
+
+        assertTrue(executor.commands.isEmpty());
+        assertEquals(1, uploads.commands.size());
+        verify(attempts).claim(detail);
+        verify(attempts).ready(any(), eq("FILE_UPLOAD"), eq(3L), anyString());
+        verify(attempts, never()).beginRemoteInit(any(), any());
+        verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
+        assertTrue(Files.exists(directory.resolve("video.mp4")));
+    }
+
+    @Test void fullUploadLaneReturnsPreparedWorkWithoutInitializingOrFailing(@TempDir Path directory) throws Exception {
+        TkOpenTiktokPublishDetailDO detail = detail().setStatus("PENDING").setPublishId(null).setConnectionId("conn");
+        TkOpenPublishPlatformAdapter adapter = prepareFixture(detail, directory);
+        uploads.reject = true;
+        ReflectionTestUtils.invokeMethod(service, "submitDetail", detail);
+        executor.runNext();
+
+        verify(attempts).deferUnsent(eq(detail), any());
+        verify(attempts, never()).beginRemoteInit(any(), any());
+        verify(attempts, never()).error(any(), anyString());
+        verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
+        assertTrue(executor.commands.isEmpty());
+    }
+
+    @Test void fullPreparationLaneLeavesPendingDetailsUnclaimed() {
+        TkOpenTiktokPublishDetailDO detail = detail().setStatus("PENDING").setPublishId(null);
+        when(details.selectStalePending(any(), eq(100))).thenReturn(Collections.singletonList(detail));
+        executor.reject = true;
+        assertEquals(0, service.resumeStalePending(100));
+        verifyNoInteractions(attempts);
+        assertEquals("PENDING", detail.getStatus());
+        executor.reject = false;
+        assertEquals(1, service.resumeStalePending(100));
+        verifyNoInteractions(attempts);
+    }
+
+    private TkOpenPublishPlatformAdapter prepareFixture(TkOpenTiktokPublishDetailDO detail, Path directory) throws Exception {
+        Path file = directory.resolve("video.mp4");
+        Files.write(file, new byte[]{1, 2, 3});
+        TkOpenTiktokPublishTaskMapper tasks = (TkOpenTiktokPublishTaskMapper) ReflectionTestUtils.getField(service, "taskMapper");
+        TkOpenTiktokMediaMapper media = (TkOpenTiktokMediaMapper) ReflectionTestUtils.getField(service, "mediaMapper");
+        TkOpenTiktokConnectionMapper connections = (TkOpenTiktokConnectionMapper) ReflectionTestUtils.getField(service, "connectionMapper");
+        TkOpenApiSecretCipher cipher = (TkOpenApiSecretCipher) ReflectionTestUtils.getField(service, "secretCipher");
+        TkOpenPublishPlatformRegistry registry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        ReflectionTestUtils.setField(service, "platformRegistry", registry);
+        when(registry.getRequired("TIKTOK")).thenReturn(adapter);
+        when(tasks.selectByClientAndTaskId("c", "t")).thenReturn(TkOpenTiktokPublishTaskDO.builder()
+                .taskId("t").mediaId("media").postMode("DIRECT_POST").privacyLevel("SELF_ONLY").build());
+        when(media.selectByClientAndMediaId("c", "media")).thenReturn(TkOpenTiktokMediaDO.builder()
+                .scheduledLocalPath(file.toString()).contentType("video/mp4").build());
+        when(connections.selectByClientAndConnectionId("c", "conn")).thenReturn(TkOpenTiktokConnectionDO.builder()
+                .authStatus("AUTHORIZED").accessTokenCipher("cipher").accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build());
+        when(cipher.decrypt("cipher")).thenReturn("token");
+        TkOpenPublishPlatformAdapter.CreatorCapabilities creator = new TkOpenPublishPlatformAdapter.CreatorCapabilities(
+                true, null, Collections.singletonList("SELF_ONLY"), false, false, false, null);
+        when(adapter.queryCreatorInfo("token")).thenReturn(creator);
+        when(attempts.claim(detail)).thenReturn(TkOpenTiktokPublishAttemptDO.builder().id(1L)
+                .ownerToken("owner").phase("MATERIAL_PREPARATION").build());
+        return adapter;
     }
 
     @Test void immediateRemoteMediaUsesDurableCopyAndRecoveryReusesIt(@TempDir Path directory) throws Exception {

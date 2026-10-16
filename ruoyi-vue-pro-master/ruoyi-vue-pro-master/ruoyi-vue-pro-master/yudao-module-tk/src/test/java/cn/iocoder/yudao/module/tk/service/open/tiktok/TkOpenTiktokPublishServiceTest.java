@@ -1341,6 +1341,10 @@ class TkOpenTiktokPublishServiceTest {
         ReflectionTestUtils.setField(service, "attemptService", mock(TkOpenTiktokPublishAttemptService.class));
         ReflectionTestUtils.setField(service, "terminalService", mock(TkOpenTiktokPublishTerminalService.class));
         ReflectionTestUtils.setField(service, "responseJournal", mock(TkOpenTiktokPublishResponseJournal.class));
+        java.util.concurrent.ExecutorService uploads = mock(java.util.concurrent.ExecutorService.class);
+        doAnswer(call -> { ((Runnable) call.getArgument(0)).run(); return null; })
+                .when(uploads).execute(any(Runnable.class));
+        ReflectionTestUtils.setField(service, "uploadExecutor", uploads);
     }
 
     private TkOpenTiktokPublishService newService() {

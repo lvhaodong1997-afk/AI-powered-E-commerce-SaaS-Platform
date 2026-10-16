@@ -2,7 +2,6 @@ package cn.iocoder.yudao.module.tk.service.open.tiktok;
 
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.http.HttpResponse;
 import cn.iocoder.yudao.module.tk.controller.open.tiktok.vo.TkOpenTiktokMediaVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokMediaDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokMediaMapper;
@@ -11,6 +10,7 @@ import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiContext;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiException;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiIds;
 import cn.iocoder.yudao.module.tk.service.reference.TkSafeRemoteUrlValidator;
+import cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokMediaTransfer;
 import cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssPostPolicySigner;
@@ -521,14 +521,7 @@ public class TkOpenTiktokMediaService {
             return;
         }
         URI remoteUrl = validateRemoteVideoUrl(media.getFileUrl());
-        try (HttpResponse response = cn.hutool.http.HttpRequest.get(remoteUrl.toString()).timeout(600000).execute()) {
-            if (!response.isOk()) throw new IllegalStateException("cannot download media, HTTP " + response.getStatus());
-            try (InputStream input = response.bodyStream(); OutputStream output = Files.newOutputStream(target)) {
-                byte[] buffer = new byte[1024 * 1024];
-                int read;
-                while ((read = input.read(buffer)) != -1) if (read > 0) output.write(buffer, 0, read);
-            }
-        }
+        TkTiktokMediaTransfer.download(remoteUrl.toString(), target, maxFileSize());
     }
 
     private String safeSegment(String value) {
