@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_connection` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tk_open_connection_id` (`connection_id`),
   UNIQUE KEY `uk_tk_open_connection_external` (`client_id`, `external_account_id`),
-  KEY `idx_tk_open_connection_open_id` (`client_id`, `open_id`)
+  KEY `idx_tk_open_connection_open_id` (`client_id`, `open_id`),
+  KEY `idx_tk_open_connection_token_refresh` (`auth_status`, `deleted`, `access_token_expire_time`, `refresh_token_expire_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `tk_open_tiktok_media` (

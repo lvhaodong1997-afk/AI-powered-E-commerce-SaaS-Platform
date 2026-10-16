@@ -453,9 +453,9 @@ class TkOpenTiktokPublishServiceTest {
         when(adapter.queryVideoMetrics("access-token", "public_metrics"))
                 .thenReturn(new TkOpenPublishPlatformAdapter.VideoMetricsResult(true, "public_metrics",
                         "https://www.tiktok.com/@demo/video/public_metrics", 123L, 45L, 6L, 7L, null, null));
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
-                platformRegistry, null, secretCipher, null);
+                platformRegistry, null, secretCipher, null));
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "metrics"), "req-metrics");
 
         Object response = method.invoke(service, "task_metrics");
@@ -504,9 +504,9 @@ class TkOpenTiktokPublishServiceTest {
         when(apiClient.queryVideoShareUrl(eq("access-token"), anyList())).thenReturn(
                 new TkTiktokApiClient.VideoQueryResult(true, null, null, null, null,
                         Arrays.asList(video("post-1", 101L), video("post-2", 202L))));
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
-                registry, null, cipher, null);
+                registry, null, cipher, null));
         TkOpenApiContext.set(new TkOpenApiPrincipal("client-b", "B", "metrics"), "req-batch");
 
         Object response = TkOpenTiktokPublishService.class.getMethod("getMetricsBatch", List.class)
@@ -565,9 +565,9 @@ class TkOpenTiktokPublishServiceTest {
                 .thenReturn(new TkOpenPublishPlatformAdapter.PublishStatusResult(
                         true, "PUBLISH_COMPLETE", null, null, null));
 
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
-                platformRegistry, null, secretCipher, null);
+                platformRegistry, null, secretCipher, null));
         wireExecutionServices(service);
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "metrics"), "req-public-pending");
 
@@ -605,15 +605,17 @@ class TkOpenTiktokPublishServiceTest {
         when(detailMapper.selectByClientAndDetailId("client_b", "detail_public_reauth")).thenReturn(detail);
         when(connectionMapper.selectByClientAndConnectionId("client_b", "connection_public_reauth"))
                 .thenReturn(connection);
+        connection.setRefreshTokenExpireTime(LocalDateTime.now().plusDays(30));
+        when(connectionMapper.selectById(52L)).thenReturn(connection);
         when(secretCipher.decrypt("refresh-cipher")).thenReturn("refresh-token");
         when(platformRegistry.getRequired("TIKTOK")).thenReturn(adapter);
         when(adapter.refreshAccessToken("refresh-token"))
                 .thenReturn(new TkOpenPublishPlatformAdapter.OAuthTokenResult(
                         false, null, null, null, null, null, null, "invalid_grant", "refresh token expired"));
 
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
-                platformRegistry, null, secretCipher, null);
+                platformRegistry, null, secretCipher, null));
         wireExecutionServices(service);
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "metrics"), "req-public-reauth");
 
@@ -650,25 +652,26 @@ class TkOpenTiktokPublishServiceTest {
                 .thenReturn(Collections.singletonList(detail));
         when(connectionMapper.selectByClientAndConnectionId("client_b", "connection_metrics_reauth"))
                 .thenReturn(connection);
+        connection.setRefreshTokenExpireTime(LocalDateTime.now().plusDays(30));
+        when(connectionMapper.selectById(42L)).thenReturn(connection);
         when(secretCipher.decrypt("refresh-cipher")).thenReturn("refresh-token");
         when(platformRegistry.getRequired("TIKTOK")).thenReturn(adapter);
         when(adapter.refreshAccessToken("refresh-token"))
                 .thenReturn(new TkOpenPublishPlatformAdapter.OAuthTokenResult(
                         false, null, null, null, null, null, null, "invalid_grant", "refresh token expired"));
 
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
-                platformRegistry, null, secretCipher, null);
+                platformRegistry, null, secretCipher, null));
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "metrics"), "req-metrics-reauth");
 
         TkOpenTiktokPublishVO.MetricsResp response = service.getMetrics("task_metrics_reauth");
 
         assertEquals("REAUTH_REQUIRED", response.getMetricsStatus());
         assertEquals("refresh token expired", response.getMetricsFailReason());
-        ArgumentCaptor<TkOpenTiktokConnectionDO> connectionCaptor = ArgumentCaptor.forClass(TkOpenTiktokConnectionDO.class);
-        verify(connectionMapper).updateById(connectionCaptor.capture());
-        assertEquals("REAUTH_REQUIRED", connectionCaptor.getValue().getAuthStatus());
-        assertEquals("INVALID", connectionCaptor.getValue().getTokenStatus());
+        verify(connectionMapper).update(org.mockito.ArgumentMatchers.isNull(), any());
+        assertEquals("REAUTH_REQUIRED", connection.getAuthStatus());
+        assertEquals("INVALID", connection.getTokenStatus());
         verify(adapter, never()).queryVideoMetrics(anyString(), anyString());
     }
 
@@ -696,9 +699,9 @@ class TkOpenTiktokPublishServiceTest {
         when(connectionMapper.selectListByClientAndIds(eq("client_b"), any())).thenReturn(Collections.singletonList(
                 TkOpenTiktokConnectionDO.builder().connectionId("conn_1").clientId("client_b")
                         .displayName("account").authStatus("AUTHORIZED").build()));
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mediaMapper, connectionMapper, idempotencyMapper, null, null,
-                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null);
+                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null));
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-5");
         TransactionSynchronizationManager.setActualTransactionActive(true);
         TransactionSynchronizationManager.initSynchronization();
@@ -736,9 +739,9 @@ class TkOpenTiktokPublishServiceTest {
                         .displayName("account").authStatus("AUTHORIZED").build()));
         when(taskMapper.selectByClientAndTaskIdForUpdate("client_b", "task_winner")).thenReturn(
                 TkOpenTiktokPublishTaskDO.builder().taskId("task_winner").status("PENDING").build());
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mediaMapper, connectionMapper, idempotencyMapper, null, null,
-                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null);
+                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null));
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-race");
 
         TkOpenTiktokPublishVO.TaskResp response = service.create(request(), "order-race");
@@ -754,10 +757,10 @@ class TkOpenTiktokPublishServiceTest {
         when(detailMapper.selectByClientAndDetailId("client_b", "detail_1")).thenReturn(
                 TkOpenTiktokPublishDetailDO.builder().detailId("detail_1").clientId("client_b")
                         .status("PROCESSING").build());
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(
                 mock(TkOpenTiktokPublishTaskMapper.class), detailMapper, mock(TkOpenTiktokMediaMapper.class),
                 mock(TkOpenTiktokConnectionMapper.class), mock(TkOpenApiIdempotencyMapper.class), null, null,
-                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null);
+                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null));
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-6");
 
         TkOpenApiException error = assertThrows(TkOpenApiException.class,
@@ -773,10 +776,10 @@ class TkOpenTiktokPublishServiceTest {
         TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
         when(detailMapper.selectListByClientAndTaskId("client_b", "task_1"))
                 .thenThrow(new DataAccessResourceFailureException("database unavailable"));
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), mock(TkOpenTiktokConnectionMapper.class),
                 mock(TkOpenApiIdempotencyMapper.class), null, null,
-                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null);
+                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null));
 
         wireExecutionServices(service);
         try {
@@ -795,10 +798,10 @@ class TkOpenTiktokPublishServiceTest {
         TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
         when(detailMapper.selectStalePending(any(java.time.LocalDateTime.class), eq(100)))
                 .thenReturn(Collections.emptyList());
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(
                 mock(TkOpenTiktokPublishTaskMapper.class), detailMapper, mock(TkOpenTiktokMediaMapper.class),
                 mock(TkOpenTiktokConnectionMapper.class), mock(TkOpenApiIdempotencyMapper.class), null, null,
-                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null);
+                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null));
 
         try {
             assertEquals(0, service.resumeStalePending(100));
@@ -825,10 +828,10 @@ class TkOpenTiktokPublishServiceTest {
                 TkOpenTiktokPublishTaskDO.builder().taskId("task_1").clientId("client_b").build());
         when(detailMapper.selectListByClientAndTaskId("client_b", "task_1"))
                 .thenReturn(Collections.singletonList(detail));
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), mock(TkOpenTiktokConnectionMapper.class),
                 mock(TkOpenApiIdempotencyMapper.class), null, callbackService,
-                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null);
+                mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null));
 
         try {
             wireExecutionServices(service);
@@ -882,9 +885,9 @@ class TkOpenTiktokPublishServiceTest {
         when(adapter.listRecentVideos("access-token", null, 20)).thenReturn(
                 new TkOpenPublishPlatformAdapter.RecentVideosResult(true,
                         Collections.singletonList(video), null, false, null, null));
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
-                registry, callbackService, cipher, null);
+                registry, callbackService, cipher, null));
 
         try {
             wireExecutionServices(service);
@@ -927,9 +930,9 @@ class TkOpenTiktokPublishServiceTest {
         when(adapter.listRecentVideos("access-token", null, 20)).thenReturn(
                 new TkOpenPublishPlatformAdapter.RecentVideosResult(true, Collections.emptyList(), null,
                         false, null, null));
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
-                registry, callbackService, cipher, null);
+                registry, callbackService, cipher, null));
 
         try {
             wireExecutionServices(service);
@@ -972,9 +975,9 @@ class TkOpenTiktokPublishServiceTest {
         when(adapter.listRecentVideos("access-token", null, 20)).thenReturn(
                 new TkOpenPublishPlatformAdapter.RecentVideosResult(true, Collections.emptyList(), null,
                         false, null, null));
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
-                registry, callbackService, cipher, null);
+                registry, callbackService, cipher, null));
 
         try {
             wireExecutionServices(service);
@@ -1024,10 +1027,10 @@ class TkOpenTiktokPublishServiceTest {
         when(detailMapper.selectListByClientAndTaskId("client_b", "task_terminal"))
                 .thenReturn(Collections.singletonList(detail));
         when(taskMapper.selectByClientAndTaskId("client_b", "task_terminal")).thenReturn(task);
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), mock(TkOpenTiktokConnectionMapper.class),
                 mock(TkOpenApiIdempotencyMapper.class), null, callbackService,
-                mock(TkOpenApiSecretCipher.class), null);
+                mock(TkOpenApiSecretCipher.class), null));
 
         try {
             wireExecutionServices(service);
@@ -1142,9 +1145,9 @@ class TkOpenTiktokPublishServiceTest {
                     .thenThrow(new IllegalStateException("network request timed out"));
         }
 
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(taskMapper, detailMapper,
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mediaMapper, connectionMapper, mock(TkOpenApiIdempotencyMapper.class), platformRegistry,
-                callbackService, secretCipher, mock(cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService.class));
+                callbackService, secretCipher, mock(cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService.class)));
 
         wireExecutionServices(service);
         TkOpenTiktokPublishAttemptService attempts = (TkOpenTiktokPublishAttemptService)
@@ -1277,10 +1280,10 @@ class TkOpenTiktokPublishServiceTest {
                     new TkOpenPublishPlatformAdapter.PublishStatusResult(true, platformStatus,
                             null, null, Collections.emptyList(), null));
         }
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(
                 mock(TkOpenTiktokPublishTaskMapper.class), details, mock(TkOpenTiktokMediaMapper.class),
                 connections, mock(TkOpenApiIdempotencyMapper.class), registry,
-                mock(TkOpenApiCallbackService.class), cipher, null);
+                mock(TkOpenApiCallbackService.class), cipher, null));
         wireExecutionServices(service);
         TkOpenTiktokPublishTerminalService terminal = (TkOpenTiktokPublishTerminalService)
                 ReflectionTestUtils.getField(service, "terminalService");
@@ -1313,10 +1316,10 @@ class TkOpenTiktokPublishServiceTest {
                 .detailId("d").clientId("c").taskId("t").status("PROCESSING")
                 .tiktokStatus("LOCAL_PROCESSING").lastSyncTime(LocalDateTime.now().minusHours(1)).build();
         when(details.selectStaleInitializing(any(), eq(100))).thenReturn(Collections.singletonList(detail));
-        TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(
+        TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(
                 mock(TkOpenTiktokPublishTaskMapper.class), details, mock(TkOpenTiktokMediaMapper.class),
                 mock(TkOpenTiktokConnectionMapper.class), mock(TkOpenApiIdempotencyMapper.class),
-                null, null, mock(TkOpenApiSecretCipher.class), null);
+                null, null, mock(TkOpenApiSecretCipher.class), null));
         wireExecutionServices(service);
         TkOpenTiktokPublishAttemptService attempts = (TkOpenTiktokPublishAttemptService)
                 ReflectionTestUtils.getField(service, "attemptService");
@@ -1353,9 +1356,9 @@ class TkOpenTiktokPublishServiceTest {
 
     private TkOpenTiktokPublishService newService(TkOpenTiktokPublishTaskMapper taskMapper,
                                                    TkOpenApiIdempotencyMapper idempotencyMapper) {
-        return new TkOpenTiktokPublishService(taskMapper, mock(TkOpenTiktokPublishDetailMapper.class),
+        return TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, mock(TkOpenTiktokPublishDetailMapper.class),
                 mock(TkOpenTiktokMediaMapper.class), mock(TkOpenTiktokConnectionMapper.class), idempotencyMapper,
-                null, null, mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null);
+                null, null, mock(cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher.class), null));
     }
 
     private TkOpenTiktokPublishService newQuickService(TkOpenTiktokConnectionMapper connectionMapper,
@@ -1372,9 +1375,9 @@ class TkOpenTiktokPublishServiceTest {
                                                        TkOpenTiktokConnectionMapper connectionMapper,
                                                        TkOpenApiIdempotencyMapper idempotencyMapper,
                                                        TkOpenTiktokMediaService mediaService) {
-        return new TkOpenTiktokPublishService(taskMapper, detailMapper, mediaMapper, connectionMapper,
+        return TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper, mediaMapper, connectionMapper,
                 idempotencyMapper, mock(TkOpenPublishPlatformRegistry.class), null,
-                mock(TkOpenApiSecretCipher.class), null, mediaService);
+                mock(TkOpenApiSecretCipher.class), null, mediaService));
     }
 
     static TkOpenTiktokPublishVO.TaskCreateReq request() {

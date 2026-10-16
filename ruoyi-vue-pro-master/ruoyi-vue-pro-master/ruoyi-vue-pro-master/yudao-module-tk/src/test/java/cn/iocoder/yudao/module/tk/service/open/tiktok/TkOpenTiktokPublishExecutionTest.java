@@ -38,10 +38,10 @@ class TkOpenTiktokPublishExecutionTest {
     private final TkOpenTiktokPublishAttemptService attempts = mock(TkOpenTiktokPublishAttemptService.class);
     private final CapturingExecutor executor = new CapturingExecutor();
     private final CapturingExecutor uploads = new CapturingExecutor();
-    private final TkOpenTiktokPublishService service = new TkOpenTiktokPublishService(
+    private final TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(
             mock(TkOpenTiktokPublishTaskMapper.class), details, mock(TkOpenTiktokMediaMapper.class),
             mock(TkOpenTiktokConnectionMapper.class), mock(TkOpenApiIdempotencyMapper.class),
-            null, null, mock(TkOpenApiSecretCipher.class), null);
+            null, null, mock(TkOpenApiSecretCipher.class), null));
 
     TkOpenTiktokPublishExecutionTest() {
         ReflectionTestUtils.setField(service, "executor", executor);
@@ -182,8 +182,8 @@ class TkOpenTiktokPublishExecutionTest {
     }
 
     @Test void defaultExecutorHasTwoWorkersAndNoWaitingQueue() {
-        TkOpenTiktokPublishService defaults = new TkOpenTiktokPublishService(
-                null, null, null, null, null, null, null, null, null);
+        TkOpenTiktokPublishService defaults = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(
+                null, null, null, null, null, null, null, null, null));
         try {
             Object workers = ReflectionTestUtils.getField(defaults, "executor");
             assertTrue(workers instanceof ThreadPoolExecutor);
@@ -197,8 +197,8 @@ class TkOpenTiktokPublishExecutionTest {
     }
 
     @Test void uploadExecutorIsSeparateAndHasNoWaitingQueue() {
-        TkOpenTiktokPublishService defaults = new TkOpenTiktokPublishService(
-                null, null, null, null, null, null, null, null, null);
+        TkOpenTiktokPublishService defaults = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(
+                null, null, null, null, null, null, null, null, null));
         try {
             Object uploadWorkers = ReflectionTestUtils.getField(defaults, "uploadExecutor");
             assertTrue(uploadWorkers instanceof ThreadPoolExecutor);

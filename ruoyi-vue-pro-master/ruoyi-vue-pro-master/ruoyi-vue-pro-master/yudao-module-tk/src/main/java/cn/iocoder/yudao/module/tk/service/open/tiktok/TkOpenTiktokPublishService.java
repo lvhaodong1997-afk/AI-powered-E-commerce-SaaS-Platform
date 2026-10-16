@@ -75,6 +75,8 @@ public class TkOpenTiktokPublishService {
     private final TkLocalUploadStorageService localStorageService;
     private final TkOpenTiktokMediaService mediaService;
     private final TkOpenTiktokScheduleTimeService scheduleTimeService;
+    @Resource
+    private TkOpenTiktokConnectionTokenService connectionTokenService;
     private static final int DEFAULT_PUBLISH_WORKER_COUNT = 2;
     private final Set<String> inFlightDetailKeys = ConcurrentHashMap.newKeySet();
     private final Set<String> inFlightRecoveryKeys = ConcurrentHashMap.newKeySet();
@@ -1298,28 +1300,9 @@ public class TkOpenTiktokPublishService {
         detail.setStatus("PROCESSING").setTiktokStatus("RECOVERY_REQUIRED").setFailReason(reason).setLastSyncTime(LocalDateTime.now());
     }
 
-    private String validAccessToken(TkOpenTiktokConnectionDO connection, TkOpenPublishPlatformAdapter adapter, boolean force) {
-        if (!"AUTHORIZED".equals(connection.getAuthStatus())) throw new IllegalStateException("connection is not authorized");
-        if (!force && connection.getAccessTokenExpireTime() != null
-                && connection.getAccessTokenExpireTime().isAfter(LocalDateTime.now().plusMinutes(1)))
-            return secretCipher.decrypt(connection.getAccessTokenCipher());
-        String refresh = secretCipher.decrypt(connection.getRefreshTokenCipher());
-        TkOpenPublishPlatformAdapter.OAuthTokenResult result = adapter.refreshAccessToken(refresh);
-        if (!result.isSuccess()) {
-            String reason = StrUtil.blankToDefault(result.getFailReason(), "token refresh failed");
-            connection.setTokenStatus("INVALID").setAuthStatus("REAUTH_REQUIRED").setFailReason(reason);
-            connectionMapper.updateById(new TkOpenTiktokConnectionDO().setId(connection.getId())
-                    .setTokenStatus("INVALID").setAuthStatus("REAUTH_REQUIRED").setFailReason(reason));
-            throw new IllegalStateException(reason);
-        }
-        connection.setAccessTokenCipher(secretCipher.encrypt(result.getAccessToken()));
-        if (StrUtil.isNotBlank(result.getRefreshToken())) connection.setRefreshTokenCipher(secretCipher.encrypt(result.getRefreshToken()));
-        connection.setAccessTokenExpireTime(LocalDateTime.now().plusSeconds(defaultLong(result.getAccessTokenExpiresIn(), 86400L)));
-        connection.setRefreshTokenExpireTime(LocalDateTime.now().plusSeconds(defaultLong(result.getRefreshTokenExpiresIn(), 31536000L)));
-        connection.setTokenStatus("NORMAL");
-        connection.setFailReason(null);
-        connectionMapper.updateById(connection);
-        return result.getAccessToken();
+    private String validAccessToken(TkOpenTiktokConnectionDO connection,
+                                    TkOpenPublishPlatformAdapter adapter, boolean force) {
+        return connectionTokenService.getValidAccessToken(connection, adapter, force);
     }
 
     private Map<String, Object> buildPayload(TkOpenTiktokPublishTaskDO task, TkOpenTiktokMediaDO media,
@@ -1517,7 +1500,6 @@ public class TkOpenTiktokPublishService {
     private TkOpenPublishPlatformAdapter platform() { return platformRegistry.getRequired("TIKTOK"); }
     private boolean defaultBool(Boolean value, boolean fallback) { return value == null ? fallback : value; }
     private int defaultInt(Integer value) { return value == null ? 0 : value; }
-    private long defaultLong(Long value, long fallback) { return value == null || value <= 0 ? fallback : value; }
     private boolean isSuccess(String status) { return "PUBLISH_COMPLETE".equals(status); }
     private boolean isFailed(String status) { return "FAILED".equals(status); }
 

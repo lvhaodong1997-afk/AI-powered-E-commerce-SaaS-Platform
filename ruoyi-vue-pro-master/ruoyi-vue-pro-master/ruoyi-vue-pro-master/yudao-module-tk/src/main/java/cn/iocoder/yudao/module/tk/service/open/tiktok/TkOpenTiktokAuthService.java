@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -32,6 +33,8 @@ public class TkOpenTiktokAuthService {
     private final TkOpenApiSecretCipher secretCipher;
     private final TkOpenApiCallbackService callbackService;
     private final TkOpenTiktokVideoRegionService videoRegionService;
+    @Resource
+    private TkOpenTiktokConnectionTokenService connectionTokenService;
     private final String redirectUri;
     private final String launchBaseUrl;
 
@@ -182,7 +185,6 @@ public class TkOpenTiktokAuthService {
         return result;
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public TkOpenTiktokAuthVO.ConnectionResp refreshProfile(String connectionId) {
         String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
         TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(clientId, connectionId);
@@ -203,7 +205,11 @@ public class TkOpenTiktokAuthService {
         applyUserProfile(connection, user);
         connection.setStatsUpdatedAt(LocalDateTime.now());
         connection.setFailReason(null);
-        connectionMapper.updateById(connection);
+        TkOpenTiktokConnectionDO profile = new TkOpenTiktokConnectionDO().setId(connection.getId())
+                .setOpenId(connection.getOpenId()).setDisplayName(connection.getDisplayName())
+                .setUsername(connection.getUsername()).setStatsUpdatedAt(connection.getStatsUpdatedAt());
+        applyUserProfile(profile, user);
+        connectionMapper.updateById(profile);
         return toConnectionResp(connection);
     }
 
@@ -373,30 +379,7 @@ public class TkOpenTiktokAuthService {
 
     private String validAccessToken(TkOpenTiktokConnectionDO connection,
                                     TkOpenPublishPlatformAdapter adapter, boolean force) {
-        if (!"AUTHORIZED".equals(connection.getAuthStatus())) {
-            throw TkOpenApiException.badRequest("REAUTH_REQUIRED", "TikTok authorization is required");
-        }
-        if (!force && connection.getAccessTokenExpireTime() != null
-                && connection.getAccessTokenExpireTime().isAfter(LocalDateTime.now().plusMinutes(1))) {
-            return secretCipher.decrypt(connection.getAccessTokenCipher());
-        }
-        String refreshToken = secretCipher.decrypt(connection.getRefreshTokenCipher());
-        TkOpenPublishPlatformAdapter.OAuthTokenResult result = adapter.refreshAccessToken(refreshToken);
-        if (!result.isSuccess()) {
-            String reason = StrUtil.blankToDefault(result.getFailReason(), "TikTok token refresh failed");
-            connectionMapper.updateById(new TkOpenTiktokConnectionDO().setId(connection.getId())
-                    .setTokenStatus("INVALID").setAuthStatus("REAUTH_REQUIRED").setFailReason(reason));
-            throw TkOpenApiException.badRequest("REAUTH_REQUIRED", reason);
-        }
-        connection.setAccessTokenCipher(secretCipher.encrypt(result.getAccessToken()));
-        if (StrUtil.isNotBlank(result.getRefreshToken())) {
-            connection.setRefreshTokenCipher(secretCipher.encrypt(result.getRefreshToken()));
-        }
-        connection.setAccessTokenExpireTime(LocalDateTime.now().plusSeconds(defaultLong(result.getAccessTokenExpiresIn(), 86400L)));
-        connection.setRefreshTokenExpireTime(LocalDateTime.now().plusSeconds(defaultLong(result.getRefreshTokenExpiresIn(), 31536000L)));
-        connection.setTokenStatus("NORMAL").setFailReason(null);
-        connectionMapper.updateById(connection);
-        return result.getAccessToken();
+        return connectionTokenService.getValidAccessToken(connection, adapter, force);
     }
 
     private void applyUserProfile(TkOpenTiktokConnectionDO connection,

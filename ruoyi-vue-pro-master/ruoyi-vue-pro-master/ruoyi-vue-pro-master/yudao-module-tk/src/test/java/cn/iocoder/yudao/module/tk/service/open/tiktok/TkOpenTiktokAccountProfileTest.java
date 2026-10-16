@@ -87,10 +87,10 @@ class TkOpenTiktokAccountProfileTest {
         when(cipher.decrypt("access-cipher")).thenReturn("access-token");
         when(registry.getRequired("TIKTOK")).thenReturn(adapter);
         when(adapter.queryUserInfo("access-token")).thenReturn(user);
-        TkOpenTiktokAuthService service = new TkOpenTiktokAuthService(
+        TkOpenTiktokAuthService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokAuthService(
                 mock(TkOpenTiktokAuthSessionMapper.class), connectionMapper, registry, cipher,
                 mock(TkOpenApiCallbackService.class), mock(TkOpenTiktokVideoRegionService.class),
-                "https://callback", "https://launch");
+                "https://callback", "https://launch"));
         TkOpenApiContext.set(new TkOpenApiPrincipal("client-a", "A", "profile"), "req-profile");
 
         Object response = TkOpenTiktokAuthService.class.getMethod("refreshProfile", String.class)
@@ -99,7 +99,11 @@ class TkOpenTiktokAccountProfileTest {
         assertEquals("Creator bio", property(response, "bioDescription"));
         assertEquals(1200L, property(response, "followerCount"));
         assertEquals(true, property(response, "verified"));
-        verify(connectionMapper).updateById(connection);
+        org.mockito.ArgumentCaptor<TkOpenTiktokConnectionDO> saved = org.mockito.ArgumentCaptor.forClass(TkOpenTiktokConnectionDO.class);
+        verify(connectionMapper).updateById(saved.capture());
+        assertEquals(1200L, saved.getValue().getFollowerCount());
+        org.junit.jupiter.api.Assertions.assertNull(saved.getValue().getAccessTokenCipher());
+        org.junit.jupiter.api.Assertions.assertNull(saved.getValue().getRefreshTokenCipher());
     }
 
     private static Object property(Object bean, String name) throws Exception {

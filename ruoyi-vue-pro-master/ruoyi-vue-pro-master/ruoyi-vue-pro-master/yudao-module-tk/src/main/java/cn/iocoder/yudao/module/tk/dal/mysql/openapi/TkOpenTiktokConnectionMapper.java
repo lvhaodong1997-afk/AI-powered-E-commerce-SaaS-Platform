@@ -5,6 +5,7 @@ import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokConnectionDO;
 import org.apache.ibatis.annotations.Mapper;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -36,5 +37,20 @@ public interface TkOpenTiktokConnectionMapper extends BaseMapperX<TkOpenTiktokCo
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokConnectionDO>()
                 .eq(TkOpenTiktokConnectionDO::getClientId, clientId)
                 .inIfPresent(TkOpenTiktokConnectionDO::getConnectionId, connectionIds));
+    }
+
+    default List<TkOpenTiktokConnectionDO> selectExpiringAuthorizedConnections(LocalDateTime now,
+                  LocalDateTime expireBefore, long afterId, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 200));
+        return selectList(new LambdaQueryWrapperX<TkOpenTiktokConnectionDO>()
+                .eq(TkOpenTiktokConnectionDO::getAuthStatus, "AUTHORIZED")
+                .isNotNull(TkOpenTiktokConnectionDO::getRefreshTokenCipher)
+                .ne(TkOpenTiktokConnectionDO::getRefreshTokenCipher, "")
+                .gt(TkOpenTiktokConnectionDO::getId, afterId)
+                .gt(TkOpenTiktokConnectionDO::getRefreshTokenExpireTime, now)
+                .and(wrapper -> wrapper.isNull(TkOpenTiktokConnectionDO::getAccessTokenExpireTime)
+                        .or().le(TkOpenTiktokConnectionDO::getAccessTokenExpireTime, expireBefore))
+                .orderByAsc(TkOpenTiktokConnectionDO::getId)
+                .last("LIMIT " + safeLimit));
     }
 }
