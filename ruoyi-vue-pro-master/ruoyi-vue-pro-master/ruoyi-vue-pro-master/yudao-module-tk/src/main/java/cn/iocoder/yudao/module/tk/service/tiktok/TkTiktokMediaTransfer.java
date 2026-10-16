@@ -142,7 +142,9 @@ public final class TkTiktokMediaTransfer {
     }
 
     ApiResponse post(String url, String authorization, String contentType, String body) throws IOException {
-        Request.Builder builder = request(url).post(RequestBody.create(body, MediaType.parse(contentType)));
+        // TikTok OAuth rejects form Content-Type with an automatically appended charset.
+        Request.Builder builder = request(url).post(RequestBody.create(
+                body.getBytes(StandardCharsets.UTF_8), MediaType.parse(contentType)));
         if (authorization != null) builder.header("Authorization", authorization);
         return json(builder.build());
     }

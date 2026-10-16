@@ -192,6 +192,26 @@ class TkTiktokMediaTransferTest {
     }
 
     @Test
+    void oauthFormPreservesExactContentTypeWithoutAddingCharset() throws Exception {
+        AtomicReference<String> contentType = new AtomicReference<>();
+        AtomicReference<String> receivedBody = new AtomicReference<>();
+        String form = "grant_type=refresh_token&refresh_token=rft.test%2Bvalue%2F%3D";
+        String url = server(exchange -> {
+            contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            receivedBody.set(new String(exchange.getRequestBody().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8));
+            respond(exchange, 2, new byte[]{'{', '}'});
+        });
+
+        TkTiktokMediaTransfer.ApiResponse response = transfer(2_000).post(url, null,
+                "application/x-www-form-urlencoded", form);
+
+        assertEquals("application/x-www-form-urlencoded", contentType.get());
+        assertEquals(form, receivedBody.get());
+        assertEquals(200, response.status);
+    }
+
+    @Test
     void jsonApiCallDeadlineBoundsTricklingBodyWithoutReplayingPost() throws Exception {
         AtomicInteger requests = new AtomicInteger();
         String url = tricklingServer(requests);
