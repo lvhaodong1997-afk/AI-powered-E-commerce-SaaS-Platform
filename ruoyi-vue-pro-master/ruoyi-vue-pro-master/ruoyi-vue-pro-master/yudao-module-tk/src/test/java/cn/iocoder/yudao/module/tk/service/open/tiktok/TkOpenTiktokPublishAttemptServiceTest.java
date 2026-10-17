@@ -8,6 +8,7 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.lang.reflect.Method;
+import java.util.Collections;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -160,6 +161,78 @@ class TkOpenTiktokPublishAttemptServiceTest {
         assertNull(service.claimUpload(expected, LocalDateTime.now().minusMinutes(3)));
         verify(attempts, never()).selectCurrent(anyString(), anyInt());
         verify(attempts, never()).update(any(), any());
+    }
+
+    @Test
+    void expiredUploadIsRequeuedWithANewRetryGeneration() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailDO expected = detail("PROCESSING", "publish")
+                .setRetryCount(0).setTiktokStatus("PROCESSING_UPLOAD");
+        TkOpenTiktokPublishAttemptDO current = attempt("UPLOADING", "owner")
+                .setAttemptNo(0).setPublishId("publish").setFileSize(100L)
+                .setPhase("UPLOAD_URL_EXPIRED").setUploadSource("FILE_UPLOAD").setLastError("HTTP 403 upload URL expired");
+        when(tasks.selectByClientAndTaskIdForUpdate("c", "t")).thenReturn(task());
+        when(details.selectByClientAndDetailIdForUpdate("c", "t", "d")).thenReturn(expected);
+        when(attempts.selectCurrentForUpdate("d", 0)).thenReturn(current);
+        when(attempts.update(isNull(), any())).thenReturn(1);
+        when(details.update(isNull(), any())).thenReturn(1);
+        when(details.selectListByClientAndTaskId("c", "t")).thenReturn(Collections.emptyList());
+
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts, details, tasks);
+
+        assertEquals(TkOpenTiktokPublishAttemptService.ExpiredUploadDecision.REQUEUED,
+                service.requeueExpiredUpload(expected, current, 40L, "upload URL expired", 2));
+        assertEquals(1, expected.getRetryCount());
+        assertEquals("PENDING", expected.getStatus());
+        assertNull(expected.getPublishId());
+        assertEquals("URL_EXPIRED_RETRY", current.getPhase());
+        assertNotEquals("owner", current.getOwnerToken());
+        verify(details).update(isNull(), any());
+        verify(tasks).update(isNull(), any());
+    }
+
+    @Test
+    void expiredUploadAtRetryLimitIsNotRequeued() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailDO expected = detail("PROCESSING", "publish").setRetryCount(2);
+        TkOpenTiktokPublishAttemptDO current = attempt("UPLOADING", "owner")
+                .setAttemptNo(2).setPublishId("publish").setFileSize(100L)
+                .setPhase("UPLOAD_URL_EXPIRED").setUploadSource("FILE_UPLOAD").setLastError("HTTP 403 upload URL expired");
+        when(tasks.selectByClientAndTaskIdForUpdate("c", "t")).thenReturn(task());
+        when(details.selectByClientAndDetailIdForUpdate("c", "t", "d")).thenReturn(expected);
+        when(attempts.selectCurrentForUpdate("d", 2)).thenReturn(current);
+
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts, details, tasks);
+
+        assertEquals(TkOpenTiktokPublishAttemptService.ExpiredUploadDecision.RETRY_EXHAUSTED,
+                service.requeueExpiredUpload(expected, current, 40L, "upload URL expired", 2));
+        verify(attempts, never()).update(any(), any());
+        verify(details, never()).update(any(), any());
+    }
+
+    @Test
+    void expiredUploadLosesRaceWhenTheOwnerWasFenced() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailDO expected = detail("PROCESSING", "publish");
+        TkOpenTiktokPublishAttemptDO current = attempt("UPLOADING", "owner")
+                .setAttemptNo(0).setPublishId("publish").setFileSize(100L)
+                .setPhase("UPLOAD_URL_EXPIRED").setUploadSource("FILE_UPLOAD").setLastError("HTTP 403 upload URL expired");
+        when(tasks.selectByClientAndTaskIdForUpdate("c", "t")).thenReturn(task());
+        when(details.selectByClientAndDetailIdForUpdate("c", "t", "d")).thenReturn(expected);
+        when(attempts.selectCurrentForUpdate("d", 0)).thenReturn(current);
+        when(attempts.update(isNull(), any())).thenReturn(0);
+
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts, details, tasks);
+
+        assertEquals(TkOpenTiktokPublishAttemptService.ExpiredUploadDecision.STALE,
+                service.requeueExpiredUpload(expected, current, 40L, "upload URL expired", 2));
+        verify(details, never()).update(any(), any());
     }
 
     @Test void firstResponsePersistenceFailureCanRetrySameOfficialId() {

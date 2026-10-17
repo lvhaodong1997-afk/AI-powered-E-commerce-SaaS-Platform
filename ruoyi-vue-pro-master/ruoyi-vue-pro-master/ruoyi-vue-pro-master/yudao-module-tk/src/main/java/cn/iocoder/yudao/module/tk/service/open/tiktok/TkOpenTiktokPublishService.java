@@ -92,6 +92,8 @@ public class TkOpenTiktokPublishService {
     private int uploadWorkerCount = DEFAULT_PUBLISH_WORKER_COUNT;
     @Value("${tk.open-api.publish.recovery-worker-count:1}")
     private int recoveryWorkerCount = 1;
+    @Value("${tk.open-api.publish.upload-url-max-retries:2}")
+    private int uploadUrlMaxRetries = 2;
     @Resource private TkOpenTiktokPublishAttemptService attemptService;
     @Resource private TkOpenTiktokPublishTerminalService terminalService;
     @Resource private TkOpenTiktokPublishResponseJournal responseJournal;
@@ -1042,7 +1044,13 @@ public class TkOpenTiktokPublishService {
             if (attempt != null) {
                 try {
                     attemptService.error(attempt, safeError(ex));
-                    if (isUploadUrlExpired(ex) && reconcileExpiredUpload(detail, attempt)) return;
+                    if (isUploadUrlExpired(ex)) {
+                        if (attemptService.markUploadExpired(attempt, safeError(ex))
+                                && !reconcileExpiredUpload(detail, attempt)) {
+                            markRecoveryRequired(detail, attempt, "Upload URL expired; awaiting authoritative TikTok status before retry");
+                        }
+                        return;
+                    }
                     if (initSent || StrUtil.isNotBlank(detail.getPublishId())) {
                         markRecoveryRequired(detail, attempt,
                                 "Awaiting authoritative TikTok result; execution interrupted");
@@ -1162,6 +1170,8 @@ public class TkOpenTiktokPublishService {
             String postId = status.getPublicPostIds() == null || status.getPublicPostIds().isEmpty() ? null : status.getPublicPostIds().get(0);
             if (isSuccess(status.getStatus()) || isFailed(status.getStatus())) {
                 terminalService.confirm(detail, status.getStatus(), postId, status.getFailReason(), "STATUS_API");
+            } else if (attempt != null && "UPLOAD_URL_EXPIRED".equals(attempt.getPhase())) {
+                applyExpiredUploadStatus(detail, attempt, status);
             } else {
                 attemptService.clearReconcileBackoff(attempt);
                 detailMapper.update(null, processingUpdate(detail)
@@ -1228,7 +1238,10 @@ public class TkOpenTiktokPublishService {
                 } catch (Exception ex) {
                     try {
                         attemptService.error(attempt, safeError(ex));
-                        if (isUploadUrlExpired(ex) && reconcileExpiredUpload(detail, attempt)) return;
+                        if (isUploadUrlExpired(ex)) {
+                            if (attemptService.markUploadExpired(attempt, safeError(ex))) reconcileExpiredUpload(detail, attempt);
+                            return;
+                        }
                     }
                     catch (Exception ignored) { log.error("[resumeUpload][detailId({}) recovery record unavailable]", detail.getDetailId()); }
                     log.warn("[resumeUpload][detailId({}) same-session upload deferred: {}]", detail.getDetailId(), safeError(ex));
@@ -1247,6 +1260,7 @@ public class TkOpenTiktokPublishService {
     private boolean reconcileExpiredUpload(TkOpenTiktokPublishDetailDO detail,
                                            TkOpenTiktokPublishAttemptDO attempt) {
         try {
+            if (attempt == null) return false;
             TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(
                     detail.getClientId(), detail.getConnectionId());
             if (connection == null || StrUtil.isBlank(detail.getPublishId())) return false;
@@ -1256,7 +1270,18 @@ public class TkOpenTiktokPublishService {
             if (status.isAccessTokenInvalid()) {
                 status = adapter.fetchPostStatus(validAccessToken(connection, adapter, true), detail.getPublishId());
             }
-            if (!status.isSuccess()) return false;
+            return applyExpiredUploadStatus(detail, attempt, status);
+        } catch (Exception statusError) {
+            log.warn("[reconcileExpiredUpload][detailId({}) status query deferred: {}]",
+                    detail.getDetailId(), safeError(statusError));
+            return false;
+        }
+    }
+
+    private boolean applyExpiredUploadStatus(TkOpenTiktokPublishDetailDO detail,
+                                            TkOpenTiktokPublishAttemptDO attempt,
+                                            TkOpenPublishPlatformAdapter.PublishStatusResult status) {
+            if (attempt == null || !status.isSuccess()) return false;
             String postId = status.getPublicPostIds() == null || status.getPublicPostIds().isEmpty()
                     ? null : status.getPublicPostIds().get(0);
             if (isSuccess(status.getStatus()) || isFailed(status.getStatus())) {
@@ -1267,15 +1292,19 @@ public class TkOpenTiktokPublishService {
                 String reason = StrUtil.format(
                         "TikTok publish failed: upload URL expired after {} of {} bytes",
                         status.getUploadedBytes(), attempt.getFileSize());
-                return terminalService.confirmUploadExpired(
-                        detail, attempt.getOwnerToken(), status.getUploadedBytes(), reason);
+                TkOpenTiktokPublishAttemptService.ExpiredUploadDecision decision =
+                        attemptService.requeueExpiredUpload(detail, attempt, status.getUploadedBytes(),
+                                reason, Math.max(0, uploadUrlMaxRetries));
+                if (decision == TkOpenTiktokPublishAttemptService.ExpiredUploadDecision.REQUEUED) {
+                    submitAfterCommit(detail.getClientId(), detail.getTaskId());
+                    return true;
+                }
+                if (decision == TkOpenTiktokPublishAttemptService.ExpiredUploadDecision.RETRY_EXHAUSTED) {
+                    return terminalService.confirmUploadExpired(
+                            detail, attempt.getOwnerToken(), status.getUploadedBytes(), reason);
+                }
             }
             return false;
-        } catch (Exception statusError) {
-            log.warn("[reconcileExpiredUpload][detailId({}) status query deferred: {}]",
-                    detail.getDetailId(), safeError(statusError));
-            return false;
-        }
     }
 
     private boolean isUploadUrlExpired(Throwable throwable) {

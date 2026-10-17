@@ -12,6 +12,7 @@ import cn.iocoder.yudao.module.tk.service.open.api.TkOpenApiCallbackService;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
@@ -31,6 +32,8 @@ public class TkOpenTiktokPublishTerminalService {
     private final TkOpenTiktokPublishTaskMapper taskMapper;
     private final TkOpenApiCallbackService callbackService;
     private final TkOpenTiktokPublishAttemptMapper attemptMapper;
+    @Value("${tk.open-api.publish.upload-url-max-retries:2}")
+    private int uploadUrlMaxRetries = 2;
     @Resource
     private TkOpenTiktokMediaService mediaService;
 
@@ -64,9 +67,8 @@ public class TkOpenTiktokPublishTerminalService {
     }
 
     /**
-     * A TikTok upload URL expiry is authoritative only when the current worker owns the upload attempt,
-     * the persisted upload error is HTTP 403, and TikTok still reports fewer uploaded bytes than the file size.
-     * The original TikTok status remains PROCESSING_UPLOAD while the local outcome becomes FAILED.
+     * Record a terminal upload URL expiry only after the retry lane has exhausted its budget.
+     * Intermediate URL expiry evidence is handled by the attempt service and never enters the callback outbox.
      */
     @Transactional(rollbackFor = Exception.class)
     public boolean confirmUploadExpired(TkOpenTiktokPublishDetailDO expected, String ownerToken,
@@ -77,7 +79,8 @@ public class TkOpenTiktokPublishTerminalService {
         if (task == null) return false;
         TkOpenTiktokPublishDetailDO detail = lockDetail(expected);
         if (!sameAttempt(expected, detail) || !"PROCESSING".equals(detail.getStatus())
-                || StrUtil.isBlank(detail.getPublishId())) return false;
+                || StrUtil.isBlank(detail.getPublishId())
+                || attemptNo(detail) < Math.max(0, uploadUrlMaxRetries)) return false;
         TkOpenTiktokPublishAttemptDO attempt = lockAttempt(detail);
         if (!validExpiredUploadAttempt(detail, attempt, ownerToken, uploadedBytes)) return false;
 
@@ -91,7 +94,7 @@ public class TkOpenTiktokPublishTerminalService {
                 .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, now)) != 1) return false;
         detail.setStatus("FAILED").setTiktokStatus("PROCESSING_UPLOAD")
                 .setFailReason(failReason).setLastSyncTime(now);
-        recordEvidence(detail, attempt, "UPLOAD_EXPIRED_CONFIRMED", now);
+        recordEvidence(detail, attempt, "UPLOAD_EXPIRED_EXHAUSTED", now);
         aggregateAndEnqueue(detail, task);
         return true;
     }
@@ -201,7 +204,7 @@ public class TkOpenTiktokPublishTerminalService {
         return attempt != null
                 && Objects.equals(ownerToken, attempt.getOwnerToken())
                 && compatibleAttempt(detail, attempt)
-                && "UPLOADING".equals(attempt.getPhase())
+                && "UPLOAD_URL_EXPIRED".equals(attempt.getPhase())
                 && "FILE_UPLOAD".equals(attempt.getUploadSource())
                 && attempt.getFileSize() != null
                 && attempt.getFileSize() > uploadedBytes

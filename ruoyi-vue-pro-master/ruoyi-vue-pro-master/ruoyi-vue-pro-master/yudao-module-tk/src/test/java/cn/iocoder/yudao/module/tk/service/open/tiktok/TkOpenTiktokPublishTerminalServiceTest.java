@@ -224,10 +224,24 @@ class TkOpenTiktokPublishTerminalServiceTest {
     }
 
     @Test
-    void confirmsExpiredUploadOnlyWithOwnedIncompleteUploadEvidence() {
+    void expiredUploadMustNotFailBeforeRetryBudgetIsExhausted() {
         TkOpenTiktokPublishAttemptDO attempt = TkOpenTiktokPublishAttemptDO.builder()
                 .id(3L).clientId("c").taskId("t").detailId("d").attemptNo(0)
                 .ownerToken("owner").phase("UPLOADING").publishId("publish")
+                .uploadSource("FILE_UPLOAD").fileSize(100L).lastError("HTTP 403").build();
+        when(attempts.selectOne(any(Wrapper.class))).thenReturn(attempt);
+        when(attempts.update(isNull(), any(Wrapper.class))).thenReturn(1);
+        assertFalse(service.confirmUploadExpired(expected, "owner", 40L, "expired"));
+        verifyNoInteractions(callbacks);
+    }
+
+    @Test
+    void confirmsExpiredUploadOnlyWithOwnedIncompleteUploadEvidence() {
+        expected.setRetryCount(2);
+        current.setRetryCount(2);
+        TkOpenTiktokPublishAttemptDO attempt = TkOpenTiktokPublishAttemptDO.builder()
+                .id(3L).clientId("c").taskId("t").detailId("d").attemptNo(2)
+                .ownerToken("owner").phase("UPLOAD_URL_EXPIRED").publishId("publish")
                 .uploadSource("FILE_UPLOAD")
                 .fileSize(100L).lastError("TikTok 分片上传失败，HTTP 403").build();
         when(attempts.selectOne(any(Wrapper.class))).thenReturn(attempt);
@@ -238,16 +252,18 @@ class TkOpenTiktokPublishTerminalServiceTest {
 
         assertEquals("FAILED", current.getStatus());
         assertEquals("PROCESSING_UPLOAD", current.getTiktokStatus());
-        assertEquals("UPLOAD_EXPIRED_CONFIRMED", attempt.getTerminalSource());
+        assertEquals("UPLOAD_EXPIRED_EXHAUSTED", attempt.getTerminalSource());
         verify(callbacks).enqueueOnce(eq("c"), eq("publish.failed"), eq("PUBLISH_DETAIL"),
-                eq("d"), anyMap(), eq(0));
+                eq("d"), anyMap(), eq(2));
     }
 
     @Test
     void rejectsExpiredUploadWithoutExactOwnedIncompleteEvidence() {
+        expected.setRetryCount(2);
+        current.setRetryCount(2);
         TkOpenTiktokPublishAttemptDO attempt = TkOpenTiktokPublishAttemptDO.builder()
-                .id(3L).clientId("c").taskId("t").detailId("d").attemptNo(0)
-                .ownerToken("owner").phase("UPLOADING").publishId("publish")
+                .id(3L).clientId("c").taskId("t").detailId("d").attemptNo(2)
+                .ownerToken("owner").phase("UPLOAD_URL_EXPIRED").publishId("publish")
                 .uploadSource("FILE_UPLOAD")
                 .fileSize(100L).lastError("TikTok 分片上传失败，HTTP 500").build();
         when(attempts.selectOne(any(Wrapper.class))).thenReturn(attempt);

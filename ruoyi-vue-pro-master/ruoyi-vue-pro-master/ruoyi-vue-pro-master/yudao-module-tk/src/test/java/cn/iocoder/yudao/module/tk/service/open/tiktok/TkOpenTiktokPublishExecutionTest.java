@@ -38,6 +38,7 @@ class TkOpenTiktokPublishExecutionTest {
     private final TkOpenTiktokPublishAttemptService attempts = mock(TkOpenTiktokPublishAttemptService.class);
     private final CapturingExecutor executor = new CapturingExecutor();
     private final CapturingExecutor uploads = new CapturingExecutor();
+    private final CapturingExecutor recoveries = new CapturingExecutor();
     private final TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(
             mock(TkOpenTiktokPublishTaskMapper.class), details, mock(TkOpenTiktokMediaMapper.class),
             mock(TkOpenTiktokConnectionMapper.class), mock(TkOpenApiIdempotencyMapper.class),
@@ -46,6 +47,7 @@ class TkOpenTiktokPublishExecutionTest {
     TkOpenTiktokPublishExecutionTest() {
         ReflectionTestUtils.setField(service, "executor", executor);
         ReflectionTestUtils.setField(service, "uploadExecutor", uploads);
+        ReflectionTestUtils.setField(service, "recoveryExecutor", recoveries);
         ReflectionTestUtils.setField(service, "attemptService", attempts);
     }
 
@@ -63,8 +65,8 @@ class TkOpenTiktokPublishExecutionTest {
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail);
 
         verify(attempts, never()).claimUpload(any(), any());
-        assertEquals(1, uploads.commands.size());
-        uploads.runNext();
+        assertEquals(1, recoveries.commands.size());
+        recoveries.runNext();
         verify(attempts).claimUpload(eq(detail), any());
     }
 
@@ -74,10 +76,10 @@ class TkOpenTiktokPublishExecutionTest {
 
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail);
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail);
-        assertEquals(1, uploads.commands.size());
-        uploads.runNext();
+        assertEquals(1, recoveries.commands.size());
+        recoveries.runNext();
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail);
-        assertEquals(1, uploads.commands.size());
+        assertEquals(1, recoveries.commands.size());
     }
 
     @Test void sameDetailIsAdmittedOnceAndSlotIsReleasedAfterExecution() {
@@ -102,19 +104,19 @@ class TkOpenTiktokPublishExecutionTest {
     }
 
     @Test void rejectedRecoveryDoesNotClaimLeaseAndCanBeQueuedAgain() {
-        uploads.reject = true;
+        recoveries.reject = true;
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail());
-        uploads.reject = false;
+        recoveries.reject = false;
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", detail());
         verify(attempts, never()).claimUpload(any(), any());
-        assertEquals(1, uploads.commands.size());
+        assertEquals(1, recoveries.commands.size());
     }
 
     @Test void changedRetryIsNotRecoveredUsingQueuedSnapshot() {
         TkOpenTiktokPublishDetailDO old = detail();
         when(details.selectByClientAndDetailId("c", "d")).thenReturn(detail().setRetryCount(1));
         ReflectionTestUtils.invokeMethod(service, "resumeUpload", old);
-        uploads.runNext();
+        recoveries.runNext();
         verify(attempts, never()).claimUpload(any(), any());
     }
 

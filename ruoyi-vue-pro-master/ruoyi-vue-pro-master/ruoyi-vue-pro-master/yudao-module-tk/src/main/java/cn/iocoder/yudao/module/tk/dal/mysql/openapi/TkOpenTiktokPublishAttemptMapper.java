@@ -12,4 +12,11 @@ public interface TkOpenTiktokPublishAttemptMapper extends BaseMapperX<TkOpenTikt
                 .eq(TkOpenTiktokPublishAttemptDO::getDetailId, detailId)
                 .eq(TkOpenTiktokPublishAttemptDO::getAttemptNo, attemptNo));
     }
+
+    default TkOpenTiktokPublishAttemptDO selectCurrentForUpdate(String detailId, int attemptNo) {
+        return selectOne(new LambdaQueryWrapperX<TkOpenTiktokPublishAttemptDO>()
+                .eq(TkOpenTiktokPublishAttemptDO::getDetailId, detailId)
+                .eq(TkOpenTiktokPublishAttemptDO::getAttemptNo, attemptNo)
+                .last("FOR UPDATE"));
+    }
 }

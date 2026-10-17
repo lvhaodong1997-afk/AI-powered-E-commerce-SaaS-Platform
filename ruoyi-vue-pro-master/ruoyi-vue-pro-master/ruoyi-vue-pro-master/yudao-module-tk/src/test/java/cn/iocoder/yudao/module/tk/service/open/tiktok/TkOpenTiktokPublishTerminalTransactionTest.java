@@ -162,6 +162,83 @@ class TkOpenTiktokPublishTerminalTransactionTest {
     }
 
     @Test
+    void expiredUploadRequeuesWithoutCallbackAndFencesTheOldWorker() {
+        prepareExpiredUpload();
+        TkOpenTiktokPublishAttemptService claims = attemptService();
+        TkOpenTiktokPublishDetailDO oldDetail = snapshot();
+        TkOpenTiktokPublishAttemptDO oldWorker = attempts.selectCurrent("d", 0);
+        assertEquals(TkOpenTiktokPublishAttemptService.ExpiredUploadDecision.REQUEUED,
+                claims.requeueExpiredUpload(oldDetail, oldWorker, 40L, "HTTP 403 upload URL expired", 2));
+        assertEquals(1, snapshot().getRetryCount());
+        assertEquals("PENDING", snapshot().getStatus());
+        assertNull(snapshot().getPublishId());
+        assertEquals(0, eventCount());
+        assertThrows(IllegalStateException.class, () -> claims.heartbeat(oldWorker));
+        assertThrows(IllegalStateException.class, () -> claims.stage(oldWorker, "PLATFORM_PROCESSING"));
+        assertThrows(IllegalStateException.class, () -> claims.saveResponse(oldDetail, oldWorker, "publish", "url"));
+        claims.clearReconcileBackoff(oldWorker);
+        assertEquals("HTTP 403 upload URL expired", attempts.selectCurrent("d", 0).getLastError());
+        TkOpenTiktokPublishAttemptDO next = claims.claim(snapshot());
+        assertNotNull(next);
+        assertEquals(1, next.getAttemptNo());
+        assertNotEquals(oldWorker.getOwnerToken(), next.getOwnerToken());
+        assertNull(next.getPublishId());
+        assertEquals("publish", attempts.selectCurrent("d", 0).getPublishId());
+    }
+
+    @Test
+    void concurrentExpiredUploadRetriesIncrementOnlyOnce() throws Exception {
+        prepareExpiredUpload();
+        TkOpenTiktokPublishAttemptService claims = attemptService();
+        TkOpenTiktokPublishDetailDO first = snapshot(), second = snapshot();
+        TkOpenTiktokPublishAttemptDO worker = attempts.selectCurrent("d", 0);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Callable<TkOpenTiktokPublishAttemptService.ExpiredUploadDecision> one = () -> {
+                start.await(); return claims.requeueExpiredUpload(first, worker, 40L, "HTTP 403 upload URL expired", 2);
+            };
+            Future<TkOpenTiktokPublishAttemptService.ExpiredUploadDecision> a = pool.submit(one);
+            Future<TkOpenTiktokPublishAttemptService.ExpiredUploadDecision> b = pool.submit(() -> {
+                start.await(); return claims.requeueExpiredUpload(second, worker, 40L, "HTTP 403 upload URL expired", 2);
+            });
+            start.countDown();
+            java.util.List<TkOpenTiktokPublishAttemptService.ExpiredUploadDecision> outcomes =
+                    java.util.Arrays.asList(a.get(10, TimeUnit.SECONDS), b.get(10, TimeUnit.SECONDS));
+            assertEquals(1, java.util.Collections.frequency(outcomes,
+                    TkOpenTiktokPublishAttemptService.ExpiredUploadDecision.REQUEUED));
+            assertEquals(1, snapshot().getRetryCount());
+            assertEquals(0, eventCount());
+        } finally { pool.shutdownNow(); }
+    }
+
+    @Test
+    void failedDetailRequeueRollsBackTheAttemptFence() {
+        prepareExpiredUpload();
+        jdbc.execute("ALTER TABLE tk_open_tiktok_publish_detail ADD CONSTRAINT no_pending CHECK(status <> 'PENDING')");
+        TkOpenTiktokPublishAttemptDO old = attempts.selectCurrent("d", 0);
+        assertThrows(Exception.class, () -> attemptService().requeueExpiredUpload(
+                snapshot(), old, 40L, "HTTP 403 upload URL expired", 2));
+        assertEquals("owner", attempts.selectCurrent("d", 0).getOwnerToken());
+        assertEquals("UPLOAD_URL_EXPIRED", attempts.selectCurrent("d", 0).getPhase());
+        assertEquals(0, snapshot().getRetryCount());
+        assertEquals(0, eventCount());
+    }
+
+    private void prepareExpiredUpload() {
+        jdbc.update("UPDATE tk_open_tiktok_publish_attempt SET phase='UPLOAD_URL_EXPIRED',owner_token='owner',"
+                + "file_size=100,upload_source='FILE_UPLOAD',last_error='HTTP 403 upload URL expired' WHERE id=1");
+    }
+
+    private TkOpenTiktokPublishAttemptService attemptService() {
+        ProxyFactory proxy = new ProxyFactory(new TkOpenTiktokPublishAttemptService(attempts, details, tasks));
+        proxy.setProxyTargetClass(true);
+        proxy.addAdvice(new TransactionInterceptor(new DataSourceTransactionManager(dataSource),
+                new AnnotationTransactionAttributeSource()));
+        return (TkOpenTiktokPublishAttemptService) proxy.getProxy();
+    }
+
+    @Test
     void claimingQueuedDetailAlsoMarksTaskProcessingInSameTransaction() {
         jdbc.update("DELETE FROM tk_open_tiktok_publish_attempt");
         jdbc.update("UPDATE tk_open_tiktok_publish_detail SET status='PENDING',publish_id=NULL WHERE id=1");

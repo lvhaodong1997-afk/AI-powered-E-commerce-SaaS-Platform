@@ -16,6 +16,12 @@ import java.util.UUID;
 /** Durable ownership of one execution, independent of status-query timestamps. */
 @Service @TenantIgnore
 public class TkOpenTiktokPublishAttemptService {
+    public enum ExpiredUploadDecision {
+        REQUEUED,
+        RETRY_EXHAUSTED,
+        STALE
+    }
+
     private final TkOpenTiktokPublishAttemptMapper attempts;
     private final TkOpenTiktokPublishDetailMapper details;
     private final TkOpenTiktokPublishTaskMapper tasks;
@@ -124,11 +130,13 @@ public class TkOpenTiktokPublishAttemptService {
                     .set(TkOpenTiktokPublishAttemptDO::getHeartbeatTime, deadline)
                     .set(TkOpenTiktokPublishAttemptDO::getLastError, StrUtil.maxLength(reason, 1000));
             if (StrUtil.isNotBlank(detail.getPublishId())) {
-                fence.set(TkOpenTiktokPublishAttemptDO::getPhase, "RECOVERY_REQUIRED");
+                fence.set(TkOpenTiktokPublishAttemptDO::getPhase,
+                        "UPLOAD_URL_EXPIRED".equals(attempt.getPhase()) ? "UPLOAD_URL_EXPIRED" : "RECOVERY_REQUIRED");
             }
             if (attempts.update(null, fence) != 1) return false;
             attempt.setOwnerToken(fencedOwner).setHeartbeatTime(deadline);
-            if (StrUtil.isNotBlank(detail.getPublishId())) attempt.setPhase("RECOVERY_REQUIRED");
+            if (StrUtil.isNotBlank(detail.getPublishId()) && !"UPLOAD_URL_EXPIRED".equals(attempt.getPhase()))
+                attempt.setPhase("RECOVERY_REQUIRED");
         }
         requireWrite(details.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
                 .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
@@ -282,25 +290,130 @@ public class TkOpenTiktokPublishAttemptService {
         return changed == 0 ? null : attempt.setOwnerToken(owner).setPhase("UPLOADING");
     }
 
+    /** Keep expiry durable even if the following authoritative status query is unavailable. */
+    public boolean markUploadExpired(TkOpenTiktokPublishAttemptDO attempt, String reason) {
+        if (attempt == null) return false;
+        int changed = attempts.update(null, owned(attempt)
+                .in(TkOpenTiktokPublishAttemptDO::getPhase, "UPLOADING", "UPLOAD_URL_EXPIRED")
+                .eq(TkOpenTiktokPublishAttemptDO::getUploadSource, "FILE_UPLOAD")
+                .set(TkOpenTiktokPublishAttemptDO::getPhase, "UPLOAD_URL_EXPIRED")
+                .set(TkOpenTiktokPublishAttemptDO::getLastError, StrUtil.maxLength(reason, 1000))
+                .set(TkOpenTiktokPublishAttemptDO::getNextReconcileTime, LocalDateTime.now().plusSeconds(30)));
+        if (changed == 1) attempt.setPhase("UPLOAD_URL_EXPIRED").setLastError(StrUtil.maxLength(reason, 1000));
+        return changed == 1;
+    }
+
+    /**
+     * Fence an expired upload session and return the detail to the initialization queue.
+     * The old publish ID is retained only on the historical attempt row; the next
+     * retry generation must initialize a fresh TikTok upload session.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ExpiredUploadDecision requeueExpiredUpload(TkOpenTiktokPublishDetailDO expected,
+                                                       TkOpenTiktokPublishAttemptDO expectedAttempt,
+                                                       long uploadedBytes, String reason, int maxRetries) {
+        if (expected == null || expectedAttempt == null || uploadedBytes < 0 || maxRetries < 0) {
+            return ExpiredUploadDecision.STALE;
+        }
+        TkOpenTiktokPublishTaskDO task = tasks.selectByClientAndTaskIdForUpdate(
+                expected.getClientId(), expected.getTaskId());
+        if (task == null) return ExpiredUploadDecision.STALE;
+        TkOpenTiktokPublishDetailDO detail = details.selectByClientAndDetailIdForUpdate(
+                expected.getClientId(), expected.getTaskId(), expected.getDetailId());
+        if (detail == null || !sameAttempt(detail, expected) || !"PROCESSING".equals(detail.getStatus())
+                || StrUtil.isBlank(detail.getPublishId())
+                || !Objects.equals(detail.getPublishId(), expectedAttempt.getPublishId())) {
+            return ExpiredUploadDecision.STALE;
+        }
+        TkOpenTiktokPublishAttemptDO current = attempts.selectCurrentForUpdate(
+                detail.getDetailId(), number(detail.getRetryCount()));
+        if (current == null || !Objects.equals(current.getId(), expectedAttempt.getId())
+                || !Objects.equals(current.getOwnerToken(), expectedAttempt.getOwnerToken())
+                || !Objects.equals(current.getPhase(), expectedAttempt.getPhase())
+                || !Objects.equals(current.getPublishId(), detail.getPublishId())
+                || !"UPLOAD_URL_EXPIRED".equals(current.getPhase())
+                || !"FILE_UPLOAD".equals(current.getUploadSource())
+                || !StrUtil.containsIgnoreCase(current.getLastError(), "HTTP 403") || current.getFileSize() == null
+                || uploadedBytes >= current.getFileSize()) {
+            return ExpiredUploadDecision.STALE;
+        }
+        int retryCount = number(detail.getRetryCount());
+        if (retryCount >= maxRetries) return ExpiredUploadDecision.RETRY_EXHAUSTED;
+
+        String fencedOwner = UUID.randomUUID().toString();
+        String failure = StrUtil.maxLength(StrUtil.blankToDefault(reason,
+                "TikTok upload URL expired before all bytes were uploaded"), 1000);
+        int fenced = attempts.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishAttemptDO.class)
+                .eq(TkOpenTiktokPublishAttemptDO::getId, current.getId())
+                .eq(TkOpenTiktokPublishAttemptDO::getOwnerToken, current.getOwnerToken())
+                .eq(TkOpenTiktokPublishAttemptDO::getAttemptNo, retryCount)
+                .set(TkOpenTiktokPublishAttemptDO::getOwnerToken, fencedOwner)
+                .set(TkOpenTiktokPublishAttemptDO::getPhase, "URL_EXPIRED_RETRY")
+                .set(TkOpenTiktokPublishAttemptDO::getLastError, failure)
+                .set(TkOpenTiktokPublishAttemptDO::getNextReconcileTime, null)
+                .set(TkOpenTiktokPublishAttemptDO::getHeartbeatTime, LocalDateTime.now()));
+        if (fenced != 1) return ExpiredUploadDecision.STALE;
+
+        int changed = details.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
+                .eq(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
+                .eq(TkOpenTiktokPublishDetailDO::getPublishId, detail.getPublishId())
+                .apply("COALESCE(retry_count,0) = {0}", retryCount)
+                .set(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")
+                .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RETRY_PENDING")
+                .set(TkOpenTiktokPublishDetailDO::getPublishId, null)
+                .set(TkOpenTiktokPublishDetailDO::getPublicPostId, null)
+                .set(TkOpenTiktokPublishDetailDO::getPublishUrl, null)
+                .set(TkOpenTiktokPublishDetailDO::getMetricsStatus, "WAITING_PUBLISH")
+                .set(TkOpenTiktokPublishDetailDO::getViewCount, null)
+                .set(TkOpenTiktokPublishDetailDO::getLikeCount, null)
+                .set(TkOpenTiktokPublishDetailDO::getCommentCount, null)
+                .set(TkOpenTiktokPublishDetailDO::getShareCount, null)
+                .set(TkOpenTiktokPublishDetailDO::getFailReason, failure)
+                .set(TkOpenTiktokPublishDetailDO::getRetryCount, retryCount + 1)
+                .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
+        requireWrite(changed);
+
+        current.setOwnerToken(fencedOwner).setPhase("URL_EXPIRED_RETRY")
+                .setLastError(failure).setHeartbeatTime(LocalDateTime.now());
+        detail.setStatus("PENDING").setTiktokStatus("RETRY_PENDING")
+                .setPublishId(null).setPublicPostId(null).setPublishUrl(null)
+                .setMetricsStatus("WAITING_PUBLISH").setViewCount(null).setLikeCount(null)
+                .setCommentCount(null).setShareCount(null).setFailReason(failure)
+                .setRetryCount(retryCount + 1).setLastSyncTime(LocalDateTime.now());
+        if (details.selectListByClientAndTaskId(detail.getClientId(), detail.getTaskId()).stream()
+                .noneMatch(item -> "PROCESSING".equals(item.getStatus()))) {
+            tasks.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
+                    .eq(TkOpenTiktokPublishTaskDO::getClientId, detail.getClientId())
+                    .eq(TkOpenTiktokPublishTaskDO::getTaskId, detail.getTaskId())
+                    .eq(TkOpenTiktokPublishTaskDO::getStatus, "PROCESSING")
+                    .set(TkOpenTiktokPublishTaskDO::getStatus, "PENDING"));
+        }
+        return ExpiredUploadDecision.REQUEUED;
+    }
+
     public void error(TkOpenTiktokPublishAttemptDO attempt, String reason) {
         if (attempt == null) return;
         int reconcileCount = number(attempt.getReconcileCount()) + 1;
         long[] delays = {30L, 60L, 120L, 300L, 600L};
         long delay = delays[Math.min(reconcileCount - 1, delays.length - 1)];
         LocalDateTime next = LocalDateTime.now().plusSeconds(delay);
-        int changed = attempts.update(null, owned(attempt).ne(TkOpenTiktokPublishAttemptDO::getPhase, "CONFIRMED_TERMINAL")
-                .set(TkOpenTiktokPublishAttemptDO::getLastError, StrUtil.maxLength(reason, 1000))
+        int changed = attempts.update(null, owned(attempt)
+                .notIn(TkOpenTiktokPublishAttemptDO::getPhase, "CONFIRMED_TERMINAL", "URL_EXPIRED_RETRY")
+                .set(!"UPLOAD_URL_EXPIRED".equals(attempt.getPhase()),
+                        TkOpenTiktokPublishAttemptDO::getLastError, StrUtil.maxLength(reason, 1000))
                 .set(TkOpenTiktokPublishAttemptDO::getReconcileCount, reconcileCount)
                 .set(TkOpenTiktokPublishAttemptDO::getNextReconcileTime, next));
         if (changed == 1) attempt.setReconcileCount(reconcileCount).setNextReconcileTime(next)
-                .setLastError(StrUtil.maxLength(reason, 1000));
+                .setLastError("UPLOAD_URL_EXPIRED".equals(attempt.getPhase())
+                        ? attempt.getLastError() : StrUtil.maxLength(reason, 1000));
     }
 
     public void clearReconcileBackoff(TkOpenTiktokPublishAttemptDO attempt) {
         if (attempt == null || attempt.getId() == null) return;
-        int changed = attempts.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishAttemptDO.class)
-                .eq(TkOpenTiktokPublishAttemptDO::getId, attempt.getId())
-                .ne(TkOpenTiktokPublishAttemptDO::getPhase, "CONFIRMED_TERMINAL")
+        int changed = attempts.update(null, owned(attempt)
+                .notIn(TkOpenTiktokPublishAttemptDO::getPhase,
+                        "CONFIRMED_TERMINAL", "URL_EXPIRED_RETRY", "UPLOAD_URL_EXPIRED")
                 .set(TkOpenTiktokPublishAttemptDO::getNextReconcileTime, null)
                 .set(TkOpenTiktokPublishAttemptDO::getReconcileCount, 0)
                 .set(TkOpenTiktokPublishAttemptDO::getLastError, null));
@@ -310,6 +423,7 @@ public class TkOpenTiktokPublishAttemptService {
     static boolean canRestart(String phase) {
         return "MATERIAL_PREPARATION".equals(phase) || "READY_TO_INIT".equals(phase);
     }
+
     static boolean active(TkOpenTiktokPublishAttemptDO attempt, LocalDateTime deadline) {
         return attempt != null && attempt.getHeartbeatTime() != null && attempt.getHeartbeatTime().isAfter(deadline);
     }
