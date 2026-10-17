@@ -41,6 +41,19 @@ class TkSqlMigrationIdempotencyTest {
     }
 
     @Test
+    void publishDispatchMigrationGuardsIndexCreationAndClosesPreparedStatement() throws IOException {
+        String sql = readResource("/sql/tk_tiktok_publish_dispatch_upgrade_mysql.sql");
+
+        assertTrue(sql.contains("table_name = 'tk_open_tiktok_publish_detail'"),
+                "dispatch migration must target the publish detail table");
+        assertTrue(sql.contains("index_name = 'idx_tk_open_publish_dispatch'"),
+                "dispatch migration must guard the dispatch index");
+        assertTrue(sql.contains("(`status`, `create_time`, `id`)"),
+                "dispatch index must support deterministic pending selection");
+        assertPreparedStatementLifecycles(sql);
+    }
+
+    @Test
     void combinedAddColumnValidatorRejectsDirectAndConcatStatements() {
         String directSql = "ALTER TABLE `tk_tiktok_publish_task` "
                 + "ADD COLUMN `uploaded_video_id` bigint, ADD COLUMN `source_type` varchar(32);";
@@ -671,8 +684,12 @@ class TkSqlMigrationIdempotencyTest {
     }
 
     private static String readMigration() throws IOException {
-        try (InputStream input = TkSqlMigrationIdempotencyTest.class.getResourceAsStream(RESOURCE)) {
-            assertNotNull(input, "missing SQL migration resource: " + RESOURCE);
+        return readResource(RESOURCE);
+    }
+
+    private static String readResource(String resource) throws IOException {
+        try (InputStream input = TkSqlMigrationIdempotencyTest.class.getResourceAsStream(resource)) {
+            assertNotNull(input, "missing SQL migration resource: " + resource);
             return new String(input.readAllBytes(), StandardCharsets.UTF_8);
         }
     }

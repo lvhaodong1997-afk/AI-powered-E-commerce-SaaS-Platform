@@ -50,6 +50,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.locks.ReentrantLock;
 import javax.annotation.Resource;
 import java.security.MessageDigest;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -80,6 +81,7 @@ public class TkOpenTiktokPublishService {
     private static final int DEFAULT_PUBLISH_WORKER_COUNT = 2;
     private final Set<String> inFlightDetailKeys = ConcurrentHashMap.newKeySet();
     private final Set<String> inFlightRecoveryKeys = ConcurrentHashMap.newKeySet();
+    private final ReentrantLock dispatchLock = new ReentrantLock();
     private ExecutorService executor = newPublishExecutor(DEFAULT_PUBLISH_WORKER_COUNT, "tk-publish-prepare-");
     private ExecutorService uploadExecutor = newPublishExecutor(DEFAULT_PUBLISH_WORKER_COUNT, "tk-publish-upload-");
     private ExecutorService recoveryExecutor = newPublishExecutor(1, "tk-publish-recovery-");
@@ -842,13 +844,21 @@ public class TkOpenTiktokPublishService {
     }
 
     public int resumeStalePending(int limit) {
-        List<TkOpenTiktokPublishDetailDO> pending = detailMapper.selectStalePending(
-                LocalDateTime.now(), Math.max(1, Math.min(limit, 200)));
-        int admitted = 0;
-        for (TkOpenTiktokPublishDetailDO detail : pending) {
-            if (submitDetail(detail)) admitted++;
+        if (!dispatchLock.tryLock()) return 0;
+        try {
+            int boundedLimit = Math.max(1, Math.min(limit, 200));
+            LocalDateTime now = LocalDateTime.now();
+            List<TkOpenTiktokPublishDetailDO> pending = detailMapper.selectStalePending(now, boundedLimit);
+            List<TkOpenTiktokPublishDetailDO> selected = TkOpenTiktokPublishDispatchPolicy.select(pending, now,
+                    boundedLimit);
+            int admitted = 0;
+            for (TkOpenTiktokPublishDetailDO detail : selected) {
+                if (submitDetail(detail)) admitted++;
+            }
+            return admitted;
+        } finally {
+            dispatchLock.unlock();
         }
-        return admitted;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -890,10 +900,7 @@ public class TkOpenTiktokPublishService {
             }
             submitted.add(task.getClientId() + "\n" + task.getTaskId());
         }
-        Runnable submit = () -> submitted.forEach(value -> {
-            String[] parts = value.split("\\n", 2);
-            submitTask(parts[0], parts[1]);
-        });
+        Runnable submit = () -> resumeStalePending(100);
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void afterCommit() { submit.run(); }
@@ -1509,7 +1516,7 @@ public class TkOpenTiktokPublishService {
     }
 
     private void submitAfterCommit(String clientId, String taskId) {
-        Runnable submit = () -> submitTask(clientId, taskId);
+        Runnable submit = () -> resumeStalePending(100);
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void afterCommit() { submit.run(); }

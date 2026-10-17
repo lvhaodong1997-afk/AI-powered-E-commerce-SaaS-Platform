@@ -91,9 +91,16 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
     default List<TkOpenTiktokPublishDetailDO> selectStalePending(LocalDateTime deadline, int limit) {
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                 .eq(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")
+                .and(wrapper -> wrapper.isNull(TkOpenTiktokPublishDetailDO::getPublishId)
+                        .or().eq(TkOpenTiktokPublishDetailDO::getPublishId, ""))
+                .and(wrapper -> wrapper.isNull(TkOpenTiktokPublishDetailDO::getTiktokStatus)
+                        .or().ne(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED"))
                 .le(TkOpenTiktokPublishDetailDO::getUpdateTime, deadline)
+                .orderByAsc(TkOpenTiktokPublishDetailDO::getCreateTime)
                 .orderByAsc(TkOpenTiktokPublishDetailDO::getId)
-                .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
+                // Read a wider candidate window so the policy can reserve a recent slot
+                // even when the oldest backlog is larger than the dispatch batch.
+                .last("LIMIT " + Math.max(1, Math.min(Math.max(1, limit) * 4, 400))));
     }
 
     default List<TkOpenTiktokPublishDetailDO> selectStaleInitializing(LocalDateTime deadline, int limit) {
