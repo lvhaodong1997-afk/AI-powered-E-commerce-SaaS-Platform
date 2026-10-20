@@ -17,6 +17,9 @@ MiniMax 百度 BCE 配音的进程配置、增量迁移及验收要求见 [MINIM
 - Redis 6+
 - Nginx
 - FFmpeg / FFprobe
+- fontconfig（提供 `fc-scan`、`fc-match`）
+- Noto CJK 字体：`NotoSansCJK-Regular.ttc`、`NotoSansCJK-Bold.ttc`、
+  `NotoSerifCJK-Regular.ttc`、`NotoSerifCJK-Bold.ttc`，四个文件必须完整安装到字体目录并注册到 fontconfig
 
 ## 目录约定
 
@@ -37,14 +40,18 @@ MiniMax 百度 BCE 配音的进程配置、增量迁移及验收要求见 [MINIM
 
 ```bash
 export TK_RELEASE_RUNTIME_ROOT=/data/Tk/shared
+export TK_SUBTITLE_FONTS_DIR=/usr/share/fonts/opentype/noto
 bash deploy/scripts/validate-release.sh --write-manifest /path/to/release
 ```
+
+`TK_SUBTITLE_FONTS_DIR` 必须与生效配置 `tk.generation.subtitle.fonts-dir` 一致；上述目录仅为示例，请按实际配置调整。校验会检查四个 TTC 文件的准确字体族、字重，以及 fontconfig 是否发生字体替换。
 
 校验通过后再执行安装脚本：
 
 ```bash
 APP_DIR=/data/Tk/releases/release-<id> \
 TK_RELEASE_RUNTIME_ROOT=/data/Tk/shared \
+TK_SUBTITLE_FONTS_DIR=/usr/share/fonts/opentype/noto \
 bash deploy/scripts/install-release.sh /path/to/release
 ```
 
