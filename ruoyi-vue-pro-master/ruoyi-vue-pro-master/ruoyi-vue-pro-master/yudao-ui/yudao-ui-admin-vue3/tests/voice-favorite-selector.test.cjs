@@ -144,7 +144,7 @@ async function main() {
   )
   assert.equal(h.props.modelValue, 'VoiceA')
   assert.ok(!h.emitted.some((x) => x[0] === 'update:modelValue'))
-  assert.deepEqual(h.writes, [['remove', 'VoiceA']])
+  assert.deepEqual(h.writes, [['remove', 'MINIMAX', 'VoiceA']])
   assert.equal(h.props.options[0].favorite, false)
   h.failWrites()
   await h.selector.toggleFavorite(h.props.options[0])

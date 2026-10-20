@@ -57,12 +57,9 @@ public class TkVoiceFavoriteService {
         String code = normalizeCode(voiceCode);
         Long tenantId = requireTenantId();
         Long userId = requireUserId();
-        if ("MINIMAX".equals(normalized)) {
-            miniMaxService.removeFavorite(code);
-        } else {
-            // Removal must also work after a profile/preset is disabled or deleted.
-            favoriteMapper.deleteByScope(tenantId, userId, normalized, code);
-        }
+        // Generic API accepts persisted keys, never aliases. Exact deletion is repeatable even if
+        // a deleted MiniMax ID has since been reused as an alias for another voice.
+        favoriteMapper.deleteByScope(tenantId, userId, normalized, code);
     }
 
     private void validateCustomVoice(String code, Long tenantId) {

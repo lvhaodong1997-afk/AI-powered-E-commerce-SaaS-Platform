@@ -203,6 +203,38 @@ class TkMiniMaxVoiceDictionaryServiceTest {
         }
     }
 
+    @Test
+    void removalPrefersStoredExactIdWhenAnAliasIsReassigned() {
+        when(dictDataService.getDictDataList(0, "ai_tts_voice")).thenReturn(Collections.singletonList(
+                voice(10L, "OldVoice", "New voice", "{\"voiceId\":\"NewVoice\",\"language\":\"en-US\","
+                        + "\"country\":\"US\"}")));
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(55L, 44L,
+                TkUserLevelEnum.TENANT_USER.getCode(), null));
+        when(favoriteMapper.selectListByScope(44L, 55L, "MINIMAX")).thenReturn(Collections.singletonList(
+                new TkVoiceFavoriteDO().setVoiceCode("OldVoice")));
+        try (MockedStatic<SecurityFrameworkUtils> security = mockStatic(SecurityFrameworkUtils.class)) {
+            security.when(SecurityFrameworkUtils::getLoginUserId).thenReturn(55L);
+            service.removeFavorite("OldVoice");
+        }
+        verify(favoriteMapper).deleteByScope(44L, 55L, "MINIMAX", "OldVoice");
+        verify(favoriteMapper, never()).deleteByScope(44L, 55L, "MINIMAX", "NewVoice");
+    }
+
+    @Test
+    void removalRetainsLegacyAliasCanonicalizationWhenNoExactKeyIsStored() {
+        when(dictDataService.getDictDataList(0, "ai_tts_voice")).thenReturn(Collections.singletonList(
+                voice(10L, "alias", "Voice", "{\"voiceId\":\"ActualVoice\",\"language\":\"en-US\","
+                        + "\"country\":\"US\"}")));
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(55L, 44L,
+                TkUserLevelEnum.TENANT_USER.getCode(), null));
+        when(favoriteMapper.selectListByScope(44L, 55L, "MINIMAX")).thenReturn(Collections.emptyList());
+        try (MockedStatic<SecurityFrameworkUtils> security = mockStatic(SecurityFrameworkUtils.class)) {
+            security.when(SecurityFrameworkUtils::getLoginUserId).thenReturn(55L);
+            service.removeFavorite("alias");
+        }
+        verify(favoriteMapper).deleteByScope(44L, 55L, "MINIMAX", "ActualVoice");
+    }
+
     private static DictDataDO voice(Long id, String value, String label, String remark) {
         return new DictDataDO().setId(id).setValue(value).setLabel(label).setDictType("ai_tts_voice")
                 .setStatus(0).setSort(id.intValue()).setRemark(remark);

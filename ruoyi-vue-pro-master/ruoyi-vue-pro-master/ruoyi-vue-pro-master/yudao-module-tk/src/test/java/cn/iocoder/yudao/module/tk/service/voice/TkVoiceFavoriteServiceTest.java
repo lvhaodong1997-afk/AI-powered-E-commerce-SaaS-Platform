@@ -147,12 +147,14 @@ class TkVoiceFavoriteServiceTest {
             TkVoiceFavoriteService service = service();
             service.addFavorite(" minimax ", " AliasVoice ");
             service.removeFavorite("minimax", "StaleVoice");
+            service.removeFavorite("minimax", "StaleVoice");
         } finally {
             Locale.setDefault(previous);
         }
         verify(miniMax).addFavorite("AliasVoice");
-        verify(miniMax).removeFavorite("StaleVoice");
-        verifyNoInteractions(mapper, profiles);
+        verify(mapper, times(2)).deleteByScope(44L, 55L, "MINIMAX", "StaleVoice");
+        verifyNoMoreInteractions(miniMax);
+        verifyNoInteractions(profiles);
     }
 
     @Test

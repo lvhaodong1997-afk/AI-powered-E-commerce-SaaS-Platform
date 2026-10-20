@@ -205,14 +205,12 @@ const toggleFavorite = async (option: TkMiniMaxVoiceOptionVO) => {
       favoriteState,
       option,
       async (voiceId: string, favorite: boolean) => {
-        if (!props.provider || props.provider === 'MINIMAX') {
-          await (favorite
-            ? TkMiniMaxVoiceApi.favorite(voiceId)
-            : TkMiniMaxVoiceApi.unfavorite(voiceId))
+        if (!favorite) {
+          await TkVoiceFavoriteApi.unfavorite(props.provider || 'MINIMAX', voiceId)
+        } else if (!props.provider || props.provider === 'MINIMAX') {
+          await TkMiniMaxVoiceApi.favorite(voiceId)
         } else {
-          await (favorite
-            ? TkVoiceFavoriteApi.favorite(props.provider, voiceId)
-            : TkVoiceFavoriteApi.unfavorite(props.provider, voiceId))
+          await TkVoiceFavoriteApi.favorite(props.provider, voiceId)
         }
       },
       (voiceId: string, favorite: boolean) => emit('favorite-change', voiceId, favorite)

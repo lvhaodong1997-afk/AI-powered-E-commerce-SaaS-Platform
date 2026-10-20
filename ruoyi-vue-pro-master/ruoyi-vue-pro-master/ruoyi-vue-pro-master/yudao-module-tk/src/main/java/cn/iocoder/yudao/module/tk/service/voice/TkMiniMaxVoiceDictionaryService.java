@@ -132,11 +132,15 @@ public class TkMiniMaxVoiceDictionaryService {
         if (StrUtil.isBlank(code) || code.length() > 128) {
             throw serviceException("音色编码不能为空且不能超过 128 个字符");
         }
-        String canonicalVoiceId;
-        try {
-            canonicalVoiceId = resolveVoiceCode(null, code);
-        } catch (ServiceException ex) {
-            canonicalVoiceId = code; // Stale favorites remain removable without an enabled catalog entry.
+        String canonicalVoiceId = code;
+        boolean storedExactKey = favoriteMapper.selectListByScope(tenantId, userId, PROVIDER).stream()
+                .anyMatch(favorite -> code.equals(favorite.getVoiceCode()));
+        if (!storedExactKey) {
+            try {
+                canonicalVoiceId = resolveVoiceCode(null, code);
+            } catch (ServiceException ex) {
+                // Stale favorites remain removable without an enabled catalog entry.
+            }
         }
         favoriteMapper.deleteByScope(tenantId, userId, PROVIDER, canonicalVoiceId);
     }
