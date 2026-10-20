@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
@@ -187,7 +188,7 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
-    void planLeadGenerationFinalBackfillDoesNotRevisitUsedSourceModules() {
+    void planLeadGenerationFinalBackfillContinuesLastGeneralSource() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         ReflectionTestUtils.setField(service, "random", new FixedRandom(0, 0, 0, 0, 0, 0, 0, 0));
         ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
@@ -221,11 +222,11 @@ class DefaultTkClipPlannerServiceTest {
 
         List<TkClipPlanItem> plan = service.plan(task, "lead generation script", 29);
 
-        assertEquals(16, plan.stream().mapToInt(TkClipPlanItem::getDurationSecond).sum());
+        assertEquals(30, plan.stream().mapToInt(TkClipPlanItem::getDurationSecond).sum());
         List<Long> backfillIds = plan.stream().skip(8)
                 .map(TkClipPlanItem::getMaterialVideoId)
                 .collect(Collectors.toList());
-        assertTrue(backfillIds.isEmpty());
+        assertEquals(Arrays.asList(12L), backfillIds);
         assertTrue(plan.stream().allMatch(item -> item.getStartSecond() == 0));
     }
 
@@ -239,7 +240,7 @@ class DefaultTkClipPlannerServiceTest {
                 material(1L, 5L, "ATTENTION", "S1_HOOK"),
                 material(2L, 5L, "PRODUCT_SHOW", "S4_DEMO"),
                 material(3L, 5L, "GENERAL", "GENERAL"),
-                material(4L, 6L, "GENERAL", "GENERAL")
+                material(4L, 6L, "GENERAL", "S4_DEMO")
         ));
         TkGenerationTaskDO task = TkGenerationTaskDO.builder()
                 .id(187L)
@@ -789,7 +790,7 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
-    void planRejectsSeveralRequiredSectionsWhenOnlyOneUnassignedSourcePoolExists() {
+    void planRejectsInitialRequiredSectionWhenOnlyUnassignedSourcePoolExists() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getFfmpeg().setClipDurationPool(Arrays.asList(2, 3, 4));
@@ -811,12 +812,12 @@ class DefaultTkClipPlannerServiceTest {
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> service.plan(task, "portable blender demo result"));
 
-        assertTrue(error.getMessage().contains("S3_REVEAL"));
+        assertTrue(error.getMessage().contains("S1_HOOK"));
         assertTrue(error.getMessage().contains("素材不足"));
     }
 
     @Test
-    void planUsesUnusedCrossSegmentMaterialsWhenStrictSegmentIsShort() {
+    void planKeepsNonemptyShortSectionForRendererInsteadOfTakingFutureSource() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getFfmpeg().setClipDurationPool(Arrays.asList(2, 3, 4));
@@ -841,12 +842,12 @@ class DefaultTkClipPlannerServiceTest {
         List<TkClipPlanItem> plan = service.plan(task, "demo proof");
 
         assertEquals(plan.size(), plan.stream().map(TkClipPlanItem::getMaterialVideoId).distinct().count());
-        assertTrue(plan.stream().anyMatch(item -> Long.valueOf(4L).equals(item.getMaterialVideoId())
+        assertTrue(plan.stream().noneMatch(item -> Long.valueOf(4L).equals(item.getMaterialVideoId())
                 && "S4_DEMO".equals(item.getSection())));
     }
 
     @Test
-    void planChoosesClosestUnusedCrossSegmentMaterialForDurationGap() {
+    void planDoesNotUseGeneralWhenLastOwnModuleIsExhausted() {
         DefaultTkClipPlannerService service = new DefaultTkClipPlannerService();
         ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
         TkMaterialVideoMapper materialVideoMapper = mock(TkMaterialVideoMapper.class);
@@ -869,94 +870,97 @@ class DefaultTkClipPlannerServiceTest {
 
         List<TkClipPlanItem> plan = service.plan(task, "demo");
 
-        assertTrue(plan.stream().anyMatch(item -> Long.valueOf(4L).equals(item.getMaterialVideoId())
-                && "S4_DEMO".equals(item.getSection())));
-        assertTrue(plan.stream().noneMatch(item -> Long.valueOf(3L).equals(item.getMaterialVideoId())));
-    }
-
-    @Test
-    void nearestSourceModuleWinsBeforeDurationMatch() {
-        DefaultTkClipPlannerService service = plannerWith(
-                material(1L, 2L, "GENERAL", "S4_DEMO"),
-                material(2L, 20L, "GENERAL", "S3_REVEAL"),
-                material(3L, 6L, "GENERAL", "S6_DETAIL"));
-
-        List<TkClipPlanItem> plan = service.plan(orderedTask(new int[]{8}, "S4_DEMO"), "demo");
-
         assertEquals(Arrays.asList(1L, 2L), materialIds(plan));
-        assertTrue(plan.get(1).getReason().contains("S4_DEMO"));
-        assertTrue(plan.get(1).getReason().contains("S3_REVEAL"));
+        assertEquals(7, sectionTargetOf(plan, "S4_DEMO"));
     }
 
     @Test
-    void fallbackExcludesUsedSourceModulesEvenWithUnusedBetterDurationClip() {
+    void ownModuleStillWinsBeforeLastSourceFallback() {
         DefaultTkClipPlannerService service = plannerWith(
-                material(1L, 1L, "GENERAL", "S2_PAIN"),
-                material(2L, 4L, "GENERAL", "S2_PAIN"),
-                material(3L, 20L, "GENERAL", "S6_DETAIL"));
-
-        List<TkClipPlanItem> plan = service.plan(orderedTask(new int[]{1, 7}, "S2_PAIN", "S7_LIFESTYLE"), "demo");
-
-        assertEquals(Arrays.asList(1L, 3L), materialIds(plan));
+                material(1L, 2L, "GENERAL", "S3_REVEAL"),
+                material(2L, 8L, "GENERAL", "S4_DEMO"),
+                material(3L, 6L, "GENERAL", "S3_REVEAL"));
+        assertEquals(Arrays.asList(1L, 2L), materialIds(service.plan(
+                orderedTask(new int[]{2, 8}, "S3_REVEAL", "S4_DEMO"), "demo")));
     }
 
     @Test
-    void borrowedSourceCannotBeReusedInTheNextGap() {
+    void fallbackContinuesLastSourceEvenWhenUnusedS6Exists() {
         DefaultTkClipPlannerService service = plannerWith(
-                material(1L, 3L, "GENERAL", "S2_PAIN"),
-                material(2L, 3L, "GENERAL", "S2_PAIN"),
-                material(3L, 20L, "GENERAL", "S4_DEMO"));
-
-        List<TkClipPlanItem> plan = service.plan(orderedTask(new int[]{3, 5}, "S1_HOOK", "S3_REVEAL"), "demo");
-
-        assertEquals(Arrays.asList(1L, 3L), materialIds(plan));
+                material(1L, 1L, "GENERAL", "S5_PROOF"),
+                material(2L, 7L, "GENERAL", "S5_PROOF"),
+                material(3L, 7L, "GENERAL", "S6_DETAIL"));
+        List<TkClipPlanItem> plan = service.plan(orderedTask(new int[]{1, 7}, "S5_PROOF", "S7_LIFESTYLE"), "demo");
+        assertEquals(Arrays.asList(1L, 2L), materialIds(plan));
+        assertEquals("S7_LIFESTYLE", plan.get(1).getSection());
+        assertTrue(plan.get(1).getReason().contains("S5_PROOF"));
+        assertTrue(plan.get(1).getReason().contains("S7_LIFESTYLE"));
     }
 
     @Test
-    void equalDistancePrefersFollowingSourceModule() {
+    void multipleMissingSectionsContinueActualSourceDespiteTargetLabels() {
         DefaultTkClipPlannerService service = plannerWith(
-                material(1L, 5L, "GENERAL", "S3_REVEAL"),
-                material(2L, 20L, "GENERAL", "S5_PROOF"));
-
-        List<TkClipPlanItem> plan = service.plan(orderedTask(new int[]{8}, "S4_DEMO"), "demo");
-
-        assertEquals(Arrays.asList(2L), materialIds(plan));
+                material(1L, 3L, "GENERAL", "S5_PROOF"),
+                material(2L, 3L, "GENERAL", "S5_PROOF"),
+                material(3L, 5L, "GENERAL", "S5_PROOF"),
+                material(4L, 20L, "GENERAL", "S4_DEMO"));
+        List<TkClipPlanItem> plan = service.plan(orderedTask(new int[]{3, 3, 5},
+                "S5_PROOF", "S6_DETAIL", "S7_LIFESTYLE"), "demo");
+        assertEquals(Arrays.asList(1L, 2L, 3L), materialIds(plan));
+        assertEquals(Arrays.asList("S5_PROOF", "S6_DETAIL", "S7_LIFESTYLE"), plan.stream()
+                .map(TkClipPlanItem::getSection).collect(Collectors.toList()));
     }
 
     @Test
-    void generalIsOnlyUsedAfterEligibleOrderedModules() {
+    void lastSourceUsesTimelineOrderRatherThanHighestEnum() {
+        DefaultTkClipPlannerService service = plannerWith(
+                material(1L, 2L, "GENERAL", "S5_PROOF"),
+                material(2L, 2L, "GENERAL", "S2_PAIN"),
+                material(3L, 4L, "GENERAL", "S2_PAIN"),
+                material(4L, 4L, "GENERAL", "S5_PROOF"));
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder().libraryId(10L).targetDuration(8)
+                .segmentTimeline("[{\"segmentLibrary\":\"S5_PROOF\",\"timeWindow\":\"0-2s\"},"
+                        + "{\"segmentLibrary\":\"S2_PAIN\",\"timeWindow\":\"2-4s\"},"
+                        + "{\"segmentLibrary\":\"S7_LIFESTYLE\",\"timeWindow\":\"4-8s\"}]").build();
+        assertEquals(Arrays.asList(1L, 2L, 3L), materialIds(service.plan(task, "demo")));
+    }
+
+    @Test
+    void noInitialSourceCannotInventGeneralOrAnUnusedOrderedPool() {
         DefaultTkClipPlannerService service = plannerWith(
                 material(1L, 5L, "GENERAL", "GENERAL"),
                 material(2L, 20L, "GENERAL", "S1_HOOK"));
-
-        assertEquals(Arrays.asList(2L), materialIds(service.plan(
-                orderedTask(new int[]{8}, "S7_LIFESTYLE"), "demo")));
-        assertEquals(Arrays.asList(1L), materialIds(plannerWith(material(1L, 5L, "GENERAL", "GENERAL"))
-                .plan(orderedTask(new int[]{8}, "S7_LIFESTYLE"), "demo")));
-    }
-
-    @Test
-    void oneGapCanConsumeSeveralClipsFromChosenSourcePoolByDuration() {
-        DefaultTkClipPlannerService service = plannerWith(
-                material(1L, 3L, "GENERAL", "S6_DETAIL"),
-                material(2L, 5L, "GENERAL", "S6_DETAIL"),
-                material(3L, 3L, "GENERAL", "S5_PROOF"));
-
-        assertEquals(Arrays.asList(2L, 1L), materialIds(service.plan(
-                orderedTask(new int[]{8}, "S7_LIFESTYLE"), "demo")));
-    }
-
-    @Test
-    void emptyRequiredSectionFailsWhenOnlyPreviouslyUsedSourcesRemain() {
-        DefaultTkClipPlannerService service = plannerWith(
-                material(1L, 3L, "GENERAL", "S2_PAIN"),
-                material(2L, 3L, "GENERAL", "S2_PAIN"));
-
         IllegalStateException error = assertThrows(IllegalStateException.class, () -> service.plan(
-                orderedTask(new int[]{3, 5}, "S1_HOOK", "S3_REVEAL"), "demo"));
+                orderedTask(new int[]{8}, "S7_LIFESTYLE"), "demo"));
+        assertTrue(error.getMessage().contains("S7_LIFESTYLE"));
+        assertTrue(error.getMessage().contains("尚无实际来源模块"));
+    }
 
-        assertTrue(error.getMessage().contains("S3_REVEAL"));
-        assertTrue(error.getMessage().contains("素材不足"));
+    @Test
+    void oneGapConsumesDurationNearestUniqueClipsOnlyFromLastPool() {
+        DefaultTkClipPlannerService service = plannerWith(
+                material(1L, 1L, "GENERAL", "S5_PROOF"),
+                material(2L, 3L, "GENERAL", "S5_PROOF"),
+                material(3L, 5L, "GENERAL", "S5_PROOF"),
+                material(4L, 20L, "GENERAL", "S5_PROOF"),
+                material(5L, 8L, "GENERAL", "S6_DETAIL"));
+        assertEquals(Arrays.asList(1L, 3L, 2L), materialIds(service.plan(
+                orderedTask(new int[]{1, 8}, "S5_PROOF", "S7_LIFESTYLE"), "demo")));
+    }
+
+    @Test
+    void exhaustedLastPoolCannotRevisitEarlierOrNeverUsedPools() {
+        DefaultTkClipPlannerService service = plannerWith(
+                material(1L, 1L, "GENERAL", "S2_PAIN"),
+                material(2L, 20L, "GENERAL", "S2_PAIN"),
+                material(3L, 1L, "GENERAL", "S5_PROOF"),
+                material(4L, 20L, "GENERAL", "S6_DETAIL"),
+                material(5L, 20L, "GENERAL", "GENERAL"));
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> service.plan(
+                orderedTask(new int[]{1, 1, 6}, "S2_PAIN", "S5_PROOF", "S7_LIFESTYLE"), "demo"));
+        assertTrue(error.getMessage().contains("S7_LIFESTYLE"));
+        assertTrue(error.getMessage().contains("S5_PROOF"));
+        assertTrue(error.getMessage().contains("耗尽"));
     }
 
     @Test
@@ -973,16 +977,14 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
-    void futureOwnModuleCanUseRemainingUniqueClipsAfterEarlierBorrow() {
+    void futureOwnModuleWinsAfterEarlierFallbackContinuedPreviousSource() {
         DefaultTkClipPlannerService service = plannerWith(
-                material(1L, 3L, "GENERAL", "S2_PAIN"),
-                material(2L, 5L, "GENERAL", "S2_PAIN"));
-
-        List<TkClipPlanItem> plan = service.plan(orderedTask(new int[]{3, 5}, "S1_HOOK", "S2_PAIN"), "demo");
-
-        assertEquals(Arrays.asList(1L, 2L), materialIds(plan));
-        assertEquals(Arrays.asList("S1_HOOK", "S2_PAIN"), plan.stream()
-                .map(TkClipPlanItem::getSection).collect(Collectors.toList()));
+                material(1L, 3L, "GENERAL", "S1_HOOK"),
+                material(2L, 3L, "GENERAL", "S1_HOOK"),
+                material(3L, 5L, "GENERAL", "S3_REVEAL"));
+        List<TkClipPlanItem> plan = service.plan(orderedTask(new int[]{3, 3, 5},
+                "S1_HOOK", "S2_PAIN", "S3_REVEAL"), "demo");
+        assertEquals(Arrays.asList(1L, 2L, 3L), materialIds(plan));
     }
 
     @Test
@@ -997,7 +999,7 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
-    void leadMissingModuleUsesNearestUnusedSourceAndReportsActualSource() {
+    void leadMissingModuleContinuesLastSourceAndReportsTargetAndSource() {
         DefaultTkClipPlannerService service = plannerWith(
                 material(1L, 2L, "GENERAL", "S1_HOOK"),
                 material(2L, 1L, "GENERAL", "S1_HOOK"),
@@ -1005,34 +1007,39 @@ class DefaultTkClipPlannerServiceTest {
                 material(4L, 2L, "GENERAL", "S3_REVEAL"));
         TkGenerationTaskDO task = orderedTask(new int[]{10}, "S1_HOOK");
         task.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
-
         List<TkClipPlanItem> plan = service.plan(task, "lead");
-
-        assertEquals(Arrays.asList(1L, 4L, 3L), materialIds(plan));
+        assertEquals(Arrays.asList(1L, 2L, 3L, 4L), materialIds(plan));
         assertEquals("S2_PAIN", plan.get(1).getSection());
-        assertTrue(plan.get(1).getReason().contains("S3_REVEAL"));
+        assertTrue(plan.get(1).getReason().contains("S1_HOOK"));
+        assertTrue(plan.get(1).getReason().contains("S2_PAIN"));
     }
 
     @Test
-    void tailReplanExcludesActualSourceUsedByRetainedFallbackItem() {
+    void tailReplanContinuesActualSourceOfRetainedS7ItemAndExcludesAllOriginalIds() {
         DefaultTkClipPlannerService service = plannerWith(
-                material(1L, 3L, "GENERAL", "S6_DETAIL"),
-                material(2L, 5L, "GENERAL", "S7_LIFESTYLE"),
-                material(3L, 5L, "GENERAL", "S6_DETAIL"),
+                material(1L, 3L, "GENERAL", "S5_PROOF"),
+                material(2L, 5L, "GENERAL", "S5_PROOF"),
+                material(3L, 5L, "GENERAL", "S5_PROOF"),
                 material(4L, 6L, "GENERAL", "GENERAL"));
         TkGenerationTaskDO task = orderedTask(new int[]{8}, "S7_LIFESTYLE");
         task.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
         List<TkClipPlanItem> original = Arrays.asList(
                 new TkClipPlanItem(1, "MATERIAL", 1L, "first", "https://example.com/first", 0, 3,
-                        "fallback", "S1_HOOK", "hook", 1, null),
+                        "fallback", "S7_LIFESTYLE", "custom target", 1, null, "target script", "target visual", 8),
                 new TkClipPlanItem(2, "MATERIAL", 2L, "tail", "https://example.com/tail", 0, 5,
-                        "tail", "S7_LIFESTYLE", "lifestyle", 2, null));
-
-        assertEquals(Arrays.asList(1L, 4L), materialIds(service.replanTailForLowDynamic(task, original, 8)));
+                        "tail", "S7_LIFESTYLE", "custom target", 2, null, "target script", "target visual", 8));
+        List<TkClipPlanItem> replanned = service.replanTailForLowDynamic(task, original, 8);
+        assertEquals(Arrays.asList(1L, 3L), materialIds(replanned));
+        assertEquals("S7_LIFESTYLE", replanned.get(1).getSection());
+        assertEquals("custom target", replanned.get(1).getSectionName());
+        assertEquals("target script", replanned.get(1).getScriptLine());
+        assertEquals("target visual", replanned.get(1).getVisualDirection());
+        assertEquals(8, replanned.get(1).getSectionTargetSecond());
+        assertTrue(replanned.get(1).getReason().contains("S5_PROOF"));
     }
 
     @Test
-    void s7BorrowsUnusedS6AfterS1ThroughS5WereUsed() {
+    void s7ContinuesS5AfterS1ThroughS5WereUsedEvenWithUnusedS6() {
         DefaultTkClipPlannerService service = plannerWith(
                 material(1L, 1L, "GENERAL", "S1_HOOK"),
                 material(2L, 1L, "GENERAL", "S2_PAIN"),
@@ -1040,40 +1047,34 @@ class DefaultTkClipPlannerServiceTest {
                 material(4L, 1L, "GENERAL", "S4_DEMO"),
                 material(5L, 1L, "GENERAL", "S5_PROOF"),
                 material(6L, 20L, "GENERAL", "S6_DETAIL"),
-                material(20L, 3L, "GENERAL", "S2_PAIN"));
-
+                material(20L, 3L, "GENERAL", "S5_PROOF"));
         List<TkClipPlanItem> plan = service.plan(orderedTask(new int[]{1, 1, 1, 1, 1, 3},
                 "S1_HOOK", "S2_PAIN", "S3_REVEAL", "S4_DEMO", "S5_PROOF", "S7_LIFESTYLE"), "demo");
-
-        assertEquals(Arrays.asList(1L, 2L, 3L, 4L, 5L, 6L), materialIds(plan));
+        assertEquals(Arrays.asList(1L, 2L, 3L, 4L, 5L, 20L), materialIds(plan));
     }
 
     @Test
-    void s7FailsIfS6AndAllOtherSourceModulesWereAlreadyUsed() {
+    void s7ContinuesS6WhenItIsTheLastActualSource() {
         DefaultTkClipPlannerService service = plannerWith(
-                material(1L, 1L, "GENERAL", "S1_HOOK"),
-                material(2L, 1L, "GENERAL", "S2_PAIN"),
-                material(3L, 1L, "GENERAL", "S3_REVEAL"),
-                material(4L, 1L, "GENERAL", "S4_DEMO"),
-                material(5L, 1L, "GENERAL", "S5_PROOF"),
-                material(6L, 1L, "GENERAL", "S6_DETAIL"),
-                material(60L, 2L, "GENERAL", "S6_DETAIL"));
-
-        IllegalStateException error = assertThrows(IllegalStateException.class, () -> service.plan(
-                orderedTask(new int[]{1, 1, 1, 1, 1, 1, 2}, "S1_HOOK", "S2_PAIN", "S3_REVEAL",
-                        "S4_DEMO", "S5_PROOF", "S6_DETAIL", "S7_LIFESTYLE"), "demo"));
-
-        assertTrue(error.getMessage().contains("S7_LIFESTYLE"));
+                material(1L, 1L, "GENERAL", "S5_PROOF"),
+                material(2L, 1L, "GENERAL", "S6_DETAIL"),
+                material(3L, 6L, "GENERAL", "S6_DETAIL"));
+        assertEquals(Arrays.asList(1L, 2L, 3L), materialIds(service.plan(
+                orderedTask(new int[]{1, 1, 6}, "S5_PROOF", "S6_DETAIL", "S7_LIFESTYLE"), "demo")));
     }
 
     @Test
-    void generalSourceCannotBeBorrowedAgainForAnotherSection() {
+    void generalCanContinueWhenItIsTheLastActualSource() {
         DefaultTkClipPlannerService service = plannerWith(
                 material(1L, 4L, "GENERAL", "GENERAL"),
-                material(2L, 4L, "GENERAL", "GENERAL"));
-
-        assertThrows(IllegalStateException.class, () -> service.plan(
-                orderedTask(new int[]{4, 4}, "S1_HOOK", "S4_DEMO"), "demo"));
+                material(2L, 4L, "GENERAL", "GENERAL"),
+                material(3L, 4L, "GENERAL", "S6_DETAIL"));
+        TkGenerationTaskDO task = orderedTask(new int[]{8}, "S7_LIFESTYLE");
+        task.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
+        // S6 is selected first, then GENERAL becomes the last actual source before final fill.
+        assertEquals(Arrays.asList(3L, 1L), materialIds(service.plan(task, "lead")));
+        task.setTargetDuration(12);
+        assertEquals(Arrays.asList(3L, 1L, 2L), materialIds(service.plan(task, "lead")));
     }
 
     @Test
@@ -1086,6 +1087,112 @@ class DefaultTkClipPlannerServiceTest {
                 () -> service.plan(task, "lead"));
 
         assertTrue(error.getMessage().contains("素材不足"));
+    }
+
+    @Test
+    void productionRequested15Effective21ContinuesS5WithUniqueIdsWhenS6S7AreEmpty() {
+        ArrayList<TkMaterialVideoDO> materials = new ArrayList<>();
+        String[] modules = {"S1_HOOK", "S2_PAIN", "S3_REVEAL", "S4_DEMO", "S5_PROOF"};
+        int[] counts = {31, 53, 17, 44, 29};
+        long id = 1;
+        for (int module = 0; module < modules.length; module++) {
+            for (int clip = 0; clip < counts[module]; clip++) {
+                materials.add(material(id++, 2L, "GENERAL", modules[module]));
+            }
+        }
+        DefaultTkClipPlannerService service = plannerWith(materials.toArray(new TkMaterialVideoDO[0]));
+        TkGenerationTaskDO task = orderedTask(new int[]{3, 2, 2, 3, 2, 3},
+                "S1_HOOK", "S2_PAIN", "S3_REVEAL", "S4_DEMO", "S5_PROOF", "S7_LIFESTYLE");
+
+        List<TkClipPlanItem> plan = service.plan(task, "production-shaped independent fixture", 21);
+
+        assertEquals(15, task.getTargetDuration());
+        assertEquals(21, plan.stream().collect(Collectors.toMap(TkClipPlanItem::getSection,
+                TkClipPlanItem::getSectionTargetSecond, (first, ignored) -> first)).values().stream()
+                .mapToInt(Integer::intValue).sum());
+        assertEquals(plan.size(), materialIds(plan).stream().distinct().count());
+        assertTrue(plan.stream().anyMatch(item -> "S7_LIFESTYLE".equals(item.getSection())));
+        assertTrue(plan.stream().filter(item -> "S7_LIFESTYLE".equals(item.getSection()))
+                .allMatch(item -> item.getMaterialVideoId() >= 146L
+                        && item.getReason().contains("S5_PROOF")));
+    }
+
+    @Test
+    void invalidUnusedIdsUrlsAndDurationsCannotFillFromLastPool() {
+        TkMaterialVideoDO noUrl = material(2L, 7L, "GENERAL", "S5_PROOF");
+        noUrl.setFileUrl(" ");
+        DefaultTkClipPlannerService service = plannerWith(
+                material(1L, 1L, "GENERAL", "S5_PROOF"), noUrl,
+                material(null, 7L, "GENERAL", "S5_PROOF"),
+                material(0L, 7L, "GENERAL", "S5_PROOF"),
+                material(-1L, 7L, "GENERAL", "S5_PROOF"),
+                material(3L, 0L, "GENERAL", "S5_PROOF"),
+                material(4L, -2L, "GENERAL", "S5_PROOF"),
+                material(5L, 7L, "GENERAL", "S6_DETAIL"));
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> service.plan(
+                orderedTask(new int[]{1, 7}, "S5_PROOF", "S7_LIFESTYLE"), "demo"));
+        assertTrue(error.getMessage().contains("S5_PROOF"));
+        assertTrue(error.getMessage().contains("耗尽"));
+    }
+
+    @Test
+    void uploadedOpeningWithoutMaterialIdDoesNotFabricateSource() {
+        DefaultTkClipPlannerService service = plannerWith(material(1L, 7L, "GENERAL", "S1_HOOK"));
+        TkGenerationTaskDO task = orderedTask(new int[]{1, 7}, "S1_HOOK", "S7_LIFESTYLE");
+        task.setOpeningVideoUrl("https://example.com/opening.mp4");
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> service.plan(task, "demo"));
+        assertTrue(error.getMessage().contains("S7_LIFESTYLE"));
+        assertTrue(error.getMessage().contains("尚无实际来源模块"));
+    }
+
+    @Test
+    void nativeLeadOpeningCannotBorrowUnusedLibraryHookWithoutActualBodySource() {
+        DefaultTkClipPlannerService service = plannerWith(material(1L, 7L, "GENERAL", "S1_HOOK"));
+        TkGenerationTaskDO task = orderedTask(new int[]{1, 7}, "S1_HOOK", "S7_LIFESTYLE");
+        task.setOpeningProcessMode(TkNativeOpeningSupport.MODE_NATIVE);
+        task.setOpeningVideoUrl("https://example.com/opening.mp4");
+        task.setOpeningDurationMs(1000L);
+        task.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> service.plan(task, "demo"));
+        assertTrue(error.getMessage().contains("正文"));
+    }
+
+    @Test
+    void leadFinalFillContinuesActualS5BehindS7TargetLabel() {
+        DefaultTkClipPlannerService service = plannerWith(
+                material(1L, 1L, "GENERAL", "S5_PROOF"),
+                material(2L, 7L, "GENERAL", "S5_PROOF"),
+                material(3L, 7L, "GENERAL", "S6_DETAIL"));
+        List<TkClipPlanItem> plan = new ArrayList<>();
+        plan.add(new TkClipPlanItem(1, "MATERIAL", 1L, "first", "https://example.com/first", 0, 1,
+                "fallback", "S7_LIFESTYLE", "custom target", 1, null, "target script", "target visual", 8));
+        ReflectionTestUtils.invokeMethod(service, "backfillLeadGenerationPlan", plan,
+                Arrays.asList(material(1L, 1L, "GENERAL", "S5_PROOF"),
+                        material(2L, 7L, "GENERAL", "S5_PROOF"),
+                        material(3L, 7L, "GENERAL", "S6_DETAIL")), 2, 8);
+        assertEquals(Arrays.asList(1L, 2L), materialIds(plan));
+        assertEquals("S7_LIFESTYLE", plan.get(1).getSection());
+        assertEquals("custom target", plan.get(1).getSectionName());
+        assertEquals("target script", plan.get(1).getScriptLine());
+        assertEquals("target visual", plan.get(1).getVisualDirection());
+        assertEquals(8, plan.get(1).getSectionTargetSecond());
+        assertTrue(plan.get(1).getReason().contains("S5_PROOF"));
+    }
+
+    @Test
+    void exhaustedTailPoolReturnsOriginalWithoutUsingRemovedOrUnrelatedClips() {
+        DefaultTkClipPlannerService service = plannerWith(
+                material(1L, 3L, "GENERAL", "S5_PROOF"),
+                material(2L, 5L, "GENERAL", "S5_PROOF"),
+                material(3L, 8L, "GENERAL", "S6_DETAIL"));
+        TkGenerationTaskDO task = orderedTask(new int[]{8}, "S7_LIFESTYLE");
+        task.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
+        List<TkClipPlanItem> original = Arrays.asList(
+                new TkClipPlanItem(1, "MATERIAL", 1L, "first", "https://example.com/first", 0, 3,
+                        "fallback", "S7_LIFESTYLE", "lifestyle", 1, null),
+                new TkClipPlanItem(2, "MATERIAL", 2L, "tail", "https://example.com/tail", 0, 5,
+                        "tail", "S7_LIFESTYLE", "lifestyle", 2, null));
+        org.junit.jupiter.api.Assertions.assertSame(original, service.replanTailForLowDynamic(task, original, 8));
     }
 
     private DefaultTkClipPlannerService plannerWith(TkMaterialVideoDO... materials) {
