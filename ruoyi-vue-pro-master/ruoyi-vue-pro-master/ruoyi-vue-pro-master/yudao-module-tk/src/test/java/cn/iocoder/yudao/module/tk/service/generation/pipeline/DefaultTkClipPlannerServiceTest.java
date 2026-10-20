@@ -1015,6 +1015,59 @@ class DefaultTkClipPlannerServiceTest {
     }
 
     @Test
+    void fullPoolRandomLeadTailPreservesUnusedModuleSelectionAndSourceMetadata() {
+        DefaultTkClipPlannerService service = plannerWith(
+                material(1L, 3L, "GENERAL", "S5_PROOF"),
+                material(2L, 5L, "GENERAL", "S6_DETAIL"),
+                material(3L, 5L, "GENERAL", "S6_DETAIL"));
+        TkGenerationTaskDO task = orderedTask(new int[]{8}, "S7_LIFESTYLE");
+        task.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
+        List<TkClipPlanItem> original = Arrays.asList(
+                new TkClipPlanItem(1, "MATERIAL", 1L, "first", "https://example.com/first", 0, 3,
+                        "first", "S5_PROOF", "proof", 1, null),
+                new TkClipPlanItem(2, "MATERIAL", 2L, "tail", "https://example.com/tail", 0, 5,
+                        "tail", "S7_LIFESTYLE", "custom target", 7, null, "target script", "target visual", 8));
+        for (String mode : Arrays.asList("FULL_POOL_RANDOM", " full_pool_random ")) {
+            task.setGenerationRouteConfig("{\"clipPlanMode\":\"" + mode + "\"}");
+            List<TkClipPlanItem> replanned = service.replanTailForLowDynamic(task, original, 8);
+            assertEquals(Arrays.asList(1L, 3L), materialIds(replanned));
+            org.junit.jupiter.api.Assertions.assertSame(original.get(0), replanned.get(0));
+            assertEquals(Arrays.asList(1L, 2L), materialIds(original));
+            TkClipPlanItem replacement = replanned.get(1);
+            assertEquals("S6_DETAIL", replacement.getSection());
+            assertEquals(cn.iocoder.yudao.module.tk.enums.TkMaterialSegmentTypeEnum.S6_DETAIL.getName(),
+                    replacement.getSectionName());
+            assertEquals(2, replacement.getSectionOrder());
+            org.junit.jupiter.api.Assertions.assertNull(replacement.getScriptLine());
+            org.junit.jupiter.api.Assertions.assertNull(replacement.getVisualDirection());
+            org.junit.jupiter.api.Assertions.assertNull(replacement.getSectionTargetSecond());
+            assertTrue(replacement.getReason().contains("最近未使用来源模块"));
+            assertTrue(replacement.getReason().contains("S7_LIFESTYLE"));
+            assertTrue(replacement.getReason().contains("S6_DETAIL"));
+        }
+    }
+
+    @Test
+    void segmentedLeadTailCannotUseUnrelatedModuleWhenLastSourceIsExhausted() {
+        DefaultTkClipPlannerService service = plannerWith(
+                material(1L, 3L, "GENERAL", "S5_PROOF"),
+                material(2L, 5L, "GENERAL", "S6_DETAIL"),
+                material(3L, 5L, "GENERAL", "S6_DETAIL"));
+        TkGenerationTaskDO task = orderedTask(new int[]{8}, "S7_LIFESTYLE");
+        task.setMaterialPurpose(TkGeminiPromptConfig.MATERIAL_PURPOSE_LEAD_GENERATION);
+        List<TkClipPlanItem> original = Arrays.asList(
+                new TkClipPlanItem(1, "MATERIAL", 1L, "first", "https://example.com/first", 0, 3,
+                        "first", "S5_PROOF", "proof", 1, null),
+                new TkClipPlanItem(2, "MATERIAL", 2L, "tail", "https://example.com/tail", 0, 5,
+                        "tail", "S7_LIFESTYLE", "custom target", 7, null));
+        for (String config : Arrays.asList(null, "{}", "{\"clipPlanMode\":\" segmented \"}",
+                "{\"clipPlanMode\":\"unknown\"}")) {
+            task.setGenerationRouteConfig(config);
+            org.junit.jupiter.api.Assertions.assertSame(original, service.replanTailForLowDynamic(task, original, 8));
+        }
+    }
+
+    @Test
     void tailReplanContinuesActualSourceOfRetainedS7ItemAndExcludesAllOriginalIds() {
         DefaultTkClipPlannerService service = plannerWith(
                 material(1L, 3L, "GENERAL", "S5_PROOF"),
