@@ -80,6 +80,14 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
                     return exactTimeline;
                 }
             }
+            TkSubtitleTimeline partialTimeline = salvageReliableSegments(task, scriptText, audioFile, keywords,
+                    asrTimeline, retryTimeline);
+            if (partialTimeline != null) {
+                writeSubtitleQualityReport(task, partialTimeline, audioFile, "ASR_PARTIAL",
+                        inspectSubtitleQuality(partialTimeline, audioFile),
+                        "Whole-script ASR text mismatch; independently matched segments retain actual word timing");
+                return partialTimeline;
+            }
             if (!estimatedFallbackOnMismatch()) {
                 writeSubtitleQualityReport(task, asrTimeline, audioFile, "ASR_TEXT_MISMATCH", inspectSubtitleQuality(asrTimeline, audioFile),
                         "ASR text does not match original script");
@@ -96,6 +104,28 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         writeSubtitleQualityReport(task, timeline, audioFile, "ESTIMATED_ASR_UNAVAILABLE", inspectSubtitleQuality(timeline, audioFile),
                 "ASR 时间轴不可用或与 AI 文案不匹配，已降级为估算字幕");
         return timeline;
+    }
+
+    private TkSubtitleTimeline salvageReliableSegments(TkGenerationTaskDO task, String scriptText, File audioFile,
+                                                        List<String> keywords, TkSubtitleTimeline... candidates) {
+        TkSubtitleTimeline best = null;
+        long bestReliableCount = 0L;
+        List<String> scriptUnits = buildScriptSubtitleUnits(splitSentences(task, scriptText));
+        for (TkSubtitleTimeline candidate : candidates) {
+            List<TimingUnit> timingUnits = collectTimingUnits(candidate);
+            if (timingUnits.isEmpty() || countMatched(alignScriptUnitsToTimingUnits(scriptUnits, timingUnits)) == 0) {
+                continue;
+            }
+            TkSubtitleTimeline aligned = rebuildExactTimelineWithScriptText(task, scriptText, candidate, keywords);
+            // Reuse content/group provenance and renderer validation; interpolated units stay plain.
+            long reliableCount = aligned.getSegments().stream()
+                    .filter(DefaultTkAssSubtitleRenderService::canRenderKaraoke).count();
+            if (reliableCount > bestReliableCount && inspectSubtitleQuality(aligned, audioFile).acceptable) {
+                best = aligned;
+                bestReliableCount = reliableCount;
+            }
+        }
+        return best;
     }
 
     private TkSubtitleTimeline buildTimelineByAsr(TkGenerationTaskDO task, String scriptText, File audioFile, List<String> keywords) {

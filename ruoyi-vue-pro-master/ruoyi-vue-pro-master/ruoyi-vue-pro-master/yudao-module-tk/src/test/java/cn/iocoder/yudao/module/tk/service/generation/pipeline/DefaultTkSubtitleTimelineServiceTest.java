@@ -169,6 +169,64 @@ class DefaultTkSubtitleTimelineServiceTest {
         assertFalse(quality.contains("private diagnostic"));
     }
 
+    @Test
+    void publicTimelinePreservesIndependentReliableSentenceBelowWholeScriptThreshold() throws Exception {
+        String scriptText="甲乙丙丁戊己庚辛。\n水果新鲜。";
+        List<TkSubtitleWord> words=new ArrayList<>();
+        String spoken="天地玄黄宇宙洪荒水果新鲜";
+        for(int i=0;i<spoken.length();i++) {
+            String token=spoken.substring(i,i+1)+(i==7 || i==11 ? "。" : "");
+            words.add(new TkSubtitleWord(token,i,i+1,false));
+        }
+        TkSubtitleTimeline raw=new TkSubtitleTimeline();
+        raw.setAudioDuration(12D);
+        raw.setSegments(Collections.singletonList(new TkSubtitleSegment("天地玄黄宇宙洪荒。水果新鲜。",
+                0D,12D,null,0,0,words)));
+        Path asr=tempDir.resolve("partial-asr.py");
+        Files.writeString(asr,"from pathlib import Path\n"
+                +"p=Path(__file__).with_name('calls.txt')\n"
+                +"p.write_text(p.read_text()+'x' if p.exists() else 'x')\n"
+                +"print("+JsonUtils.toJsonString(JsonUtils.toJsonString(raw))+")\n");
+        for(boolean retry:Arrays.asList(false,true)) {
+            for(boolean allowFallback:Arrays.asList(true,false)) {
+                Files.deleteIfExists(tempDir.resolve("calls.txt"));
+                TkGenerationProperties properties=modelTestProperties(asr);
+                Path cache=tempDir.resolve("partial-models");
+                Files.createDirectories(cache.resolve("small"));Files.createDirectories(cache.resolve("medium"));
+                properties.getSubtitle().getAsr().setModelCacheDir(cache.toString());
+                properties.getSubtitle().getAsr().setRetryEnabled(retry);
+                properties.getSubtitle().getAsr().setRetryModel("medium");
+                properties.getSubtitle().getAsr().setEstimatedFallbackOnMismatch(allowFallback);
+                ReflectionTestUtils.setField(service,"generationProperties",properties);
+                TkGenerationTaskDO task=TkGenerationTaskDO.builder().targetLanguage("zh-cn")
+                        .targetDuration(12).subtitleKaraokeEnabled(true).build();
+                TkSubtitleTimeline timeline=service.buildTimeline(task,scriptText,modelTestAudio(),Collections.emptyList());
+                assertEquals(scriptText.replace("\n",""),timeline.getSegments().stream().map(TkSubtitleSegment::getText)
+                        .collect(java.util.stream.Collectors.joining()));
+                assertEquals(2,timeline.getSegments().size());
+                assertFalse(timeline.getSegments().get(0).getWordTimingReliable());
+                assertTrue(timeline.getSegments().get(1).getWordTimingReliable());
+                assertEquals(8D,timeline.getSegments().get(1).getWords().get(0).getStart(),0.001D);
+                assertEquals(retry ? "xx" : "x",Files.readString(tempDir.resolve("calls.txt")));
+                com.fasterxml.jackson.databind.JsonNode quality=JsonUtils.parseTree(Files.readString(tempDir.resolve("subtitle-quality.json")));
+                assertEquals("partial",quality.path("karaokeStatus").asText());
+                assertEquals("ASR_PARTIAL",quality.path("mode").asText());
+            }
+        }
+        TkGenerationProperties noMatchProperties=modelTestProperties(asr);
+        Path cache=tempDir.resolve("partial-models");
+        noMatchProperties.getSubtitle().getAsr().setModelCacheDir(cache.toString());
+        ReflectionTestUtils.setField(service,"generationProperties",noMatchProperties);
+        TkGenerationTaskDO task=TkGenerationTaskDO.builder().targetLanguage("zh-cn")
+                .targetDuration(12).subtitleKaraokeEnabled(true).build();
+        TkSubtitleTimeline noMatch=service.buildTimeline(task,"甲乙丙丁戊己庚辛。",modelTestAudio(),Collections.emptyList());
+        assertTrue(noMatch.getSegments().stream().noneMatch(segment->Boolean.TRUE.equals(segment.getWordTimingReliable())));
+        assertEquals("disabled",JsonUtils.parseTree(Files.readString(tempDir.resolve("subtitle-quality.json")))
+                .path("karaokeStatus").asText());
+        noMatchProperties.getSubtitle().getAsr().setEstimatedFallbackOnMismatch(false);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                ()->service.buildTimeline(task,"甲乙丙丁戊己庚辛。",modelTestAudio(),Collections.emptyList()));
+    }
     private TkGenerationProperties modelTestProperties(Path script) {
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getSubtitle().setLeadSeconds(0D);
