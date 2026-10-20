@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -101,9 +102,15 @@ public class TkMiniMaxVoiceDictionaryService {
         Long tenantId = requireTenantId();
         Long userId = requireUserId();
         Set<String> favorites = favoriteMapper.selectListByScope(tenantId, userId, PROVIDER).stream()
-                .map(TkVoiceFavoriteDO::getVoiceCode).collect(Collectors.toSet());
-        return getValidVoices().stream().map(voice -> voice.toOption(favorites.contains(voice.voiceId)))
-                .collect(Collectors.toList());
+                .map(TkVoiceFavoriteDO::getVoiceCode).collect(Collectors.toCollection(LinkedHashSet::new));
+        List<TkMiniMaxVoiceOptionRespVO> options = getValidVoices().stream()
+                .map(voice -> voice.toOption(favorites.contains(voice.voiceId))).collect(Collectors.toList());
+        Set<String> available = options.stream().map(TkMiniMaxVoiceOptionRespVO::getVoiceId)
+                .collect(Collectors.toSet());
+        favorites.stream().filter(code -> !available.contains(code)).forEach(code -> options.add(
+                new TkMiniMaxVoiceOptionRespVO().setValue(code).setVoiceId(code).setLabel(code)
+                        .setFavorite(true).setIsDefault(false).setUnavailable(true)));
+        return options;
     }
 
     public void addFavorite(String voiceCode) {
@@ -119,8 +126,19 @@ public class TkMiniMaxVoiceDictionaryService {
     }
 
     public void removeFavorite(String voiceCode) {
-        String canonicalVoiceId = resolveVoiceCode(null, voiceCode);
-        favoriteMapper.deleteByScope(requireTenantId(), requireUserId(), PROVIDER, canonicalVoiceId);
+        Long tenantId = requireTenantId();
+        Long userId = requireUserId();
+        String code = StrUtil.trim(voiceCode);
+        if (StrUtil.isBlank(code) || code.length() > 128) {
+            throw serviceException("音色编码不能为空且不能超过 128 个字符");
+        }
+        String canonicalVoiceId;
+        try {
+            canonicalVoiceId = resolveVoiceCode(null, code);
+        } catch (ServiceException ex) {
+            canonicalVoiceId = code; // Stale favorites remain removable without an enabled catalog entry.
+        }
+        favoriteMapper.deleteByScope(tenantId, userId, PROVIDER, canonicalVoiceId);
     }
 
     private List<VoiceDefinition> getValidVoices() {

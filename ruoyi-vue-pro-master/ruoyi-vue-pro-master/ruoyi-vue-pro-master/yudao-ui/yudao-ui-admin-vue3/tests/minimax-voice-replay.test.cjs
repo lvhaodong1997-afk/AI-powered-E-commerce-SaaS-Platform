@@ -101,6 +101,14 @@ async function main() {
   const legacy = harness('DASHSCOPE').context
   await legacy.hydrateReplayFromAnalysis({ sourceUrl: 'https://example/video', libraryId: 1 })
   assert.equal(legacy.createForm.voiceCode, 'cosyvoice-old-default')
+  legacy.createForm.voiceCode = 'custom:7'
+  const customPayload = legacy.selectedVoicePayload()
+  assert.equal(customPayload.ttsProvider, 'DASHSCOPE')
+  assert.equal(customPayload.voiceProfileId, 7)
+  assert.equal(customPayload.voiceCode, undefined, 'Synthetic favorite key must never reach vendor TTS')
+  selected.TkMiniMaxVoiceApi.getOptions = async () => [{ voiceId: defaultId, isDefault: true }]
+  await selected.loadMiniMaxVoices()
+  assert.equal(selected.createForm.voiceCode, 'German_SweetLady', 'Refreshing favorites must preserve current selection')
   const mini = harness()
   mini.context.createForm.voiceCode = defaultId
   await mini.context.handlePreviewVoice()

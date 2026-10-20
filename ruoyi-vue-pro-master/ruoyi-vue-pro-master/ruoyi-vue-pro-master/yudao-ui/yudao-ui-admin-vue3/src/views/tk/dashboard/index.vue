@@ -823,26 +823,24 @@
                     :loading="miniMaxVoiceLoading"
                     :disabled="!isVoiceoverEnabled"
                     :is-en="isEn"
-                    @refresh="loadMiniMaxVoices"
+                    @favorite-change="updateMiniMaxFavorite"
                   />
 
-                  <div v-else-if="createForm.ttsProvider === TTS_PROVIDER_DASHSCOPE" class="voice-select-row">
-                    <el-select
+                  <div v-else-if="createForm.ttsProvider === TTS_PROVIDER_DASHSCOPE" class="dashscope-voice-selector">
+                    <MiniMaxVoiceSelector
                       v-model="createForm.voiceCode"
-                      :placeholder="copy.voicePlaceholder"
-                      class="library-select"
+                      :provider="TTS_PROVIDER_DASHSCOPE"
+                      :options="dashScopeVoiceOptions"
+                      :loading="dashScopeFavoritesLoading"
                       :disabled="!isVoiceoverEnabled"
-                    >
-                      <el-option-group :label="copy.systemVoiceGroup">
-                        <el-option v-for="item in systemVoiceOptions" :key="item.value" :label="item.label" :value="item.value" />
-                      </el-option-group>
-                      <el-option-group v-if="customVoiceOptions.length" :label="copy.customVoiceGroup">
-                        <el-option v-for="item in customVoiceOptions" :key="item.value" :label="item.label" :value="item.value" />
-                      </el-option-group>
-                      <el-option-group v-if="historicalVoiceOptions.length" :label="copy.historicalVoiceGroup">
-                        <el-option v-for="item in historicalVoiceOptions" :key="item.value" :label="item.label" :value="item.value" />
-                      </el-option-group>
-                    </el-select>
+                      :favorites-disabled="!dashScopeFavoritesReady"
+                      @favorite-change="updateDashScopeFavorite"
+                    />
+                    <el-button
+                      v-if="!dashScopeFavoritesLoading && !dashScopeFavoritesReady"
+                      text
+                      @click="loadDashScopeFavorites"
+                    >{{ tt('voice.retryFavorites') }}</el-button>
                     <el-tooltip :content="copy.manageCustomVoice">
                       <el-button circle plain :disabled="!isVoiceoverEnabled" @click="voiceManagerVisible = true"><Icon icon="ep:setting" /></el-button>
                     </el-tooltip>
@@ -1532,12 +1530,15 @@ import aiMaterialMatchImage from '@/assets/imgs/tk-dashboard/ai-material-match.w
 import aiVoiceoverImage from '@/assets/imgs/tk-dashboard/ai-voiceover.webp'
 import {
   TkMiniMaxVoiceApi,
+  TkVoiceFavoriteApi,
   TkVoiceProfileApi,
   type TkMiniMaxVoiceOptionVO,
   type TkVoiceProfileVO
 } from '@/api/tk/voice'
 import VoiceProfileDialog from '@/views/tk/voice/components/VoiceProfileDialog.vue'
 import MiniMaxVoiceSelector from './components/MiniMaxVoiceSelector.vue'
+import { buildDashScopeVoiceOptions } from './voiceFavorites.mjs'
+import { useTkI18n } from '@/hooks/web/useTkI18n'
 import {
   getGenerationFocusTask,
   isTerminalGenerationStatus,
@@ -1881,6 +1882,7 @@ const subtitlePositionOptions = [
   { zh: '随机安全区', en: 'Random safe area', value: 'random_safe' }
 ]
 const message = useMessage()
+const { tt } = useTkI18n()
 const router = useRouter()
 const localeStore = useLocaleStore()
 const currentLocale = computed(() => localeStore.getCurrentLocale.lang)
@@ -2707,6 +2709,9 @@ const voiceManagerVisible = ref(false)
 const customVoiceProfiles = ref<TkVoiceProfileVO[]>([])
 const miniMaxVoiceOptions = ref<TkMiniMaxVoiceOptionVO[]>([])
 const miniMaxVoiceLoading = ref(false)
+const dashScopeFavoriteKeys = ref<string[]>([])
+const dashScopeFavoritesLoading = ref(false)
+const dashScopeFavoritesReady = ref(false)
 const bgmAssets = ref<TkBgmAssetVO[]>([])
 const bgmLoading = ref(false)
 const bgmUploading = ref(false)
@@ -2721,6 +2726,29 @@ const mimoSavedVoiceOptions = computed(() => customVoiceProfiles.value
     value: item.id
   })))
 const historicalVoiceOptions = ref<Array<{ label: string; value: string }>>([])
+const dashScopeVoiceOptions = computed(() => buildDashScopeVoiceOptions(
+  systemVoiceOptions, customVoiceProfiles.value, dashScopeFavoriteKeys.value, historicalVoiceOptions.value
+))
+const loadDashScopeFavorites = async () => {
+  dashScopeFavoritesLoading.value = true
+  try {
+    dashScopeFavoriteKeys.value = await TkVoiceFavoriteApi.getFavorites(TTS_PROVIDER_DASHSCOPE)
+    dashScopeFavoritesReady.value = true
+  } catch {
+    message.error(tt('voice.favoritesLoadFailed'))
+  } finally {
+    dashScopeFavoritesLoading.value = false
+  }
+}
+const updateDashScopeFavorite = (voiceId: string, favorite: boolean) => {
+  dashScopeFavoriteKeys.value = dashScopeFavoriteKeys.value.filter((key) => key !== voiceId)
+  if (favorite) dashScopeFavoriteKeys.value.push(voiceId)
+}
+const updateMiniMaxFavorite = (voiceId: string, favorite: boolean) => {
+  miniMaxVoiceOptions.value = miniMaxVoiceOptions.value
+    .filter((option) => !option.unavailable || option.voiceId !== voiceId || favorite)
+    .map((option) => option.voiceId === voiceId ? { ...option, favorite } : option)
+}
 const systemBgmOptions = computed(() => bgmAssets.value.filter((item) => item.sourceType === 'SYSTEM'))
 const userBgmOptions = computed(() => bgmAssets.value.filter((item) => item.sourceType === 'USER'))
 const selectedBgmAsset = computed(() =>
@@ -2750,7 +2778,7 @@ const loadCustomVoices = async () => {
   customVoiceProfiles.value = await TkVoiceProfileApi.getList()
 }
 const getDefaultMiniMaxVoiceCode = () =>
-  (miniMaxVoiceOptions.value.find((item) => item.isDefault) || miniMaxVoiceOptions.value[0])?.voiceId || ''
+  (miniMaxVoiceOptions.value.find((item) => item.isDefault && !item.unavailable) || miniMaxVoiceOptions.value.find((item) => !item.unavailable))?.voiceId || ''
 const loadMiniMaxVoices = async () => {
   miniMaxVoiceLoading.value = true
   try {
@@ -5678,6 +5706,7 @@ watch(
 onMounted(() => {
   getData()
   loadMiniMaxVoices().catch(() => undefined)
+  loadDashScopeFavorites().catch(() => undefined)
   loadCustomVoices().catch(() => undefined)
   loadBgmAssets().catch(() => undefined)
 })
@@ -7465,14 +7494,13 @@ onUnmounted(() => {
   width: 100%;
 }
 
-.voice-select-row {
+.dashscope-voice-selector {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
   gap: 8px;
-  align-items: center;
 }
 
-.voice-config-body .voice-select-row {
+.voice-config-body .dashscope-voice-selector {
   margin-top: 12px;
 }
 

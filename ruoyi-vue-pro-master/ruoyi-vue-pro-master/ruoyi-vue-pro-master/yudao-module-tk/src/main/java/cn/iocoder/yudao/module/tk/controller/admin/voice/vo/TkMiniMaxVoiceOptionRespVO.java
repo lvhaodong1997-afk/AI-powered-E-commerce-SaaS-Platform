@@ -18,4 +18,5 @@ public class TkMiniMaxVoiceOptionRespVO {
     private String previewUrl;
     private Boolean favorite;
     private Boolean isDefault;
+    private Boolean unavailable;
 }

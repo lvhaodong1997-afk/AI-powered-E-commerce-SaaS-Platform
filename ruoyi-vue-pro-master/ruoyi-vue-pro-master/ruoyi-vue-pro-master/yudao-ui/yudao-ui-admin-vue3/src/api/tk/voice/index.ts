@@ -34,6 +34,8 @@ export interface TkMiniMaxVoiceOptionVO {
   previewUrl: string
   favorite: boolean
   isDefault: boolean
+  unavailable?: boolean
+  favoriteDisabled?: boolean
 }
 
 export const TkMiniMaxVoiceApi = {
@@ -45,6 +47,20 @@ export const TkMiniMaxVoiceApi = {
   },
   unfavorite: async (voiceCode: string) => {
     return await request.delete({ url: '/tk/voice/minimax/favorite', params: { voiceCode } })
+  }
+}
+
+export type TkFavoriteVoiceProvider = 'MINIMAX' | 'DASHSCOPE'
+
+export const TkVoiceFavoriteApi = {
+  getFavorites: async (provider: TkFavoriteVoiceProvider): Promise<string[]> => {
+    return await request.get({ url: '/tk/voice/favorite', params: { provider } })
+  },
+  favorite: async (provider: TkFavoriteVoiceProvider, voiceCode: string) => {
+    return await request.post({ url: '/tk/voice/favorite', data: { provider, voiceCode } })
+  },
+  unfavorite: async (provider: TkFavoriteVoiceProvider, voiceCode: string) => {
+    return await request.delete({ url: '/tk/voice/favorite', params: { provider, voiceCode } })
   }
 }
 

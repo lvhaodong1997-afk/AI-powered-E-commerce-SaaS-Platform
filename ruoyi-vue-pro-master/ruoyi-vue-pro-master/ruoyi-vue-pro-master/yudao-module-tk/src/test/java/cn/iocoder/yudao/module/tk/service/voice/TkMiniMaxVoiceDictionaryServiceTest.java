@@ -174,6 +174,35 @@ class TkMiniMaxVoiceDictionaryServiceTest {
         verify(favoriteMapper).deleteByScope(44L, 55L, "MINIMAX", "ActualVoice");
     }
 
+    @Test
+    void removeStaleFavoriteDoesNotRequireEnabledCatalog() {
+        when(dictDataService.getDictDataList(0, "ai_tts_voice")).thenReturn(Collections.emptyList());
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(55L, 44L,
+                TkUserLevelEnum.TENANT_USER.getCode(), null));
+        try (MockedStatic<SecurityFrameworkUtils> security = mockStatic(SecurityFrameworkUtils.class)) {
+            security.when(SecurityFrameworkUtils::getLoginUserId).thenReturn(55L);
+            assertDoesNotThrow(() -> service.removeFavorite(" DeletedVoice "));
+        }
+        verify(favoriteMapper).deleteByScope(44L, 55L, "MINIMAX", "DeletedVoice");
+    }
+
+    @Test
+    void getOptionsKeepsStaleFavoritesRemovable() {
+        when(dictDataService.getDictDataList(0, "ai_tts_voice")).thenReturn(Collections.emptyList());
+        when(dataScopeService.getCurrentScope()).thenReturn(new TkUserScope(55L, 44L,
+                TkUserLevelEnum.TENANT_USER.getCode(), null));
+        when(favoriteMapper.selectListByScope(44L, 55L, "MINIMAX")).thenReturn(Collections.singletonList(
+                new TkVoiceFavoriteDO().setVoiceCode("DeletedVoice")));
+        try (MockedStatic<SecurityFrameworkUtils> security = mockStatic(SecurityFrameworkUtils.class)) {
+            security.when(SecurityFrameworkUtils::getLoginUserId).thenReturn(55L);
+            List<TkMiniMaxVoiceOptionRespVO> options = service.getOptions();
+            assertEquals(1, options.size(), "A deleted favorite remains visible for removal");
+            assertEquals("DeletedVoice", options.get(0).getVoiceId());
+            assertTrue(options.get(0).getFavorite());
+            assertFalse(options.get(0).getIsDefault());
+        }
+    }
+
     private static DictDataDO voice(Long id, String value, String label, String remark) {
         return new DictDataDO().setId(id).setValue(value).setLabel(label).setDictType("ai_tts_voice")
                 .setStatus(0).setSort(id.intValue()).setRemark(remark);
