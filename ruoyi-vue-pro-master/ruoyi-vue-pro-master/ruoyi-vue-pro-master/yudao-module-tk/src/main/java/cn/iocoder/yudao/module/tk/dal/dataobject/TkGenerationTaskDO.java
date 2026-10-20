@@ -133,6 +133,13 @@ public class TkGenerationTaskDO extends TenantBaseDO {
 
     private String subtitleFontSize;
 
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String subtitleQualityUrl;
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String subtitleKaraokeStatus;
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String subtitleKaraokeReason;
+
     private String subtitleTimelineUrl;
 
     private String subtitleVisualAnalysisUrl;

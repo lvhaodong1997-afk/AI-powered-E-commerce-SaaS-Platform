@@ -70,6 +70,9 @@ public class TkGenerationTaskRespVO {
     private String subtitleActiveColor;
     private String subtitleKeywordColor;
     private String subtitleFontSize;
+    private String subtitleQualityUrl;
+    private String subtitleKaraokeStatus;
+    private String subtitleKaraokeReason;
     private String subtitleTimelineUrl;
     private String subtitleVisualAnalysisUrl;
     private String subtitleLayoutUrl;

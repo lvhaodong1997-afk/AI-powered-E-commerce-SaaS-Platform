@@ -1,75 +1,67 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-
-const source = fs.readFileSync(
-  path.join(__dirname, '../src/views/tk/dashboard/index.vue'),
-  'utf8'
-)
-
-assert.match(
-  source,
-  /:class="subtitlePreviewClasses"/,
-  'subtitle preview must be driven by computed style, font size, and position classes'
-)
-
-assert.match(
-  source,
-  /const subtitlePreviewClasses = computed\(\(\) => \[/,
-  'subtitle preview class list must be computed from current form state'
-)
-
-assert.match(
-  source,
-  /`is-position-\$\{createForm\.subtitlePositionMode\}`/,
-  'subtitle preview must expose selected position mode as a CSS class'
-)
-
-assert.match(
-  source,
-  /`is-size-\$\{createForm\.subtitleFontSize\}`/,
-  'subtitle preview must expose selected font size as a CSS class'
-)
-
-assert.match(
-  source,
-  /const subtitlePreviewUsesEmphasis = computed/,
-  'subtitle preview must decide whether the middle phrase is emphasized'
-)
-
-assert.match(
-  source,
-  /v-if="subtitlePreviewUsesEmphasis"/,
-  'standard white preview should be able to render the middle phrase without a colored strong tag'
-)
-
-assert.match(
-  source,
-  /\.subtitle-style-preview\.is-classic_white \.subtitle-preview-caption strong[\s\S]*?color:\s*#fff/,
-  'classic white preview must keep emphasized text white when emphasis is rendered'
-)
-
-for (const size of ['small', 'medium', 'large']) {
-  assert.match(
-    source,
-    new RegExp(`\\.subtitle-style-preview\\.is-size-${size} \\.subtitle-preview-caption`),
-    `subtitle preview must include a visible ${size} font-size class`
+;(async () => {
+  const { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay } =
+    await import('../src/views/tk/dashboard/subtitlePreview.mjs')
+  const words = subtitlePreviewWords(['Feel ', 'fresh fruit ', 'today'], true)
+  assert.deepEqual(
+    words.map((word) => word.text),
+    ['Feel ', 'fresh ', 'fruit ', 'today']
   )
-}
-
-for (const position of [
-  'smart_safe',
-  'fixed_bottom',
-  'fixed_middle',
-  'alternate',
-  'sentence_rotate',
-  'random_safe'
-]) {
-  assert.match(
-    source,
-    new RegExp(`\\.subtitle-style-preview\\.is-position-${position}`),
-    `subtitle preview must include position treatment for ${position}`
+  assert.deepEqual(
+    words.map((word) => word.keyword),
+    [false, true, true, false]
   )
-}
-
-console.log('subtitle preview config tests passed')
+  assert.equal(subtitlePreviewWords(['新品', '芒果', '🤩'], false).at(-1).text, '🤩')
+  const resultCopy = { partial: 'partly applied', disabled: 'disabled', unknown: 'older task' }
+  const requested = { subtitleEnabled: true, subtitleKaraokeEnabled: true }
+  assert.match(
+    karaokeResultMessage({ ...requested, subtitleKaraokeStatus: 'partial' }, resultCopy),
+    /partly applied/
+  )
+  assert.match(
+    karaokeResultMessage({ ...requested, subtitleKaraokeStatus: 'disabled' }, resultCopy),
+    /disabled/
+  )
+  assert.match(karaokeResultMessage(requested, resultCopy), /older task/)
+  assert.equal(karaokeResultMessage({ ...requested, subtitleKaraokeStatus: 'enabled' }, resultCopy), '')
+  assert.equal(karaokeResultMessage({ subtitleKaraokeEnabled: false }, resultCopy), '')
+  const form = { subtitleFontSize: 'small', subtitleStyle: 'classic_white', subtitleKaraokeEnabled: false }
+  const replay = { subtitleFontSize: 'extra_large', subtitleStyle: 'brand_minimal', subtitleKaraokeEnabled: true }
+  restoreSubtitleReplay(form, replay)
+  assert.equal(form.subtitleFontSize, 'extra_large')
+  assert.equal(form.subtitleStyle, 'brand_minimal')
+  assert.equal(form.subtitleKaraokeEnabled, true)
+  replay.subtitleFontSize = 'small'
+  assert.equal(form.subtitleFontSize, 'extra_large')
+  restoreSubtitleReplay(form, {})
+  assert.equal(form.subtitleFontSize, 'medium')
+  const source = fs.readFileSync(
+    path.join(__dirname, '../src/views/tk/dashboard/index.vue'),
+    'utf8'
+  )
+  const payloadStart = source.indexOf('function getSubtitlePayload() {')
+  const payloadEnd = source.indexOf('\nasync function ensureBgmReadyForGeneration', payloadStart)
+  const payloadForm = { subtitleEnabled: true, subtitleFontSize: 'extra_large' }
+  const capture = new Function('createForm', 'isVoiceoverEnabled',
+    source.slice(payloadStart, payloadEnd) + '\nreturn getSubtitlePayload()')
+  const payload = capture(payloadForm, { value: true })
+  payloadForm.subtitleFontSize = 'small'
+  assert.equal(payload.subtitleFontSize, 'extra_large')
+  assert.match(source, /subtitlePayload: \{ \.\.\.getSubtitlePayload\(\) \}/)
+  assert.match(source, /restoreSubtitleReplay\(createForm, task\)/)
+  for (const size of ['small', 'medium', 'large', 'extra_large']) {
+    assert.match(source, new RegExp(`value: '${size}'`))
+    assert.match(source, new RegExp(`is-size-${size} \\.subtitle-preview-caption`))
+  }
+  assert.match(source, /v-for="\(word, index\) in subtitlePreviewWordList"/)
+  assert.match(source, /@keyframes subtitle-word-highlight/)
+  assert.match(source, /Noto Serif CJK SC/)
+  assert.match(source, /:title="subtitleKaraokeResultNotice"/)
+  assert.doesNotMatch(source, /has-karaoke-preview \.subtitle-preview-caption::after/)
+  console.log('subtitle preview and result behavior tests passed')
+})().catch((error) => {
+  console.error(error)
+  process.exit(1)
+})

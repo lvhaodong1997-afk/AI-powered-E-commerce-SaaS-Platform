@@ -60,13 +60,13 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
             TkSubtitleTimeline exactTimeline = rebuildExactTimelineWithScriptText(task, scriptText, asrTimeline, keywords);
             SubtitleQuality exactQuality = inspectSubtitleQuality(exactTimeline, audioFile);
             if (exactQuality.acceptable) {
-                writeSubtitleQualityReport(audioFile, "ASR_EXACT", exactQuality, null);
+                writeSubtitleQualityReport(task, exactTimeline, audioFile, "ASR_EXACT", exactQuality, null);
                 return exactTimeline;
             }
             TkSubtitleTimeline fallbackTimeline = buildEstimatedTimeline(task, scriptText, audioFile, keywords,
                     resolveTimelineDuration(exactTimeline));
             SubtitleQuality fallbackQuality = inspectSubtitleQuality(fallbackTimeline, audioFile);
-            writeSubtitleQualityReport(audioFile, "ESTIMATED_FALLBACK", fallbackQuality, exactQuality.reason);
+            writeSubtitleQualityReport(task, fallbackTimeline, audioFile, "ESTIMATED_FALLBACK", fallbackQuality, exactQuality.reason);
             return fallbackTimeline;
         }
         if (asrTimeline != null) {
@@ -75,25 +75,25 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
                 TkSubtitleTimeline exactTimeline = rebuildExactTimelineWithScriptText(task, scriptText, retryTimeline, keywords);
                 SubtitleQuality exactQuality = inspectSubtitleQuality(exactTimeline, audioFile);
                 if (exactQuality.acceptable) {
-                    writeSubtitleQualityReport(audioFile, "ASR_RETRY_EXACT", exactQuality,
+                    writeSubtitleQualityReport(task, exactTimeline, audioFile, "ASR_RETRY_EXACT", exactQuality,
                             "Primary ASR text does not match original script");
                     return exactTimeline;
                 }
             }
             if (!estimatedFallbackOnMismatch()) {
-                writeSubtitleQualityReport(audioFile, "ASR_TEXT_MISMATCH", inspectSubtitleQuality(asrTimeline, audioFile),
+                writeSubtitleQualityReport(task, asrTimeline, audioFile, "ASR_TEXT_MISMATCH", inspectSubtitleQuality(asrTimeline, audioFile),
                         "ASR text does not match original script");
                 throw new IllegalStateException("ASR_TEXT_MISMATCH: audio narration text does not match the original script");
             }
             TkSubtitleTimeline fallbackTimeline = buildEstimatedTimeline(task, scriptText, audioFile, keywords,
                     resolveTimelineDuration(asrTimeline));
-            writeSubtitleQualityReport(audioFile, "ESTIMATED_AFTER_ASR_MISMATCH",
+            writeSubtitleQualityReport(task, fallbackTimeline, audioFile, "ESTIMATED_AFTER_ASR_MISMATCH",
                     inspectSubtitleQuality(fallbackTimeline, audioFile),
                     "ASR text does not match original script");
             return fallbackTimeline;
         }
         TkSubtitleTimeline timeline = buildEstimatedTimeline(task, scriptText, audioFile, keywords, 0D);
-        writeSubtitleQualityReport(audioFile, "ESTIMATED_ASR_UNAVAILABLE", inspectSubtitleQuality(timeline, audioFile),
+        writeSubtitleQualityReport(task, timeline, audioFile, "ESTIMATED_ASR_UNAVAILABLE", inspectSubtitleQuality(timeline, audioFile),
                 "ASR 时间轴不可用或与 AI 文案不匹配，已降级为估算字幕");
         return timeline;
     }
@@ -177,7 +177,10 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
             outputFile = File.createTempFile("tk-asr-output-", ".json");
             errorFile = File.createTempFile("tk-asr-error-", ".log");
             // JSON stays on stdout; model warnings on stderr must not invalidate the timeline.
-            process = new ProcessBuilder(command).redirectOutput(outputFile).redirectError(errorFile).start();
+            ProcessBuilder builder = new ProcessBuilder(command).redirectOutput(outputFile).redirectError(errorFile);
+            // The ASR JSON protocol is UTF-8, including when Windows redirects Python stdout.
+            builder.environment().put("PYTHONIOENCODING", "utf-8");
+            process = builder.start();
             if (!process.waitFor(timeoutSeconds == null ? 300 : timeoutSeconds, TimeUnit.SECONDS)) {
                 throw new IllegalStateException("ASR_PROCESS_TIMEOUT");
             }
@@ -239,8 +242,8 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
             throw new IllegalStateException("字幕精准对齐失败：ASR 未返回可用逐字时间轴");
         }
         List<TkSubtitleSegment> segments = buildExactSegments(sentences, exactWords);
+        markAlignedSegmentReliability(segments, sentences, timingTimeline);
         timeline.setSegments(smoothRapidSegments(segments, scriptText));
-        markWordTimingReliability(timeline.getSegments(), hasExactWordTiming(sentences, timingTimeline));
         return timeline;
     }
 
@@ -296,8 +299,13 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         return new SubtitleQuality(true, audioDuration, firstStart, lastEnd, "OK");
     }
 
-    private void writeSubtitleQualityReport(File audioFile, String mode, SubtitleQuality quality, String fallbackReason) {
+    private void writeSubtitleQualityReport(TkGenerationTaskDO task, TkSubtitleTimeline timeline, File audioFile, String mode, SubtitleQuality quality, String fallbackReason) {
         Map<String, Object> report = new LinkedHashMap<>();
+        TkSubtitleKaraokeQuality karaoke = TkSubtitleKaraokeQuality.inspect(task, timeline);
+        report.put("karaokeStatus", karaoke.getStatus());
+        report.put("karaokeReason", karaoke.getReason());
+        report.put("karaokeReliableSegments", karaoke.getReliableSegments());
+        report.put("karaokeTotalSegments", karaoke.getTotalSegments());
         report.put("mode", mode);
         report.put("acceptable", quality.acceptable);
         report.put("reason", quality.reason);
@@ -340,15 +348,6 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         if (scriptUnits.isEmpty() || timingUnits.isEmpty()) {
             return words;
         }
-        if (scriptUnits.size() == timingUnits.size()) {
-            for (int i = 0; i < scriptUnits.size(); i++) {
-                TimingUnit timing = timingUnits.get(i);
-                words.add(new TkSubtitleWord(scriptUnits.get(i), round(timing.start), round(timing.end),
-                        isKeyword(scriptUnits.get(i), keywords)));
-            }
-            markKeywordPhrases(words, keywords);
-            return words;
-        }
         int[] timingIndexes = alignScriptUnitsToTimingUnits(scriptUnits, timingUnits);
         if (countMatched(timingIndexes) <= 0) {
             return words;
@@ -358,13 +357,49 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         return words;
     }
 
-    private boolean hasExactWordTiming(List<String> sentences, TkSubtitleTimeline timingTimeline) {
-        List<String> scriptUnits = buildScriptSubtitleUnits(sentences);
-        List<TimingUnit> timingUnits = collectTimingUnits(timingTimeline);
-        if (scriptUnits.isEmpty() || timingUnits.isEmpty()) {
-            return false;
+    private void markAlignedSegmentReliability(List<TkSubtitleSegment> segments, List<String> sentences,
+                                                TkSubtitleTimeline timingTimeline) {
+        List<TimingUnit> timing = collectTimingUnits(timingTimeline);
+        int[] indexes = alignScriptUnitsToTimingUnits(buildScriptSubtitleUnits(sentences), timing);
+        int cursor = 0;
+        for (TkSubtitleSegment segment : segments) {
+            List<TkSubtitleWord> grouped = new ArrayList<>();
+            boolean reliable = true;
+            int lastGroup = -1;
+            double previousEnd = -1D;
+            for (TkSubtitleWord word : segment.getWords()) {
+                int match = cursor < indexes.length ? indexes[cursor] : -1;
+                cursor++;
+                if (match < 0 || !timing.get(match).actualWord) {
+                    reliable = false;
+                    continue;
+                }
+                TimingUnit unit = timing.get(match);
+                if (unit.group == lastGroup) {
+                    TkSubtitleWord previous = grouped.get(grouped.size() - 1);
+                    previous.setText(previous.getText() + word.getText());
+                    previous.setKeyword(previous.isKeyword() || word.isKeyword());
+                } else {
+                    if (!unit.firstInGroup || unit.sourceStart < previousEnd - 0.011D) {
+                        reliable = false;
+                    }
+                    grouped.add(new TkSubtitleWord(word.getText(), unit.sourceStart, unit.sourceEnd, word.isKeyword()));
+                    previousEnd = unit.sourceEnd;
+                }
+                lastGroup = unit.group;
+                // A group cut by a caption boundary cannot retain its original word timing.
+                if (!unit.lastInGroup && cursor == indexes.length) {
+                    reliable = false;
+                }
+            }
+            if (cursor > 0 && indexes[cursor - 1] >= 0 && !timing.get(indexes[cursor - 1]).lastInGroup) {
+                reliable = false;
+            }
+            segment.setWordTimingReliable(reliable && !grouped.isEmpty());
+            if (Boolean.TRUE.equals(segment.getWordTimingReliable())) {
+                segment.setWords(grouped);
+            }
         }
-        return countMatched(alignScriptUnitsToTimingUnits(scriptUnits, timingUnits)) == scriptUnits.size();
     }
 
     private List<String> buildScriptSubtitleUnits(List<String> sentences) {
@@ -513,25 +548,28 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         for (TkSubtitleSegment segment : timingTimeline.getSegments()) {
             if (segment.getWords() != null && !segment.getWords().isEmpty()) {
                 for (TkSubtitleWord word : segment.getWords()) {
-                    addTimingUnits(units, word.getText(), word.getStart(), word.getEnd());
+                    addTimingUnits(units, word.getText(), word.getStart(), word.getEnd(),
+                            !Boolean.FALSE.equals(segment.getWordTimingReliable()));
                 }
             } else {
-                addTimingUnits(units, segment.getText(), segment.getStart(), segment.getEnd());
+                addTimingUnits(units, segment.getText(), segment.getStart(), segment.getEnd(), false);
             }
         }
         return units;
     }
 
-    private void addTimingUnits(List<TimingUnit> units, String text, double start, double end) {
-        if (StrUtil.isBlank(text) || end <= start) {
+    private void addTimingUnits(List<TimingUnit> units, String text, double start, double end, boolean actualWord) {
+        if (StrUtil.isBlank(text) || !Double.isFinite(start) || !Double.isFinite(end) || start < 0D || end <= start) {
             return;
         }
         List<String> values = buildSubtitleUnits(text);
         if (values.isEmpty()) {
             return;
         }
+        int group = units.size();
+        boolean realWord = actualWord && (values.size() == 1 || !isMostlyEnglish(text));
         if (values.size() == 1) {
-            units.add(new TimingUnit(values.get(0), start, end));
+            units.add(new TimingUnit(values.get(0), start, end, group, start, end, realWord, true, true));
             return;
         }
         double cursor = start;
@@ -541,7 +579,8 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
             String value = values.get(i);
             double valueEnd = i == values.size() - 1 ? end
                     : Math.min(end, cursor + duration * textWeight(value) / Math.max(totalWeight, 1));
-            units.add(new TimingUnit(value, round(cursor), round(valueEnd)));
+            units.add(new TimingUnit(value, round(cursor), round(valueEnd), group, start, end, realWord,
+                    i == 0, i == values.size() - 1));
             cursor = valueEnd;
         }
     }
@@ -695,10 +734,24 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         private final double start;
         private final double end;
 
-        private TimingUnit(String text, double start, double end) {
+        private final int group;
+        private final double sourceStart;
+        private final double sourceEnd;
+        private final boolean actualWord;
+        private final boolean firstInGroup;
+        private final boolean lastInGroup;
+
+        private TimingUnit(String text, double start, double end, int group, double sourceStart, double sourceEnd,
+                           boolean actualWord, boolean firstInGroup, boolean lastInGroup) {
             this.text = text;
             this.start = start;
             this.end = end;
+            this.group = group;
+            this.sourceStart = sourceStart;
+            this.sourceEnd = sourceEnd;
+            this.actualWord = actualWord;
+            this.firstInGroup = firstInGroup;
+            this.lastInGroup = lastInGroup;
         }
     }
 
@@ -1158,13 +1211,16 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
         int wordCount = 0;
         int maxChars = socialCaptionStyle(task) ? SOCIAL_ENGLISH_SEGMENT_CHARS : MAX_ENGLISH_SEGMENT_CHARS;
         int maxWords = socialCaptionStyle(task) ? SOCIAL_ENGLISH_SEGMENT_WORDS : MAX_ENGLISH_SEGMENT_WORDS;
+        int fontSize = DefaultTkAssSubtitleRenderService.fontSize(task);
+        int lineLimit = fontSize > 82 ? Math.max(10, (int) (860D / (fontSize * 0.65D))) : Integer.MAX_VALUE;
         for (String word : words) {
             if (StrUtil.isBlank(word)) {
                 continue;
             }
             int nextLength = chunk.length() == 0 ? word.length() : chunk.length() + 1 + word.length();
             if (chunk.length() > 0
-                    && (nextLength > maxChars || wordCount >= maxWords)) {
+                    && (nextLength > maxChars || wordCount >= maxWords
+                    || !fitsEnglishLines(chunk + " " + word, lineLimit))) {
                 chunks.add(chunk.toString());
                 chunk.setLength(0);
                 wordCount = 0;
@@ -1179,6 +1235,19 @@ public class DefaultTkSubtitleTimelineService implements TkSubtitleTimelineServi
             chunks.add(chunk.toString());
         }
         return chunks;
+    }
+
+    private boolean fitsEnglishLines(String text, int lineLimit) {
+        int lines = 1;
+        int width = 0;
+        for (String token : text.split(" ")) {
+            if (width > 0 && width + 1 + token.length() > lineLimit) {
+                lines++;
+                width = 0;
+            }
+            width += token.length() + (width > 0 ? 1 : 0);
+        }
+        return lines <= 2;
     }
 
     private List<String> splitCjkReadableChunks(TkGenerationTaskDO task, String text) {

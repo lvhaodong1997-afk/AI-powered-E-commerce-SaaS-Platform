@@ -43,6 +43,24 @@ require_executable "$DOWNLOAD_PYTHON"
 require_executable "$ASR_PYTHON"
 require_file_or_dir "$MODEL_CACHE_DIR"
 
+FONTS_DIR="${TK_SUBTITLE_FONTS_DIR:-}"
+[[ -n "$FONTS_DIR" ]] || fail "Set TK_SUBTITLE_FONTS_DIR to the configured tk.generation.subtitle.fonts-dir"
+[[ -d "$FONTS_DIR" ]] || fail "Subtitle font directory does not exist: $FONTS_DIR"
+command -v fc-scan >/dev/null || fail "fontconfig fc-scan is required"
+command -v fc-match >/dev/null || fail "fontconfig fc-match is required"
+for family in "Noto Sans CJK SC" "Noto Serif CJK SC"; do
+  stem="NotoSansCJK"
+  [[ "$family" == "Noto Serif CJK SC" ]] && stem="NotoSerifCJK"
+  for weight in Regular Bold; do
+    file="$FONTS_DIR/$stem-$weight.ttc"
+    require_file_or_dir "$file"
+    fc-scan --format '%{family[0]}|%{style[0]}\n' "$file" | grep -Fx "$family|$weight" >/dev/null \
+      || fail "Font asset does not contain exact family/weight: $family $weight ($file)"
+    [[ "$(fc-match --format '%{family[0]}' "$family:style=$weight")" == "$family" ]] \
+      || fail "Silent font substitution detected: $family $weight"
+  done
+done
+
 find -L "$MODEL_CACHE_DIR" -mindepth 1 -print -quit | grep -q . \
   || fail "Model cache is empty: $MODEL_CACHE_DIR"
 

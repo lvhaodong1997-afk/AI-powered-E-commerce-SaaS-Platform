@@ -103,6 +103,8 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     @Resource
     private TkBusinessLogService businessLogService;
     @Resource
+    private cn.iocoder.yudao.module.tk.dal.mysql.TkBusinessLogMapper businessLogMapper;
+    @Resource
     private TkGenerationPrecheckService precheckService;
     @Resource
     private TkVoiceProfileService voiceProfileService;
@@ -813,6 +815,26 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
             throw exception(TK_GENERATION_TASK_NOT_EXISTS);
         }
         dataScopeService.validateReadable(task.getTenantId(), task.getCompanyId(), task.getCreator());
+        if ("SUCCESS".equals(task.getStatus()) && businessLogMapper != null) {
+            cn.iocoder.yudao.module.tk.dal.dataobject.TkBusinessLogDO resultLog = businessLogMapper.selectOne(
+                    new cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX<cn.iocoder.yudao.module.tk.dal.dataobject.TkBusinessLogDO>()
+                            .eq(cn.iocoder.yudao.module.tk.dal.dataobject.TkBusinessLogDO::getBizType, "GENERATION_TASK")
+                            .eq(cn.iocoder.yudao.module.tk.dal.dataobject.TkBusinessLogDO::getBizId, task.getId())
+                            .eq(cn.iocoder.yudao.module.tk.dal.dataobject.TkBusinessLogDO::getBusinessTraceId, task.getBusinessTraceId())
+                            .in(cn.iocoder.yudao.module.tk.dal.dataobject.TkBusinessLogDO::getAction, "SUBTITLE_QUALITY", "SUCCESS")
+                            .orderByDesc(cn.iocoder.yudao.module.tk.dal.dataobject.TkBusinessLogDO::getId).last("LIMIT 1"));
+            if (resultLog != null && StrUtil.isNotBlank(resultLog.getDetailJson())) {
+                try {
+                    cn.iocoder.yudao.module.tk.service.generation.pipeline.TkRenderResult result = JsonUtils.parseObject(
+                            resultLog.getDetailJson(), cn.iocoder.yudao.module.tk.service.generation.pipeline.TkRenderResult.class);
+                    task.setSubtitleQualityUrl(result.getSubtitleQualityUrl());
+                    task.setSubtitleKaraokeStatus(result.getSubtitleKaraokeStatus());
+                    task.setSubtitleKaraokeReason(result.getSubtitleKaraokeReason());
+                } catch (Exception ignored) {
+                    // Historical logs may predate subtitle diagnostics. Never invent a successful timing status.
+                }
+            }
+        }
         return task;
     }
 

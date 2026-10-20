@@ -156,16 +156,16 @@ class DefaultTkAssSubtitleRenderServiceTest {
         String promo = renderDialogue("promo_bold", new TkSubtitleWord("限时", 0D, 1D, true));
         String classic = renderDialogue("classic_white", new TkSubtitleWord("Limited", 0D, 1D, true));
 
-        assertTrue(neon.contains("{\\c&H00C86BFF}") && neon.contains("secret"),
+        assertTrue(neon.contains("{\\1c&H00C86BFF\\2c&H00C86BFF}") && neon.contains("secret"),
                 "Neon pop keywords should use hot pink");
-        assertTrue(price.contains("{\\c&H000066FF}") && price.contains("$19.99"),
+        assertTrue(price.contains("{\\1c&H000066FF\\2c&H000066FF}") && price.contains("$19.99"),
                 "Price flash keywords should use orange/red");
-        assertTrue(promo.contains("{\\c&H00FFFFFF}") && promo.contains("限时"),
+        assertTrue(promo.contains("{\\1c&H00FFFFFF\\2c&H00FFFFFF}") && promo.contains("限时"),
                 "Promo bold keywords should flip to white inside the yellow promo treatment");
-        assertTrue(classic.contains("{\\c&H00FFFFFF}") && classic.contains("Limited"),
-                "Classic white keywords should stay white instead of turning yellow");
-        assertFalse(classic.contains("&H004DD8FF"),
-                "Classic white should not render yellow keyword overrides");
+        assertTrue(classic.contains("{\\1c&H004DD8FF\\2c&H004DD8FF}") && classic.contains("Limited"),
+                "Configured keyword color must take priority even in classic white");
+        assertTrue(classic.contains("&H004DD8FF"),
+                "Classic white respects the configured keyword color");
     }
 
     private String renderStyleLine(String subtitleStyle) throws Exception {

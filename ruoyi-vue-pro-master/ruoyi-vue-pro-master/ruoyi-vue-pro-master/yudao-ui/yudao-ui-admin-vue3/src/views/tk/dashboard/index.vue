@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="tk-home">
     <header class="home-header">
       <div>
@@ -1179,12 +1179,13 @@
                   <div class="subtitle-style-preview" :class="subtitlePreviewClasses">
                     <div class="subtitle-preview-screen">
                       <div class="subtitle-preview-caption">
-                        <span>{{ localizedSubtitlePreviewParts[0] }}</span>
-                        <strong v-if="subtitlePreviewUsesEmphasis">{{
-                          localizedSubtitlePreviewParts[1]
-                        }}</strong>
-                        <span v-else>{{ localizedSubtitlePreviewParts[1] }}</span>
-                        <span>{{ localizedSubtitlePreviewParts[2] }}</span>
+                        <span
+                          v-for="(word, index) in subtitlePreviewWordList"
+                          :key="index"
+                          :class="{ 'is-keyword': subtitlePreviewUsesEmphasis && word.keyword }"
+                          :style="{ '--word-delay': `${index * 0.3}s` }"
+                          >{{ word.text }}</span
+                        >
                       </div>
                       <div class="subtitle-position-guide" aria-hidden="true">
                         <span class="guide-top"></span>
@@ -1320,6 +1321,13 @@
                 </div>
                 <div v-if="currentGenerationTask?.outputUrl" class="generation-result-preview">
                   <video :src="currentGenerationTask.outputUrl" controls playsinline></video>
+                  <el-alert
+                    v-if="subtitleKaraokeResultNotice"
+                    :title="subtitleKaraokeResultNotice"
+                    :type="currentGenerationTask.subtitleKaraokeStatus ? 'warning' : 'info'"
+                    :closable="false"
+                    show-icon
+                  />
                   <div class="generation-result-name">
                     {{ currentGenerationOutputDisplayName }}
                   </div>
@@ -1498,6 +1506,7 @@
 </template>
 
 <script setup lang="ts">
+import { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay } from './subtitlePreview.mjs'
 import { TkDashboardApi } from '@/api/tk/dashboard'
 import { TkBgmAssetApi, type TkBgmAssetVO } from '@/api/tk/bgm'
 import { TkGenerationApi } from '@/api/tk/generation'
@@ -2532,7 +2541,8 @@ const analysisProviderOptions = computed(() => [
 const subtitleFontSizeOptions = computed(() => [
   { label: isEn.value ? 'Small' : '小', value: 'small' },
   { label: isEn.value ? 'Medium' : '中', value: 'medium' },
-  { label: isEn.value ? 'Large' : '大', value: 'large' }
+  { label: isEn.value ? 'Large' : '大', value: 'large' },
+  { label: isEn.value ? 'Extra large' : '特大', value: 'extra_large' }
 ])
 const localizedOption = (item: { zh: string; en: string }) => (isEn.value ? item.en : item.zh)
 const currentSubtitleStyleOption = computed(
@@ -2548,7 +2558,22 @@ const localizedSubtitlePreviewParts = computed(() =>
     ? currentSubtitleStyleOption.value.previewEn
     : currentSubtitleStyleOption.value.previewZh
 )
+const subtitlePreviewWordList = computed(() =>
+  subtitlePreviewWords(localizedSubtitlePreviewParts.value, isEn.value)
+)
+const subtitleKaraokeResultNotice = computed(() => karaokeResultMessage(currentGenerationTask.value, {
+  partial: isEn.value
+    ? 'Karaoke partly applied. Segments without reliable word timing use plain captions.'
+    : '逐字高亮部分生效，缺少可靠逐词时间的片段已使用普通字幕。',
+  disabled: isEn.value
+    ? 'Karaoke unavailable. Reliable word timing was not obtained; plain captions were kept.'
+    : '逐字高亮未生效，未取得可靠逐词时间，已保留普通字幕。',
+  unknown: isEn.value ? 'Word highlighting status is unavailable for this older task.' : '该历史任务没有记录逐字高亮状态。'
+}))
 const subtitlePreviewEmphasisStyles = new Set([
+  'classic_white',
+  'clean_product',
+  'step_card',
   'yellow_keyword',
   'tiktok_large',
   'promo_bold',
@@ -4695,8 +4720,10 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
       return
     }
 
-    createForm.sourceUrl = isManualLeadGenerationSource(task.sourceUrl) || isManualEcommerceSource(task.sourceUrl)
-      ? '' : (task.sourceUrl || '')
+    createForm.sourceUrl =
+      isManualLeadGenerationSource(task.sourceUrl) || isManualEcommerceSource(task.sourceUrl)
+        ? ''
+        : task.sourceUrl || ''
     createForm.title = task.title || ''
     createForm.libraryId = task.libraryId
     createForm.targetLanguage = manualLeadReplay || manualEcommerceReplay
@@ -4715,6 +4742,7 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     createForm.openingClipStartSecond = task.openingClipStartSecond ?? DEFAULT_OPENING_CLIP_START
     createForm.openingClipEndSecond =
       task.openingClipEndSecond ?? createForm.openingClipStartSecond + DEFAULT_OPENING_CLIP_DURATION
+    restoreSubtitleReplay(createForm, task)
     createForm.bgmEnabled = Boolean(task.bgmEnabled)
     createForm.bgmAssetId = task.bgmAssetId
     createForm.bgmVolume = task.bgmVolume ?? 0.1
@@ -7684,9 +7712,10 @@ onUnmounted(() => {
   min-height: 28px;
   padding: 0 2px;
   font-size: var(--subtitle-preview-font-size);
-  font-weight: 900;
-  line-height: 1.2;
-  color: #fff;
+  font-family: 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--subtitle-plain, #fff);
   text-align: center;
   text-shadow:
     0 1px 0 #000,
@@ -7701,19 +7730,78 @@ onUnmounted(() => {
   color: #ffd84d;
 }
 
-.subtitle-preview-caption::after {
-  position: absolute;
-  right: 12%;
-  bottom: -5px;
-  left: 12%;
-  height: 3px;
-  content: '';
-  background: transparent;
-  border-radius: 6px;
+/* Preview words advance independently; keywords retain priority over the animated active color. */
+.subtitle-style-preview.has-karaoke-preview .subtitle-preview-caption > span {
+  animation: subtitle-word-highlight 5s linear infinite;
+  animation-delay: var(--word-delay);
 }
 
-.subtitle-style-preview.has-karaoke-preview .subtitle-preview-caption::after {
-  background: linear-gradient(90deg, #35f27a 0 54%, rgba(255, 255, 255, 0.3) 54% 100%);
+.subtitle-preview-caption > .is-keyword {
+  color: var(--subtitle-keyword, #ffd84d);
+  animation: none !important;
+}
+
+@keyframes subtitle-word-highlight {
+  0%,
+  4% {
+    color: inherit;
+  }
+  12%,
+  80% {
+    color: var(--subtitle-active, #35f27a);
+  }
+  90%,
+  100% {
+    color: inherit;
+  }
+}
+
+.subtitle-style-preview.is-size-extra_large .subtitle-preview-caption {
+  --subtitle-preview-font-size: 27px;
+}
+
+.subtitle-style-preview.is-brand_minimal .subtitle-preview-caption,
+.subtitle-style-preview.is-yellow_story .subtitle-preview-caption {
+  font-family: 'Noto Serif CJK SC', 'Noto Serif SC', serif;
+}
+
+.subtitle-style-preview.is-brand_minimal .subtitle-preview-caption {
+  font-weight: 400;
+}
+
+.subtitle-style-preview.is-promo_bold {
+  --subtitle-active: #ff3b30;
+  --subtitle-keyword: #fff;
+}
+.subtitle-style-preview.is-tiktok_large {
+  --subtitle-active: #00f2ff;
+  --subtitle-keyword: #ff3b8d;
+}
+.subtitle-style-preview.is-clean_product {
+  --subtitle-keyword: #1677ff;
+}
+.subtitle-style-preview.is-neon_pop {
+  --subtitle-active: #35f27a;
+  --subtitle-keyword: #ff6bc8;
+}
+.subtitle-style-preview.is-yellow_story {
+  --subtitle-active: #fff;
+  --subtitle-keyword: #ff3d00;
+}
+.subtitle-style-preview.is-price_flash {
+  --subtitle-active: #fff;
+  --subtitle-keyword: #ff6600;
+}
+.subtitle-style-preview.is-step_card {
+  --subtitle-keyword: #0ea5e9;
+}
+.subtitle-style-preview.is-brand_minimal {
+  --subtitle-active: #2563eb;
+  --subtitle-keyword: #2563eb;
+}
+.subtitle-style-preview.is-comment_bubble {
+  --subtitle-active: #1677ff;
+  --subtitle-keyword: #1677ff;
 }
 
 .subtitle-style-preview small {

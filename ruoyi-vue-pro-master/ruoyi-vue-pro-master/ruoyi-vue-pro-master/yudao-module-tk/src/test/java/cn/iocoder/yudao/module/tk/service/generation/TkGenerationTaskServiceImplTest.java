@@ -47,6 +47,29 @@ import static org.mockito.Mockito.when;
 
 class TkGenerationTaskServiceImplTest {
     @Test
+    void taskDetailReadsOptionalSubtitleDiagnosticsFromExistingResultLog() {
+        TkGenerationTaskServiceImpl service=new TkGenerationTaskServiceImpl();
+        TkGenerationTaskMapper tasks=mock(TkGenerationTaskMapper.class);
+        cn.iocoder.yudao.module.tk.dal.mysql.TkBusinessLogMapper logs=mock(cn.iocoder.yudao.module.tk.dal.mysql.TkBusinessLogMapper.class);
+        TkDataScopeService scope=mock(TkDataScopeService.class);
+        ReflectionTestUtils.setField(service,"taskMapper",tasks);
+        ReflectionTestUtils.setField(service,"businessLogMapper",logs);
+        ReflectionTestUtils.setField(service,"dataScopeService",scope);
+        TkGenerationTaskDO task=TkGenerationTaskDO.builder().id(1L).status("SUCCESS").businessTraceId("trace").build();
+        when(tasks.selectById(1L)).thenReturn(task);
+        when(logs.selectOne(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(
+                cn.iocoder.yudao.module.tk.dal.dataobject.TkBusinessLogDO.builder().detailJson(
+                        "{\"subtitleKaraokeStatus\":\"partial\",\"subtitleKaraokeReason\":\"mismatched words\",\"subtitleQualityUrl\":\"https://example.com/quality.json\"}").build());
+        TkGenerationTaskDO detail=service.getGenerationTask(1L);
+        assertEquals("partial",detail.getSubtitleKaraokeStatus());
+        assertEquals("mismatched words",detail.getSubtitleKaraokeReason());
+        assertEquals("https://example.com/quality.json",detail.getSubtitleQualityUrl());
+        when(logs.selectOne(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(null);
+        when(tasks.selectById(1L)).thenReturn(TkGenerationTaskDO.builder().id(1L).status("SUCCESS").build());
+        assertEquals(null,service.getGenerationTask(1L).getSubtitleKaraokeStatus());
+        verify(scope,org.mockito.Mockito.times(2)).validateReadable(any(),any(),any());
+    }
+    @Test
     void countryTranslationMetadataPreservesCanonicalLocaleAndManualClipConfig() {
         for (String locale : new String[] {"en-gb", "ja-jp", "es-mx", "pt-br", "pt-pt", "th-th"}) {
             TkGenerationTaskCreateReqVO request = new TkGenerationTaskCreateReqVO();
@@ -167,6 +190,7 @@ class TkGenerationTaskServiceImplTest {
                 .companyId(20L)
                 .status(TkGenerationStatusEnum.FAILED)
                 .progress(100)
+                .subtitleFontSize("extra_large")
                 .failReason("render failed")
                 .build();
         task.setTenantId(10L);
@@ -176,6 +200,7 @@ class TkGenerationTaskServiceImplTest {
         service.retryGenerationTask(100L);
 
         verify(taskMapper).resetForRetry(eq(100L), eq(1), any(), eq(false));
+        assertEquals("extra_large",task.getSubtitleFontSize());
         verify(pipelineService).submit(10L, 100L);
     }
 
@@ -283,6 +308,7 @@ class TkGenerationTaskServiceImplTest {
         reqVO.setTtsProvider("DASHSCOPE");
         reqVO.setVoiceCode("system-voice");
         reqVO.setTitle("  夏季防晒视频  ");
+        reqVO.setSubtitleFontSize("extra_large");
         TkMaterialLibraryDO library = TkMaterialLibraryDO.builder().id(10L).companyId(20L).name("Demo").build();
         library.setTenantId(8L);
         TkReferenceAnalysisDO analysis = TkReferenceAnalysisDO.builder()
@@ -310,6 +336,7 @@ class TkGenerationTaskServiceImplTest {
         verify(taskMapper).insert(captor.capture());
         assertEquals("TRACE-ANALYSIS-001", captor.getValue().getBusinessTraceId());
         assertEquals("夏季防晒视频", captor.getValue().getTitle());
+        assertEquals("extra_large", captor.getValue().getSubtitleFontSize());
         assertEquals("Why your summer skin still feels dry?", captor.getValue().getScriptTitle());
         verify(pipelineService).submit(8L, captor.getValue().getId());
     }

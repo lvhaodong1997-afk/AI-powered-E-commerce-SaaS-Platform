@@ -27,7 +27,7 @@ public class DefaultTkSubtitleLayoutService implements TkSubtitleLayoutService {
         TkSubtitleLayout layout = new TkSubtitleLayout(new ArrayList<>());
         for (int i = 0; i < timeline.getSegments().size(); i++) {
             TkSubtitleSegment segment = timeline.getSegments().get(i);
-            SubtitlePosition position = choosePosition(task, mode, positions, i, segment, visualAnalysis);
+            SubtitlePosition position = safePosition(task, choosePosition(task, mode, positions, i, segment, visualAnalysis));
             segment.setPosition(position.name);
             segment.setX(position.x);
             segment.setY(position.y);
@@ -71,7 +71,7 @@ public class DefaultTkSubtitleLayoutService implements TkSubtitleLayoutService {
             return BOTTOM;
         }
         if (StrUtil.equals(mode, "smart_safe") && hasBoxes(visualAnalysis)) {
-            return bestVisualPosition(positions, segment, visualAnalysis, index);
+            return bestVisualPosition(task, positions, segment, visualAnalysis, index);
         }
         if (StrUtil.equals(mode, "random_safe")) {
             if (hasBoxes(visualAnalysis)) {
@@ -97,7 +97,7 @@ public class DefaultTkSubtitleLayoutService implements TkSubtitleLayoutService {
         List<PositionScore> scores = new ArrayList<>();
         double bestScore = Double.MAX_VALUE;
         for (SubtitlePosition position : positions) {
-            double score = scorePosition(position, segment, visualAnalysis);
+            double score = scorePosition(task, position, segment, visualAnalysis);
             scores.add(new PositionScore(position, score));
             if (score < bestScore) {
                 bestScore = score;
@@ -126,12 +126,12 @@ public class DefaultTkSubtitleLayoutService implements TkSubtitleLayoutService {
         return Math.floorMod(hash, size);
     }
 
-    private SubtitlePosition bestVisualPosition(List<SubtitlePosition> positions, TkSubtitleSegment segment,
+    private SubtitlePosition bestVisualPosition(TkGenerationTaskDO task, List<SubtitlePosition> positions, TkSubtitleSegment segment,
                                                 TkVisualAnalysis visualAnalysis, int index) {
         SubtitlePosition best = positions.get(0);
         double bestScore = Double.MAX_VALUE;
         for (SubtitlePosition position : positions) {
-            double score = scorePosition(position, segment, visualAnalysis);
+            double score = scorePosition(task, position, segment, visualAnalysis);
             if (position.equals(index % 2 == 0 ? BOTTOM : TOP)) {
                 score -= 0.2D;
             }
@@ -143,8 +143,8 @@ public class DefaultTkSubtitleLayoutService implements TkSubtitleLayoutService {
         return best;
     }
 
-    private double scorePosition(SubtitlePosition position, TkSubtitleSegment segment, TkVisualAnalysis visualAnalysis) {
-        Rect subtitle = subtitleRect(position);
+    private double scorePosition(TkGenerationTaskDO task, SubtitlePosition position, TkSubtitleSegment segment, TkVisualAnalysis visualAnalysis) {
+        Rect subtitle = subtitleRect(task, safePosition(task, position));
         double score = 0D;
         for (TkVisualAnalysis.TkVisualFrame frame : visualAnalysis.getFrames()) {
             if (frame.getTime() < segment.getStart() || frame.getTime() > segment.getEnd() || frame.getBoxes() == null) {
@@ -176,10 +176,18 @@ public class DefaultTkSubtitleLayoutService implements TkSubtitleLayoutService {
         return 1.5D;
     }
 
-    private Rect subtitleRect(SubtitlePosition position) {
-        int halfWidth = position.x == CENTER_X ? 430 : 330;
-        int halfHeight = 88;
-        return new Rect(position.x - halfWidth, position.y - halfHeight, position.x + halfWidth, position.y + halfHeight);
+    private SubtitlePosition safePosition(TkGenerationTaskDO task, SubtitlePosition position) {
+        int fontSize = DefaultTkAssSubtitleRenderService.fontSize(task);
+        int height = (int) Math.ceil(fontSize * 1.6D) * 2;
+        int x = fontSize > 82 ? CENTER_X : position.x;
+        return new SubtitlePosition(position.name, x, Math.max(height + 80, Math.min(1540, position.y)));
+    }
+
+    private Rect subtitleRect(TkGenerationTaskDO task, SubtitlePosition position) {
+        int halfWidth = position.x == CENTER_X ? 450 : 280;
+        // ASS alignment 2 anchors the bottom center, including both lines and their leading.
+        int height = (int) Math.ceil(DefaultTkAssSubtitleRenderService.fontSize(task) * 1.6D) * 2;
+        return new Rect(position.x - halfWidth, position.y - height, position.x + halfWidth, position.y);
     }
 
     private boolean hasBoxes(TkVisualAnalysis visualAnalysis) {

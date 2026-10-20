@@ -107,7 +107,7 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                         File bgmFile = resolveBgmFile(taskDir, task);
                         List<String> renderCommand = buildFinalRenderCommand(ffmpeg(), mergedVideo, renderMedia.audioFile, bgmFile,
                                 normalizeBgmVolume(task.getBgmVolume()), TkVideoDurationSupport.normalize(task.getTargetDuration()),
-                                renderMedia.subtitleAssets.assFile, output, ffmpegPreset(), nativeOpeningDurationSeconds(task));
+                                renderMedia.subtitleAssets.assFile, output, ffmpegPreset(), nativeOpeningDurationSeconds(task), subtitleFontsDir());
                         runCommand(renderCommand);
                         return output;
                     });
@@ -120,6 +120,9 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
             TkRenderResult result = new TkRenderResult(outputUrl, subtitleAssets.assUrl, subtitleAssets.timelineUrl,
                     subtitleAssets.visualAnalysisUrl, subtitleAssets.layoutUrl, subtitleAssets.assUrl,
                     subtitleAssets.asrRawUrl, subtitleAssets.qualityUrl);
+            TkSubtitleKaraokeQuality karaoke = TkSubtitleKaraokeQuality.inspect(task, subtitleAssets.timeline);
+            result.setSubtitleKaraokeStatus(karaoke.getStatus());
+            result.setSubtitleKaraokeReason(karaoke.getReason());
             completed = true;
             return result;
         } catch (Exception ex) {
@@ -286,6 +289,14 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                                                 File bgmFile, Double bgmVolume, double videoDuration,
                                                 File assFile, File finalVideo, String preset,
                                                 double nativeOpeningDuration) {
+        return buildFinalRenderCommand(ffmpeg, mergedVideo, finalAudioFile, bgmFile, bgmVolume, videoDuration,
+                assFile, finalVideo, preset, nativeOpeningDuration, null);
+    }
+
+    static List<String> buildFinalRenderCommand(String ffmpeg, File mergedVideo, File finalAudioFile,
+                                                File bgmFile, Double bgmVolume, double videoDuration,
+                                                File assFile, File finalVideo, String preset,
+                                                double nativeOpeningDuration, String fontsDir) {
         List<String> renderCommand = new ArrayList<>(Arrays.asList(ffmpeg, "-y", "-i", mergedVideo.getAbsolutePath()));
         boolean hasVoice = finalAudioFile != null;
         if (hasVoice) {
@@ -296,7 +307,8 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         }
         if (assFile != null) {
             renderCommand.add("-vf");
-            renderCommand.add("ass=" + escapeSubtitlePath(assFile));
+            renderCommand.add("ass=" + escapeSubtitlePath(assFile)
+                    + (StrUtil.isBlank(fontsDir) ? "" : ":fontsdir=" + escapeSubtitlePath(new File(fontsDir))));
         }
         if (nativeOpeningDuration > SECTION_COMPRESS_EPSILON_SECONDS) {
             renderCommand.addAll(Arrays.asList("-filter_complex",
@@ -928,8 +940,19 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
         return StrUtil.blankToDefault(StrUtil.trim(preset), "veryfast");
     }
 
+    private String subtitleFontsDir() {
+        String directory = generationProperties.getSubtitle().getFontsDir();
+        if (StrUtil.isNotBlank(directory) && !new File(directory).isDirectory()) {
+            throw new IllegalStateException("SUBTITLE_FONTS_DIR_NOT_FOUND: " + directory);
+        }
+        return directory;
+    }
+
     private static String escapeSubtitlePath(File subtitleFile) {
-        return subtitleFile.getAbsolutePath().replace("\\", "/").replace(":", "\\\\:");
+        // Two FFmpeg parsers consume escapes: filtergraph, then ASS filter options.
+        return subtitleFile.getAbsolutePath().replace("\\", "/").replace(":", "\\\\:")
+                .replace("'", "\\\\\\'").replace(",", "\\,").replace(";", "\\;")
+                .replace("[", "\\[").replace("]", "\\]").replace(" ", "\\ ");
     }
 
     @FunctionalInterface

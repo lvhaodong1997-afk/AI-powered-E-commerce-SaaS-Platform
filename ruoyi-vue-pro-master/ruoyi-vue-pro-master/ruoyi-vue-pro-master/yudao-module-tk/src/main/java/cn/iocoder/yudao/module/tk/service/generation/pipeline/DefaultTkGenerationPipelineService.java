@@ -273,6 +273,9 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
                     .setHeartbeatTime(LocalDateTime.now())
                     .setWorkerId(workerId));
 
+            // Persist optional diagnostics before SUCCESS can be observed by polling clients.
+            businessLogService.info(businessTraceId, "GENERATION_TASK", taskId, "SUBTITLE_QUALITY", "SUCCESS",
+                    "字幕时间轴质量", renderResult);
             update(taskId, TkGenerationStatusEnum.SUCCESS, 100, "生成完成", null, null);
             creditService.settle(GENERATION_TASK, taskId);
             refreshBatchProgress(task.getBatchId());

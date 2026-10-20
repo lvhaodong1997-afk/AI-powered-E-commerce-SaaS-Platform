@@ -33,19 +33,25 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
                 .append("Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, ")
                 .append("Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
                 .append("Style: Default,").append(style.fontName).append(',').append(style.fontSize).append(',')
-                .append(toAssColor(style.primaryColor)).append(',').append(toAssColor(style.activeColor)).append(',')
+                .append(toAssColor(Boolean.TRUE.equals(task.getSubtitleKaraokeEnabled()) ? style.activeColor : style.primaryColor))
+                .append(',').append(toAssColor(style.primaryColor)).append(',')
                 .append(toAssColor(style.outlineColor)).append(',').append(toAssColor(style.backColor)).append(',')
                 .append(style.bold).append(',').append(style.italic).append(",0,0,100,100,0,0,")
                 .append(style.borderStyle).append(',').append(style.outline).append(',').append(style.shadow)
                 .append(',').append(style.alignment).append(",80,80,80,1\n\n")
                 .append("[Events]\n")
                 .append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
-        for (TkSubtitleSegment segment : layout.getSegments()) {
+        List<TkSubtitleSegment> displaySegments = new ArrayList<>();
+        for (TkSubtitleSegment original : layout.getSegments()) {
+            displaySegments.addAll(splitLegacyEnglish(original, style.fontSize));
+        }
+        for (TkSubtitleSegment segment : displaySegments) {
             ass.append("Dialogue: 0,")
                     .append(formatAssTime(segment.getStart())).append(',')
                     .append(formatAssTime(segment.getEnd())).append(',')
                     .append("Default,,0,0,0,,")
                     .append("{\\pos(").append(segment.getX()).append(',').append(segment.getY()).append(")}")
+                    .append(horizontalFit(style, segment))
                     .append(renderText(task, style, segment))
                     .append('\n');
         }
@@ -54,14 +60,13 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
     }
 
     private String renderText(TkGenerationTaskDO task, SubtitleStyle style, TkSubtitleSegment segment) {
-        if (!Boolean.TRUE.equals(task.getSubtitleKaraokeEnabled())
-                || !Boolean.TRUE.equals(segment.getWordTimingReliable())
-                || segment.getWords() == null || segment.getWords().isEmpty()) {
-            return renderPlainText(style, segment);
+        if (!Boolean.TRUE.equals(task.getSubtitleKaraokeEnabled()) || !canRenderKaraoke(segment)) {
+            return "{\\1c" + toAssColor(style.primaryColor) + "}" + renderPlainText(task, style, segment);
         }
         StringBuilder text = new StringBuilder();
-        List<List<TkSubtitleWord>> lines = splitWordsToLines(segment);
+        List<List<TkSubtitleWord>> lines = splitWordsToLines(segment, style.fontSize);
         boolean mostlyEnglish = isMostlyEnglish(segment.getText());
+        long karaokeCursor = 0L;
         for (int lineIndex = 0; lineIndex < lines.size(); lineIndex++) {
             if (lineIndex > 0) {
                 text.append("\\N");
@@ -73,9 +78,11 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
                     text.append(' ');
                 }
                 int centiseconds = Math.max(1, (int) Math.round((word.getEnd() - word.getStart()) * 100));
-                if (word.isKeyword()) {
-                    text.append("{\\c").append(toAssColor(style.keywordColor)).append('}');
-                }
+                boolean keyword = !Boolean.FALSE.equals(task.getSubtitleKeywordEnabled()) && word.isKeyword();
+                String spokenColor = keyword ? style.keywordColor : style.activeColor;
+                String waitingColor = keyword ? style.keywordColor : style.primaryColor;
+                text.append("{\\1c").append(toAssColor(spokenColor))
+                        .append("\\2c").append(toAssColor(waitingColor)).append('}');
                 String wordText = word.getText() == null ? "" : word.getText();
                 if (!mostlyEnglish) {
                     if (wordIndex == 0) {
@@ -85,24 +92,156 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
                         wordText = wordText.stripTrailing();
                     }
                 }
+                // Empty k syllables preserve silence on libass < 0.17, where kt is unsupported.
+                long start = Math.max(karaokeCursor, Math.round((word.getStart() - segment.getStart()) * 100));
+                if (start > karaokeCursor) {
+                    text.append("{\\k").append(start - karaokeCursor).append('}');
+                }
+                karaokeCursor = start + centiseconds;
                 text.append("{\\kf").append(centiseconds).append('}')
                         .append(escapeAssText(wordText));
-                if (word.isKeyword()) {
-                    text.append("{\\c").append(toAssColor(style.primaryColor)).append('}');
-                }
             }
         }
         return text.toString();
     }
 
-    private List<List<TkSubtitleWord>> splitWordsToLines(TkSubtitleSegment segment) {
+    private List<TkSubtitleSegment> splitLegacyEnglish(TkSubtitleSegment original, int fontSize) {
+        if (!isMostlyEnglish(StrUtil.blankToDefault(original.getText(), ""))) {
+            return List.of(original);
+        }
+        int limit = englishLineWeight(fontSize);
+        List<String> chunks = new ArrayList<>();
+        StringBuilder chunk = new StringBuilder();
+        int lines = 1;
+        int width = 0;
+        for (String token : normalizeDisplayText(original.getText()).split(" ")) {
+            int nextWidth = width + (width > 0 ? 1 : 0) + token.length();
+            if (width > 0 && nextWidth > limit) {
+                lines++;
+                width = 0;
+            }
+            if (lines > MAX_LINES) {
+                chunks.add(chunk.toString());
+                chunk.setLength(0);
+                lines = 1;
+            }
+            if (chunk.length() > 0) {
+                chunk.append(' ');
+            }
+            chunk.append(token);
+            width += token.length() + (width > 0 ? 1 : 0);
+        }
+        if (chunk.length() > 0) {
+            chunks.add(chunk.toString());
+        }
+        if (chunks.size() <= 1) {
+            return List.of(original);
+        }
+        boolean actual = canRenderKaraoke(original);
+        StringBuilder joined = new StringBuilder();
+        if (original.getWords() != null) {
+            for (TkSubtitleWord word : original.getWords()) {
+                joined.append(word.getText());
+            }
+        }
+        actual &= normalizeDisplayText(original.getText()).replace(" ", "").equals(joined.toString().replace(" ", ""));
+        List<TkSubtitleSegment> result = new ArrayList<>();
+        int wordCursor = 0;
+        int textCursor = 0;
+        int totalLength = Math.max(1, normalizeDisplayText(original.getText()).length());
+        for (int index = 0; index < chunks.size(); index++) {
+            String text = chunks.get(index);
+            List<TkSubtitleWord> words = new ArrayList<>();
+            if (actual) {
+                int targetLength = text.replace(" ", "").length();
+                int length = 0;
+                while (wordCursor < original.getWords().size() && length < targetLength) {
+                    TkSubtitleWord word = original.getWords().get(wordCursor++);
+                    words.add(word);
+                    length += word.getText().replace(" ", "").length();
+                }
+                if (length != targetLength) {
+                    actual = false;
+                }
+            }
+            double duration = original.getEnd() - original.getStart();
+            double start = original.getStart() + duration * textCursor / totalLength;
+            textCursor += text.length() + (index < chunks.size() - 1 ? 1 : 0);
+            double end = index == chunks.size() - 1 ? original.getEnd()
+                    : original.getStart() + duration * textCursor / totalLength;
+            if (actual && !words.isEmpty()) {
+                start = index == 0 ? original.getStart() : words.get(0).getStart();
+                end = index == chunks.size() - 1 ? original.getEnd() : words.get(words.size() - 1).getEnd();
+            }
+            TkSubtitleSegment segment = new TkSubtitleSegment(text, start, end, original.getPosition(),
+                    original.getX(), original.getY(), words);
+            segment.setWordTimingReliable(actual);
+            result.add(segment);
+        }
+        return result;
+    }
+
+    // Shared with diagnostics: exactly the same decision must describe what was rendered.
+    static boolean canRenderKaraoke(TkSubtitleSegment segment) {
+        if (!Boolean.TRUE.equals(segment.getWordTimingReliable()) || segment.getWords() == null
+                || segment.getWords().isEmpty() || !Double.isFinite(segment.getStart())
+                || !Double.isFinite(segment.getEnd()) || segment.getEnd() <= segment.getStart()) {
+            return false;
+        }
+        double previousEnd = segment.getStart();
+        for (TkSubtitleWord word : segment.getWords()) {
+            if (!Double.isFinite(word.getStart()) || !Double.isFinite(word.getEnd())
+                    || word.getStart() < previousEnd - 0.011D || word.getEnd() <= word.getStart()
+                    || word.getEnd() > segment.getEnd() + 0.011D) {
+                return false;
+            }
+            previousEnd = word.getEnd();
+        }
+        return true;
+    }
+
+    private int englishLineWeight(int fontSize) {
+        return fontSize <= 82 ? MAX_ENGLISH_LINE_WEIGHT
+                : Math.max(10, (int) (860D / (fontSize * 0.65D)));
+    }
+
+    private String horizontalFit(SubtitleStyle style, TkSubtitleSegment segment) {
+        // Legacy tasks may contain a caption too long for two lines. Keep the exact text visible.
+        String visible = wrapPlainText(segment, style.fontSize).replaceAll("\\\\[{}]", "");
+        double maxWidth = 1D;
+        for (String line : visible.split("\\\\N")) {
+            double width = line.codePoints().mapToDouble(cp -> isCjk((char) cp) ? 1D : 0.65D).sum() * style.fontSize;
+            maxWidth = Math.max(maxWidth, width);
+        }
+        double safeWidth = Math.min(900D, Math.min(segment.getX() - 80, 1000 - segment.getX()) * 2D);
+        int scale = Math.max(1, Math.min(100, (int) Math.floor(safeWidth * 100D / maxWidth)));
+        return scale < 100 ? "{\\fscx" + scale + "\\fscy" + scale + "}" : "";
+    }
+
+    private List<List<TkSubtitleWord>> splitWordsToLines(TkSubtitleSegment segment, int fontSize) {
         if (!isMostlyEnglish(segment.getText())) {
             return splitCjkWordsToLines(restoreCjkWordSpacing(segment));
         }
         List<List<TkSubtitleWord>> lines = new ArrayList<>();
+        List<String> visibleLines = splitTextToLines(segment.getText(), fontSize);
+        if (visibleLines.size() == 2) {
+            int boundary = visibleLines.get(0).replace(" ", "").length();
+            int cursor = 0;
+            List<TkSubtitleWord> first = new ArrayList<>();
+            List<TkSubtitleWord> second = new ArrayList<>();
+            for (TkSubtitleWord word : segment.getWords()) {
+                (cursor < boundary ? first : second).add(word);
+                cursor += StrUtil.blankToDefault(word.getText(), "").replace(" ", "").length();
+            }
+            if (!first.isEmpty() && !second.isEmpty()) {
+                lines.add(first);
+                lines.add(second);
+                return lines;
+            }
+        }
         List<TkSubtitleWord> line = new ArrayList<>();
         boolean mostlyEnglish = isMostlyEnglish(segment.getText());
-        int maxWeight = mostlyEnglish ? MAX_ENGLISH_LINE_WEIGHT : MAX_CJK_LINE_WEIGHT;
+        int maxWeight = mostlyEnglish ? englishLineWeight(fontSize) : MAX_CJK_LINE_WEIGHT;
         int lineWeight = 0;
         for (TkSubtitleWord word : segment.getWords()) {
             String wordText = StrUtil.blankToDefault(word.getText(), "");
@@ -208,9 +347,9 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
         return Character.isLetterOrDigit(ch);
     }
 
-    private String renderPlainText(SubtitleStyle style, TkSubtitleSegment segment) {
-        String text = wrapPlainText(segment);
-        if (segment.getWords() == null || segment.getWords().stream().noneMatch(TkSubtitleWord::isKeyword)) {
+    private String renderPlainText(TkGenerationTaskDO task, SubtitleStyle style, TkSubtitleSegment segment) {
+        String text = wrapPlainText(segment, style.fontSize);
+        if (Boolean.FALSE.equals(task.getSubtitleKeywordEnabled()) || segment.getWords() == null || segment.getWords().stream().noneMatch(TkSubtitleWord::isKeyword)) {
             return text;
         }
         for (TkSubtitleWord word : segment.getWords()) {
@@ -224,10 +363,10 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
         return text;
     }
 
-    private String wrapPlainText(TkSubtitleSegment segment) {
-        String source = StrUtil.maxLength(segment.getText(), 80);
+    private String wrapPlainText(TkSubtitleSegment segment, int fontSize) {
+        String source = StrUtil.blankToDefault(segment.getText(), "");
         if (isMostlyEnglish(source) || segment.getWords() == null || segment.getWords().isEmpty()) {
-            return wrapPlainText(source);
+            return wrapPlainText(source, fontSize);
         }
         List<TkSubtitleWord> displayWords = restoreCjkWordSpacing(segment);
         StringBuilder wordText = new StringBuilder();
@@ -235,7 +374,7 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
             wordText.append(word.getText() == null ? "" : word.getText());
         }
         if (!normalizeDisplayText(source).equals(wordText.toString())) {
-            return wrapPlainText(source);
+            return wrapPlainText(source, fontSize);
         }
         List<String> lines = new ArrayList<>();
         for (List<TkSubtitleWord> words : splitCjkWordsToLines(displayWords)) {
@@ -248,8 +387,8 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
         return String.join("\\N", lines);
     }
 
-    private String wrapPlainText(String text) {
-        List<String> lines = splitTextToLines(text);
+    private String wrapPlainText(String text, int fontSize) {
+        List<String> lines = splitTextToLines(text, fontSize);
         List<String> escapedLines = new ArrayList<>();
         for (String line : lines) {
             escapedLines.add(escapeAssText(line));
@@ -257,7 +396,7 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
         return String.join("\\N", escapedLines);
     }
 
-    private List<String> splitTextToLines(String text) {
+    private List<String> splitTextToLines(String text, int fontSize) {
         String normalized = normalizeDisplayText(text);
         List<String> lines = new ArrayList<>();
         if (StrUtil.isBlank(normalized)) {
@@ -265,7 +404,7 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
             return lines;
         }
         if (isMostlyEnglish(normalized)) {
-            splitEnglishLines(normalized, lines);
+            splitEnglishLines(normalized, lines, englishLineWeight(fontSize));
         } else {
             splitCjkLines(normalized, lines);
         }
@@ -276,13 +415,29 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
         return StrUtil.blankToDefault(text, "").trim().replaceAll("\\s+", " ");
     }
 
-    private void splitEnglishLines(String text, List<String> lines) {
+    private void splitEnglishLines(String text, List<String> lines, int maxWeight) {
+        if (text.length() > maxWeight) {
+            int split = -1;
+            int best = Integer.MAX_VALUE;
+            for (int index = text.indexOf(' '); index >= 0; index = text.indexOf(' ', index + 1)) {
+                int difference = Math.abs(index - (text.length() - index - 1));
+                if (index <= maxWeight && text.length() - index - 1 <= maxWeight && difference < best) {
+                    split = index;
+                    best = difference;
+                }
+            }
+            if (split >= 0) {
+                lines.add(text.substring(0, split));
+                lines.add(text.substring(split + 1));
+                return;
+            }
+        }
         StringBuilder line = new StringBuilder();
         int lineWeight = 0;
         for (String token : text.split(" ")) {
             int tokenWeight = displayWeight(token);
             int extraSpace = line.length() == 0 ? 0 : 1;
-            if (line.length() > 0 && lineWeight + extraSpace + tokenWeight > MAX_ENGLISH_LINE_WEIGHT
+            if (line.length() > 0 && lineWeight + extraSpace + tokenWeight > maxWeight
                     && lines.size() < MAX_LINES - 1) {
                 lines.add(line.toString());
                 line.setLength(0);
@@ -346,61 +501,68 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
                 || block == Character.UnicodeBlock.HANGUL_SYLLABLES;
     }
 
-    private SubtitleStyle resolveStyle(TkGenerationTaskDO task) {
+    private static SubtitleStyle resolveStyle(TkGenerationTaskDO task) {
         String style = StrUtil.blankToDefault(task.getSubtitleStyle(), "classic_white");
         int fontSize = resolveFontSize(task.getSubtitleFontSize());
         String activeColor = StrUtil.blankToDefault(task.getSubtitleActiveColor(), "#35F27A");
         String keywordColor = StrUtil.blankToDefault(task.getSubtitleKeywordColor(), "#FFD84D");
         if (StrUtil.equals(style, "promo_bold")) {
-            return new SubtitleStyle("Arial", fontSize + 4, "#FFF200", "#FF3B30", "#FFFFFF", "#2B0505",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize + 4, "#FFF200", "#FF3B30", "#FFFFFF", "#2B0505",
                     "#E02020", 3, 3, 0, 2, -1, 0);
         }
         if (StrUtil.equals(style, "tiktok_large")) {
-            return new SubtitleStyle("Arial", fontSize + 8, "#FFFFFF", "#00F2FF", "#FF3B8D", "#080A12",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize + 8, "#FFFFFF", "#00F2FF", "#FF3B8D", "#080A12",
                     "#000000", 1, 6, 2, 2, -1, 0);
         }
         if (StrUtil.equals(style, "clean_product")) {
-            return new SubtitleStyle("Arial", fontSize - 4, "#131F2A", activeColor, "#1677FF", "#D5E4F0",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize - 4, "#131F2A", activeColor, "#1677FF", "#D5E4F0",
                     "#F8FBFF", 3, 2, 0, 2, -1, 0);
         }
         if (StrUtil.equals(style, "yellow_keyword")) {
-            return new SubtitleStyle("Arial", fontSize + 1, "#FFFFFF", activeColor, keywordColor, "#111111",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize + 1, "#FFFFFF", activeColor, keywordColor, "#111111",
                     "#000000", 1, 5, 0, 2, -1, 0);
         }
         if (StrUtil.equals(style, "neon_pop")) {
-            return new SubtitleStyle("Arial", fontSize + 5, "#00F2FF", "#35F27A", "#FF6BC8", "#080A12",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize + 5, "#00F2FF", "#35F27A", "#FF6BC8", "#080A12",
                     "#000000", 1, 5, 2, 2, -1, 0);
         }
         if (StrUtil.equals(style, "yellow_story")) {
-            return new SubtitleStyle("Arial", fontSize + 4, "#FFE837", "#FFFFFF", "#FF3D00", "#151515",
+            return new SubtitleStyle("Noto Serif CJK SC", fontSize + 4, "#FFE837", "#FFFFFF", "#FF3D00", "#151515",
                     "#000000", 1, 3, 2, 2, -1, -1);
         }
         if (StrUtil.equals(style, "price_flash")) {
-            return new SubtitleStyle("Arial", fontSize + 6, "#FFFF00", "#FFFFFF", "#FF6600", "#000000",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize + 6, "#FFFF00", "#FFFFFF", "#FF6600", "#000000",
                     "#111111", 3, 4, 0, 2, -1, 0);
         }
         if (StrUtil.equals(style, "step_card")) {
-            return new SubtitleStyle("Arial", fontSize - 3, "#101A22", activeColor, "#0EA5E9", "#CBD5E1",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize - 3, "#101A22", activeColor, "#0EA5E9", "#CBD5E1",
                     "#F8FAFC", 3, 2, 0, 2, -1, 0);
         }
         if (StrUtil.equals(style, "brand_minimal")) {
-            return new SubtitleStyle("Arial", fontSize - 2, "#374151", "#2563EB", "#2563EB", "#CBD5E1",
-                    "#FFFFFF", 3, 2, 0, 2, -1, 0);
+            return new SubtitleStyle("Noto Serif CJK SC", fontSize - 2, "#374151", "#2563EB", "#2563EB", "#CBD5E1",
+                    "#FFFFFF", 3, 2, 0, 2, 0, 0);
         }
         if (StrUtil.equals(style, "comment_bubble")) {
-            return new SubtitleStyle("Arial", fontSize - 1, "#101A22", "#1677FF", "#1677FF", "#D6E1EA",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize - 1, "#101A22", "#1677FF", "#1677FF", "#D6E1EA",
                     "#FFFFFF", 3, 2, 1, 2, -1, 0);
         }
-        return new SubtitleStyle("Arial", fontSize, "#FFFFFF", "#FFFFFF", "#FFFFFF", "#000000",
+        return new SubtitleStyle("Noto Sans CJK SC", fontSize, "#FFFFFF", activeColor, keywordColor, "#000000",
                 "#000000", 1, 4, 1, 2, -1, 0);
     }
 
-    private int resolveFontSize(String value) {
+    static int fontSize(TkGenerationTaskDO task) {
+        return resolveStyle(task).fontSize;
+    }
+
+    private static int resolveFontSize(String value) {
         if (StrUtil.equals(value, "small")) {
             return 52;
         }
         if (StrUtil.equals(value, "large")) {
             return 74;
+        }
+        if (StrUtil.equals(value, "extra_large")) {
+            return 88;
         }
         return 62;
     }

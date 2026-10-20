@@ -66,6 +66,9 @@ export interface TkGenerationTaskVO {
   subtitleActiveColor?: string
   subtitleKeywordColor?: string
   subtitleFontSize?: string
+  subtitleQualityUrl?: string
+  subtitleKaraokeStatus?: 'off' | 'enabled' | 'partial' | 'disabled'
+  subtitleKaraokeReason?: string
   subtitleTimelineUrl?: string
   subtitleVisualAnalysisUrl?: string
   subtitleLayoutUrl?: string

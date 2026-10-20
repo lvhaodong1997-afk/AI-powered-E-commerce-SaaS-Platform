@@ -157,6 +157,9 @@ public class TkGenerationProperties {
     @Data
     public static class Subtitle {
 
+        /** Directory of licensed runtime subtitle fonts; required by release validation. */
+        private String fontsDir;
+
         private Asr asr = new Asr();
         private Visual visual = new Visual();
         /**
