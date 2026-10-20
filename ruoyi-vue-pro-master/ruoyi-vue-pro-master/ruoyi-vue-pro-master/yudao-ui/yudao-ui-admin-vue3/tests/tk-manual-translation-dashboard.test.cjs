@@ -13,6 +13,7 @@ const noop = () => {}
 
 async function harness(flow = 'ECOMMERCE') {
   const translation = await import('../src/views/tk/dashboard/manualTranslation.mjs')
+  const { restoreSubtitleReplay } = await import('../src/views/tk/dashboard/subtitlePreview.mjs')
   const state = translation.createManualTranslationState()
   translation.updateManualTranslationContext(state, { flow, sourceText: '原始文案', targetLanguage: 'en' })
   const audioRequests = []
@@ -25,7 +26,7 @@ async function harness(flow = 'ECOMMERCE') {
     bgmEnabled: false, bgmVolume: 0.1
   }
   const ctx = vm.createContext({
-    ...translation, ref, computed, console,
+    ...translation, restoreSubtitleReplay, ref, computed, console,
     manualTranslation: state, createForm,
     manualTranslationFlow: ref(flow),
     isLeadGenerationManualMode: ref(flow === 'LEAD_GENERATION'),

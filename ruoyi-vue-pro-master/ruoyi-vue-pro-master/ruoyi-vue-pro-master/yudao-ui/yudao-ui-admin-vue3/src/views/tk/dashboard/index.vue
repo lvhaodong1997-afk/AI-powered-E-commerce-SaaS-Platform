@@ -3753,7 +3753,18 @@ const friendlyGenerationFailureReason = (task?: TkGenerationTaskVO) => {
 const syncGenerationBatchProgress = (tasks: TkGenerationTaskStatusVO[]) => {
   batchGenerationTasks.value = tasks
   const activeTask = getGenerationFocusTask(tasks)
-  currentGenerationTask.value = activeTask as TkGenerationTaskVO | undefined
+  const previousTask = currentGenerationTask.value
+  currentGenerationTask.value = activeTask
+    ? ({
+        ...(previousTask &&
+        previousTask.id === activeTask.id &&
+        previousTask.status === activeTask.status &&
+        previousTask.outputUrl === activeTask.outputUrl
+          ? previousTask
+          : {}),
+        ...activeTask
+      } as TkGenerationTaskVO)
+    : undefined
   const totalProgress = tasks.reduce((total, task) => total + Number(task.progress || 0), 0)
   const batchPercent = tasks.length
     ? Math.max(0, Math.min(Math.round(totalProgress / tasks.length), 100))
@@ -3765,9 +3776,28 @@ const syncGenerationBatchProgress = (tasks: TkGenerationTaskStatusVO[]) => {
   generationProgress.elapsedText = formatElapsed(generationProgress.startedAt)
 }
 
+const loadGenerationResultDetail = async () => {
+  const result = currentGenerationTask.value
+  if (!result?.id || result.status !== 'SUCCESS' || !result.outputUrl) return
+  const detail: TkGenerationTaskVO = await TkGenerationApi.getGeneration(result.id)
+  const current = currentGenerationTask.value
+  // A late detail response must not replace another task, retry, or cleared result.
+  if (
+    current?.id === result.id &&
+    current.status === result.status &&
+    current.outputUrl === result.outputUrl &&
+    detail.id === result.id &&
+    detail.status === result.status &&
+    detail.outputUrl === result.outputUrl
+  ) {
+    currentGenerationTask.value = { ...current, ...detail }
+  }
+}
+
 const pollGenerationTaskBatch = async (taskIds: number[]) => {
   const tasks = await TkGenerationApi.getGenerationStatusBatch(taskIds)
   syncGenerationBatchProgress(tasks)
+  const resultDetail = loadGenerationResultDetail().catch(() => undefined)
   if (!generationProgress.running) {
     clearGenerationPolling()
     await refreshCreditBalance()
@@ -3777,6 +3807,7 @@ const pollGenerationTaskBatch = async (taskIds: number[]) => {
       message.success(tasks.length > 1 ? copy.value.batchGenerationCreated : copy.value.generationSuccess)
     }
   }
+  await resultDetail
 }
 
 const startGenerationPolling = (taskId: number) => {
