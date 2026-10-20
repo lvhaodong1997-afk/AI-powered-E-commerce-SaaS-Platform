@@ -30,17 +30,6 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
 
     private static final int OPENING_SECONDS = 3;
     private static final int RECENT_SUCCESS_TASK_LIMIT = 10;
-    private static final List<TkMaterialSegmentTypeEnum> LEAD_BACKFILL_PRIORITY = Arrays.asList(
-            TkMaterialSegmentTypeEnum.GENERAL,
-            TkMaterialSegmentTypeEnum.S7_LIFESTYLE,
-            TkMaterialSegmentTypeEnum.S6_DETAIL,
-            TkMaterialSegmentTypeEnum.S4_DEMO,
-            TkMaterialSegmentTypeEnum.S5_PROOF,
-            TkMaterialSegmentTypeEnum.S3_REVEAL,
-            TkMaterialSegmentTypeEnum.S2_PAIN,
-            TkMaterialSegmentTypeEnum.S1_HOOK
-    );
-
     @Resource
     private TkMaterialVideoMapper materialVideoMapper;
     @Resource
@@ -95,6 +84,7 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         }
         Set<Long> recentlyUsedMaterialIds = resolveRecentlyUsedMaterialIds(task);
         Set<Long> selectedMaterialIds = new HashSet<>();
+        Set<TkMaterialSegmentTypeEnum> usedSourceModules = usedSourceModules(plan, materials);
 
         for (SegmentSection section : sections) {
             int selectedDuration = plan.stream()
@@ -109,7 +99,7 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                     continue;
                 }
                 int duration = materialDuration(material);
-                if (duration <= 0) {
+                if (!isUsableOrderedClip(material)) {
                     continue;
                 }
                 plan.add(new TkClipPlanItem(orderNo++, "MATERIAL", material.getId(), material.getFileName(),
@@ -118,32 +108,26 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                         section.code(), section.name(), section.order(), null,
                         section.scriptLine, section.visualDirection, section.targetDuration));
                 selectedMaterialIds.add(material.getId());
+                usedSourceModules.add(resolveSegmentType(material));
                 selectedDuration += duration;
             }
-            while (selectedDuration < section.targetDuration) {
-                TkMaterialVideoDO material = selectClosestUnusedMaterial(
-                        materials, selectedMaterialIds, section.targetDuration - selectedDuration);
-                if (material == null) {
-                    break;
-                }
+            for (TkMaterialVideoDO material : selectUnusedModuleBackfill(materials, selectedMaterialIds,
+                    usedSourceModules, section.segment, section.targetDuration - selectedDuration)) {
                 int duration = materialDuration(material);
                 plan.add(new TkClipPlanItem(orderNo++, "MATERIAL", material.getId(), material.getFileName(),
                         material.getFileUrl(), 0, duration,
-                        StrUtil.format("{}素材不足，选择最接近缺口的未使用素材并在渲染时适配到目标时长", section.name()),
+                        moduleFallbackReason(section.segment, resolveSegmentType(material)),
                         section.code(), section.name(), section.order(), null,
                         section.scriptLine, section.visualDirection, section.targetDuration));
                 selectedMaterialIds.add(material.getId());
                 selectedDuration += duration;
             }
+            if (section.targetDuration > 0 && selectedDuration == 0) {
+                throw new IllegalStateException(StrUtil.format("{}({})素材不足：没有可用的未使用来源模块",
+                        section.name(), section.code()));
+            }
         }
-        int planTargetDuration = nativeOpening
-                ? (int) Math.ceil(nativeOpeningDurationSeconds(task)) + bodyTargetDuration : targetDuration;
-        if (planDuration(plan) < planTargetDuration) {
-            backfillWholeMaterials(plan, nativeOpening
-                            ? randomBackfillCandidatesWithoutHook(materials)
-                            : randomBackfillCandidates(materials), planTargetDuration, orderNo,
-                    "音频时长补足，完整追加{}秒素材，避免尾帧停留");
-        }
+        // Each gap already exhausted eligible source pools; any remaining short section is adapted by the renderer.
         return normalizePrecisePlan(task, plan, targetDuration);
     }
 
@@ -281,25 +265,34 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
             plan.add(buildNativeOpeningPlanItem(orderNo++, task, targetDuration));
         }
         Set<Long> selectedMaterialIds = new HashSet<>();
+        Set<TkMaterialSegmentTypeEnum> usedSourceModules = usedSourceModules(plan, materials);
         for (TkMaterialSegmentTypeEnum segment : TkMaterialSegmentTypeEnum.LEAD_GENERATION_SEGMENTS) {
             if (nativeOpening && segment == TkMaterialSegmentTypeEnum.S1_HOOK) {
                 continue;
             }
-            TkMaterialVideoDO selected = prioritizedSectionCandidates(segment, materials, recentlyUsedMaterialIds).stream()
-                    .filter(material -> materialDuration(material) > 0)
+            TkMaterialVideoDO selected = prioritizedSegmentCandidates(segment, materials, recentlyUsedMaterialIds).stream()
+                    .filter(this::isUsableOrderedClip)
                     .filter(material -> material.getId() == null || !selectedMaterialIds.contains(material.getId()))
                     .findFirst().orElse(null);
+            boolean fallback = selected == null;
+            if (fallback) {
+                List<TkMaterialVideoDO> backfill = selectUnusedModuleBackfill(materials, selectedMaterialIds,
+                        usedSourceModules, segment, 1);
+                selected = backfill.isEmpty() ? null : backfill.get(0);
+            }
             if (selected == null) {
                 continue;
             }
             int duration = materialDuration(selected);
             plan.add(new TkClipPlanItem(orderNo, "MATERIAL", selected.getId(), selected.getFileName(),
                     selected.getFileUrl(), 0, duration,
-                    StrUtil.format("引流素材按固定结构拼装，完整使用{} {} 秒素材", segment.getName(), duration),
+                    fallback ? moduleFallbackReason(segment, resolveSegmentType(selected))
+                            : StrUtil.format("引流素材按固定结构拼装，完整使用{} {} 秒素材", segment.getName(), duration),
                     segment.getCode(), segment.getName(), orderNo, null, null, null, null));
             if (selected.getId() != null) {
                 selectedMaterialIds.add(selected.getId());
             }
+            usedSourceModules.add(resolveSegmentType(selected));
             orderNo++;
         }
         int planTargetDuration = nativeOpening
@@ -309,12 +302,15 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                         .filter(material -> resolveSegmentType(material) != TkMaterialSegmentTypeEnum.S1_HOOK)
                         .collect(Collectors.toList())
                         : materials,
-                recentlyUsedMaterialIds, orderNo, planTargetDuration);
+                orderNo, planTargetDuration);
+        if (bodyTargetDuration > 0 && plan.stream().noneMatch(item -> "MATERIAL".equals(item.getSourceType()))) {
+            throw new IllegalStateException("引流素材不足：没有可用素材生成正文");
+        }
         return plan;
     }
 
     private void backfillLeadGenerationPlan(List<TkClipPlanItem> plan,
-                                            List<TkMaterialVideoDO> materials, Set<Long> recentlyUsedMaterialIds,
+                                            List<TkMaterialVideoDO> materials,
                                             int orderNo, int targetDuration) {
         if (targetDuration <= 0) {
             return;
@@ -323,24 +319,21 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         if (selectedDuration >= targetDuration) {
             return;
         }
-        List<TkMaterialVideoDO> candidates = leadBackfillCandidates(materials, recentlyUsedMaterialIds);
-        if (CollUtil.isEmpty(candidates)) {
-            return;
-        }
         Set<Long> selectedMaterialIds = plan.stream()
                 .map(TkClipPlanItem::getMaterialVideoId)
                 .filter(id -> id != null)
                 .collect(Collectors.toCollection(HashSet::new));
-        List<TkMaterialVideoDO> selected = selectBestFitBackfillMaterials(candidates, selectedMaterialIds,
-                targetDuration - selectedDuration);
+        TkMaterialSegmentTypeEnum target = plan.isEmpty() ? TkMaterialSegmentTypeEnum.S7_LIFESTYLE
+                : TkMaterialSegmentTypeEnum.normalize(plan.get(plan.size() - 1).getSection());
+        List<TkMaterialVideoDO> selected = selectUnusedModuleBackfill(materials, selectedMaterialIds,
+                usedSourceModules(plan, materials), target, targetDuration - selectedDuration);
         for (TkMaterialVideoDO material : selected) {
             int duration = materialDuration(material);
             TkMaterialSegmentTypeEnum segment = resolveSegmentType(material);
             int currentOrderNo = orderNo++;
             plan.add(new TkClipPlanItem(currentOrderNo, "MATERIAL", material.getId(), material.getFileName(),
                     material.getFileUrl(), 0, duration,
-                    StrUtil.format("引流素材时长补足，完整追加{} {} 秒素材，避免口播被截断",
-                            segment.getName(), duration),
+                    "引流素材时长补足，" + moduleFallbackReason(target, segment),
                     segment.getCode(), segment.getName(), currentOrderNo, null, null, null, null));
             selectedDuration += duration;
         }
@@ -385,8 +378,6 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         if (CollUtil.isEmpty(materials)) {
             return originalPlan;
         }
-        Set<Long> recentlyUsedMaterialIds = resolveRecentlyUsedMaterialIds(task);
-        List<TkMaterialVideoDO> candidates = leadBackfillCandidates(materials, recentlyUsedMaterialIds);
         int maxRemoveCount = Math.min(2, originalPlan.size());
         for (int removeCount = 1; removeCount <= maxRemoveCount; removeCount++) {
             List<TkClipPlanItem> fixedPlan = new ArrayList<>(originalPlan.subList(0, originalPlan.size() - removeCount));
@@ -399,8 +390,10 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                     .map(TkClipPlanItem::getMaterialVideoId)
                     .filter(id -> id != null)
                     .forEach(fixedMaterialIds::add);
-            List<TkMaterialVideoDO> selected = selectBestFitBackfillMaterials(candidates, fixedMaterialIds,
-                    targetDuration - fixedDuration);
+            TkMaterialSegmentTypeEnum target = TkMaterialSegmentTypeEnum.normalize(
+                    originalPlan.get(originalPlan.size() - removeCount).getSection());
+            List<TkMaterialVideoDO> selected = selectUnusedModuleBackfill(materials, fixedMaterialIds,
+                    usedSourceModules(fixedPlan, materials), target, targetDuration - fixedDuration);
             if (selected.isEmpty()) {
                 continue;
             }
@@ -411,7 +404,7 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                 TkMaterialSegmentTypeEnum segment = resolveSegmentType(material);
                 replanned.add(new TkClipPlanItem(orderNo, "MATERIAL", material.getId(), material.getFileName(),
                         material.getFileUrl(), 0, duration,
-                        StrUtil.format("尾部低动态重排，完整使用{} {} 秒素材", segment.getName(), duration),
+                        "尾部低动态重排，" + moduleFallbackReason(target, segment),
                         segment.getCode(), segment.getName(), orderNo, null, null, null, null));
                 orderNo++;
             }
@@ -487,33 +480,6 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
                 .filter(this::isUsableRandomClip)
                 .collect(Collectors.toCollection(ArrayList::new));
         Collections.shuffle(candidates, random);
-        return candidates;
-    }
-
-    private List<TkMaterialVideoDO> randomBackfillCandidatesWithoutHook(List<TkMaterialVideoDO> materials) {
-        return randomBackfillCandidates(materials.stream()
-                .filter(material -> resolveSegmentType(material) != TkMaterialSegmentTypeEnum.S1_HOOK)
-                .collect(Collectors.toList()));
-    }
-
-    private List<TkMaterialVideoDO> leadBackfillCandidates(List<TkMaterialVideoDO> materials,
-                                                           Set<Long> recentlyUsedMaterialIds) {
-        List<TkMaterialVideoDO> candidates = new ArrayList<>();
-        Set<Long> addedIds = new HashSet<>();
-        for (TkMaterialSegmentTypeEnum segment : LEAD_BACKFILL_PRIORITY) {
-            for (TkMaterialVideoDO material : prioritizedSegmentCandidates(segment, materials, recentlyUsedMaterialIds)) {
-                if (material.getId() != null && addedIds.contains(material.getId())) {
-                    continue;
-                }
-                if (materialDuration(material) <= 0) {
-                    continue;
-                }
-                candidates.add(material);
-                if (material.getId() != null) {
-                    addedIds.add(material.getId());
-                }
-            }
-        }
         return candidates;
     }
 
@@ -753,42 +719,73 @@ public class DefaultTkClipPlannerService implements TkClipPlannerService {
         return freshCandidates;
     }
 
-    private List<TkMaterialVideoDO> prioritizedSectionCandidates(TkMaterialSegmentTypeEnum segment,
-                                                                  List<TkMaterialVideoDO> materials,
-                                                                  Set<Long> recentlyUsedMaterialIds) {
-        List<TkMaterialVideoDO> candidates = new ArrayList<>(
-                prioritizedSegmentCandidates(segment, materials, recentlyUsedMaterialIds));
-        Set<Long> addedIds = candidates.stream().map(TkMaterialVideoDO::getId)
-                .filter(id -> id != null).collect(Collectors.toSet());
-        for (TkMaterialVideoDO material : materials) {
-            if (!isUsableRandomClip(material) || resolveSegmentType(material) == segment
-                    || (material.getId() != null && addedIds.contains(material.getId()))) {
-                continue;
-            }
-            candidates.add(material);
-            if (material.getId() != null) {
-                addedIds.add(material.getId());
-            }
-        }
-        return candidates;
-    }
-
     private TkMaterialVideoDO selectClosestDurationMaterial(List<TkMaterialVideoDO> candidates, int targetDuration) {
         return candidates.stream().min((left, right) -> Integer.compare(
                         Math.abs(materialDuration(left) - targetDuration), Math.abs(materialDuration(right) - targetDuration)))
                 .orElseThrow(() -> new IllegalStateException("素材库没有可用于随机混剪的可用视频"));
     }
 
-    private TkMaterialVideoDO selectClosestUnusedMaterial(List<TkMaterialVideoDO> materials,
-                                                           Set<Long> selectedMaterialIds,
-                                                           int missingDuration) {
-        return materials.stream()
-                .filter(this::isUsableRandomClip)
-                .filter(material -> !selectedMaterialIds.contains(material.getId()))
-                .min((left, right) -> Integer.compare(
-                        Math.abs(materialDuration(left) - missingDuration),
-                        Math.abs(materialDuration(right) - missingDuration)))
-                .orElse(null);
+    private boolean isUsableOrderedClip(TkMaterialVideoDO material) {
+        return isUsableRandomClip(material) && materialDurationMillis(material) > 0L;
+    }
+
+    private Set<TkMaterialSegmentTypeEnum> usedSourceModules(List<TkClipPlanItem> plan,
+                                                            List<TkMaterialVideoDO> materials) {
+        Set<Long> selectedIds = plan.stream().map(TkClipPlanItem::getMaterialVideoId)
+                .filter(id -> id != null).collect(Collectors.toSet());
+        Set<TkMaterialSegmentTypeEnum> sources = materials.stream()
+                .filter(material -> selectedIds.contains(material.getId()))
+                .map(this::resolveSegmentType).collect(Collectors.toCollection(HashSet::new));
+        if (plan.stream().anyMatch(item -> "NATIVE".equals(item.getReuseMode()))) {
+            sources.add(TkMaterialSegmentTypeEnum.S1_HOOK);
+        }
+        return sources;
+    }
+
+    // A chosen source pool can fill this gap, but is unavailable for subsequent fallback gaps.
+    private List<TkMaterialVideoDO> selectUnusedModuleBackfill(List<TkMaterialVideoDO> materials,
+                                                               Set<Long> selectedMaterialIds,
+                                                               Set<TkMaterialSegmentTypeEnum> usedSourceModules,
+                                                               TkMaterialSegmentTypeEnum target,
+                                                               int missingDuration) {
+        List<TkMaterialVideoDO> selected = new ArrayList<>();
+        while (missingDuration > 0) {
+            TkMaterialSegmentTypeEnum source = materials.stream()
+                    .filter(this::isUsableOrderedClip)
+                    .filter(material -> !selectedMaterialIds.contains(material.getId()))
+                    .map(this::resolveSegmentType)
+                    .filter(segment -> !usedSourceModules.contains(segment))
+                    .min((left, right) -> {
+                        int leftDistance = left == TkMaterialSegmentTypeEnum.GENERAL ? Integer.MAX_VALUE
+                                : Math.abs(left.getOrder() - target.getOrder());
+                        int rightDistance = right == TkMaterialSegmentTypeEnum.GENERAL ? Integer.MAX_VALUE
+                                : Math.abs(right.getOrder() - target.getOrder());
+                        int distance = Integer.compare(leftDistance, rightDistance);
+                        return distance != 0 ? distance : Integer.compare(right.getOrder(), left.getOrder());
+                    }).orElse(null);
+            if (source == null) {
+                break;
+            }
+            usedSourceModules.add(source);
+            List<TkMaterialVideoDO> pool = materials.stream()
+                    .filter(this::isUsableOrderedClip)
+                    .filter(material -> resolveSegmentType(material) == source)
+                    .filter(material -> !selectedMaterialIds.contains(material.getId()))
+                    .collect(Collectors.toCollection(ArrayList::new));
+            while (missingDuration > 0 && !pool.isEmpty()) {
+                TkMaterialVideoDO material = selectClosestDurationMaterial(pool, missingDuration);
+                selected.add(material);
+                selectedMaterialIds.add(material.getId());
+                missingDuration -= materialDuration(material);
+                pool.removeIf(candidate -> material.getId().equals(candidate.getId()));
+            }
+        }
+        return selected;
+    }
+
+    private String moduleFallbackReason(TkMaterialSegmentTypeEnum target, TkMaterialSegmentTypeEnum source) {
+        return StrUtil.format("{}({})素材不足，从最近未使用来源模块{}({})回填，完整使用素材并在渲染时适配目标时长",
+                target.getName(), target.getCode(), source.getName(), source.getCode());
     }
 
     private List<TkMaterialVideoDO> segmentCandidates(TkMaterialSegmentTypeEnum segment, List<TkMaterialVideoDO> materials) {
