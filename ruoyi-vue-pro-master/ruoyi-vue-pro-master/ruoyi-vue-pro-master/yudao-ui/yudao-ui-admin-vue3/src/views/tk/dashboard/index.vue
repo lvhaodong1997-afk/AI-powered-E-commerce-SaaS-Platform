@@ -7750,7 +7750,7 @@ onUnmounted(() => {
   container-type: inline-size;
   position: relative;
   min-height: 158px;
-  height: clamp(158px, 18vw, 210px);
+  aspect-ratio: 2 / 1;
   padding: 0;
   overflow: hidden;
   background: #111827;
