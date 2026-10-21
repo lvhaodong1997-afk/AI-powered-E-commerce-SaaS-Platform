@@ -124,7 +124,7 @@ class DefaultTkAssSubtitleRenderServiceTest {
         assertNotEquals(cleanProduct, brandMinimal, "Brand minimal should be distinct from clean product");
         assertNotEquals(stepCard, commentBubble, "Comment bubble should be distinct from step card");
 
-        assertTrue(tiktokLarge.contains(",70,"), "TikTok large should use a larger medium-base font size");
+        assertTrue(tiktokLarge.contains(",68,"), "Preset styling should retain the selected medium font size");
         assertTrue(promoBold.contains("&H0000F2FF"), "Promo bold should use yellow primary text");
         assertTrue(cleanProduct.contains("&H002A1F13"), "Clean product should use a dark text color");
         assertTrue(neonPop.contains("&H00FFF200"), "Neon pop should use cyan primary text");
@@ -283,5 +283,65 @@ class DefaultTkAssSubtitleRenderServiceTest {
         service.render(task, new TkSubtitleLayout(Collections.singletonList(segment)), file);
 
         return Files.readString(file.toPath());
+    }
+
+    @Test
+    void priceKeywordsNeverRewriteGeneratedAssColorsInPlainOrEstimatedKaraoke() throws Exception {
+        for (boolean karaoke : List.of(false, true)) {
+            String text = renderHighlighted("一斤装 39.8", List.of("39.", "8"), karaoke, false);
+            assertTrue(text.contains("一斤装 {\\c&H004DD8FF}39.8{\\c&H00FFFFFF}"), text);
+            assertFalse(text.contains("{\\kf"));
+        }
+    }
+
+    @Test
+    void repeatedAndOverlappingKeywordsEmitOneHighlightPerVisibleRange() throws Exception {
+        String text = renderHighlighted("banana banana", List.of("ana", "banana", "banana", "nan"), false, false);
+        assertTrue(text.endsWith("{\\c&H004DD8FF}banana{\\c&H00FFFFFF} "
+                + "{\\c&H004DD8FF}banana{\\c&H00FFFFFF}"), text);
+        assertEquals(2, text.split("\\Q{\\c&H004DD8FF}\\E", -1).length - 1);
+    }
+
+    @Test
+    void hexLikeKeywordsMatchOnlyVisibleTextAndEscapeAssSensitiveCharactersOnce() throws Exception {
+        String text = renderHighlighted("8FF {D8} \\N 39.8", List.of("8", "D8", "8FF", "{D8}", "\\N"), false, false);
+        assertTrue(text.endsWith("{\\c&H004DD8FF}8FF{\\c&H00FFFFFF} "
+                + "{\\c&H004DD8FF}\\{D8\\}{\\c&H00FFFFFF} "
+                + "{\\c&H004DD8FF}\\\\N{\\c&H00FFFFFF} 39."
+                + "{\\c&H004DD8FF}8{\\c&H00FFFFFF}"), text);
+    }
+
+    @Test
+    void highlightingPreservesChineseAndEnglishWrapping() throws Exception {
+        for (String source : List.of("配料表 只有芒果不加任何糖", "Fresh mango delicious fruit today")) {
+            String highlighted = renderHighlighted(source, List.of("果", "芒果", "mango", "a", "8"), true, false);
+            String plain = renderHighlighted(source, Collections.emptyList(), true, false);
+            assertEquals(plain, highlighted.replace("{\\c&H004DD8FF}", "").replace("{\\c&H00FFFFFF}", ""));
+            assertTrue(highlighted.contains("\\N"));
+        }
+    }
+
+    @Test
+    void reliablePriceKaraokeKeepsTimingAndUncorruptedColors() throws Exception {
+        String text = renderHighlighted("一斤装 39.8", List.of("一斤装 ", "39.", "8"), true, true);
+        assertTrue(text.contains("{\\kf50}"));
+        assertTrue(text.contains("{\\1c&H004DD8FF\\2c&H004DD8FF}{\\kf50} 39."));
+        assertTrue(text.endsWith("{\\1c&H004DD8FF\\2c&H004DD8FF}{\\kf50}8"), text);
+    }
+
+    private String renderHighlighted(String source, List<String> keywords, boolean karaoke, boolean reliable) throws Exception {
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder().subtitleStyle("classic_white")
+                .subtitleFontSize("medium").subtitleKeywordColor("#FFD84D")
+                .subtitleKaraokeEnabled(karaoke).subtitleKeywordEnabled(true).build();
+        java.util.ArrayList<TkSubtitleWord> words = new java.util.ArrayList<>();
+        for (int i = 0; i < keywords.size(); i++) {
+            words.add(new TkSubtitleWord(keywords.get(i), i * .5, (i + 1) * .5, true));
+        }
+        TkSubtitleSegment segment = new TkSubtitleSegment(source, 0, 3, "bottom_center", 540, 1450, words);
+        segment.setWordTimingReliable(reliable);
+        File file = File.createTempFile("subtitle-highlight", ".ass");
+        service.render(task, new TkSubtitleLayout(List.of(segment)), file);
+        return Files.readString(file.toPath()).lines().filter(line -> line.startsWith("Dialogue:"))
+                .findFirst().orElseThrow().split(",", 10)[9];
     }
 }

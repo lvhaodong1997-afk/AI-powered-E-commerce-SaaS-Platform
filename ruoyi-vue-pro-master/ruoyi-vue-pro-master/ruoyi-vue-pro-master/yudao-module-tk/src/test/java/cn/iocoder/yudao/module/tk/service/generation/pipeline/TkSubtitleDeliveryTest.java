@@ -27,12 +27,15 @@ class TkSubtitleDeliveryTest {
     String[] style(String ass) {
         return ass.lines().filter(s -> s.startsWith("Style:")).findFirst().orElseThrow().split(",");
     }
-    @Test void fourSizesReachActualAssIncludingStyleOffsets() throws Exception {
+    @Test void fourFinalSizesReachActualAssAcrossEveryPreset() throws Exception {
         String[] sizes = {"small", "medium", "large", "extra_large"};
-        int[] expected = {52, 62, 74, 88};
+        int[] expected = {58, 68, 86, 96};
         for (int i = 0; i < sizes.length; i++) {
-            assertEquals(expected[i], Integer.parseInt(style(render(sizes[i], "classic_white", false, caption()))[2]));
-            assertEquals(expected[i] + 8, Integer.parseInt(style(render(sizes[i], "tiktok_large", false, caption()))[2]));
+            for (String preset : List.of("classic_white", "yellow_keyword", "tiktok_large", "promo_bold",
+                    "clean_product", "neon_pop", "yellow_story", "price_flash", "step_card", "brand_minimal", "comment_bubble")) {
+                assertEquals(expected[i], Integer.parseInt(style(render(sizes[i], preset, false, caption()))[2]),
+                        sizes[i] + " / " + preset);
+            }
         }
     }
     @Test void fontsUseRealSansAndSerifWithRegularMinimalWeight() throws Exception {
@@ -126,8 +129,9 @@ class TkSubtitleDeliveryTest {
     @Test void emitReproducibleJavaAssSamples() throws Exception {
         String output=System.getProperty("tk.subtitle.samples");
         Path destination=output==null?dir:Path.of(output);Files.createDirectories(destination);
+        for(String size:List.of("small","medium","large","extra_large")) {
         for(String style:List.of("classic_white","tiktok_large","yellow_story","brand_minimal","promo_bold","clean_product")) {
-            TkGenerationTaskDO task=TkGenerationTaskDO.builder().subtitleEnabled(true).subtitleFontSize("extra_large")
+            TkGenerationTaskDO task=TkGenerationTaskDO.builder().subtitleEnabled(true).subtitleFontSize(size)
                     .subtitleStyle(style).subtitlePositionMode("fixed_bottom").subtitleKaraokeEnabled(true)
                     .subtitleKeywordEnabled(true).subtitleActiveColor("#35F27A").subtitleKeywordColor("#FFD84D").build();
             List<TkSubtitleSegment> segments=new ArrayList<>();
@@ -135,17 +139,21 @@ class TkSubtitleDeliveryTest {
             segments.add(sample("Fresh fruit daily comfort",List.of("Fresh","fruit","daily","comfort"),8,13));
             TkSubtitleSegment estimated=sample("时间不足时保留普通字幕",List.of("时间","不足","时","保留","普通","字幕"),14,20);
             estimated.setWordTimingReliable(false);segments.add(estimated);
+            TkSubtitleSegment price = new TkSubtitleSegment("一斤装 39.8",21,24,"bottom_center",540,1450,
+                    List.of(new TkSubtitleWord("39.",21,22,true),new TkSubtitleWord("8",22,23,true)));
+            price.setWordTimingReliable(false);segments.add(price);
             TkSubtitleTimeline timeline=new TkSubtitleTimeline();timeline.setSegments(segments);
-            Path file=destination.resolve("task-2-sample-"+style+".ass");
+            Path file=destination.resolve("task-1-sample-"+size+"-"+style+".ass");
             renderer.render(task,new DefaultTkSubtitleLayoutService().layout(task,timeline,null),file.toFile());
             String ass=Files.readString(file);
             assertTrue(ass.contains("{\\k40}{\\kf45}"));assertFalse(ass.contains("\\kt"));
             assertTrue(ass.contains("\\N"));assertTrue(ass.contains("Noto "));
             assertEquals("partial",TkSubtitleKaraokeQuality.inspect(task,timeline).getStatus());
         }
+        }
         TkSubtitleSegment legacy=sample("Wonderful products improve everyday comfort with breathable material and lasting support",
                 List.of("Wonderful","products","improve","everyday","comfort","with","breathable","material","and","lasting","support"),0,10);
-        Path legacyFile=destination.resolve("task-2-sample-legacy-english-xl.ass");
+        Path legacyFile=destination.resolve("task-1-sample-legacy-english-xl.ass");
         renderer.render(TkGenerationTaskDO.builder().subtitleFontSize("extra_large").subtitleStyle("tiktok_large")
                 .subtitleKaraokeEnabled(true).build(),new TkSubtitleLayout(List.of(legacy)),legacyFile.toFile());
         String legacyAss=Files.readString(legacyFile);

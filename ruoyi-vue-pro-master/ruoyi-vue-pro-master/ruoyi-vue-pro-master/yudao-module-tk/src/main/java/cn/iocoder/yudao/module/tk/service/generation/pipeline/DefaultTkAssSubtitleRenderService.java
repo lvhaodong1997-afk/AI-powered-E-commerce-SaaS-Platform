@@ -348,25 +348,70 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
     }
 
     private String renderPlainText(TkGenerationTaskDO task, SubtitleStyle style, TkSubtitleSegment segment) {
-        String text = wrapPlainText(segment, style.fontSize);
-        if (Boolean.FALSE.equals(task.getSubtitleKeywordEnabled()) || segment.getWords() == null || segment.getWords().stream().noneMatch(TkSubtitleWord::isKeyword)) {
-            return text;
-        }
-        for (TkSubtitleWord word : segment.getWords()) {
-            if (!word.isKeyword() || StrUtil.isBlank(word.getText())) {
-                continue;
+        String source = normalizeDisplayText(segment.getText());
+        List<int[]> ranges = new ArrayList<>();
+        if (!Boolean.FALSE.equals(task.getSubtitleKeywordEnabled()) && segment.getWords() != null) {
+            Set<String> keywords = new HashSet<>();
+            for (TkSubtitleWord word : segment.getWords()) {
+                if (word.isKeyword() && StrUtil.isNotBlank(word.getText())) {
+                    keywords.add(word.getText());
+                }
             }
-            String escaped = escapeAssText(word.getText());
-            text = text.replace(escaped, "{\\c" + toAssColor(style.keywordColor) + "}" + escaped
-                    + "{\\c" + toAssColor(style.primaryColor) + "}");
+            // Search visible source only: generated ASS colors must never become match candidates.
+            for (String keyword : keywords) {
+                for (int from = source.indexOf(keyword); from >= 0; from = source.indexOf(keyword, from + 1)) {
+                    ranges.add(new int[]{from, from + keyword.length()});
+                }
+            }
         }
-        return text;
+        ranges.sort(java.util.Comparator.comparingInt(range -> range[0]));
+        List<int[]> merged = new ArrayList<>();
+        for (int[] range : ranges) {
+            if (!merged.isEmpty() && range[0] <= merged.get(merged.size() - 1)[1]) {
+                int[] previous = merged.get(merged.size() - 1);
+                previous[1] = Math.max(previous[1], range[1]);
+            } else {
+                merged.add(range);
+            }
+        }
+        List<String> renderedLines = new ArrayList<>();
+        int sourceCursor = 0;
+        for (String line : plainTextLines(segment, style.fontSize)) {
+            int lineStart = source.indexOf(line, sourceCursor);
+            int lineEnd = lineStart + line.length();
+            StringBuilder rendered = new StringBuilder();
+            int cursor = lineStart;
+            for (int[] range : merged) {
+                int start = Math.max(lineStart, range[0]);
+                int end = Math.min(lineEnd, range[1]);
+                if (start >= end) {
+                    continue;
+                }
+                rendered.append(escapeAssText(source.substring(cursor, start)))
+                        .append("{\\c").append(toAssColor(style.keywordColor)).append('}')
+                        .append(escapeAssText(source.substring(start, end)))
+                        .append("{\\c").append(toAssColor(style.primaryColor)).append('}');
+                cursor = end;
+            }
+            rendered.append(escapeAssText(source.substring(cursor, lineEnd)));
+            renderedLines.add(rendered.toString());
+            sourceCursor = lineEnd;
+        }
+        return String.join("\\N", renderedLines);
     }
 
     private String wrapPlainText(TkSubtitleSegment segment, int fontSize) {
+        List<String> escapedLines = new ArrayList<>();
+        for (String line : plainTextLines(segment, fontSize)) {
+            escapedLines.add(escapeAssText(line));
+        }
+        return String.join("\\N", escapedLines);
+    }
+
+    private List<String> plainTextLines(TkSubtitleSegment segment, int fontSize) {
         String source = StrUtil.blankToDefault(segment.getText(), "");
         if (isMostlyEnglish(source) || segment.getWords() == null || segment.getWords().isEmpty()) {
-            return wrapPlainText(source, fontSize);
+            return splitTextToLines(source, fontSize);
         }
         List<TkSubtitleWord> displayWords = restoreCjkWordSpacing(segment);
         StringBuilder wordText = new StringBuilder();
@@ -374,7 +419,7 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
             wordText.append(word.getText() == null ? "" : word.getText());
         }
         if (!normalizeDisplayText(source).equals(wordText.toString())) {
-            return wrapPlainText(source, fontSize);
+            return splitTextToLines(source, fontSize);
         }
         List<String> lines = new ArrayList<>();
         for (List<TkSubtitleWord> words : splitCjkWordsToLines(displayWords)) {
@@ -382,18 +427,9 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
             for (TkSubtitleWord word : words) {
                 line.append(word.getText() == null ? "" : word.getText());
             }
-            lines.add(escapeAssText(line.toString().trim()));
+            lines.add(line.toString().trim());
         }
-        return String.join("\\N", lines);
-    }
-
-    private String wrapPlainText(String text, int fontSize) {
-        List<String> lines = splitTextToLines(text, fontSize);
-        List<String> escapedLines = new ArrayList<>();
-        for (String line : lines) {
-            escapedLines.add(escapeAssText(line));
-        }
-        return String.join("\\N", escapedLines);
+        return lines;
     }
 
     private List<String> splitTextToLines(String text, int fontSize) {
@@ -507,43 +543,43 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
         String activeColor = StrUtil.blankToDefault(task.getSubtitleActiveColor(), "#35F27A");
         String keywordColor = StrUtil.blankToDefault(task.getSubtitleKeywordColor(), "#FFD84D");
         if (StrUtil.equals(style, "promo_bold")) {
-            return new SubtitleStyle("Noto Sans CJK SC", fontSize + 4, "#FFF200", "#FF3B30", "#FFFFFF", "#2B0505",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize, "#FFF200", "#FF3B30", "#FFFFFF", "#2B0505",
                     "#E02020", 3, 3, 0, 2, -1, 0);
         }
         if (StrUtil.equals(style, "tiktok_large")) {
-            return new SubtitleStyle("Noto Sans CJK SC", fontSize + 8, "#FFFFFF", "#00F2FF", "#FF3B8D", "#080A12",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize, "#FFFFFF", "#00F2FF", "#FF3B8D", "#080A12",
                     "#000000", 1, 6, 2, 2, -1, 0);
         }
         if (StrUtil.equals(style, "clean_product")) {
-            return new SubtitleStyle("Noto Sans CJK SC", fontSize - 4, "#131F2A", activeColor, "#1677FF", "#D5E4F0",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize, "#131F2A", activeColor, "#1677FF", "#D5E4F0",
                     "#F8FBFF", 3, 2, 0, 2, -1, 0);
         }
         if (StrUtil.equals(style, "yellow_keyword")) {
-            return new SubtitleStyle("Noto Sans CJK SC", fontSize + 1, "#FFFFFF", activeColor, keywordColor, "#111111",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize, "#FFFFFF", activeColor, keywordColor, "#111111",
                     "#000000", 1, 5, 0, 2, -1, 0);
         }
         if (StrUtil.equals(style, "neon_pop")) {
-            return new SubtitleStyle("Noto Sans CJK SC", fontSize + 5, "#00F2FF", "#35F27A", "#FF6BC8", "#080A12",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize, "#00F2FF", "#35F27A", "#FF6BC8", "#080A12",
                     "#000000", 1, 5, 2, 2, -1, 0);
         }
         if (StrUtil.equals(style, "yellow_story")) {
-            return new SubtitleStyle("Noto Serif CJK SC", fontSize + 4, "#FFE837", "#FFFFFF", "#FF3D00", "#151515",
+            return new SubtitleStyle("Noto Serif CJK SC", fontSize, "#FFE837", "#FFFFFF", "#FF3D00", "#151515",
                     "#000000", 1, 3, 2, 2, -1, -1);
         }
         if (StrUtil.equals(style, "price_flash")) {
-            return new SubtitleStyle("Noto Sans CJK SC", fontSize + 6, "#FFFF00", "#FFFFFF", "#FF6600", "#000000",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize, "#FFFF00", "#FFFFFF", "#FF6600", "#000000",
                     "#111111", 3, 4, 0, 2, -1, 0);
         }
         if (StrUtil.equals(style, "step_card")) {
-            return new SubtitleStyle("Noto Sans CJK SC", fontSize - 3, "#101A22", activeColor, "#0EA5E9", "#CBD5E1",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize, "#101A22", activeColor, "#0EA5E9", "#CBD5E1",
                     "#F8FAFC", 3, 2, 0, 2, -1, 0);
         }
         if (StrUtil.equals(style, "brand_minimal")) {
-            return new SubtitleStyle("Noto Serif CJK SC", fontSize - 2, "#374151", "#2563EB", "#2563EB", "#CBD5E1",
+            return new SubtitleStyle("Noto Serif CJK SC", fontSize, "#374151", "#2563EB", "#2563EB", "#CBD5E1",
                     "#FFFFFF", 3, 2, 0, 2, 0, 0);
         }
         if (StrUtil.equals(style, "comment_bubble")) {
-            return new SubtitleStyle("Noto Sans CJK SC", fontSize - 1, "#101A22", "#1677FF", "#1677FF", "#D6E1EA",
+            return new SubtitleStyle("Noto Sans CJK SC", fontSize, "#101A22", "#1677FF", "#1677FF", "#D6E1EA",
                     "#FFFFFF", 3, 2, 1, 2, -1, 0);
         }
         return new SubtitleStyle("Noto Sans CJK SC", fontSize, "#FFFFFF", activeColor, keywordColor, "#000000",
@@ -556,15 +592,15 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
 
     private static int resolveFontSize(String value) {
         if (StrUtil.equals(value, "small")) {
-            return 52;
+            return 58;
         }
         if (StrUtil.equals(value, "large")) {
-            return 74;
+            return 86;
         }
         if (StrUtil.equals(value, "extra_large")) {
-            return 88;
+            return 96;
         }
-        return 62;
+        return 68;
     }
 
     private String toAssColor(String hexColor) {
