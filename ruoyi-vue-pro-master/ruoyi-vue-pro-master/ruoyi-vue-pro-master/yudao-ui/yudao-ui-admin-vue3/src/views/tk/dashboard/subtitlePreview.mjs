@@ -1,3 +1,18 @@
+const subtitleRenderFontSizes = Object.freeze({
+  small: 58,
+  medium: 68,
+  large: 86,
+  extra_large: 96
+})
+
+/** Map the 1080px ASS canvas to the preview screen's responsive inline size. */
+export function subtitlePreviewFontSize(size = 'medium') {
+  const fontSize = Object.hasOwn(subtitleRenderFontSizes, size)
+    ? subtitleRenderFontSizes[size]
+    : subtitleRenderFontSizes.medium
+  return `calc(100cqw * ${fontSize} / 1080)`
+}
+
 /** @param {string[]} parts @param {boolean} english @returns {{text: string, keyword: boolean}[]} */
 export function subtitlePreviewWords(parts, english) {
   return parts.flatMap((text, partIndex) => {

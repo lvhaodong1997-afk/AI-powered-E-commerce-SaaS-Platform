@@ -2,7 +2,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 ;(async () => {
-  const { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay } =
+  const { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay, subtitlePreviewFontSize } =
     await import('../src/views/tk/dashboard/subtitlePreview.mjs')
   const words = subtitlePreviewWords(['Feel ', 'fresh fruit ', 'today'], true)
   assert.deepEqual(
@@ -51,9 +51,43 @@ const path = require('node:path')
   assert.equal(payload.subtitleFontSize, 'extra_large')
   assert.match(source, /subtitlePayload: \{ \.\.\.getSubtitlePayload\(\) \}/)
   assert.match(source, /restoreSubtitleReplay\(createForm, task\)/)
-  for (const size of ['small', 'medium', 'large', 'extra_large']) {
+  const approvedSizes = { small: 58, medium: 68, large: 86, extra_large: 96 }
+  assert.equal(typeof subtitlePreviewFontSize, 'function', 'preview must scale approved render font sizes')
+  for (const [size, renderSize] of Object.entries(approvedSizes)) {
+    assert.equal(subtitlePreviewFontSize(size), `calc(100cqw * ${renderSize} / 1080)`)
     assert.match(source, new RegExp(`value: '${size}'`))
-    assert.match(source, new RegExp(`is-size-${size} \\.subtitle-preview-caption`))
+    const replayForm = {}
+    restoreSubtitleReplay(replayForm, { subtitleFontSize: size })
+    assert.equal(replayForm.subtitleFontSize, size)
+    const sizePayload = capture({ subtitleFontSize: size }, { value: true })
+    assert.equal(sizePayload.subtitleFontSize, size)
+  }
+  assert.equal(subtitlePreviewFontSize(), subtitlePreviewFontSize('medium'))
+  assert.equal(subtitlePreviewFontSize('unknown'), subtitlePreviewFontSize('medium'))
+  assert.match(source, /label: isEn.value \? 'Small' : '小', value: 'small'/)
+  assert.match(source, /label: isEn.value \? 'Medium' : '中', value: 'medium'/)
+  assert.match(source, /label: isEn.value \? 'Large' : '大', value: 'large'/)
+  assert.match(source, /label: isEn.value \? 'Extra large' : '特大', value: 'extra_large'/)
+  assert.match(source, /subtitleFontSize: 'medium'/)
+  assert.match(source, /:style="\{ '--subtitle-preview-font-size': subtitlePreviewFontSize\(createForm.subtitleFontSize\) \}"/)
+  const previewCss = source.slice(source.indexOf('.subtitle-style-preview {'), source.indexOf('.library-select :deep'))
+  assert.match(previewCss, /\.subtitle-preview-screen \{[^}]*container-type: inline-size;/)
+  assert.match(previewCss, /\.subtitle-preview-screen \{[^}]*padding: 0;/)
+  assert.match(previewCss, /\.subtitle-preview-caption \{[^}]*width: max-content;/)
+  assert.match(previewCss, /\.subtitle-preview-caption \{[^}]*box-sizing: border-box;/)
+  assert.match(previewCss, /max-width: calc\(100% - 24px\)/)
+  assert.match(previewCss, /overflow-wrap: anywhere/)
+  assert.match(previewCss, /font-size: var\(--subtitle-preview-font-size\)/)
+  assert.doesNotMatch(previewCss, /--subtitle-preview-font-size:\s*\d+px/)
+  const styleConfig = source.slice(source.indexOf('const subtitleStyleOptions = ['), source.indexOf('const subtitlePositionOptions = ['))
+  const styles = [...styleConfig.matchAll(/value: '([^']+)'/g)].map((match) => match[1])
+  assert.equal(styles.length, 11)
+  for (const style of styles) {
+    for (const rule of previewCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (rule[1].includes(`.is-${style}`) && rule[1].includes('.subtitle-preview-caption')) {
+        assert.doesNotMatch(rule[2], /(?:^|;)\s*(?:font-size|--subtitle-preview-font-size):/, `${style} must inherit the shared size`)
+      }
+    }
   }
   assert.match(source, /v-for="\(word, index\) in subtitlePreviewWordList"/)
   assert.match(source, /@keyframes subtitle-word-highlight/)

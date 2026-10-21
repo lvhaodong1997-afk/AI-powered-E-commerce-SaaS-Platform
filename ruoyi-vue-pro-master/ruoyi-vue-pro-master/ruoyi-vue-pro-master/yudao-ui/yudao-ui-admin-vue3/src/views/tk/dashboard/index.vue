@@ -1176,7 +1176,10 @@
                   />
                   <div class="subtitle-style-preview" :class="subtitlePreviewClasses">
                     <div class="subtitle-preview-screen">
-                      <div class="subtitle-preview-caption">
+                      <div
+                        class="subtitle-preview-caption"
+                        :style="{ '--subtitle-preview-font-size': subtitlePreviewFontSize(createForm.subtitleFontSize) }"
+                      >
                         <span
                           v-for="(word, index) in subtitlePreviewWordList"
                           :key="index"
@@ -1504,7 +1507,7 @@
 </template>
 
 <script setup lang="ts">
-import { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay } from './subtitlePreview.mjs'
+import { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay, subtitlePreviewFontSize } from './subtitlePreview.mjs'
 import { TkDashboardApi } from '@/api/tk/dashboard'
 import { TkBgmAssetApi, type TkBgmAssetVO } from '@/api/tk/bgm'
 import { TkGenerationApi } from '@/api/tk/generation'
@@ -7738,17 +7741,17 @@ onUnmounted(() => {
 }
 
 .subtitle-style-preview {
-  --subtitle-preview-font-size: 19px;
   display: grid;
   gap: 6px;
   margin-top: 10px;
 }
 
 .subtitle-preview-screen {
+  container-type: inline-size;
   position: relative;
   min-height: 158px;
   height: clamp(158px, 18vw, 210px);
-  padding: 14px 12px;
+  padding: 0;
   overflow: hidden;
   background: #111827;
   border: 1px solid #dce5f4;
@@ -7764,6 +7767,8 @@ onUnmounted(() => {
 }
 
 .subtitle-preview-caption {
+  box-sizing: border-box;
+  width: max-content;
   position: absolute;
   left: 50%;
   z-index: 2;
@@ -7813,10 +7818,6 @@ onUnmounted(() => {
   100% {
     color: inherit;
   }
-}
-
-.subtitle-style-preview.is-size-extra_large .subtitle-preview-caption {
-  --subtitle-preview-font-size: 27px;
 }
 
 .subtitle-style-preview.is-brand_minimal .subtitle-preview-caption,
@@ -7869,24 +7870,11 @@ onUnmounted(() => {
   color: #667085;
 }
 
-.subtitle-style-preview.is-size-small .subtitle-preview-caption {
-  --subtitle-preview-font-size: 16px;
-}
-
-.subtitle-style-preview.is-size-medium .subtitle-preview-caption {
-  --subtitle-preview-font-size: 19px;
-}
-
-.subtitle-style-preview.is-size-large .subtitle-preview-caption {
-  --subtitle-preview-font-size: 23px;
-}
-
 .subtitle-style-preview.is-classic_white .subtitle-preview-caption strong {
   color: #fff;
 }
 
 .subtitle-style-preview.is-yellow_keyword .subtitle-preview-caption {
-  font-size: calc(var(--subtitle-preview-font-size) + 1px);
   text-shadow:
     0 2px 0 #111,
     2px 0 0 #111,
@@ -7895,7 +7883,6 @@ onUnmounted(() => {
 }
 
 .subtitle-style-preview.is-tiktok_large .subtitle-preview-caption {
-  font-size: calc(var(--subtitle-preview-font-size) + 5px);
   text-shadow:
     0 3px 0 #080a12,
     3px 0 0 #080a12,
@@ -7942,7 +7929,6 @@ onUnmounted(() => {
 }
 
 .subtitle-style-preview.is-neon_pop .subtitle-preview-caption {
-  font-size: calc(var(--subtitle-preview-font-size) + 3px);
   color: #00f2ff;
   text-shadow:
     0 2px 0 #080a12,
@@ -7957,7 +7943,6 @@ onUnmounted(() => {
 }
 
 .subtitle-style-preview.is-yellow_story .subtitle-preview-caption {
-  font-size: calc(var(--subtitle-preview-font-size) + 3px);
   font-style: italic;
   color: #ffe837;
   text-shadow:
@@ -7973,7 +7958,6 @@ onUnmounted(() => {
 
 .subtitle-style-preview.is-price_flash .subtitle-preview-caption {
   padding: 7px 12px;
-  font-size: calc(var(--subtitle-preview-font-size) + 4px);
   color: #ff0;
   text-shadow: none;
   background: #111;
