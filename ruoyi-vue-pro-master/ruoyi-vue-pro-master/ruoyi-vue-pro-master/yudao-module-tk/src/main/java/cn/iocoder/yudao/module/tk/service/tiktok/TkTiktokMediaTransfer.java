@@ -142,11 +142,15 @@ public final class TkTiktokMediaTransfer {
     }
 
     ApiResponse post(String url, String authorization, String contentType, String body) throws IOException {
+        return post(url, authorization, contentType, body, null);
+    }
+
+    ApiResponse post(String url, String authorization, String contentType, String body, Long deadlineNanos) throws IOException {
         // TikTok OAuth rejects form Content-Type with an automatically appended charset.
         Request.Builder builder = request(url).post(RequestBody.create(
                 body.getBytes(StandardCharsets.UTF_8), MediaType.parse(contentType)));
         if (authorization != null) builder.header("Authorization", authorization);
-        return json(builder.build());
+        return json(builder.build(), deadlineNanos);
     }
 
     ApiResponse get(String url, String authorization) throws IOException {
@@ -154,9 +158,15 @@ public final class TkTiktokMediaTransfer {
     }
 
     private ApiResponse json(Request request) throws IOException {
+        return json(request, null);
+    }
+
+    private ApiResponse json(Request request, Long deadlineNanos) throws IOException {
         checkInterrupted();
+        if (deadlineNanos != null) checkUploadActive(deadlineNanos);
         Call call = uploadClient.newCall(request);
         call.timeout().timeout(apiTimeoutMillis, TimeUnit.MILLISECONDS);
+        if (deadlineNanos != null) call.timeout().deadlineNanoTime(deadlineNanos);
         try (InterruptGuard ignored = new InterruptGuard(call); Response response = call.execute()) {
             ResponseBody body = response.body();
             ByteArrayOutputStream output = new ByteArrayOutputStream();

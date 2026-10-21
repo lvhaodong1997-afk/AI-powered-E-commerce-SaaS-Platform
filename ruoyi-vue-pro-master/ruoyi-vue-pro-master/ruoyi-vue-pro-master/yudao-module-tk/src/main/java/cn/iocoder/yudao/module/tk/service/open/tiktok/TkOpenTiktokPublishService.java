@@ -1021,8 +1021,10 @@ public class TkOpenTiktokPublishService {
             if (!source.pullFromUrl) {
                 if (StrUtil.isBlank(initialized.getUploadUrl())) throw new IllegalStateException("platform upload URL is missing");
                 attemptService.stage(attempt, "UPLOADING");
+                String uploadAccessToken = token;
                 adapter.uploadVideo(initialized.getUploadUrl(), source.file, media.getContentType(),
-                        () -> heartbeatOrRecover(attempt));
+                        () -> heartbeatOrRecover(attempt),
+                        deadline -> confirmedUploadProgress(uploadAccessToken, adapter, detail.getPublishId(), source.size, deadline));
             }
             attemptService.stage(attempt, "PLATFORM_PROCESSING");
             detail.setTiktokStatus("PROCESSING");
@@ -1222,13 +1224,15 @@ public class TkOpenTiktokPublishService {
                     TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(
                             currentDetail.getClientId(), currentDetail.getConnectionId());
                     TkOpenPublishPlatformAdapter adapter = platform();
+                    String uploadAccessToken = validAccessToken(connection, adapter, false);
                     TkOpenPublishPlatformAdapter.PublishStatusResult current = adapter.fetchPostStatus(
-                            validAccessToken(connection, adapter, false), currentDetail.getPublishId());
+                            uploadAccessToken, currentDetail.getPublishId());
                     if (current.isSuccess() && "PROCESSING_UPLOAD".equals(current.getStatus()) && current.getUploadedBytes() != null) {
                         heartbeatOrRecover(attempt);
                         TkOpenTiktokPublishAttemptDO activeAttempt = attempt;
                         adapter.resumeUploadVideo(secretCipher.decrypt(attempt.getUploadUrlCipher()), source.file,
-                                media.getContentType(), current.getUploadedBytes(), () -> heartbeatOrRecover(activeAttempt));
+                                media.getContentType(), current.getUploadedBytes(), () -> heartbeatOrRecover(activeAttempt),
+                                deadline -> confirmedUploadProgress(uploadAccessToken, adapter, currentDetail.getPublishId(), activeAttempt.getFileSize(), deadline));
                         attemptService.stage(attempt, "PLATFORM_PROCESSING");
                     } else if (current.isSuccess() && (isSuccess(current.getStatus()) || isFailed(current.getStatus()))) {
                         terminalService.confirm(currentDetail, current.getStatus(),
@@ -1255,6 +1259,20 @@ public class TkOpenTiktokPublishService {
             inFlightRecoveryKeys.remove(recoveryKey);
             log.debug("[resumeUpload][detailId({}) retained for next recovery scan]", detail.getDetailId());
         }
+    }
+
+    private Long confirmedUploadProgress(String accessToken, TkOpenPublishPlatformAdapter adapter,
+                                         String publishId, long fileSize, long deadlineNanos) {
+        TkOpenPublishPlatformAdapter.PublishStatusResult current = adapter.fetchPostStatus(
+                accessToken, publishId, deadlineNanos);
+        if (current == null || !current.isSuccess()) {
+            throw new IllegalStateException("TikTok upload progress query was not confirmed");
+        }
+        if (isSuccess(current.getStatus())) return fileSize;
+        if (!"PROCESSING_UPLOAD".equals(current.getStatus())) {
+            throw new IllegalStateException("TikTok upload state changed; awaiting authoritative status reconciliation");
+        }
+        return current.getUploadedBytes();
     }
 
     private boolean reconcileExpiredUpload(TkOpenTiktokPublishDetailDO detail,

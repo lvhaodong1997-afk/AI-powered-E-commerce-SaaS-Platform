@@ -148,7 +148,7 @@ class TkTiktokMediaTransferTest {
     }
 
     @Test
-    void uploadAttemptDeadlineRetriesOnlyThroughLeaseHook() throws Exception {
+    void uploadAttemptDeadlineDefersWithoutReplayingUnconfirmedProgress() throws Exception {
         AtomicInteger requests = new AtomicInteger();
         String url = server(exchange -> {
             requests.incrementAndGet();
@@ -164,8 +164,8 @@ class TkTiktokMediaTransferTest {
         assertTimeoutPreemptively(Duration.ofSeconds(3), () -> assertThrows(IllegalStateException.class,
                 () -> client.resumeUploadVideoChunks(url, video, "video/mp4", 0, checks::incrementAndGet)));
 
-        assertEquals(3, checks.get());
-        assertEquals(3, requests.get());
+        assertEquals(1, checks.get());
+        assertEquals(1, requests.get());
     }
 
     @Test
@@ -187,8 +187,8 @@ class TkTiktokMediaTransferTest {
         assertTimeoutPreemptively(Duration.ofSeconds(3), () -> assertThrows(IllegalStateException.class,
                 () -> client.resumeUploadVideoChunks(url, video, "video/mp4", 0, checks::incrementAndGet)));
 
-        assertEquals(3, checks.get());
-        assertEquals(3, requests.get());
+        assertEquals(1, checks.get());
+        assertEquals(1, requests.get());
     }
 
     @Test

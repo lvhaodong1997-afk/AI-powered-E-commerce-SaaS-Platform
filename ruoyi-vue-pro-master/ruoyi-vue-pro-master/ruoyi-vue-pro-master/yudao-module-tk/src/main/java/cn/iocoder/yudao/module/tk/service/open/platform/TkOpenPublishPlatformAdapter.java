@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.LongFunction;
 
 public interface TkOpenPublishPlatformAdapter {
 
@@ -26,6 +27,10 @@ public interface TkOpenPublishPlatformAdapter {
         beforeChunk.run();
         uploadVideo(uploadUrl, videoFile, contentType);
     }
+    default void uploadVideo(String uploadUrl, Path videoFile, String contentType, Runnable beforeChunk,
+                             LongFunction<Long> queryUploadedBytes) {
+        uploadVideo(uploadUrl, videoFile, contentType, beforeChunk);
+    }
     default void resumeUploadVideo(String uploadUrl, Path videoFile, String contentType, long uploadedBytes) {
         throw new UnsupportedOperationException("Platform does not support upload resume");
     }
@@ -34,7 +39,14 @@ public interface TkOpenPublishPlatformAdapter {
         beforeChunk.run();
         resumeUploadVideo(uploadUrl, videoFile, contentType, uploadedBytes);
     }
+    default void resumeUploadVideo(String uploadUrl, Path videoFile, String contentType, long uploadedBytes,
+                                   Runnable beforeChunk, LongFunction<Long> queryUploadedBytes) {
+        resumeUploadVideo(uploadUrl, videoFile, contentType, uploadedBytes, beforeChunk);
+    }
     PublishStatusResult fetchPostStatus(String accessToken, String publishId);
+    default PublishStatusResult fetchPostStatus(String accessToken, String publishId, long deadlineNanos) {
+        throw new UnsupportedOperationException("Platform does not support bounded upload progress queries");
+    }
     RecentVideosResult listRecentVideos(String accessToken, Long cursor, Integer maxCount);
     VideoMetricsResult queryVideoMetrics(String accessToken, String publicPostId);
     default Map<String, VideoMetricsResult> queryVideoMetrics(String accessToken, List<String> publicPostIds) {

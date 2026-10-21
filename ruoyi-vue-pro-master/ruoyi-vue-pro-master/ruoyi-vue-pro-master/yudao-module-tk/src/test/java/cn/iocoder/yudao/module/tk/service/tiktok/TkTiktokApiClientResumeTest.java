@@ -207,7 +207,7 @@ class TkTiktokApiClientResumeTest {
                     if (checks.incrementAndGet() == 2) {
                         throw fenced;
                     }
-                }));
+                }, deadline -> 0L));
 
         assertSame(fenced, actual);
         assertEquals(2, checks.get());
@@ -222,7 +222,7 @@ class TkTiktokApiClientResumeTest {
         AtomicInteger checks = new AtomicInteger();
 
         new TkTiktokApiClient().resumeUploadVideoChunks(uploadUrl, video, "video/quicktime", 32_000_000L,
-                () -> assertEquals(requests.size(), checks.getAndIncrement()));
+                () -> assertEquals(requests.size(), checks.getAndIncrement()), deadline -> 32_000_000L);
 
         assertEquals(3, checks.get());
         String middle = "PUT /upload?upload_id=same&upload_token=test video/quicktime 32000000"

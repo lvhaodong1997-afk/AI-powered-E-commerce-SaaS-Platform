@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.LongFunction;
 import java.util.stream.Collectors;
 
 @Component
@@ -274,6 +275,11 @@ public class TkTiktokApiClient {
     /** Checks upload ownership before every HTTP attempt, including retries; hook failures propagate unchanged. */
     public void resumeUploadVideoChunks(String uploadUrl, Path videoFile, String contentType, long uploadedBytes,
                                        Runnable beforeChunk) {
+        resumeUploadVideoChunks(uploadUrl, videoFile, contentType, uploadedBytes, beforeChunk, null);
+    }
+
+    public void resumeUploadVideoChunks(String uploadUrl, Path videoFile, String contentType, long uploadedBytes,
+                                        Runnable beforeChunk, LongFunction<Long> queryUploadedBytes) {
         if (videoFile == null || !Files.isRegularFile(videoFile)) {
             throw new IllegalArgumentException("TikTok 上传文件不存在");
         }
@@ -288,25 +294,18 @@ public class TkTiktokApiClient {
             if (uploadedBytes == total) {
                 return;
             }
-            int firstChunk = -1;
-            for (int chunkIndex = 0; chunkIndex < plan.getTotalChunkCount(); chunkIndex++) {
-                if (plan.chunkOffset(chunkIndex) == uploadedBytes) {
-                    firstChunk = chunkIndex;
-                    break;
-                }
-            }
-            if (firstChunk < 0) {
-                throw new IllegalArgumentException("TikTok 已上传字节数不在原始分片边界");
-            }
+            int firstChunk = uploadChunkIndex(plan, uploadedBytes);
             try (SeekableByteChannel channel = Files.newByteChannel(videoFile);
                  InputStream inputStream = Channels.newInputStream(channel)) {
                 channel.position(uploadedBytes);
-                for (int chunkIndex = firstChunk; chunkIndex < plan.getTotalChunkCount(); chunkIndex++) {
+                for (int chunkIndex = firstChunk; chunkIndex < plan.getTotalChunkCount();) {
                     mediaTransfer.checkUploadActive(deadline);
                     int length = Math.toIntExact(plan.chunkLength(chunkIndex));
                     byte[] chunk = readChunk(inputStream, length, deadline);
-                    uploadChunkWithRetry(uploadUrl, chunk, mimeType, plan.chunkOffset(chunkIndex), total,
-                            chunkIndex, plan.getTotalChunkCount(), beforeChunk, deadline);
+                    long confirmedBytes = uploadChunkWithRetry(uploadUrl, chunk, mimeType, plan.chunkOffset(chunkIndex), total,
+                            chunkIndex, plan.getTotalChunkCount(), beforeChunk, deadline, queryUploadedBytes);
+                    chunkIndex = uploadChunkIndex(plan, confirmedBytes);
+                    channel.position(confirmedBytes);
                 }
             }
         } catch (TkTiktokMediaTransfer.TransferStoppedException ex) {
@@ -314,6 +313,14 @@ public class TkTiktokApiClient {
         } catch (IOException ex) {
             throw new IllegalStateException("读取 TikTok 上传文件失败：" + ex.getMessage(), ex);
         }
+    }
+
+    private int uploadChunkIndex(TkTiktokUploadPlanner.UploadPlan plan, long uploadedBytes) {
+        if (uploadedBytes == plan.getVideoSize()) return plan.getTotalChunkCount();
+        for (int index = 0; index < plan.getTotalChunkCount(); index++) {
+            if (plan.chunkOffset(index) == uploadedBytes) return index;
+        }
+        throw new IllegalArgumentException("TikTok 已上传字节数不在原始分片边界");
     }
 
     private byte[] readChunk(InputStream inputStream, int length, long deadline) throws IOException {
@@ -333,9 +340,17 @@ public class TkTiktokApiClient {
     private void uploadChunkWithRetry(String uploadUrl, byte[] chunk, String contentType,
                                       long offset, long total, int chunkIndex, int totalChunkCount,
                                       Runnable beforeChunk, long deadline) {
-        Throwable lastFailure = null;
+        uploadChunkWithRetry(uploadUrl, chunk, contentType, offset, total, chunkIndex, totalChunkCount,
+                beforeChunk, deadline, null);
+    }
+
+    private long uploadChunkWithRetry(String uploadUrl, byte[] chunk, String contentType,
+                                      long offset, long total, int chunkIndex, int totalChunkCount,
+                                      Runnable beforeChunk, long deadline, LongFunction<Long> queryUploadedBytes) {
+        Exception lastFailure = null;
         long end = offset + chunk.length - 1;
         for (int attempt = 0; attempt < UPLOAD_MAX_ATTEMPTS; attempt++) {
+            boolean uncertainProgress = false;
             checkUploadActive(deadline);
             // A fenced worker must stop; never catch a lease failure as a retryable transport error.
             beforeChunk.run();
@@ -343,19 +358,42 @@ public class TkTiktokApiClient {
                 int status = mediaTransfer.putChunk(uploadUrl, chunk, normalizeVideoMimeType(contentType),
                         offset, total, deadline);
                 if (isSuccessfulUploadStatus(status)) {
-                    return;
+                    return end + 1;
                 }
                 UploadException error = new UploadException(status);
-                if (!isRetryableUploadStatus(status)) {
+                if (status != 416 && !isRetryableUploadStatus(status)) {
                     throw error;
                 }
                 lastFailure = error;
+                uncertainProgress = true;
             } catch (UploadException ex) {
                 throw ex;
             } catch (TkTiktokMediaTransfer.TransferStoppedException ex) {
                 throw new IllegalStateException(ex.getMessage(), ex);
             } catch (Exception ex) {
                 lastFailure = ex;
+                uncertainProgress = true;
+            }
+            if (uncertainProgress) {
+                // An unacknowledged PUT may already be accepted. Never replay it based on a local offset alone.
+                checkUploadActive(deadline);
+                log.warn("[uploadProgress][offset({}) end({}) total({}) attempt({}) reason({})]",
+                        offset, end, total, attempt + 1, safeExceptionMessage(lastFailure));
+                if (queryUploadedBytes == null) {
+                    throw new IllegalStateException("TikTok upload progress is uncertain; reconcile before retry", lastFailure);
+                }
+                Long confirmedBytes = queryUploadedBytes.apply(deadline);
+                checkUploadActive(deadline);
+                if (confirmedBytes == null || confirmedBytes < offset || confirmedBytes > total) {
+                    throw new IllegalStateException("TikTok returned missing or inconsistent upload progress", lastFailure);
+                }
+                try {
+                    uploadChunkIndex(TkTiktokUploadPlanner.plan(total), confirmedBytes);
+                } catch (IllegalArgumentException invalidBoundary) {
+                    throw new IllegalStateException("TikTok upload progress is outside the original chunk boundaries", invalidBoundary);
+                }
+                log.info("[uploadProgress][offset({}) confirmedBytes({}) total({})]", offset, confirmedBytes, total);
+                if (confirmedBytes > offset) return confirmedBytes;
             }
             if (attempt + 1 < UPLOAD_MAX_ATTEMPTS) {
                 checkUploadActive(deadline);
@@ -435,6 +473,23 @@ public class TkTiktokApiClient {
         payload.put("publish_id", publishId);
         return parsePostStatusResult(executeQueryWithRetry("publish_status",
                 () -> postJson(STATUS_URL, accessToken, payload, "publish_status")));
+    }
+
+    /** One bounded query inside an upload; durable recovery handles unavailable progress. */
+    public PostStatusResult fetchPostStatus(String accessToken, String publishId, long deadlineNanos) {
+        checkUploadActive(deadlineNanos);
+        if (StrUtil.isBlank(accessToken) || StrUtil.isBlank(publishId)) {
+            throw new IllegalArgumentException("TikTok upload progress requires access token and publish ID");
+        }
+        Map<String, Object> payload = Collections.singletonMap("publish_id", publishId);
+        try {
+            TkTiktokMediaTransfer.ApiResponse response = mediaTransfer.post(STATUS_URL, "Bearer " + accessToken,
+                    "application/json; charset=UTF-8", JsonUtils.toJsonString(payload), deadlineNanos);
+            checkUploadActive(deadlineNanos);
+            return parsePostStatusResult(parseJsonResponse(response.status, response.contentType, response.body));
+        } catch (java.io.IOException ex) {
+            throw new IllegalStateException("TikTok upload progress query failed", ex);
+        }
     }
 
     public VideoQueryResult queryVideoShareUrl(String accessToken, List<String> videoIds) {

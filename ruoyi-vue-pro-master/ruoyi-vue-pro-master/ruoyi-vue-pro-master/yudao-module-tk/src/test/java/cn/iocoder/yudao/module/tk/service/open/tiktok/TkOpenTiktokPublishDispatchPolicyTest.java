@@ -55,10 +55,11 @@ class TkOpenTiktokPublishDispatchPolicyTest {
     }
 
     private static TkOpenTiktokPublishDetailDO pending(String detailId, long ageMinutes) {
-        return new TkOpenTiktokPublishDetailDO()
+        TkOpenTiktokPublishDetailDO detail = new TkOpenTiktokPublishDetailDO()
                 .setDetailId(detailId)
-                .setStatus("PENDING")
-                .setCreateTime(NOW.minusMinutes(ageMinutes));
+                .setStatus("PENDING");
+        detail.setCreateTime(NOW.minusMinutes(ageMinutes));
+        return detail;
     }
 
     private static List<String> ids(List<TkOpenTiktokPublishDetailDO> details) {

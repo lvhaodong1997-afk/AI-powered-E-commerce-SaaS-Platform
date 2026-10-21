@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.LongFunction;
 
 @Component
 public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter {
@@ -113,6 +114,12 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
     }
 
     @Override
+    public void uploadVideo(String uploadUrl, Path videoFile, String contentType, Runnable beforeChunk,
+                            LongFunction<Long> queryUploadedBytes) {
+        apiClient.resumeUploadVideoChunks(uploadUrl, videoFile, contentType, 0L, beforeChunk, queryUploadedBytes);
+    }
+
+    @Override
     public void resumeUploadVideo(String uploadUrl, Path videoFile, String contentType, long uploadedBytes) {
         apiClient.resumeUploadVideoChunks(uploadUrl, videoFile, contentType, uploadedBytes);
     }
@@ -124,8 +131,21 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
     }
 
     @Override
+    public void resumeUploadVideo(String uploadUrl, Path videoFile, String contentType, long uploadedBytes,
+                                  Runnable beforeChunk, LongFunction<Long> queryUploadedBytes) {
+        apiClient.resumeUploadVideoChunks(uploadUrl, videoFile, contentType, uploadedBytes, beforeChunk, queryUploadedBytes);
+    }
+
+    @Override
     public PublishStatusResult fetchPostStatus(String accessToken, String publishId) {
         TkTiktokApiClient.PostStatusResult result = apiClient.fetchPostStatus(accessToken, publishId);
+        return new PublishStatusResult(result.isSuccess(), result.getStatus(), result.getFailReason(), result.getErrorCode(),
+                result.getPublicPostIds(), result.getUploadedBytes());
+    }
+
+    @Override
+    public PublishStatusResult fetchPostStatus(String accessToken, String publishId, long deadlineNanos) {
+        TkTiktokApiClient.PostStatusResult result = apiClient.fetchPostStatus(accessToken, publishId, deadlineNanos);
         return new PublishStatusResult(result.isSuccess(), result.getStatus(), result.getFailReason(), result.getErrorCode(),
                 result.getPublicPostIds(), result.getUploadedBytes());
     }

@@ -139,12 +139,12 @@ class TkOpenTiktokPublishExecutionTest {
         when(connections.selectByClientAndConnectionId("c", "connection")).thenReturn(
                 TkOpenTiktokConnectionDO.builder().authStatus("AUTHORIZED").accessTokenCipher("cipher")
                         .accessTokenExpireTime(LocalDateTime.now().plusHours(1)).build());
-        TkOpenApiSecretCipher cipher = (TkOpenApiSecretCipher) ReflectionTestUtils.getField(service, "secretCipher");
-        when(cipher.decrypt("cipher")).thenReturn("token");
         TkOpenPublishPlatformRegistry registry = mock(TkOpenPublishPlatformRegistry.class);
         TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
         when(registry.getRequired("TIKTOK")).thenReturn(adapter);
         ReflectionTestUtils.setField(service, "platformRegistry", registry);
+        TkOpenApiSecretCipher cipher = (TkOpenApiSecretCipher) ReflectionTestUtils.getField(service, "secretCipher");
+        when(cipher.decrypt("cipher")).thenReturn("token");
         when(adapter.fetchPostStatus("token", "official-id"))
                 .thenThrow(new IllegalStateException("network timed out"));
 
@@ -153,6 +153,54 @@ class TkOpenTiktokPublishExecutionTest {
         verify(attempts).error(attempt, "network timed out");
         assertEquals("PROCESSING", detail.getStatus());
         verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
+    }
+
+    @Test void uploadProgressUsesTheExistingConnectionAndPublishId() {
+        TkOpenPublishPlatformAdapter adapter = progressAdapter("PROCESSING_UPLOAD", 32_000_000L, true);
+
+        Long confirmed = ReflectionTestUtils.invokeMethod(service, "confirmedUploadProgress",
+                "token", adapter, "official-id", 100_000_000L, 123L);
+
+        assertEquals(Long.valueOf(32_000_000L), confirmed);
+        verify(adapter).fetchPostStatus("token", "official-id", 123L);
+        verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
+        verifyNoInteractions(attempts);
+    }
+
+    @Test void confirmedPublishedUploadDoesNotNeedAnotherPut() {
+        TkOpenPublishPlatformAdapter adapter = progressAdapter("PUBLISH_COMPLETE", null, true);
+
+        Long confirmed = ReflectionTestUtils.invokeMethod(service, "confirmedUploadProgress",
+                "token", adapter, "official-id", 100_000_000L, 123L);
+
+        assertEquals(Long.valueOf(100_000_000L), confirmed);
+        verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
+    }
+
+    @Test void failedProgressQueryCannotBeTreatedAsZeroProgress() {
+        TkOpenPublishPlatformAdapter adapter = progressAdapter("FAILED", null, false);
+
+        assertThrows(IllegalStateException.class, () -> ReflectionTestUtils.invokeMethod(service,
+                "confirmedUploadProgress", "token", adapter, "official-id", 100_000_000L, 123L));
+
+        verify(adapter, never()).initVideoPost(anyString(), anyString(), anyMap());
+    }
+
+    @Test void providerTerminalFailureDefersToExistingTerminalReconciliation() {
+        TkOpenPublishPlatformAdapter adapter = progressAdapter("FAILED", null, true);
+
+        assertThrows(IllegalStateException.class, () -> ReflectionTestUtils.invokeMethod(service,
+                "confirmedUploadProgress", "token", adapter, "official-id", 100_000_000L, 123L));
+
+        verifyNoInteractions(attempts);
+    }
+
+    private TkOpenPublishPlatformAdapter progressAdapter(String status, Long bytes, boolean success) {
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        when(adapter.fetchPostStatus("token", "official-id", 123L)).thenReturn(
+                new TkOpenPublishPlatformAdapter.PublishStatusResult(success, status, null, null,
+                        Collections.emptyList(), bytes));
+        return adapter;
     }
 
     @Test void unresolvedInitializationDefersNextScanWithoutRepublishing() {
