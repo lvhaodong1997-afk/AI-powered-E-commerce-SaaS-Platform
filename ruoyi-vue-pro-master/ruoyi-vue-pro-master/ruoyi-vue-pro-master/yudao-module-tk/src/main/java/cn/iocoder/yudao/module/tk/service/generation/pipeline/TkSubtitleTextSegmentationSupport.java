@@ -102,6 +102,22 @@ final class TkSubtitleTextSegmentationSupport {
             }
             int previous = text.codePointBefore(offset);
             int next = text.codePointAt(offset);
+            // Rendering trims line edges; whitespace must not hide dangling punctuation.
+            int left = offset;
+            while (left > 0 && (text.codePointBefore(left) <= ' '
+                    || Character.isWhitespace(text.codePointBefore(left)))) {
+                left -= Character.charCount(text.codePointBefore(left));
+            }
+            int right = offset;
+            while (right < text.length() && (text.codePointAt(right) <= ' '
+                    || Character.isWhitespace(text.codePointAt(right)))) {
+                right += Character.charCount(text.codePointAt(right));
+            }
+            if (left == 0 || right == text.length()
+                    || OPENING_PUNCTUATION.indexOf(text.codePointBefore(left)) >= 0
+                    || PUNCTUATION.indexOf(text.codePointAt(right)) >= 0) {
+                return false;
+            }
             // Keep decimal numbers intact even when ASR supplied 39. and 8 as separate words.
             boolean decimal = previous == '.' && offset >= 2 && Character.isDigit(text.codePointBefore(offset - 1))
                     && Character.isDigit(next);

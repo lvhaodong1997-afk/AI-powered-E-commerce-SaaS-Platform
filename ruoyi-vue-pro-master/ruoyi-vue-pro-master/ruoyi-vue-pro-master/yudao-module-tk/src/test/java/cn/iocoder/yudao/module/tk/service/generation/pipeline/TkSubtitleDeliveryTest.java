@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.Files;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class TkSubtitleDeliveryTest {
     @TempDir Path dir;
@@ -84,7 +85,8 @@ class TkSubtitleDeliveryTest {
     }
 
     @Test void smallTwentyCjkCaptionFitsOneAssLineWithTheProductionFont() throws Exception {
-        if (System.getProperty("tk.subtitle.fonts") == null) return;
+        assumeTrue(System.getProperty("tk.subtitle.fonts") != null,
+                "Supply -Dtk.subtitle.fonts with the production TTC fixtures");
         String text = "甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸";
         TkSubtitleSegment c = new TkSubtitleSegment(text, 0, 3, "bottom_center", 540, 1450, List.of());
         String ass = render("small", "classic_white", false, c);
@@ -93,11 +95,13 @@ class TkSubtitleDeliveryTest {
     }
 
     @Test void measuredEnglishWidthKeepsThinLongWordsOnOneLine() throws Exception {
+        assumeTrue(System.getProperty("tk.subtitle.fonts") != null,
+                "Supply -Dtk.subtitle.fonts with the production TTC fixtures");
         String text = "iiiiiiiiii iiiiiiiiii iiiiiiiiii iiiiiiiiii";
         TkSubtitleSegment c = new TkSubtitleSegment(text, 0, 3, "bottom_center", 540, 1450, List.of());
         String ass = render("small", "classic_white", false, c);
         assertEquals(1, ass.lines().filter(line -> line.startsWith("Dialogue:")).count());
-        if (System.getProperty("tk.subtitle.fonts") != null) assertFalse(ass.contains("\\N"), ass);
+        assertFalse(ass.contains("\\N"), ass);
         assertTrue(ass.contains("0:00:00.00,0:00:03.00"));
     }
 
@@ -121,6 +125,36 @@ class TkSubtitleDeliveryTest {
         assertEquals(first, c.getWords().get(0).getText());
         assertEquals(.2, c.getWords().get(0).getStart());
         assertEquals(1.7, c.getWords().get(0).getEnd());
+    }
+
+    @Test void trimmedPunctuationUsesEarlierOriginalWordBoundaryForPlainAndKaraoke() {
+        String first = "甲乙丙丁戊己庚辛壬癸甲";
+        String text = first + "乙 。丙丁戊己庚辛";
+        List<TkSubtitleWord> words = List.of(new TkSubtitleWord(first, .2, 1.1, false),
+                new TkSubtitleWord("乙", 1.4, 1.8, false),
+                new TkSubtitleWord("。丙丁戊己庚辛", 2, 2.8, false));
+        TkSubtitleSegment segment = new TkSubtitleSegment(text, 0, 3, "bottom_center", 540, 1450, words);
+        assertTrue(DefaultTkAssSubtitleRenderService.canRenderKaraoke(segment));
+        TkSubtitleLineBreakSupport metrics = new TkSubtitleLineBreakSupport(dir.toString(),
+                "Unavailable punctuation regression font", 68, -1, 0, 4, 1, 540);
+        Object lines = ReflectionTestUtils.invokeMethod(renderer, "captionLines", segment, metrics);
+        List<String> rendered = new ArrayList<>();
+        for (boolean karaoke : List.of(false, true)) {
+            TkGenerationTaskDO task = TkGenerationTaskDO.builder().subtitleFontSize("medium")
+                    .subtitleStyle("classic_white").subtitleKaraokeEnabled(karaoke).build();
+            Object style = ReflectionTestUtils.invokeMethod(renderer, "resolveStyle", task);
+            String ass = ReflectionTestUtils.invokeMethod(renderer, "renderText", task, style, segment, lines);
+            assertNotNull(ass);
+            rendered.add(ass.replaceAll("\\{[^}]*}", ""));
+            if (karaoke) {
+                assertTrue(ass.contains("{\\k20}{\\kf90}"), ass);
+                assertTrue(ass.contains("{\\k30}{\\kf40}"), ass);
+                assertTrue(ass.contains("{\\k20}{\\kf80}"), ass);
+            }
+        }
+        assertEquals(first + "\\N乙 。丙丁戊己庚辛", rendered.get(0));
+        assertEquals(rendered.get(0), rendered.get(1));
+        assertEquals(List.of(first, "乙", "。丙丁戊己庚辛"), words.stream().map(TkSubtitleWord::getText).toList());
     }
 
     @Test void fontsUseRealSansAndSerifWithRegularMinimalWeight() throws Exception {
@@ -238,6 +272,12 @@ class TkSubtitleDeliveryTest {
             Path file=destination.resolve("task-1-sample-"+size+"-"+style+".ass");
             renderer.render(task,new DefaultTkSubtitleLayoutService().layout(task,timeline,null),file.toFile());
             String ass=Files.readString(file);
+            TkSubtitleSegment overflow = segments.get(1);
+            assertTrue(DefaultTkAssSubtitleRenderService.canRenderKaraoke(overflow),
+                    "The 31-39s overflow fixture must retain reliable word timing");
+            String overflowEvent = ass.lines().filter(line -> line.startsWith("Dialogue: 0,0:00:31.00,0:00:39.00"))
+                    .findFirst().orElseThrow();
+            assertEquals(15, overflowEvent.split("\\Q{\\kf\\E", -1).length - 1, overflowEvent);
             assertTrue(ass.contains("{\\k40}{\\kf45}"));assertFalse(ass.contains("\\kt"));
             assertTrue(ass.contains("\\N"));assertTrue(ass.contains("Noto "));
             assertEquals("partial",TkSubtitleKaraokeQuality.inspect(task,timeline).getStatus());
@@ -272,7 +312,9 @@ class TkSubtitleDeliveryTest {
 
     TkSubtitleSegment sample(String text,List<String> units,double start,double end) {
         List<TkSubtitleWord> words=new ArrayList<>();
-        for(int i=0;i<units.size();i++)words.add(new TkSubtitleWord(units.get(i),start+.4+i*.7,start+.85+i*.7,i==2));
+        double timeScale = Math.min(1D, (end - start) / (.85D + Math.max(0, units.size() - 1) * .7D));
+        for(int i=0;i<units.size();i++)words.add(new TkSubtitleWord(units.get(i),
+                start + (.4 + i * .7) * timeScale, start + (.85 + i * .7) * timeScale, i==2));
         return new TkSubtitleSegment(text,start,end,"bottom_center",540,1450,words);
     }
     TkSubtitleTimeline rebuild(String script,List<String> tokens) {

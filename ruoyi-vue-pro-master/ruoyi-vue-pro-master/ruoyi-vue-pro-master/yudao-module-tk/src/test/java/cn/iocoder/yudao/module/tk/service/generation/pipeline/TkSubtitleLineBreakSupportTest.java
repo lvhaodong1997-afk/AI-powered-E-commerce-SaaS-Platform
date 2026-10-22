@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class TkSubtitleLineBreakSupportTest {
     @TempDir Path emptyFonts;
@@ -19,6 +20,26 @@ class TkSubtitleLineBreakSupportTest {
         assertFalse(metrics.hasMatchingFont());
         assertEquals(text.length(), metrics.breakIndex(text, i -> true));
         assertEquals(100, metrics.scale(List.of(text)));
+    }
+
+    @Test void missingExactFontWarnsOncePerDirectoryAndFamily() {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(TkSubtitleLineBreakSupport.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> events =
+                new ch.qos.logback.core.read.ListAppender<>();
+        events.start();
+        logger.addAppender(events);
+        try {
+            assertFalse(metrics(68, 540).hasMatchingFont());
+            assertFalse(metrics(86, 540).hasMatchingFont());
+            assertEquals(1, events.list.size());
+            assertEquals(ch.qos.logback.classic.Level.WARN, events.list.get(0).getLevel());
+            assertTrue(events.list.get(0).getFormattedMessage().contains("Unavailable test font"));
+            assertTrue(events.list.get(0).getFormattedMessage().contains("using conservative glyph widths"));
+        } finally {
+            logger.detachAppender(events);
+            events.stop();
+        }
     }
 
     @Test void overflowUsesMeasuredWidthAndPositionInsteadOfCharacterCount() {
@@ -53,9 +74,19 @@ class TkSubtitleLineBreakSupportTest {
         assertEquals(text.length(), metrics.breakIndex(text, i -> false));
     }
 
+    @Test void whitespaceCannotHideClosingOrOpeningPunctuationAtVisibleLineEdges() {
+        String text = "甲乙丙丁戊己庚辛壬癸甲乙 。丙丁戊己庚辛";
+        TkSubtitleLineBreakSupport metrics = metrics(68, 540);
+        assertEquals(11, metrics.breakIndex(text, i -> true));
+        assertEquals(11, metrics.breakIndex(text, i -> i == 11 || i == 12));
+        assertFalse(TkSubtitleTextSegmentationSupport.safeLineBoundaries(text).test(12));
+        String opening = "甲乙丙丁戊己庚辛壬癸（ 乙丙丁戊己庚辛";
+        assertFalse(TkSubtitleTextSegmentationSupport.safeLineBoundaries(opening).test(12));
+    }
+
     @Test void realConfiguredFontFamilyIsUsedWithoutLogicalFontSubstitution() {
         String fonts = System.getProperty("tk.subtitle.fonts");
-        if (fonts == null) return;
+        assumeTrue(fonts != null, "Supply -Dtk.subtitle.fonts with the production TTC fixtures");
         TkSubtitleLineBreakSupport metrics = new TkSubtitleLineBreakSupport(fonts, "Noto Sans CJK SC", 68, -1, 0, 4, 1, 540);
         assertTrue(metrics.hasMatchingFont(), "The supplied production TTC must load its exact SC face");
         assertTrue(metrics.width("iiiiiiii") < metrics.width("WWWWWWWW"));
