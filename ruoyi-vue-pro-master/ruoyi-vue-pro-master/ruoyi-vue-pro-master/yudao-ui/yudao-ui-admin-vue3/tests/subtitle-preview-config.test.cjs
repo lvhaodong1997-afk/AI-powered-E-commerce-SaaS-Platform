@@ -104,6 +104,68 @@ const path = require('node:path')
     path.join(__dirname, '../src/views/tk/dashboard/index.vue'),
     'utf8'
   )
+  // Execute the production preview setup in its original declaration order. Real Vue watch()
+  // reads sources synchronously even with flush:'post', before the drawer is ever opened.
+  const ts = require('typescript')
+  const vue = require('vue')
+  const script = source.split('<script setup lang="ts">')[1].split('</script>')[0]
+  const ast = ts.createSourceFile('dashboard.ts', script, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const previewBindings = new Set([
+    'subtitleStyleOptions', 'currentSubtitleStyleOption', 'localizedSubtitlePreviewParts',
+    'subtitlePreviewWordList', 'subtitlePreviewScreen', 'subtitlePreviewCaption',
+    'subtitlePreviewMeasuredFontSize', 'measuredSubtitlePreviewLines', 'subtitlePreviewLines',
+    'subtitlePreviewObserver', 'subtitlePreviewFrame', 'subtitlePreviewRevision', 'createForm'
+  ])
+  const setupStatements = ast.statements.filter((node) => {
+    if (ts.isVariableStatement(node)) {
+      return node.declarationList.declarations.some((decl) => previewBindings.has(decl.name.getText(ast)))
+    }
+    if (ts.isFunctionDeclaration(node)) return node.name?.text === 'scheduleSubtitlePreviewLayout'
+    if (!ts.isExpressionStatement(node) || !ts.isCallExpression(node.expression)) return false
+    const call = node.expression
+    return call.expression.getText(ast) === 'watch' &&
+      ['subtitlePreviewScreen', '[subtitlePreviewWordList'].some((prefix) => call.arguments[0].getText(ast).startsWith(prefix))
+  })
+  const setupCode = ts.transpileModule(setupStatements.map((node) => node.getText(ast)).join('\n'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
+  }).outputText
+  const defaults = {
+    TTS_PROVIDER_MINIMAX: 'minimax', MIMO_VOICE_MODE_PRESET: 'preset', defaultMimoVoiceCode: 'Mia',
+    defaultTargetLanguage: 'zh', MATERIAL_PURPOSE_ECOMMERCE: 'ecommerce', DEFAULT_PRODUCT_CATEGORY_CODE: 'other',
+    CLIP_PLAN_MODE_SEGMENTED: 'segmented', ANALYSIS_PROVIDER_GEMINI: 'gemini', DEFAULT_TARGET_DURATION: 30,
+    DEFAULT_OPENING_CLIP_START: 0, DEFAULT_OPENING_CLIP_DURATION: 3
+  }
+  let scheduledLayouts = 0
+  const setupDependencies = {
+    ...defaults, computed: vue.computed, ref: vue.ref, reactive: vue.reactive, watch: vue.watch,
+    nextTick: vue.nextTick, isEn: vue.ref(false), subtitlePreviewWords, measureSubtitlePreview,
+    cancelAnimationFrame: () => { scheduledLayouts++ }
+  }
+  const scope = vue.effectScope()
+  try {
+    const setup = new Function(...Object.keys(setupDependencies), setupCode +
+      '\nreturn { createForm, subtitlePreviewWordList, subtitlePreviewLines, subtitlePreviewScreen }')
+    const state = scope.run(() => setup(...Object.values(setupDependencies)))
+    assert.equal(state.subtitlePreviewScreen.value, undefined, 'collapsed preview must initialize without DOM')
+    assert.equal(state.subtitlePreviewLines.value.length, 1)
+    assert.equal(state.subtitlePreviewWordList.value.map((word) => word.text).join(''), '这个产品轻松解决日常小麻烦')
+    assert.equal(scheduledLayouts, 0, 'initial dependency collection must not schedule a layout')
+    for (const update of [
+      () => { state.createForm.subtitleFontSize = 'large' },
+      () => { state.createForm.subtitleStyle = 'yellow_keyword' },
+      () => { state.createForm.subtitlePositionMode = 'bottom_center' },
+      () => { setupDependencies.isEn.value = true }
+    ]) {
+      const previous = scheduledLayouts
+      update()
+      await vue.nextTick()
+      assert.equal(scheduledLayouts, previous + 1, 'preview inputs must still trigger recomputation after setup')
+    }
+    assert.equal(state.subtitlePreviewWordList.value.map((word) => word.text).join(''), 'Today only40% offwith fast shipping')
+    console.log('Vue synchronous preview startup and reactive recomputation regression passed')
+  } finally {
+    scope.stop()
+  }
   const payloadStart = source.indexOf('function getSubtitlePayload() {')
   const payloadEnd = source.indexOf('\nasync function ensureBgmReadyForGeneration', payloadStart)
   const payloadForm = { subtitleEnabled: true, subtitleFontSize: 'extra_large' }

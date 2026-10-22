@@ -2610,8 +2610,6 @@ watch(subtitlePreviewScreen, (screen) => {
   }
   scheduleSubtitlePreviewLayout()
 }, { flush: 'post' })
-watch([subtitlePreviewWordList, () => createForm.subtitleFontSize, () => createForm.subtitleStyle,
-  () => createForm.subtitlePositionMode], scheduleSubtitlePreviewLayout, { flush: 'post' })
 const subtitleKaraokeResultNotice = computed(() => karaokeResultMessage(currentGenerationTask.value, {
   partial: isEn.value
     ? 'Karaoke partly applied. Segments without reliable word timing use plain captions.'
@@ -3117,6 +3115,9 @@ const createForm = reactive<{
   bgmAssetId: undefined,
   bgmVolume: 0.1
 })
+// Vue evaluates watch sources immediately, so the form must exist before registration.
+watch([subtitlePreviewWordList, () => createForm.subtitleFontSize, () => createForm.subtitleStyle,
+  () => createForm.subtitlePositionMode], scheduleSubtitlePreviewLayout, { flush: 'post' })
 const openingConfigExpanded = ref(false)
 const subtitleConfigExpanded = ref(false)
 const voiceConfigExpanded = ref(false)
