@@ -1175,18 +1175,21 @@
                     clearable
                   />
                   <div class="subtitle-style-preview" :class="subtitlePreviewClasses">
-                    <div class="subtitle-preview-screen">
+                    <div ref="subtitlePreviewScreen" class="subtitle-preview-screen">
                       <div
+                        ref="subtitlePreviewCaption"
                         class="subtitle-preview-caption"
-                        :style="{ '--subtitle-preview-font-size': subtitlePreviewFontSize(createForm.subtitleFontSize) }"
+                        :style="{ '--subtitle-preview-font-size': subtitlePreviewMeasuredFontSize || subtitlePreviewFontSize(createForm.subtitleFontSize) }"
                       >
-                        <span
-                          v-for="(word, index) in subtitlePreviewWordList"
-                          :key="index"
-                          :class="{ 'is-keyword': subtitlePreviewUsesEmphasis && word.keyword }"
-                          :style="{ '--word-delay': `${index * 0.3}s` }"
-                          >{{ word.text }}</span
-                        >
+                        <span v-for="(line, lineIndex) in subtitlePreviewLines" :key="lineIndex" class="subtitle-preview-line">
+                          <span
+                            v-for="word in line"
+                            :key="word.tokenIndex"
+                            :class="{ 'is-keyword': subtitlePreviewUsesEmphasis && word.keyword }"
+                            :style="{ '--word-delay': `${word.tokenIndex * 0.3}s` }"
+                            >{{ word.text }}</span
+                          >
+                        </span>
                       </div>
                       <div class="subtitle-position-guide" aria-hidden="true">
                         <span class="guide-top"></span>
@@ -1507,7 +1510,7 @@
 </template>
 
 <script setup lang="ts">
-import { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay, subtitlePreviewFontSize } from './subtitlePreview.mjs'
+import { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay, subtitlePreviewFontSize, measureSubtitlePreview } from './subtitlePreview.mjs'
 import { TkDashboardApi } from '@/api/tk/dashboard'
 import { TkBgmAssetApi, type TkBgmAssetVO } from '@/api/tk/bgm'
 import { TkGenerationApi } from '@/api/tk/generation'
@@ -2566,6 +2569,49 @@ const localizedSubtitlePreviewParts = computed(() =>
 const subtitlePreviewWordList = computed(() =>
   subtitlePreviewWords(localizedSubtitlePreviewParts.value, isEn.value)
 )
+const subtitlePreviewScreen = ref<HTMLElement>()
+const subtitlePreviewCaption = ref<HTMLElement>()
+const subtitlePreviewMeasuredFontSize = ref('')
+const measuredSubtitlePreviewLines = ref<Array<Array<{ text: string; keyword: boolean; tokenIndex: number }>>>()
+const subtitlePreviewLines = computed(() => measuredSubtitlePreviewLines.value || [
+  subtitlePreviewWordList.value.map((token, tokenIndex) => ({ ...token, tokenIndex }))
+])
+let subtitlePreviewObserver: ResizeObserver | undefined
+let subtitlePreviewFrame = 0
+let subtitlePreviewRevision = 0
+function scheduleSubtitlePreviewLayout() {
+  const revision = ++subtitlePreviewRevision
+  cancelAnimationFrame(subtitlePreviewFrame)
+  if (!subtitlePreviewScreen.value || !subtitlePreviewCaption.value) return
+  subtitlePreviewFrame = requestAnimationFrame(async () => {
+    await document.fonts.ready
+    await nextTick()
+    if (revision !== subtitlePreviewRevision || !subtitlePreviewScreen.value || !subtitlePreviewCaption.value) return
+    const result = measureSubtitlePreview(subtitlePreviewCaption.value, subtitlePreviewScreen.value,
+      createForm.subtitleFontSize, createForm.subtitleStyle, subtitlePreviewWordList.value)
+    if (result) {
+      measuredSubtitlePreviewLines.value = result.lines
+      subtitlePreviewMeasuredFontSize.value = `${result.fontSize}px`
+    }
+  })
+}
+watch(subtitlePreviewScreen, (screen) => {
+  subtitlePreviewObserver?.disconnect()
+  document.fonts.removeEventListener('loadingdone', scheduleSubtitlePreviewLayout)
+  if (screen) {
+    subtitlePreviewObserver = new ResizeObserver(scheduleSubtitlePreviewLayout)
+    subtitlePreviewObserver.observe(screen)
+    document.fonts.addEventListener('loadingdone', scheduleSubtitlePreviewLayout)
+  } else {
+    ++subtitlePreviewRevision
+    cancelAnimationFrame(subtitlePreviewFrame)
+    measuredSubtitlePreviewLines.value = undefined
+    subtitlePreviewMeasuredFontSize.value = ''
+  }
+  scheduleSubtitlePreviewLayout()
+}, { flush: 'post' })
+watch([subtitlePreviewWordList, () => createForm.subtitleFontSize, () => createForm.subtitleStyle,
+  () => createForm.subtitlePositionMode], scheduleSubtitlePreviewLayout, { flush: 'post' })
 const subtitleKaraokeResultNotice = computed(() => karaokeResultMessage(currentGenerationTask.value, {
   partial: isEn.value
     ? 'Karaoke partly applied. Segments without reliable word timing use plain captions.'
@@ -5745,6 +5791,10 @@ onMounted(() => {
   loadBgmAssets().catch(() => undefined)
 })
 onUnmounted(() => {
+  ++subtitlePreviewRevision
+  cancelAnimationFrame(subtitlePreviewFrame)
+  subtitlePreviewObserver?.disconnect()
+  document.fonts.removeEventListener('loadingdone', scheduleSubtitlePreviewLayout)
   stopVoicePreview()
   stopBgmPreview()
   clearTaskTimer('analysis')
@@ -7772,7 +7822,6 @@ onUnmounted(() => {
   position: absolute;
   left: 50%;
   z-index: 2;
-  max-width: calc(100% - 24px);
   min-height: 28px;
   padding: 0 2px;
   font-size: var(--subtitle-preview-font-size);
@@ -7786,7 +7835,7 @@ onUnmounted(() => {
     1px 0 0 #000,
     0 -1px 0 #000,
     -1px 0 0 #000;
-  overflow-wrap: anywhere;
+  white-space: pre;
   transform: translateX(-50%);
 }
 
@@ -7795,12 +7844,17 @@ onUnmounted(() => {
 }
 
 /* Preview words advance independently; keywords retain priority over the animated active color. */
-.subtitle-style-preview.has-karaoke-preview .subtitle-preview-caption > span {
+.subtitle-preview-line {
+  display: block;
+  white-space: pre;
+}
+
+.subtitle-style-preview.has-karaoke-preview .subtitle-preview-line > span {
   animation: subtitle-word-highlight 5s linear infinite;
   animation-delay: var(--word-delay);
 }
 
-.subtitle-preview-caption > .is-keyword {
+.subtitle-preview-line > .is-keyword {
   color: var(--subtitle-keyword, #ffd84d);
   animation: none !important;
 }
