@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.tk.service.generation.pipeline;
 
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.file.Path;
@@ -27,6 +28,17 @@ class TkSubtitleDeliveryTest {
     String[] style(String ass) {
         return ass.lines().filter(s -> s.startsWith("Style:")).findFirst().orElseThrow().split(",");
     }
+    @BeforeEach
+    void useProductionFontsWhenSupplied() {
+        String fonts = System.getProperty("tk.subtitle.fonts");
+        if (fonts != null) {
+            cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties properties =
+                    new cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties();
+            properties.getSubtitle().setFontsDir(fonts);
+            ReflectionTestUtils.setField(renderer, "generationProperties", properties);
+        }
+    }
+
     @Test void fourFinalSizesReachActualAssAcrossEveryPreset() throws Exception {
         String[] sizes = {"small", "medium", "large", "extra_large"};
         int[] expected = {58, 68, 86, 96};
@@ -38,6 +50,79 @@ class TkSubtitleDeliveryTest {
             }
         }
     }
+    @Test void screenshotCaptionFitsSmallMediumAndLargePresetsAndKeepsTimedWordGroups() throws Exception {
+        for (String size : List.of("small", "medium", "large", "extra_large")) {
+            for (String preset : List.of("classic_white", "yellow_keyword", "tiktok_large", "promo_bold",
+                    "clean_product", "neon_pop", "yellow_story", "price_flash", "step_card", "brand_minimal", "comment_bubble")) {
+                TkSubtitleSegment screenshot = sample("试试这个厚切芒果干。", List.of("试试", "这个", "厚切", "芒果干", "。"), 0, 5);
+                String plain = render(size, preset, false, screenshot);
+                String karaoke = render(size, preset, true, screenshot);
+                assertFalse(plain.contains("\\N"), size + " / " + preset + ": " + plain);
+                assertFalse(karaoke.contains("\\N"), size + " / " + preset + ": " + karaoke);
+                assertFalse(plain.contains("\\fscx"), "Fitting captions retain the selected size");
+                assertEquals(5, karaoke.split("\\Q{\\kf45}\\E", -1).length - 1);
+                assertTrue(karaoke.contains("{\\k40}{\\kf45}"));
+                assertTrue(karaoke.contains("{\\k25}{\\kf45}"));
+            }
+        }
+    }
+
+    @Test void legacyEnglishFallbackRetainsKeywordMetadataAndItsOriginalTimeSpan() throws Exception {
+        String text = "Wonderful products improve everyday comfort with breathable material and lasting support";
+        TkSubtitleSegment c = sample(text,
+                List.of("Wonderful", "products", "improve", "everyday", "comfort", "with", "breathable", "material", "and", "lasting", "support"), 0, 10);
+        c.setWordTimingReliable(false);
+        String ass = render("extra_large", "classic_white", true, c);
+        assertFalse(ass.contains("\\kf"));
+        assertTrue(ass.contains("{\\c&H004DD8FF}improve{\\c&H00FFFFFF}"), ass);
+        List<String> dialogues = ass.lines().filter(line -> line.startsWith("Dialogue:")).toList();
+        assertTrue(dialogues.size() > 1);
+        assertTrue(dialogues.get(0).contains("0:00:00.00"));
+        assertTrue(dialogues.get(dialogues.size() - 1).contains("0:00:10.00"));
+        assertEquals(text.replace(" ", ""), String.join("", dialogues.stream().map(line -> line.split(",", 10)[9]
+                .replaceAll("\\{[^}]*}", "").replace("\\N", "").replace(" ", "")).toList()));
+    }
+
+    @Test void smallTwentyCjkCaptionFitsOneAssLineWithTheProductionFont() throws Exception {
+        if (System.getProperty("tk.subtitle.fonts") == null) return;
+        String text = "甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸";
+        TkSubtitleSegment c = new TkSubtitleSegment(text, 0, 3, "bottom_center", 540, 1450, List.of());
+        String ass = render("small", "classic_white", false, c);
+        assertFalse(ass.contains("\\N"), ass);
+        assertFalse(ass.contains("\\fscx"), ass);
+    }
+
+    @Test void measuredEnglishWidthKeepsThinLongWordsOnOneLine() throws Exception {
+        String text = "iiiiiiiiii iiiiiiiiii iiiiiiiiii iiiiiiiiii";
+        TkSubtitleSegment c = new TkSubtitleSegment(text, 0, 3, "bottom_center", 540, 1450, List.of());
+        String ass = render("small", "classic_white", false, c);
+        assertEquals(1, ass.lines().filter(line -> line.startsWith("Dialogue:")).count());
+        if (System.getProperty("tk.subtitle.fonts") != null) assertFalse(ass.contains("\\N"), ass);
+        assertTrue(ass.contains("0:00:00.00,0:00:03.00"));
+    }
+
+    @Test void oversizedTimedWordStaysWholeAndPlainKaraokeShareTheScaledLayout() throws Exception {
+        String first = "甲乙丙丁戊己庚辛壬癸甲乙丙丁";
+        String second = "戊己庚辛壬癸甲乙";
+        TkSubtitleSegment c = new TkSubtitleSegment(first + second, 0, 3, "bottom_center", 540, 1450,
+                List.of(new TkSubtitleWord(first, .2, 1.7, true), new TkSubtitleWord(second, 2, 2.8, false)));
+        String plain = render("extra_large", "classic_white", false, c);
+        String karaoke = render("extra_large", "classic_white", true, c);
+        String plainVisible = plain.lines().filter(line -> line.startsWith("Dialogue:")).findFirst().orElseThrow()
+                .split(",", 10)[9].replaceAll("\\{[^}]*}", "");
+        String karaokeVisible = karaoke.lines().filter(line -> line.startsWith("Dialogue:")).findFirst().orElseThrow()
+                .split(",", 10)[9].replaceAll("\\{[^}]*}", "");
+        assertEquals(first + "\\N" + second, plainVisible);
+        assertEquals(plainVisible, karaokeVisible);
+        assertTrue(plain.contains("\\fscx"));
+        assertTrue(karaoke.contains("{\\k20}{\\kf150}"));
+        assertTrue(karaoke.contains("{\\k30}{\\kf80}"));
+        assertEquals(2, karaoke.split("\\Q{\\kf\\E", -1).length - 1);
+        assertEquals(first, c.getWords().get(0).getText());
+        assertEquals(.2, c.getWords().get(0).getStart());
+        assertEquals(1.7, c.getWords().get(0).getEnd());
+    }
+
     @Test void fontsUseRealSansAndSerifWithRegularMinimalWeight() throws Exception {
         assertEquals("Noto Sans CJK SC", style(render("medium", "classic_white", false, caption()))[1]);
         String[] brand = style(render("medium", "brand_minimal", false, caption()));
@@ -130,11 +215,18 @@ class TkSubtitleDeliveryTest {
         String output=System.getProperty("tk.subtitle.samples");
         Path destination=output==null?dir:Path.of(output);Files.createDirectories(destination);
         for(String size:List.of("small","medium","large","extra_large")) {
-        for(String style:List.of("classic_white","tiktok_large","yellow_story","brand_minimal","promo_bold","clean_product")) {
+        for(String style:List.of("classic_white","yellow_keyword","tiktok_large","promo_bold","clean_product","neon_pop",
+                "yellow_story","price_flash","step_card","brand_minimal","comment_bubble")) {
             TkGenerationTaskDO task=TkGenerationTaskDO.builder().subtitleEnabled(true).subtitleFontSize(size)
                     .subtitleStyle(style).subtitlePositionMode("fixed_bottom").subtitleKaraokeEnabled(true)
                     .subtitleKeywordEnabled(true).subtitleActiveColor("#35F27A").subtitleKeywordColor("#FFD84D").build();
             List<TkSubtitleSegment> segments=new ArrayList<>();
+            segments.add(sample("试试这个厚切芒果干。",List.of("试试","这个","厚切","芒果干","。"),25,30));
+            segments.add(sample("甲乙丙丁戊己庚辛壬癸".repeat(3),
+                    List.of("甲乙","丙丁","戊己","庚辛","壬癸","甲乙","丙丁","戊己","庚辛","壬癸",
+                            "甲乙","丙丁","戊己","庚辛","壬癸"),31,39));
+            TkSubtitleSegment plainScreenshot=sample("试试这个厚切芒果干。",List.of("试试","这个","厚切","芒果干","。"),40,45);
+            plainScreenshot.setWordTimingReliable(false);segments.add(plainScreenshot);
             segments.add(sample("只选成熟芒果厚切烘干锁住自然果香",List.of("只选","成熟","芒果","厚切","烘干","锁住","自然","果香"),0,7));
             segments.add(sample("Fresh fruit daily comfort",List.of("Fresh","fruit","daily","comfort"),8,13));
             TkSubtitleSegment estimated=sample("时间不足时保留普通字幕",List.of("时间","不足","时","保留","普通","字幕"),14,20);
@@ -157,11 +249,27 @@ class TkSubtitleDeliveryTest {
         renderer.render(TkGenerationTaskDO.builder().subtitleFontSize("extra_large").subtitleStyle("tiktok_large")
                 .subtitleKaraokeEnabled(true).build(),new TkSubtitleLayout(List.of(legacy)),legacyFile.toFile());
         String legacyAss=Files.readString(legacyFile);
-        assertTrue(legacyAss.lines().filter(line->line.startsWith("Dialogue:")).count()>=3);
+        assertTrue(legacyAss.lines().filter(line->line.startsWith("Dialogue:")).count()>=2);
         assertFalse(legacyAss.contains("\\fscx18"));
         assertTrue(legacyAss.contains("Wonderful"));
         assertTrue(legacyAss.contains("support"));
     }
+    @Test void emitPlainAndMissingFontFallbackSamples() throws Exception {
+        String output = System.getProperty("tk.subtitle.samples");
+        Path destination = output == null ? dir : Path.of(output);
+        Files.createDirectories(destination);
+        TkSubtitleSegment screenshot = sample("试试这个厚切芒果干。", List.of("试试", "这个", "厚切", "芒果干", "。"), 0, 5);
+        TkGenerationTaskDO plain = TkGenerationTaskDO.builder().subtitleFontSize("large").subtitleStyle("classic_white")
+                .subtitleKaraokeEnabled(false).build();
+        renderer.render(plain, new TkSubtitleLayout(List.of(screenshot)),
+                destination.resolve("task-1-sample-plain-large-classic.ass").toFile());
+        new DefaultTkAssSubtitleRenderService().render(plain, new TkSubtitleLayout(List.of(screenshot)),
+                destination.resolve("task-1-sample-font-fallback-large-classic.ass").toFile());
+        String ass = Files.readString(destination.resolve("task-1-sample-plain-large-classic.ass"));
+        assertFalse(ass.contains("\\kf"));
+        assertFalse(ass.contains("\\N"));
+    }
+
     TkSubtitleSegment sample(String text,List<String> units,double start,double end) {
         List<TkSubtitleWord> words=new ArrayList<>();
         for(int i=0;i<units.size();i++)words.add(new TkSubtitleWord(units.get(i),start+.4+i*.7,start+.85+i*.7,i==2));

@@ -92,6 +92,33 @@ final class TkSubtitleTextSegmentationSupport {
         return bestIndex > 0 ? bestIndex : fallbackIndex;
     }
 
+    // Display-only boundary rules. Chunk/timeline consumers retain their existing weight policy.
+    static IntPredicate safeLineBoundaries(String text) {
+        boolean[] protectedOffsets = protectedBoundaries(text);
+        return offset -> {
+            if (offset <= 0 || offset >= text.length() || protectedOffsets[offset]
+                    || Character.isLowSurrogate(text.charAt(offset))) {
+                return false;
+            }
+            int previous = text.codePointBefore(offset);
+            int next = text.codePointAt(offset);
+            // Keep decimal numbers intact even when ASR supplied 39. and 8 as separate words.
+            boolean decimal = previous == '.' && offset >= 2 && Character.isDigit(text.codePointBefore(offset - 1))
+                    && Character.isDigit(next);
+            int type = Character.getType(next);
+            boolean grapheme = previous == 0x200D || next == 0x200D
+                    || type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK
+                    || type == Character.ENCLOSING_MARK || next >= 0x1F3FB && next <= 0x1F3FF
+                    || previous >= 0x1F1E6 && previous <= 0x1F1FF && next >= 0x1F1E6 && next <= 0x1F1FF;
+            return !decimal && !grapheme && PUNCTUATION.indexOf(next) < 0 && OPENING_PUNCTUATION.indexOf(previous) < 0
+                    && !(isAsciiWord(previous) && isAsciiWord(next));
+        };
+    }
+
+    static int lineBoundaryPriority(String text, int offset) {
+        return boundaryPriority(text, offset, text.codePointBefore(offset), text.codePointAt(offset));
+    }
+
     private static boolean[] protectedBoundaries(String text) {
         boolean[] boundaries = new boolean[text.length() + 1];
         for (String phrase : PROTECTED_PHRASES) {

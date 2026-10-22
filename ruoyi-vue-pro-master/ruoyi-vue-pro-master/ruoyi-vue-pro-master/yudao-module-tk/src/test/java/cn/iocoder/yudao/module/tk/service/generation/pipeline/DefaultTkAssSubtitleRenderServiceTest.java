@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.tk.service.generation.pipeline;
 
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.File;
@@ -18,6 +19,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DefaultTkAssSubtitleRenderServiceTest {
 
     private final DefaultTkAssSubtitleRenderService service = new DefaultTkAssSubtitleRenderService();
+
+    @BeforeEach
+    void useProductionFontsWhenSupplied() {
+        String fonts = System.getProperty("tk.subtitle.fonts");
+        if (fonts != null) {
+            cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties properties =
+                    new cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties();
+            properties.getSubtitle().setFontsDir(fonts);
+            ReflectionTestUtils.setField(service, "generationProperties", properties);
+        }
+    }
 
     @Test
     void renderWrapsLongEnglishSubtitleAndKeepsSpaces() throws Exception {
@@ -36,7 +48,7 @@ class DefaultTkAssSubtitleRenderServiceTest {
         service.render(task, new TkSubtitleLayout(Collections.singletonList(segment)), file);
 
         String ass = Files.readString(file.toPath());
-        assertTrue(ass.contains("Sign relax your fingers."),
+        assertTrue(ass.replace("\\N", " ").contains("Sign relax your fingers."),
                 "English words should keep visible spaces instead of being merged");
         assertTrue(ass.contains("\\N"), "Long subtitle should wrap to a second line inside the safe width");
         assertFalse(ass.contains("\\\\N"), "ASS newline should not be escaped into visible text");
@@ -177,6 +189,27 @@ class DefaultTkAssSubtitleRenderServiceTest {
     }
 
     @Test
+    void screenshotCaptionUsesOneLineWheneverTheSelectedSizeFits() throws Exception {
+        for (boolean reliable : List.of(false, true)) {
+            assertEquals("试试这个厚切芒果干。", renderChineseCaption("试试这个厚切芒果干。", reliable),
+                    "A fitting screenshot caption must not be balanced into two short lines");
+        }
+    }
+
+    @Test
+    void overflowingCaptionFillsTheFirstLineBeforeWrapping() throws Exception {
+        String source = "甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸";
+        for (boolean reliable : List.of(false, true)) {
+            String visible = renderChineseCaption(source, reliable);
+            String[] lines = visible.split("\\\\N");
+            assertEquals(2, lines.length);
+            assertTrue(lines[0].codePointCount(0, lines[0].length()) >= 10,
+                    "The first line should fill the measured safe width instead of balancing at 9 CJK: " + visible);
+            assertEquals(source, visible.replace("\\N", ""));
+        }
+    }
+
+    @Test
     void plainAndKaraokeCaptionsUseTheSameReadableChineseLineBreaks() throws Exception {
         for (String text : Arrays.asList("买芒果干 先看配料表", "也不额外添加其他任何东西",
                 "每一口都是自然的芒果香", "只选用成熟芒果厚切加上高温烘干", "配料表 只有芒果不加任何糖")) {
@@ -189,12 +222,14 @@ class DefaultTkAssSubtitleRenderServiceTest {
                     || plain.contains("芒\\N果") || plain.contains("自\\N然"));
             String[] lines = plain.replace("\\N", "\n").split("\n");
             assertTrue(lines.length <= 2);
+            TkSubtitleLineBreakSupport metrics = new TkSubtitleLineBreakSupport(System.getProperty("tk.subtitle.fonts"),
+                    "Noto Sans CJK SC", 86, -1, 0, 4, 1, 540);
+            int scale = metrics.scale(List.of(lines));
             for (String line : lines) {
-                assertTrue(line.codePoints().map(cp -> cp < 128 ? 1 : 2).sum() <= 18,
-                        "Both lines must fit the existing safe width: " + line);
+                assertTrue(metrics.width(line) * scale / 100D <= metrics.safeWidth(), line);
             }
         }
-        assertEquals("配料表\\N只有芒果不加任何糖", renderChineseCaption("配料表 只有芒果不加任何糖", true));
+        assertEquals("配料表只有芒果不加任何糖", renderChineseCaption("配料表 只有芒果不加任何糖", true).replace("\\N", "").replace(" ", ""));
     }
 
     @Test
@@ -238,7 +273,7 @@ class DefaultTkAssSubtitleRenderServiceTest {
             String firstLine = visible.replace("\\N", "\n").split("\n")[0];
 
             assertTrue(firstLine.codePointCount(0, firstLine.length()) >= 6);
-            assertTrue(firstLine.codePointCount(0, firstLine.length()) <= 9);
+            assertTrue(firstLine.codePointCount(0, firstLine.length()) >= 9, "Use the available font width: " + visible);
             assertTrue(visible.contains("厚切"));
             assertEquals(text, visible.replace("\\N", ""));
         }
@@ -317,7 +352,7 @@ class DefaultTkAssSubtitleRenderServiceTest {
             String highlighted = renderHighlighted(source, List.of("果", "芒果", "mango", "a", "8"), true, false);
             String plain = renderHighlighted(source, Collections.emptyList(), true, false);
             assertEquals(plain, highlighted.replace("{\\c&H004DD8FF}", "").replace("{\\c&H00FFFFFF}", ""));
-            assertTrue(highlighted.contains("\\N"));
+            assertEquals(source.replace(" ", ""), plain.replaceAll("\\\\N", "").replaceAll("\\{[^}]*}", "").replace(" ", ""));
         }
     }
 

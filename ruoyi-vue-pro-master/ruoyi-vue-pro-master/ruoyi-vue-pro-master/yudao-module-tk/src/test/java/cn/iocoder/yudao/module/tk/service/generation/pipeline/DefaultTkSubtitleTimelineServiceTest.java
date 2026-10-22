@@ -924,9 +924,6 @@ class DefaultTkSubtitleTimelineServiceTest {
                 .findFirst().orElseThrow().split(",", 10)[9].replaceAll("\\{[^}]*}", "");
         String[] lines = visible.replace("\\N", "\n").split("\n");
         assertTrue(lines.length <= 2);
-        for (String line : lines) {
-            assertTrue(line.codePoints().map(cp -> cp < 128 ? 1 : 2).sum() <= 18, line);
-        }
         assertEquals(caption.getText().replace(" ", ""), visible.replace("\\N", "").replace(" ", ""));
     }
 
