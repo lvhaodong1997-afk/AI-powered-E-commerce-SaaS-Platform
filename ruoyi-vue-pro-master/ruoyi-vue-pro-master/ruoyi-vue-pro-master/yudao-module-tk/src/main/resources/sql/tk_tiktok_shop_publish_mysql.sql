@@ -119,63 +119,68 @@ CREATE TABLE IF NOT EXISTS tk_tiktok_shop_publish_attempt (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='TikTok Shop publication attempt audit';
 
 -- Permissions only: administrators must explicitly assign these to the intended roles.
--- Match the existing publishing center by permission rather than deployment-specific numeric IDs.
+-- Run this migration serially in one session, as with other explicit schema migrations.
+-- Read target-table values in separate statements to avoid MySQL INSERT target subqueries.
+-- Aggregates overwrite session variables even when no active parent/permission exists.
+SELECT COALESCE(MAX(id), 0) INTO @tk_shop_menu_id FROM system_menu;
+SELECT MIN(id) INTO @tk_shop_parent_id FROM system_menu
+WHERE permission = 'tk:video-publish-center:query' AND deleted = b'0';
+SELECT COUNT(*) INTO @tk_shop_permission_exists FROM system_menu
+WHERE permission = 'tk:tiktok-shop-account:query' AND deleted = b'0';
+SET @tk_shop_menu_id = @tk_shop_menu_id + 1;
 INSERT INTO system_menu (id, name, permission, type, sort, parent_id, path, icon, component,
                          status, visible, keep_alive, always_show, creator, create_time,
                          updater, update_time, deleted)
-SELECT (SELECT COALESCE(MAX(m.id), 6000) + 1 FROM system_menu m),
-       'TikTok Shop account query', 'tk:tiktok-shop-account:query', 3, 20, parent.id,
+SELECT @tk_shop_menu_id,
+       'TikTok Shop account query', 'tk:tiktok-shop-account:query', 3, 20, @tk_shop_parent_id,
        '', '', '', 0, b'0', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0'
-FROM system_menu parent
-WHERE parent.permission = 'tk:video-publish-center:query' AND parent.deleted = b'0'
-  AND NOT EXISTS (SELECT 1 FROM system_menu existing
-                  WHERE existing.permission = 'tk:tiktok-shop-account:query' AND existing.deleted = b'0')
-LIMIT 1;
+FROM DUAL
+WHERE @tk_shop_parent_id IS NOT NULL AND @tk_shop_permission_exists = 0;
 
+SELECT COUNT(*) INTO @tk_shop_permission_exists FROM system_menu
+WHERE permission = 'tk:tiktok-shop-account:authorize' AND deleted = b'0';
+SET @tk_shop_menu_id = @tk_shop_menu_id + 1;
 INSERT INTO system_menu (id, name, permission, type, sort, parent_id, path, icon, component,
                          status, visible, keep_alive, always_show, creator, create_time,
                          updater, update_time, deleted)
-SELECT (SELECT COALESCE(MAX(m.id), 6000) + 1 FROM system_menu m),
-       'TikTok Shop account authorize', 'tk:tiktok-shop-account:authorize', 3, 21, parent.id,
+SELECT @tk_shop_menu_id,
+       'TikTok Shop account authorize', 'tk:tiktok-shop-account:authorize', 3, 21, @tk_shop_parent_id,
        '', '', '', 0, b'0', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0'
-FROM system_menu parent
-WHERE parent.permission = 'tk:video-publish-center:query' AND parent.deleted = b'0'
-  AND NOT EXISTS (SELECT 1 FROM system_menu existing
-                  WHERE existing.permission = 'tk:tiktok-shop-account:authorize' AND existing.deleted = b'0')
-LIMIT 1;
+FROM DUAL
+WHERE @tk_shop_parent_id IS NOT NULL AND @tk_shop_permission_exists = 0;
 
+SELECT COUNT(*) INTO @tk_shop_permission_exists FROM system_menu
+WHERE permission = 'tk:tiktok-shop-publish:query' AND deleted = b'0';
+SET @tk_shop_menu_id = @tk_shop_menu_id + 1;
 INSERT INTO system_menu (id, name, permission, type, sort, parent_id, path, icon, component,
                          status, visible, keep_alive, always_show, creator, create_time,
                          updater, update_time, deleted)
-SELECT (SELECT COALESCE(MAX(m.id), 6000) + 1 FROM system_menu m),
-       'TikTok Shop publish query', 'tk:tiktok-shop-publish:query', 3, 22, parent.id,
+SELECT @tk_shop_menu_id,
+       'TikTok Shop publish query', 'tk:tiktok-shop-publish:query', 3, 22, @tk_shop_parent_id,
        '', '', '', 0, b'0', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0'
-FROM system_menu parent
-WHERE parent.permission = 'tk:video-publish-center:query' AND parent.deleted = b'0'
-  AND NOT EXISTS (SELECT 1 FROM system_menu existing
-                  WHERE existing.permission = 'tk:tiktok-shop-publish:query' AND existing.deleted = b'0')
-LIMIT 1;
+FROM DUAL
+WHERE @tk_shop_parent_id IS NOT NULL AND @tk_shop_permission_exists = 0;
 
+SELECT COUNT(*) INTO @tk_shop_permission_exists FROM system_menu
+WHERE permission = 'tk:tiktok-shop-publish:create' AND deleted = b'0';
+SET @tk_shop_menu_id = @tk_shop_menu_id + 1;
 INSERT INTO system_menu (id, name, permission, type, sort, parent_id, path, icon, component,
                          status, visible, keep_alive, always_show, creator, create_time,
                          updater, update_time, deleted)
-SELECT (SELECT COALESCE(MAX(m.id), 6000) + 1 FROM system_menu m),
-       'TikTok Shop publish create', 'tk:tiktok-shop-publish:create', 3, 23, parent.id,
+SELECT @tk_shop_menu_id,
+       'TikTok Shop publish create', 'tk:tiktok-shop-publish:create', 3, 23, @tk_shop_parent_id,
        '', '', '', 0, b'0', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0'
-FROM system_menu parent
-WHERE parent.permission = 'tk:video-publish-center:query' AND parent.deleted = b'0'
-  AND NOT EXISTS (SELECT 1 FROM system_menu existing
-                  WHERE existing.permission = 'tk:tiktok-shop-publish:create' AND existing.deleted = b'0')
-LIMIT 1;
+FROM DUAL
+WHERE @tk_shop_parent_id IS NOT NULL AND @tk_shop_permission_exists = 0;
 
+SELECT COUNT(*) INTO @tk_shop_permission_exists FROM system_menu
+WHERE permission = 'tk:tiktok-shop-publish:confirm' AND deleted = b'0';
+SET @tk_shop_menu_id = @tk_shop_menu_id + 1;
 INSERT INTO system_menu (id, name, permission, type, sort, parent_id, path, icon, component,
                          status, visible, keep_alive, always_show, creator, create_time,
                          updater, update_time, deleted)
-SELECT (SELECT COALESCE(MAX(m.id), 6000) + 1 FROM system_menu m),
-       'TikTok Shop publish confirm', 'tk:tiktok-shop-publish:confirm', 3, 24, parent.id,
+SELECT @tk_shop_menu_id,
+       'TikTok Shop publish confirm', 'tk:tiktok-shop-publish:confirm', 3, 24, @tk_shop_parent_id,
        '', '', '', 0, b'0', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0'
-FROM system_menu parent
-WHERE parent.permission = 'tk:video-publish-center:query' AND parent.deleted = b'0'
-  AND NOT EXISTS (SELECT 1 FROM system_menu existing
-                  WHERE existing.permission = 'tk:tiktok-shop-publish:confirm' AND existing.deleted = b'0')
-LIMIT 1;
+FROM DUAL
+WHERE @tk_shop_parent_id IS NOT NULL AND @tk_shop_permission_exists = 0;
