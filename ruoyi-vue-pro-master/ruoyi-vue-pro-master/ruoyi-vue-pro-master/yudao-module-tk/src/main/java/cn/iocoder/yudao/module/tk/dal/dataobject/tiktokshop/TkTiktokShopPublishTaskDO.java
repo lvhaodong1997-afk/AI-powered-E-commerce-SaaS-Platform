@@ -26,6 +26,9 @@ public class TkTiktokShopPublishTaskDO extends TenantBaseDO {
     private String fileName;
     private Long fileSize;
     private String title;
+    private String mimeType;
+    private Boolean isAiGenerated;
+    private String productSource;
     private String productId;
     private String productLinkTitle;
     private String productSnapshot;

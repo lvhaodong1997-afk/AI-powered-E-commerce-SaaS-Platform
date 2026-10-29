@@ -48,4 +48,12 @@ class TkTiktokShopAtomicMapperTest {
             assertNull(m.findIdentity(2L,"app","open"));assertEquals(0,m.disconnect(3L,2L));
         }
     }
+    @Test void cleanupExpiredSessionsIsBoundedAndKeepsBoundaryAndActiveSessions() throws Exception {
+        SqlSessionFactory f=database();LocalDateTime cutoff=LocalDateTime.of(2026,10,22,0,0);
+        try(SqlSession s=f.openSession(true);PreparedStatement p=s.getConnection().prepareStatement("INSERT INTO tk_tiktok_shop_auth_session(id,expire_time,status,deleted) VALUES(?,?,?,0)")){
+            for(int i=1;i<=1004;i++){p.setInt(1,i);p.setTimestamp(2,Timestamp.valueOf(i<=1002?cutoff.minusSeconds(1):i==1003?cutoff:cutoff.plusDays(7)));p.setString(3,"WAITING");p.addBatch();}p.executeBatch();
+            TkTiktokShopAuthSessionMapper m=s.getMapper(TkTiktokShopAuthSessionMapper.class);assertEquals(1000,m.cleanupExpired(cutoff));assertEquals(2,m.cleanupExpired(cutoff));assertEquals(0,m.cleanupExpired(cutoff));
+            try(ResultSet count=s.getConnection().createStatement().executeQuery("SELECT COUNT(*) FROM tk_tiktok_shop_auth_session")){count.next();assertEquals(2,count.getInt(1));}
+        }
+    }
 }

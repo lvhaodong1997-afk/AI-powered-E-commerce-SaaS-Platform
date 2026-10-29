@@ -30,7 +30,7 @@ class TkTiktokShopSchemaTest {
                 for (Field field : table.getValue().getDeclaredFields()) {
                     String column = field.getName().replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase();
                     String type = field.getType() == Long.class ? "bigint" : field.getType() == Integer.class ? "int"
-                            : field.getType() == LocalDateTime.class ? "datetime" : "(?:varchar|text|mediumtext|json)";
+                            : field.getType() == LocalDateTime.class ? "datetime" : field.getType() == Boolean.class ? "bit" : "(?:varchar|text|mediumtext|json)";
                     assertTrue(Pattern.compile("(?m)^\\s*" + column + "\\s+" + type + "\\b").matcher(create).find(), table.getKey() + "." + column);
                 }
                 for (String baseColumn : new String[]{"tenant_id", "company_id", "creator", "updater", "create_time", "update_time", "deleted"}) {

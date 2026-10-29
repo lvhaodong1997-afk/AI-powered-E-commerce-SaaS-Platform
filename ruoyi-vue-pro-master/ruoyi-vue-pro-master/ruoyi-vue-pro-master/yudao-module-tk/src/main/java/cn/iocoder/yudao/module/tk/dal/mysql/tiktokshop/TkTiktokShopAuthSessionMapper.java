@@ -7,6 +7,8 @@ import java.time.LocalDateTime;
 
 @Mapper
 public interface TkTiktokShopAuthSessionMapper extends BaseMapperX<TkTiktokShopAuthSessionDO> {
+    @org.apache.ibatis.annotations.Delete("DELETE FROM tk_tiktok_shop_auth_session WHERE expire_time < #{cutoff} LIMIT 1000")
+    int cleanupExpired(@org.apache.ibatis.annotations.Param("cutoff") java.time.LocalDateTime cutoff);
     /** Call under ignore only after validating the random state's exact format and SHA-256. */
     @Update("UPDATE tk_tiktok_shop_auth_session SET status='PROCESSING', consumed_time=#{now} "
             + "WHERE state_hash=#{hash} AND status='WAITING' AND expire_time > #{now} AND deleted=0")

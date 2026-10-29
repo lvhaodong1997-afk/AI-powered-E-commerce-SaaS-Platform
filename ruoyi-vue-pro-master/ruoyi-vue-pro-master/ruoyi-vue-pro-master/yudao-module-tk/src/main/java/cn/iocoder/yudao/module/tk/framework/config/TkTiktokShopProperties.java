@@ -20,6 +20,14 @@ public class TkTiktokShopProperties {
     private String market = "US";
     private String tokenEncryptionKey;
     private int workers = 2;
+    private String selectionProofKey;
+    private String mediaRoot;
+
+    public boolean hasValidSelectionProofKey() {
+        try { return selectionProofKey != null && java.util.Base64.getDecoder().decode(selectionProofKey).length == 32; }
+        catch (IllegalArgumentException ignored) { return false; }
+    }
+    public boolean isPublishingConfigured() { return isConfigured() && hasValidSelectionProofKey(); }
 
     public boolean isConfigured() {
         return enabled && hasText(appKey) && hasText(appSecret)

@@ -19,10 +19,11 @@ public final class TkTiktokShopAuthVO {
         public CallbackResult(Long id,boolean success){sessionId=id;status=success?"SUCCESS":"FAILED";}
     }
     @Getter public static class Capabilities {
-        private final boolean enabled,configured,supportsProducts=true,supportsPrecheck=true;
+        private final boolean enabled,configured,publishingConfigured,supportsProducts,supportsPrecheck;
+        private final java.util.List<String> supportedVideoFormats=java.util.Arrays.asList("MP4","MOV","WEBM");
         private final String market="US",requiredScope="creator.video.write",callbackOrigin;
         private final long maxVideoBytes=524288000L;
-        public Capabilities(TkTiktokShopProperties p){enabled=p.isEnabled();configured=p.isConfigured();callbackOrigin=p.callbackOrigin();}
+        public Capabilities(TkTiktokShopProperties p){enabled=p.isEnabled();configured=p.isConfigured();publishingConfigured=p.isPublishingConfigured();supportsProducts=publishingConfigured;supportsPrecheck=publishingConfigured;callbackOrigin=p.callbackOrigin();}
     }
     @Getter public static class AccountResponse {
         private final Long id,companyId; private final String displayName,username,market,authStatus,grantedScopes;

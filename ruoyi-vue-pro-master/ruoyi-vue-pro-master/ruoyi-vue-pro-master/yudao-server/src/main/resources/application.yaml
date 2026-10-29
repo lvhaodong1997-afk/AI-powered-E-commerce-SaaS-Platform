@@ -170,6 +170,9 @@ tk:
     redirect-uri: ${TIKTOK_SHOP_REDIRECT_URI:}
     frontend-origin: ${TIKTOK_SHOP_FRONTEND_ORIGIN:}
     token-encryption-key: ${TIKTOK_SHOP_TOKEN_ENCRYPTION_KEY:}
+    selection-proof-key: ${TIKTOK_SHOP_SELECTION_PROOF_KEY:}
+    media-root: ${TIKTOK_SHOP_MEDIA_ROOT:}
+    workers: ${TIKTOK_SHOP_WORKERS:2}
     market: ${TIKTOK_SHOP_MARKET:US}
   generation:
     upload:
