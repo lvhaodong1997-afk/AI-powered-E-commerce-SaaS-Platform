@@ -59,7 +59,15 @@ public class TkTiktokShopPublishWorker {
             catch(Exception error){
                 if(error instanceof TkTiktokShopApiException&&token!=null)try{tokens.reportRejectedToken(t.getTenantId(),t.getCompanyId(),t.getAccountId(),token.getVersion(),(TkTiktokShopApiException)error);}catch(Exception ignored){}
                 if(t.getVideoId()!=null){t.setStage("PROCESSING");delay(t,"STATUS_STALE");}
-                else if("SENDING".equals(t.getStage()))recovery(t,"SUBMISSION_OUTCOME_UNKNOWN");
+                else if("SENDING".equals(t.getStage())){
+                    String code="SUBMISSION_OUTCOME_UNKNOWN";
+                    if(error instanceof TkTiktokShopApiException){
+                        TkTiktokShopApiException upstream=(TkTiktokShopApiException)error;
+                        if(upstream.getRequestId()!=null)t.setRequestId(upstream.getRequestId());
+                        code=upstream.getCode();
+                    }
+                    recovery(t,code);
+                }
                 else fail(t,error instanceof TkTiktokShopApiException&&((TkTiktokShopApiException)error).isReauthorizationRequired()?"REAUTHORIZATION_REQUIRED":"PREPARATION_FAILED","Video preparation failed; verify authorization, product and media before creating a new task");
                 try{if(t.getConfirmedVersion()!=null)transaction.execute(tx->{saveAttempt(t,owner);save(t,owner,true);return null;});else save(t,owner,true);}catch(Exception ignored){/* Lease expiry recovers durable old stage. */}
             }

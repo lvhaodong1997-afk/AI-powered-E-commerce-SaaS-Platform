@@ -25,7 +25,34 @@ class TkTiktokShopWorkflowClientTest {
     }
     @Test void successEnvelopeMissingVideoIdIsUnknownFailure()throws Exception{
         TkTiktokShopWorkflowClient c=new TkTiktokShopWorkflowClient(api,json);
-        when(api.post(anyString(),anyString(),any())).thenReturn(new TkTiktokShopApiClient.Result(json.readTree("{}"),"r"));
-        assertThrows(TkTiktokShopApiException.class,()->c.publish(new TkTiktokShopPublishTaskDO(),"token"));
+        for(String data:new String[]{"{}","{\"video\":{\"id\":\"bad/id\"}}"}){
+            when(api.post(anyString(),anyString(),any())).thenReturn(new TkTiktokShopApiClient.Result(json.readTree(data),"safe-request"));
+            TkTiktokShopApiException error=assertThrows(TkTiktokShopApiException.class,()->c.publish(new TkTiktokShopPublishTaskDO(),"token"));
+            assertEquals("INVALID_RESPONSE",error.getCode());assertEquals("safe-request",error.getRequestId());assertNull(error.getCause());
+        }
+    }
+    @Test void officialPrecheckIssuesRetainViolationRiskAndQualitySuggestions()throws Exception{
+        TkTiktokShopWorkflowClient c=new TkTiktokShopWorkflowClient(api,json);
+        when(api.get(anyString(),anyString(),anyMap())).thenReturn(new TkTiktokShopApiClient.Result(json.readTree("{\"precheck_task\":{\"violation_check_result\":{\"status\":\"FAIL\",\"issues\":[{\"risk\":\"Pirated Content\",\"suggestions\":\"Creating original content is essential.\",\"raw\":\"omit\"}]},\"good_quality_check_result\":{\"status\":\"FAIL\",\"issues\":[{\"code\":\"LOW_CONTENT_PROMOTIO\",\"suggestions\":\"Showcase the product from multiple perspectives.\"}]}}}"),null));
+        TkTiktokShopWorkflowClient.Check check=c.check("pc","token");JsonNode saved=json.valueToTree(check);
+        assertTrue(check.isFailed());assertFalse(check.isPassed());assertTrue(check.isQualityAdvisory());
+        assertEquals("Pirated Content",saved.path("violationIssues").path(0).path("risk").asText());
+        assertEquals("Creating original content is essential.",saved.path("violationIssues").path(0).path("suggestions").asText());
+        assertEquals("LOW_CONTENT_PROMOTIO",saved.path("qualityIssues").path(0).path("code").asText());
+        assertEquals("Showcase the product from multiple perspectives.",saved.path("qualityIssues").path(0).path("suggestions").asText());
+        assertFalse(saved.toString().contains("omit"));
+    }
+    @Test void precheckIssuesAreBoundedAllowlistedPlainText()throws Exception{
+        TkTiktokShopWorkflowClient c=new TkTiktokShopWorkflowClient(api,json);
+        com.fasterxml.jackson.databind.node.ObjectNode data=json.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode result=data.putObject("precheck_task").putObject("violation_check_result");result.put("status","FAIL");
+        com.fasterxml.jackson.databind.node.ArrayNode issues=result.putArray("issues");
+        for(int i=0;i<25;i++)issues.addObject().put("code","bad/code").put("risk","Risk\u0000\r\n"+String.join("",Collections.nCopies(300,"x"))).put("suggestions",String.join("",Collections.nCopies(1100,"y"))).put("access_token","never-copy");
+        issues.add("ignore-non-object");
+        when(api.get(anyString(),anyString(),anyMap())).thenReturn(new TkTiktokShopApiClient.Result(data,null));
+        JsonNode saved=json.valueToTree(c.check("pc","token"));JsonNode safe=saved.path("violationIssues");
+        assertEquals(20,safe.size());assertEquals(0,saved.path("qualityIssues").size());
+        assertTrue(safe.path(0).path("code").isNull());assertTrue(safe.path(0).path("risk").asText().length()<=256);assertTrue(safe.path(0).path("suggestions").asText().length()<=1024);
+        assertFalse(safe.path(0).path("risk").asText().chars().anyMatch(Character::isISOControl));assertFalse(saved.toString().contains("never-copy"));
     }
 }
