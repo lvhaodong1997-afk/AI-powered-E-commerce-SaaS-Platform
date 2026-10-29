@@ -23,7 +23,22 @@ public class TkTiktokShopProperties {
 
     public boolean isConfigured() {
         return enabled && hasText(appKey) && hasText(appSecret)
-                && validUrl(redirectUri, true) && validUrl(frontendOrigin, false);
+                && validUrl(redirectUri, true) && validUrl(frontendOrigin, false)
+                && "US".equals(market) && hasValidEncryptionKey();
+    }
+
+    public boolean hasValidEncryptionKey() {
+        try {
+            return tokenEncryptionKey != null && java.util.Base64.getDecoder().decode(tokenEncryptionKey).length == 32;
+        } catch (IllegalArgumentException ignored) { return false; }
+    }
+
+    public String callbackOrigin() {
+        if (!validUrl(redirectUri, true)) return null;
+        URI uri = URI.create(redirectUri);
+        int port = uri.getPort();
+        return "https://" + uri.getHost().toLowerCase(java.util.Locale.ROOT)
+                + (port == -1 || port == 443 ? "" : ":" + port);
     }
 
     public void requireConfigured() {

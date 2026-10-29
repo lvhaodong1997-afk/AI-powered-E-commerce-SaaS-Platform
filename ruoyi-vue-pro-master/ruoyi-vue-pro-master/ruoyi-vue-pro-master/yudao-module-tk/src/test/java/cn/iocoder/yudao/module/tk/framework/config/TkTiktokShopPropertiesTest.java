@@ -50,8 +50,26 @@ class TkTiktokShopPropertiesTest {
         properties.setEnabled(true);
         properties.setAppKey("test-key");
         properties.setAppSecret("test-secret");
+        properties.setTokenEncryptionKey(java.util.Base64.getEncoder().encodeToString(new byte[32]));
         properties.setRedirectUri("https://example.com/callback");
         properties.setFrontendOrigin("https://example.com");
         return properties;
+    }
+
+    @Test
+    void encryptionKeyIsRequiredAndMustBeDedicatedAes256() {
+        TkTiktokShopProperties p = configured();
+        for (String key : new String[]{null, "", "not-base64", "dGVzdA=="}) {
+            p.setTokenEncryptionKey(key);
+            assertFalse(p.isConfigured());
+        }
+    }
+
+    @Test void callbackOriginMatchesBrowserCanonicalOrigin() {
+        TkTiktokShopProperties p=configured();
+        p.setRedirectUri("https://CALLBACK.Example:443/path");
+        assertEquals("https://callback.example",p.callbackOrigin());
+        p.setRedirectUri("https://callback.example:8443/path");
+        assertEquals("https://callback.example:8443",p.callbackOrigin());
     }
 }

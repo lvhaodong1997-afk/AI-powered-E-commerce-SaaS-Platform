@@ -163,6 +163,14 @@ yudao:
 debug: false
 
 tk:
+  tiktok-shop:
+    enabled: ${TIKTOK_SHOP_ENABLED:false}
+    app-key: ${TIKTOK_SHOP_APP_KEY:}
+    app-secret: ${TIKTOK_SHOP_APP_SECRET:}
+    redirect-uri: ${TIKTOK_SHOP_REDIRECT_URI:}
+    frontend-origin: ${TIKTOK_SHOP_FRONTEND_ORIGIN:}
+    token-encryption-key: ${TIKTOK_SHOP_TOKEN_ENCRYPTION_KEY:}
+    market: ${TIKTOK_SHOP_MARKET:US}
   generation:
     upload:
       scheduled-publish-root-dir: ${TK_SCHEDULED_PUBLISH_ROOT_DIR:/tk-publish-media}
