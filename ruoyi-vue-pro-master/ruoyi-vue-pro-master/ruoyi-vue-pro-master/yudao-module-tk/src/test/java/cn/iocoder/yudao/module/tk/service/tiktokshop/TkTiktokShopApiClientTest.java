@@ -2,7 +2,7 @@ package cn.iocoder.yudao.module.tk.service.tiktokshop;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
-import okhttp3.OkHttpClient;
+import okhttp3.*;
 import org.junit.jupiter.api.Test;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -10,6 +10,7 @@ import java.time.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class TkTiktokShopApiClientTest {
     private static final Clock CLOCK=Clock.fixed(Instant.ofEpochSecond(1800000000),ZoneOffset.UTC);
@@ -90,6 +91,61 @@ class TkTiktokShopApiClientTest {
             assertEquals("RESPONSE_TOO_LARGE",assertThrows(TkTiktokShopApiException.class,()->client.get("/large","a",Collections.emptyMap())).getCode());
             TkTiktokShopApiException failure=assertThrows(TkTiktokShopApiException.class,()->client.post("/broken","fake-access",Collections.singletonMap("title","fake-title")));
             assertEquals(1,attempts.get());assertEquals("TRANSPORT_ERROR",failure.getCode());assertNull(failure.getCause());assertFalse(failure.toString().contains("127.0.0.1"));assertFalse(failure.toString().contains("fake-access"));
+        }finally{server.stop(0);}
+    }
+    @Test void postDoesNotReplayAfter503RetryAfterZero() throws Exception {
+        assert503NotReplayed(client->client.post("/creator/test","fake-access",Collections.singletonMap("title","fake-title")));
+    }
+    @Test void codeExchangeDoesNotReplayAfter503RetryAfterZero() throws Exception {
+        assert503NotReplayed(client->client.exchangeCode("fake-code"));
+    }
+    @Test void rotatingRefreshDoesNotReplayAfter503RetryAfterZero() throws Exception {
+        assert503NotReplayed(client->client.refreshToken("fake-refresh"));
+    }
+    @Test void networkGuardRejectsSecondExchangeAfter421() throws Exception {
+        assertSecondExchangeRejected(421);
+    }
+    @Test void networkGuardRejectsSecondExchangeAfter503() throws Exception {
+        assertSecondExchangeRejected(503);
+    }
+    private static void assertSecondExchangeRejected(int status) throws Exception {
+        OkHttpClient transport=TkTiktokShopHttpTransport.createClient();
+        Request original=new Request.Builder().url("https://auth.tiktok-shops.com/api/v2/token/get?auth_code=fake-code").build();
+        Response response=new Response.Builder().request(original).protocol(Protocol.HTTP_2).code(status).message("test").build();
+        // Model two logical calls reusing one Request, then a follow-up on each call.
+        for(int logicalCall=0;logicalCall<2;logicalCall++) {
+            AtomicReference<Request> marked=new AtomicReference<>();
+            Interceptor.Chain application=mock(Interceptor.Chain.class);
+            when(application.request()).thenReturn(original);
+            when(application.proceed(any(Request.class))).thenAnswer(invocation->{marked.set(invocation.getArgument(0));return response;});
+            transport.interceptors().get(0).intercept(application);
+            Interceptor.Chain network=mock(Interceptor.Chain.class);
+            when(network.request()).thenAnswer(invocation->marked.get());
+            when(network.proceed(any(Request.class))).thenReturn(response);
+            Interceptor guard=transport.networkInterceptors().get(0);
+            assertSame(response,guard.intercept(network));
+            java.io.IOException failure=assertThrows(java.io.IOException.class,()->guard.intercept(network));
+            verify(network,times(1)).proceed(any(Request.class));
+            assertNull(failure.getCause());assertFalse(failure.toString().contains("fake-code"));assertFalse(failure.toString().contains("tiktok-shops.com"));
+        }
+    }
+    private static void assert503NotReplayed(java.util.function.Consumer<TkTiktokShopApiClient> operation) throws Exception {
+        java.util.concurrent.atomic.AtomicInteger sends=new java.util.concurrent.atomic.AtomicInteger();
+        HttpServer server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        server.createContext("/",e->{
+            read(e.getRequestBody());
+            boolean first=sends.incrementAndGet()==1;
+            if(first)e.getResponseHeaders().set("Retry-After","0");
+            byte[] out=("{\"code\":0,\"data\":{\"access_token\":\"a\",\"refresh_token\":\"r\",\"open_id\":\"open\",\"user_type\":1,\"granted_scopes\":[\"creator.video.write\"],\"access_token_expire_in\":1800003600,\"refresh_token_expire_in\":1800100000}}").getBytes(StandardCharsets.UTF_8);
+            e.sendResponseHeaders(first?503:200,out.length);e.getResponseBody().write(out);e.close();
+        });server.start();
+        try {
+            String base="http://127.0.0.1:"+server.getAddress().getPort();
+            TkTiktokShopApiClient client=new TkTiktokShopApiClient(TkTiktokShopTokenCipherTest.properties(),new ObjectMapper(),new OkHttpClient(),CLOCK,base,base);
+            TkTiktokShopApiException failure=assertThrows(TkTiktokShopApiException.class,()->operation.accept(client));
+            assertEquals(1,sends.get());assertEquals("TRANSPORT_ERROR",failure.getCode());assertNull(failure.getCause());
+            for(String secret:new String[]{"fake-access","fake-code","fake-refresh","fake-secret","127.0.0.1"})
+                assertFalse(failure.toString().contains(secret));
         }finally{server.stop(0);}
     }
     private static byte[] read(java.io.InputStream input) throws java.io.IOException {java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();byte[] b=new byte[4096];int n;while((n=input.read(b))!=-1)out.write(b,0,n);return out.toByteArray();}

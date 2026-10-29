@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
 import java.io.*;
 import java.time.*;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
 @Component
 public class TkTiktokShopApiClient {
@@ -28,12 +27,7 @@ public class TkTiktokShopApiClient {
     /** Package-only transport seam. Runtime configuration cannot change the official hosts. */
     TkTiktokShopApiClient(TkTiktokShopProperties properties,ObjectMapper json,OkHttpClient supplied,Clock clock,String apiBase,String authBase) {
         this.properties=properties;this.json=json;this.clock=clock;this.apiBase=apiBase;this.authBase=authBase;
-        OkHttpClient.Builder builder=supplied.newBuilder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
-                .connectTimeout(10,TimeUnit.SECONDS).readTimeout(20,TimeUnit.SECONDS).callTimeout(30,TimeUnit.SECONDS);
-        // A shared application's interceptors/authenticators must never observe Shop secrets.
-        builder.interceptors().clear();builder.networkInterceptors().clear();
-        builder.authenticator(Authenticator.NONE).proxyAuthenticator(Authenticator.NONE);
-        this.client=builder.build();
+        this.client=TkTiktokShopHttpTransport.createClient(supplied);
     }
     public Result get(String path,String token,Map<String,String> query) { return signed("GET",path,token,query,null); }
     public Result post(String path,String token,Object body) {
