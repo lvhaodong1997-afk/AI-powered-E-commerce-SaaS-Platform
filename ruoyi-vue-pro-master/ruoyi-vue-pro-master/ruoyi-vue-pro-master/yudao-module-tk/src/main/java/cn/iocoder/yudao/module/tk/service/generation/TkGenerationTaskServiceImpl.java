@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.infra.api.file.FileApi;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskCreateReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.generation.vo.TkGenerationTaskPageReqVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkBgmAssetDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkAudioAudiencePresetDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationBatchDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkMaterialLibraryDO;
@@ -20,6 +21,7 @@ import cn.iocoder.yudao.module.tk.dal.mysql.TkGenerationBatchMapper;
 import cn.iocoder.yudao.module.tk.enums.TkGenerationStatusEnum;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.service.bgm.TkBgmAssetService;
+import cn.iocoder.yudao.module.tk.service.audiopreset.TkAudioAudiencePresetService;
 import cn.iocoder.yudao.module.tk.service.credit.TkCreditService;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkGeminiPromptConfig;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkMimoVoiceModeEnum;
@@ -28,6 +30,7 @@ import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkGenerationPipeli
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkNativeOpeningSupport;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkVideoDurationSupport;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkTtsProviderEnum;
+import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkAudioMixSupport;
 import cn.iocoder.yudao.module.tk.service.generation.route.TkGenerationRoute;
 import cn.iocoder.yudao.module.tk.service.generation.route.TkGenerationRouteService;
 import cn.iocoder.yudao.module.tk.service.log.TkBusinessLogService;
@@ -113,6 +116,8 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     @Resource
     private TkBgmAssetService bgmAssetService;
     @Resource
+    private TkAudioAudiencePresetService audioAudiencePresetService;
+    @Resource
     private TkGenerationOpeningUploadService generationOpeningUploadService;
 
     @Override
@@ -137,6 +142,10 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         TkMaterialLibraryDO library = libraryService.validateMaterialLibraryReadable(createReqVO.getLibraryId());
         TkUserScope scope = dataScopeService.getCurrentScope();
         Long companyId = resolveCompanyId(createReqVO.getCompanyId(), library, scope);
+        AudioSnapshot[] resolvedAudio = new AudioSnapshot[1];
+        TenantUtils.execute(library.getTenantId(), () -> {
+            resolvedAudio[0] = resolveAudioSnapshot(createReqVO, companyId);
+        });
         Long batchId = createBatch(createReqVO, library, companyId, scriptOptionIds.size(), videosPerScript, totalCount);
         List<Long> ids = new ArrayList<>(totalCount);
         for (int scriptIndex = 0; scriptIndex < scriptOptionIds.size(); scriptIndex++) {
@@ -146,7 +155,8 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
                 itemReqVO.setScriptOptionId(scriptOptionId);
                 itemReqVO.setScriptOptionIds(null);
                 itemReqVO.setVideosPerScript(1);
-                ids.add(createGenerationTask(itemReqVO, null, true, batchId, scriptIndex + 1, videoIndex + 1));
+                ids.add(createGenerationTask(itemReqVO, null, true, batchId, scriptIndex + 1, videoIndex + 1,
+                        resolvedAudio[0]));
             }
         }
         refreshBatchProgress(batchId);
@@ -307,6 +317,9 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         target.setBgmEnabled(source.getBgmEnabled());
         target.setBgmAssetId(source.getBgmAssetId());
         target.setBgmVolume(source.getBgmVolume());
+        target.setAudioPresetId(source.getAudioPresetId());
+        target.setAudioPresetVersion(source.getAudioPresetVersion());
+        target.setAudioMixVersion(source.getAudioMixVersion());
         target.setSubtitleEnabled(source.getSubtitleEnabled());
         target.setSubtitleStyle(source.getSubtitleStyle());
         target.setSubtitlePositionMode(source.getSubtitlePositionMode());
@@ -326,6 +339,13 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
 
     private Long createGenerationTask(TkGenerationTaskCreateReqVO createReqVO, MultipartFile openingVideoFile,
                                       boolean startPipeline, Long batchId, Integer scriptIndex, Integer videoIndex) {
+        return createGenerationTask(createReqVO, openingVideoFile, startPipeline, batchId, scriptIndex,
+                videoIndex, null);
+    }
+
+    private Long createGenerationTask(TkGenerationTaskCreateReqVO createReqVO, MultipartFile openingVideoFile,
+                                      boolean startPipeline, Long batchId, Integer scriptIndex, Integer videoIndex,
+                                      AudioSnapshot frozenAudio) {
         if (openingVideoFile != null && StrUtil.isBlank(createReqVO.getOpeningVideoName())) {
             createReqVO.setOpeningVideoName(StrUtil.blankToDefault(openingVideoFile.getOriginalFilename(), "opening.mp4"));
         }
@@ -340,15 +360,22 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         TkUserScope scope = dataScopeService.getCurrentScope();
         Long companyId = resolveCompanyId(createReqVO.getCompanyId(), library, scope);
         Long[] result = new Long[1];
-        TenantUtils.execute(library.getTenantId(),
-                () -> result[0] = createGenerationTaskWithinTenant(createReqVO, openingVideoFile, startPipeline,
-                        library, companyId, batchId, scriptIndex, videoIndex));
+        TenantUtils.execute(library.getTenantId(), () -> {
+            result[0] = createGenerationTaskWithinTenant(createReqVO, openingVideoFile, startPipeline,
+                    library, companyId, batchId, scriptIndex, videoIndex, frozenAudio);
+        });
         return result[0];
     }
 
     private Long createGenerationTaskWithinTenant(TkGenerationTaskCreateReqVO createReqVO, MultipartFile openingVideoFile,
                                                   boolean startPipeline, TkMaterialLibraryDO library, Long companyId,
-                                                  Long batchId, Integer scriptIndex, Integer videoIndex) {
+                                                  Long batchId, Integer scriptIndex, Integer videoIndex,
+                                                  AudioSnapshot frozenAudio) {
+        AudioSnapshot audio = frozenAudio == null ? resolveAudioSnapshot(createReqVO, companyId) : frozenAudio;
+        if (audio.presetId != null) {
+            createReqVO = copyCreateReqVO(createReqVO);
+            applyAudioSelection(audio.selection, createReqVO);
+        }
         Long tenantId = library.getTenantId();
         String businessTraceId = TkBusinessTraceIdGenerator.generate(tenantId);
         TkGenerationPrecheckRespVO precheck = precheckService.precheck(createReqVO);
@@ -382,16 +409,20 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
             }
             boolean voiceEnabled = resolveVoiceEnabled(createReqVO, materialPurpose, promptText);
             String ttsProvider = resolveTtsProvider(createReqVO);
-            String resolvedVoiceCode = voiceEnabled && TkTtsProviderEnum.DASHSCOPE.equals(ttsProvider)
-                    ? voiceProfileService.resolveVoiceSelection(createReqVO.getVoiceProfileId(), createReqVO.getVoiceCode())
-                    : null;
-            if (voiceEnabled && TkTtsProviderEnum.MINIMAX.equals(ttsProvider)) {
-                resolvedVoiceCode = miniMaxVoiceDictionaryService.resolveVoiceCode(
-                        createReqVO.getVoiceProfileId(), createReqVO.getVoiceCode());
+            if (voiceEnabled && !audio.voiceResolved) {
+                if (TkTtsProviderEnum.DASHSCOPE.equals(ttsProvider)) {
+                    audio.voiceCode = voiceProfileService.resolveVoiceSelection(
+                            createReqVO.getVoiceProfileId(), createReqVO.getVoiceCode());
+                } else if (TkTtsProviderEnum.MINIMAX.equals(ttsProvider)) {
+                    audio.voiceCode = miniMaxVoiceDictionaryService.resolveVoiceCode(
+                            createReqVO.getVoiceProfileId(), createReqVO.getVoiceCode());
+                } else if (TkTtsProviderEnum.MIMO.equals(ttsProvider)) {
+                    audio.mimoVoice = resolveMimoVoiceSelection(createReqVO);
+                }
+                audio.voiceResolved = true;
             }
-            TkMimoVoiceSelection mimoVoiceSelection = voiceEnabled && TkTtsProviderEnum.MIMO.equals(ttsProvider)
-                    ? resolveMimoVoiceSelection(createReqVO)
-                    : null;
+            String resolvedVoiceCode = voiceEnabled ? audio.voiceCode : null;
+            TkMimoVoiceSelection mimoVoiceSelection = voiceEnabled ? audio.mimoVoice : null;
             boolean subtitleEnabled = voiceEnabled && (createReqVO.getSubtitleEnabled() == null || createReqVO.getSubtitleEnabled());
             String scriptTitle = null;
             if (createReqVO.getScriptOptionId() != null) {
@@ -409,7 +440,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
             TkGenerationRoute generationRoute = resolveGenerationRoute(tenantId, materialPurpose,
                     createReqVO.getProductCategoryCode());
             String generationRouteConfig = resolveGenerationRouteConfig(createReqVO, materialPurpose, generationRoute);
-            BgmSelection bgmSelection = resolveBgmSelection(createReqVO);
+            BgmSelection bgmSelection = audio.bgm;
             String openingProcessMode = openingVideo == null ? null
                     : TkNativeOpeningSupport.normalizeMode(createReqVO.getOpeningProcessMode());
             TkGenerationTaskDO task = TkGenerationTaskDO.builder()
@@ -454,6 +485,10 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
                     .bgmSourceType(bgmSelection.sourceType)
                     .bgmUrl(bgmSelection.url)
                     .bgmVolume(bgmSelection.volume)
+                    .audienceCode(audio.audienceCode)
+                    .audioPresetId(audio.presetId)
+                    .audioPresetVersion(audio.presetVersion)
+                    .audioMixVersion(audio.mixVersion)
                     .subtitleEnabled(subtitleEnabled)
                     .subtitleStyle(StrUtil.blankToDefault(createReqVO.getSubtitleStyle(), DEFAULT_SUBTITLE_STYLE))
                     .subtitlePositionMode(StrUtil.blankToDefault(createReqVO.getSubtitlePositionMode(), DEFAULT_SUBTITLE_POSITION_MODE))
@@ -636,20 +671,91 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     }
 
     private BgmSelection resolveBgmSelection(TkGenerationTaskCreateReqVO createReqVO) {
+        int mixVersion = TkAudioMixSupport.normalizeVersion(createReqVO.getAudioMixVersion());
+        if (mixVersion == 2 && Boolean.TRUE.equals(createReqVO.getBgmEnabled())
+                && createReqVO.getBgmAssetId() == null) {
+            throw new IllegalArgumentException("已开启背景音乐，请选择可用曲目");
+        }
         if (!Boolean.TRUE.equals(createReqVO.getBgmEnabled())
                 || createReqVO.getBgmAssetId() == null) {
             return BgmSelection.disabled();
         }
         TkBgmAssetDO asset = bgmAssetService.validateReadable(createReqVO.getBgmAssetId());
         return new BgmSelection(true, asset.getId(), asset.getSourceType(), asset.getFileUrl(),
-                normalizeBgmVolume(createReqVO.getBgmVolume()));
+                TkAudioMixSupport.normalizeVolume(createReqVO.getBgmVolume(), createReqVO.getAudioMixVersion()));
     }
 
-    private double normalizeBgmVolume(Double bgmVolume) {
-        if (bgmVolume == null) {
-            return 0.10D;
+    private AudioSnapshot resolveAudioSnapshot(TkGenerationTaskCreateReqVO request, Long companyId) {
+        try {
+            return resolveAudioSnapshotValidated(request, companyId);
+        } catch (IllegalArgumentException exception) {
+            throw new cn.iocoder.yudao.framework.common.exception.ServiceException(400, exception.getMessage());
         }
-        return Math.max(0.01D, Math.min(0.30D, bgmVolume));
+    }
+
+    private AudioSnapshot resolveAudioSnapshotValidated(TkGenerationTaskCreateReqVO request, Long companyId) {
+        int version = TkAudioMixSupport.normalizeVersion(request.getAudioMixVersion());
+        TkGenerationTaskCreateReqVO effective = copyCreateReqVO(request);
+        TkAudioAudiencePresetDO preset = null;
+        if (request.getAudioPresetId() != null) {
+            preset = audioAudiencePresetService.resolveForGeneration(request.getAudioPresetId(),
+                    request.getAudioPresetVersion(), companyId);
+            TkGenerationTaskCreateReqVO selectedVoice = JsonUtils.parseObject(preset.getVoiceConfig(),
+                    TkGenerationTaskCreateReqVO.class);
+            // Never copy nonaudio fields (including voiceEnabled) from persisted configuration.
+            applyVoiceSelection(selectedVoice, effective);
+            effective.setTtsProvider(preset.getTtsProvider());
+            effective.setBgmEnabled(preset.getBgmEnabled());
+            effective.setBgmAssetId(preset.getBgmAssetId());
+            effective.setBgmVolume(preset.getBgmVolume());
+            effective.setAudioMixVersion(2);
+            version = 2;
+        }
+        return new AudioSnapshot(effective, resolveBgmSelection(effective), preset, version);
+    }
+
+    private static void applyVoiceSelection(TkGenerationTaskCreateReqVO source,
+                                             TkGenerationTaskCreateReqVO target) {
+        target.setTtsProvider(source.getTtsProvider());
+        target.setVoiceId(source.getVoiceId());
+        target.setVoiceCode(source.getVoiceCode());
+        target.setVoiceProfileId(source.getVoiceProfileId());
+        target.setMimoVoiceMode(source.getMimoVoiceMode());
+        target.setMimoVoiceCode(source.getMimoVoiceCode());
+        target.setMimoVoicePrompt(source.getMimoVoicePrompt());
+        target.setMimoVoiceSampleUrl(source.getMimoVoiceSampleUrl());
+    }
+
+    private static void applyAudioSelection(TkGenerationTaskCreateReqVO source,
+                                             TkGenerationTaskCreateReqVO target) {
+        applyVoiceSelection(source, target);
+        target.setBgmEnabled(source.getBgmEnabled());
+        target.setBgmAssetId(source.getBgmAssetId());
+        target.setBgmVolume(source.getBgmVolume());
+        target.setAudioMixVersion(source.getAudioMixVersion());
+    }
+
+    /** Request-local snapshot shared by the sequential batch expansion, never by async workers. */
+    private static final class AudioSnapshot {
+        private final TkGenerationTaskCreateReqVO selection;
+        private final BgmSelection bgm;
+        private final Long presetId;
+        private final Integer presetVersion;
+        private final String audienceCode;
+        private final int mixVersion;
+        private boolean voiceResolved;
+        private String voiceCode;
+        private TkMimoVoiceSelection mimoVoice;
+
+        private AudioSnapshot(TkGenerationTaskCreateReqVO selection, BgmSelection bgm,
+                              TkAudioAudiencePresetDO preset, int mixVersion) {
+            this.selection = selection;
+            this.bgm = bgm;
+            this.presetId = preset == null ? null : preset.getId();
+            this.presetVersion = preset == null ? null : preset.getVersion();
+            this.audienceCode = preset == null ? null : preset.getAudienceCode();
+            this.mixVersion = mixVersion;
+        }
     }
 
     private OpeningVideo uploadOpeningVideoIfPresent(MultipartFile file, Long tenantId, Long companyId) {

@@ -777,6 +777,13 @@
                 </small>
               </div>
 
+              <div class="config-drawer audience-config-drawer">
+                <div class="config-drawer-head"><strong>{{ isEn ? 'Audience audio preset (optional)' : '人群音频预设（可选）' }}</strong><el-button text type="primary" @click="presetManagerVisible = true">{{ isEn ? 'Manage presets' : '管理预设' }}</el-button></div>
+                <div class="config-drawer-body">
+                  <el-select :model-value="audioSelection.selected?.audienceCode" clearable :loading="presetsLoading" :placeholder="isEn ? 'Optional — use manual settings' : '可不选，使用本次手动配置'" @change="handleAudienceSelection"><el-option v-for="item in audienceCategories" :key="item.code" :value="item.code" :label="audienceOptionLabel(item.code)" /></el-select>
+                  <small class="field-hint">{{ audioControlsLocked ? (isEn ? 'Applied · ' : '已应用 · ') + audienceLabel(audioSelection.selected?.audienceCode) : (isEn ? 'Clear selection to restore this submission’s manual audio settings.' : '选择后使用预设音色和 BGM，清空后恢复本次手动配置。') }}</small>
+                </div>
+              </div>
               <div class="config-drawer voice-config-drawer">
                 <button
                   class="config-drawer-head"
@@ -784,7 +791,7 @@
                   @click="voiceConfigExpanded = !voiceConfigExpanded"
                 >
                   <span class="config-drawer-title">
-                    <strong>{{ copy.voiceRequired }}</strong>
+                    <strong>{{ copy.voiceRequired }}</strong><el-tag v-if="audioControlsLocked" size="small">{{ isEn ? 'From audience preset' : '来自人群预设' }}</el-tag>
                   </span>
                   <span class="config-drawer-meta">
                     <el-switch
@@ -805,7 +812,7 @@
                   <el-radio-group
                     v-model="createForm.ttsProvider"
                     class="voice-provider-row"
-                    :disabled="!isVoiceoverEnabled"
+                    :disabled="audioControlsLocked || !isVoiceoverEnabled"
                   >
                     <el-radio-button
                       v-for="item in voiceProviderOptions"
@@ -821,7 +828,7 @@
                     v-model="createForm.voiceCode"
                     :options="miniMaxVoiceOptions"
                     :loading="miniMaxVoiceLoading"
-                    :disabled="!isVoiceoverEnabled"
+                    :disabled="audioControlsLocked || !isVoiceoverEnabled"
                     :is-en="isEn"
                     @favorite-change="updateMiniMaxFavorite"
                   />
@@ -832,7 +839,7 @@
                       :provider="TTS_PROVIDER_DASHSCOPE"
                       :options="dashScopeVoiceOptions"
                       :loading="dashScopeFavoritesLoading"
-                      :disabled="!isVoiceoverEnabled"
+                      :disabled="audioControlsLocked || !isVoiceoverEnabled"
                       :favorites-disabled="!dashScopeFavoritesReady"
                       @favorite-change="updateDashScopeFavorite"
                     />
@@ -842,7 +849,7 @@
                       @click="loadDashScopeFavorites"
                     >{{ tt('voice.retryFavorites') }}</el-button>
                     <el-tooltip :content="copy.manageCustomVoice">
-                      <el-button circle plain :disabled="!isVoiceoverEnabled" @click="voiceManagerVisible = true"><Icon icon="ep:setting" /></el-button>
+                      <el-button circle plain :disabled="audioControlsLocked || !isVoiceoverEnabled" @click="voiceManagerVisible = true"><Icon icon="ep:setting" /></el-button>
                     </el-tooltip>
                   </div>
 
@@ -852,7 +859,7 @@
                       v-model="createForm.mimoVoiceProfileId"
                       class="library-select"
                       clearable
-                      :disabled="!isVoiceoverEnabled"
+                      :disabled="audioControlsLocked || !isVoiceoverEnabled"
                       :placeholder="copy.mimoSavedVoicePlaceholder"
                     >
                       <el-option
@@ -865,7 +872,7 @@
                     <label>{{ copy.mimoModeLabel }}</label>
                     <el-radio-group
                       v-model="createForm.mimoVoiceMode"
-                      :disabled="!isVoiceoverEnabled || Boolean(createForm.mimoVoiceProfileId)"
+                      :disabled="audioControlsLocked || !isVoiceoverEnabled || Boolean(createForm.mimoVoiceProfileId)"
                     >
                       <el-radio-button
                         v-for="item in mimoVoiceModeOptions"
@@ -886,7 +893,7 @@
                       <el-select
                         v-model="createForm.mimoVoiceCode"
                         class="library-select"
-                        :disabled="!isVoiceoverEnabled || Boolean(createForm.mimoVoiceProfileId)"
+                        :disabled="audioControlsLocked || !isVoiceoverEnabled || Boolean(createForm.mimoVoiceProfileId)"
                       >
                         <el-option
                           v-for="item in mimoPresetVoiceOptions"
@@ -900,7 +907,7 @@
                       <label>{{ copy.mimoPromptLabel }}</label>
                       <el-input
                         v-model="createForm.mimoVoicePrompt"
-                        :disabled="!isVoiceoverEnabled || Boolean(createForm.mimoVoiceProfileId)"
+                        :disabled="audioControlsLocked || !isVoiceoverEnabled || Boolean(createForm.mimoVoiceProfileId)"
                         type="textarea"
                         :rows="2"
                       />
@@ -909,7 +916,7 @@
                       <label>{{ copy.mimoSampleLabel }}</label>
                       <el-input
                         v-model="createForm.mimoVoiceSampleUrl"
-                        :disabled="!isVoiceoverEnabled || Boolean(createForm.mimoVoiceProfileId)"
+                        :disabled="audioControlsLocked || !isVoiceoverEnabled || Boolean(createForm.mimoVoiceProfileId)"
                       />
                     </template>
                     <small class="field-hint">{{ copy.mimoHint }}</small>
@@ -930,7 +937,7 @@
                       v-if="showSaveMimoVoiceButton"
                       plain
                       :loading="savingMimoVoice"
-                      :disabled="!mimoVoiceSaveReady"
+                      :disabled="audioControlsLocked || !mimoVoiceSaveReady"
                       @click="handleSaveMimoVoice"
                     >
                       <Icon icon="ep:collection-tag" />
@@ -950,11 +957,11 @@
                   @click="bgmConfigExpanded = !bgmConfigExpanded"
                 >
                   <span class="config-drawer-title">
-                    <strong>{{ copy.bgmTitle }}</strong>
+                    <strong>{{ copy.bgmTitle }}</strong><el-tag v-if="audioControlsLocked" size="small">{{ isEn ? 'From audience preset' : '来自人群预设' }}</el-tag>
                     <small>{{ bgmConfigSummary }}</small>
                   </span>
                   <span class="config-drawer-meta">
-                    <el-switch v-model="createForm.bgmEnabled" @click.stop />
+                    <el-switch v-model="createForm.bgmEnabled" :disabled="audioControlsLocked" @click.stop />
                     <Icon
                       class="config-drawer-chevron"
                       :class="{ expanded: bgmConfigExpanded }"
@@ -967,6 +974,7 @@
                   <div class="bgm-select-row">
                     <el-select
                       v-model="createForm.bgmAssetId"
+                      :disabled="audioControlsLocked" clearable
                       :placeholder="copy.bgmSelectPlaceholder"
                       :loading="bgmLoading"
                       class="library-select"
@@ -997,8 +1005,9 @@
                     <span>{{ copy.bgmVolume }}</span>
                     <el-slider
                       v-model="createForm.bgmVolume"
-                      :min="0.01"
-                      :max="0.3"
+                      :disabled="audioControlsLocked"
+                      :min="0"
+                      :max="1"
                       :step="0.01"
                       :format-tooltip="(value: number) => `${Math.round(value * 100)}%`"
                     />
@@ -1011,7 +1020,7 @@
                     :on-change="handleBgmUploadChange"
                     accept=".mp3,.wav,.m4a"
                   >
-                    <el-button plain :loading="bgmUploading">
+                    <el-button plain :loading="bgmUploading" :disabled="audioControlsLocked">
                       <Icon icon="ep:upload" />
                       {{ copy.bgmUpload }}
                     </el-button>
@@ -1022,6 +1031,7 @@
                 </div>
               </div>
 
+              <el-button plain @click="bgmManagerVisible = true">{{ isEn ? 'Manage BGM' : '管理 BGM' }}</el-button>
               <div class="config-drawer opening-config-drawer">
                 <button
                   class="config-drawer-head"
@@ -1423,7 +1433,7 @@
                 </el-button>
               </div>
               <div v-if="audioExportResult?.audioUrl" class="audio-export-result">
-                <audio controls :src="audioExportResult.audioUrl" />
+                <audio controls :src="audioExportResult.audioUrl"></audio>
                 <el-button
                   plain
                   tag="a"
@@ -1506,6 +1516,8 @@
       </aside>
     </div>
     <VoiceProfileDialog v-model="voiceManagerVisible" @changed="loadCustomVoices" />
+    <AudioAudiencePresetDialog :target-language="createForm.targetLanguage" v-model="presetManagerVisible" :is-en="isEn" :presets="audioPresets" :initial-code="presetEditorCode" :bgm-assets="bgmAssets" :mini-max-options="miniMaxVoiceOptions" :dash-scope-options="dashScopeVoiceOptions" :dash-scope-favorites-ready="dashScopeFavoritesReady" :providers="presetProviderOptions" :mimo-saved-options="mimoSavedVoiceOptions" :mimo-preset-options="mimoPresetVoiceOptions" @changed="refreshAudioPresets" @manage-bgm="bgmManagerVisible = true" @manage-voices="voiceManagerVisible = true" @favorite-change="handlePresetFavoriteChange" />
+    <BgmManagerDialog v-model="bgmManagerVisible" :is-en="isEn" :assets="bgmAssets" :volume="createForm.bgmVolume" @changed="refreshAudioManagers" @deleted="handleBgmDeleted" />
   </div>
 </template>
 
@@ -1513,6 +1525,10 @@
 import { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay, subtitlePreviewFontSize, measureSubtitlePreview } from './subtitlePreview.mjs'
 import { TkDashboardApi } from '@/api/tk/dashboard'
 import { TkBgmAssetApi, type TkBgmAssetVO } from '@/api/tk/bgm'
+import { AudioAudiencePresetApi, type AudioAudiencePresetVO } from '@/api/tk/audio-audience-preset'
+import AudioAudiencePresetDialog from './components/AudioAudiencePresetDialog.vue'
+import BgmManagerDialog from './components/BgmManagerDialog.vue'
+import { audienceCategories, createAudioSelection, selectAudioPreset, clearAudioPreset, invalidateAudioPreset, captureAudioSubmission } from './audioSettings.mjs'
 import { TkGenerationApi } from '@/api/tk/generation'
 import type {
   TkAudioExportTaskVO,
@@ -1607,6 +1623,9 @@ interface GenerationSubmissionSnapshot {
   bgmEnabled: boolean
   bgmAssetId?: number
   bgmVolume: number
+  audioPresetId?: number
+  audioPresetVersion?: number
+  audioMixVersion: number
   subtitlePayload: Partial<TkGenerationTaskVO>
   isLeadGenerationManualMode: boolean
   isManualEcommerceMode: boolean
@@ -2839,20 +2858,10 @@ const loadMiniMaxVoices = async () => {
     miniMaxVoiceLoading.value = false
   }
 }
-const ensureDefaultBgmSelection = () => {
-  if (!bgmAssets.value.length) {
-    createForm.bgmAssetId = undefined
-    return
-  }
-  if (!createForm.bgmAssetId || !bgmAssets.value.some((item) => item.id === createForm.bgmAssetId)) {
-    createForm.bgmAssetId = bgmAssets.value[0].id
-  }
-}
 const loadBgmAssets = async () => {
   bgmLoading.value = true
   try {
     bgmAssets.value = await TkBgmAssetApi.getList()
-    ensureDefaultBgmSelection()
   } catch (error) {
     message.error(copy.value.bgmLoadError)
   } finally {
@@ -3115,6 +3124,84 @@ const createForm = reactive<{
   bgmAssetId: undefined,
   bgmVolume: 0.1
 })
+const audioSelection = reactive<{
+  selected?: AudioAudiencePresetVO
+  manualDraft?: Record<string, any>
+}>(createAudioSelection())
+const applyingAudioSettings = ref(false)
+const audioControlsLocked = computed(() => Boolean(audioSelection.selected))
+const audioPresets = ref<AudioAudiencePresetVO[]>([])
+const presetsLoading = ref(false)
+const presetManagerVisible = ref(false)
+const presetEditorCode = ref<string>()
+const bgmManagerVisible = ref(false)
+const presetProviderOptions = computed(() =>
+  [...voiceProviderOptions, { label: 'MiMo', value: TTS_PROVIDER_MIMO }].map((item) => ({
+    ...item,
+    label: getTtsProviderLabel(item.value)
+  }))
+)
+const audienceLabel = (code?: string) => {
+  const item = audienceCategories.find((item) => item.code === code)
+  return (isEn.value ? item?.en : item?.zh) || ''
+}
+const audienceOptionLabel = (code: string) =>
+  audienceLabel(code) +
+  (audioPresets.value.some((item) => item.audienceCode === code && item.configStatus === 'READY')
+    ? ''
+    : isEn.value
+      ? ' · Configure first'
+      : ' · 需先配置')
+const applyAudioChange = async (apply: () => void) => {
+  applyingAudioSettings.value = true
+  apply()
+  await nextTick()
+  applyingAudioSettings.value = false
+}
+const handleAudienceSelection = async (code?: string) => {
+  if (!code) {
+    await applyAudioChange(() => clearAudioPreset(audioSelection, createForm))
+    return
+  }
+  const preset = audioPresets.value.find((item) => item.audienceCode === code)
+  if (preset?.configStatus !== 'READY') {
+    presetEditorCode.value = code
+    presetManagerVisible.value = true
+    return
+  }
+  await applyAudioChange(() => selectAudioPreset(audioSelection, createForm, preset))
+}
+const refreshAudioPresets = async () => {
+  presetsLoading.value = true
+  try {
+    audioPresets.value = await AudioAudiencePresetApi.getList()
+    if (audioSelection.selected) {
+      const current = audioPresets.value.find((item) => item.id === audioSelection.selected?.id)
+      await applyAudioChange(() => {
+        if (current?.configStatus === 'READY')
+          selectAudioPreset(audioSelection, createForm, current)
+        else invalidateAudioPreset(audioSelection, createForm)
+      })
+    }
+  } finally {
+    presetsLoading.value = false
+  }
+}
+const refreshAudioManagers = async () => {
+  await Promise.all([loadBgmAssets(), refreshAudioPresets()])
+}
+const handleBgmDeleted = async (id: number) => {
+  await applyAudioChange(() => {
+    if (audioSelection.manualDraft?.bgmAssetId === id)
+      audioSelection.manualDraft.bgmAssetId = undefined
+    if (audioSelection.selected?.bgmAssetId === id) invalidateAudioPreset(audioSelection, createForm)
+    if (createForm.bgmAssetId === id) createForm.bgmAssetId = undefined
+  })
+}
+const handlePresetFavoriteChange = (provider: string, voiceId: string, favorite: boolean) => {
+  if (provider === TTS_PROVIDER_MINIMAX) updateMiniMaxFavorite(voiceId, favorite)
+  else updateDashScopeFavorite(voiceId, favorite)
+}
 // Vue evaluates watch sources immediately, so the form must exist before registration.
 watch([subtitlePreviewWordList, () => createForm.subtitleFontSize, () => createForm.subtitleStyle,
   () => createForm.subtitlePositionMode], scheduleSubtitlePreviewLayout, { flush: 'post' })
@@ -3898,7 +3985,8 @@ const createGenerationSubmissionSnapshot = (): GenerationSubmissionSnapshot => {
     libraryName: selectedLibrary.value?.name,
     sourceUrl: createForm.sourceUrl.trim() || undefined,
     title: createForm.title.trim(),
-    voicePayload: { ...selectedVoicePayload() },
+    ...captureAudioSubmission(audioSelection, createForm),
+    voicePayload: Object.freeze({ ...selectedVoicePayload() }),
     voiceEnabled: isLeadGenerationFlow.value ? isVoiceoverEnabled.value : true,
     targetLanguage: createForm.targetLanguage,
     materialPurpose: createForm.materialPurpose,
@@ -3914,9 +4002,6 @@ const createGenerationSubmissionSnapshot = (): GenerationSubmissionSnapshot => {
         : undefined,
     openingProcessMode:
       openingUploadCompleted || openingVideoUrl ? createForm.openingProcessMode : undefined,
-    bgmEnabled: createForm.bgmEnabled,
-    bgmAssetId: createForm.bgmAssetId,
-    bgmVolume: createForm.bgmVolume,
     subtitlePayload: { ...getSubtitlePayload() },
     isLeadGenerationManualMode: isLeadGenerationManualMode.value,
     isManualEcommerceMode: isManualEcommerceMode.value,
@@ -3935,6 +4020,9 @@ const createGenerationPayload = (
     sourceUrl: snapshot.sourceUrl,
     libraryId: snapshot.libraryId,
     ...snapshot.voicePayload,
+    audioPresetId: snapshot.audioPresetId,
+    audioPresetVersion: snapshot.audioPresetVersion,
+    audioMixVersion: snapshot.audioMixVersion,
     voiceEnabled: snapshot.voiceEnabled,
     targetLanguage: snapshot.targetLanguage,
     materialPurpose: snapshot.materialPurpose,
@@ -4583,20 +4671,9 @@ async function ensureBgmReadyForGeneration(snapshot?: GenerationSubmissionSnapsh
   if (!bgmEnabled) {
     return true
   }
-  if (!bgmAssets.value.length) {
-    await loadBgmAssets()
-  } else {
-    ensureDefaultBgmSelection()
-  }
-  if (
-    snapshot &&
-    (!snapshot.bgmAssetId || !bgmAssets.value.some((item) => item.id === snapshot.bgmAssetId))
-  ) {
-    snapshot.bgmAssetId = bgmAssets.value[0]?.id
-  }
-  if (snapshot ? snapshot.bgmAssetId : createForm.bgmAssetId) {
-    return true
-  }
+  if (!bgmAssets.value.length) await loadBgmAssets()
+  const assetId = snapshot ? snapshot.bgmAssetId : createForm.bgmAssetId
+  if (assetId && bgmAssets.value.some(item => item.id === assetId)) return true
   bgmConfigExpanded.value = true
   message.warning(copy.value.bgmRequiredWarning)
   return false
@@ -4843,6 +4920,7 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     createForm.productCategoryCode = normalizeProductCategoryCode(task.productCategoryCode)
     createForm.clipPlanMode = resolveClipPlanModeFromRouteConfig(task.generationRouteConfig)
     createForm.analysisProvider = ANALYSIS_PROVIDER_GEMINI
+    await applyAudioChange(() => clearAudioPreset(audioSelection, createForm))
     await restoreVoiceSelection(task)
     createForm.referenceDuration =
       task.referenceDuration || task.targetDuration || DEFAULT_TARGET_DURATION
@@ -5189,7 +5267,7 @@ const handlePreviewBgm = async () => {
   stopBgmPreview()
   const audio = new Audio(selectedBgmAsset.value.fileUrl)
   bgmPreviewAudio.value = audio
-  audio.volume = Math.max(0.01, Math.min(0.3, createForm.bgmVolume))
+  audio.volume = Math.max(0, Math.min(1, createForm.bgmVolume))
   audio.onended = stopBgmPreview
   audio.onerror = () => {
     stopBgmPreview()
@@ -5541,7 +5619,7 @@ watch(
     createForm.productCategoryCode = DEFAULT_PRODUCT_CATEGORY_CODE
     createForm.clipPlanMode = CLIP_PLAN_MODE_SEGMENTED
     stopBgmPreview()
-    createForm.bgmEnabled = isLeadGenerationFlow.value
+    if (!audioControlsLocked.value) createForm.bgmEnabled = isLeadGenerationFlow.value
     if (!isLeadGenerationFlow.value) {
       createForm.voiceEnabled = true
       createForm.subtitleEnabled = true
@@ -5732,11 +5810,15 @@ watch(
   }
 )
 
+watch(() => selectedLibrary.value?.companyId, () => {
+ applyAudioChange(() => clearAudioPreset(audioSelection, createForm)).then(refreshAudioManagers).catch(() => undefined)
+})
+
 watch(
   () => createForm.ttsProvider,
   (provider) => {
     stopVoicePreview()
-    if (hydratingReplay.value) {
+    if (hydratingReplay.value || audioControlsLocked.value || applyingAudioSettings.value) {
       return
     }
     if (provider !== TTS_PROVIDER_MIMO) {
@@ -5768,7 +5850,7 @@ watch(
   () => createForm.bgmVolume,
   (volume) => {
     if (bgmPreviewAudio.value) {
-      bgmPreviewAudio.value.volume = Math.max(0.01, Math.min(0.3, volume))
+      bgmPreviewAudio.value.volume = Math.max(0, Math.min(1, volume))
     }
   }
 )
@@ -5789,7 +5871,7 @@ onMounted(() => {
   loadMiniMaxVoices().catch(() => undefined)
   loadDashScopeFavorites().catch(() => undefined)
   loadCustomVoices().catch(() => undefined)
-  loadBgmAssets().catch(() => undefined)
+  refreshAudioManagers().catch(() => undefined)
 })
 onUnmounted(() => {
   ++subtitlePreviewRevision

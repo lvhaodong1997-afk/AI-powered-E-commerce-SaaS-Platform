@@ -55,6 +55,10 @@ export interface TkGenerationTaskVO {
   bgmSourceType?: string
   bgmUrl?: string
   bgmVolume?: number
+  audienceCode?: string
+  audioPresetId?: number
+  audioPresetVersion?: number
+  audioMixVersion?: number
   subtitleUrl?: string
   subtitleEnabled?: boolean
   subtitleStyle?: string

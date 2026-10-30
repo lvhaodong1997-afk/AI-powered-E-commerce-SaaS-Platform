@@ -59,6 +59,10 @@ public class TkGenerationTaskRespVO {
     private String bgmSourceType;
     private String bgmUrl;
     private Double bgmVolume;
+    private String audienceCode;
+    private Long audioPresetId;
+    private Integer audioPresetVersion;
+    private Integer audioMixVersion;
     private String subtitleUrl;
     private Boolean subtitleEnabled;
     private String subtitleStyle;

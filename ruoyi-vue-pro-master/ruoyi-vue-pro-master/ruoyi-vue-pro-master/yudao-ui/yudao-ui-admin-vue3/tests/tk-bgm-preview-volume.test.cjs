@@ -70,7 +70,7 @@ test('changing BGM volume updates the playing audio without pausing or restartin
   const audio = h.bgmPreviewAudio.value
   audio.currentTime = 7.25
 
-  for (const volume of [0.24, 0.01, 0.3, 0.1]) {
+  for (const volume of [0, 0.24, 0.01, 0.3, 1, 0.1]) {
     h.createForm.bgmVolume = volume
     await nextTick()
     assert.equal(audio.volume, volume)
