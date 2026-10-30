@@ -9,6 +9,7 @@ import cn.iocoder.yudao.module.tk.dal.mysql.openapi.*;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher;
 import cn.iocoder.yudao.module.tk.service.open.platform.TkOpenPublishPlatformAdapter;
 import cn.iocoder.yudao.module.tk.service.open.platform.TkOpenPublishPlatformRegistry;
+import cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokPullSourceResolver;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -327,6 +328,45 @@ class TkOpenTiktokPublishExecutionTest {
         when(attempts.claim(detail)).thenReturn(TkOpenTiktokPublishAttemptDO.builder().id(1L)
                 .ownerToken("owner").phase("MATERIAL_PREPARATION").build());
         return adapter;
+    }
+
+    @Test void pullInitializationUsesMappedUrlWithoutUploadLaneOrUploadUrl(@TempDir Path directory) throws Exception {
+        TkOpenTiktokPublishDetailDO detail = detail().setStatus("PENDING").setPublishId(null).setConnectionId("conn");
+        TkOpenPublishPlatformAdapter adapter = prepareFixture(detail, directory);
+        TkOpenTiktokPublishTaskMapper tasks = (TkOpenTiktokPublishTaskMapper) ReflectionTestUtils.getField(service, "taskMapper");
+        TkOpenTiktokMediaMapper media = (TkOpenTiktokMediaMapper) ReflectionTestUtils.getField(service, "mediaMapper");
+        TkTiktokPullSourceResolver resolver = mock(TkTiktokPullSourceResolver.class);
+        ReflectionTestUtils.setField(service, "pullSourceResolver", resolver);
+        String original = "https://tk-video-create.oss-cn-beijing.aliyuncs.com/TK/video.mp4";
+        String mapped = "https://tkpublish.fnn.net.cn/TK/video.mp4";
+        when(tasks.selectByClientAndTaskId("c", "t")).thenReturn(TkOpenTiktokPublishTaskDO.builder()
+                .taskId("t").mediaId("media").transferPolicy("OSS_PULL_V1")
+                .postMode("DIRECT_POST").privacyLevel("SELF_ONLY").build());
+        when(media.selectByClientAndMediaId("c", "media")).thenReturn(TkOpenTiktokMediaDO.builder()
+                .fileUrl(original).contentType("video/mp4").build());
+        when(resolver.resolve(eq(original), any(), any())).thenReturn(
+                TkTiktokPullSourceResolver.PullDecision.eligible(mapped, 123L));
+        TkOpenApiSecretCipher cipher = (TkOpenApiSecretCipher) ReflectionTestUtils.getField(service, "secretCipher");
+        when(cipher.encrypt(mapped)).thenReturn("encrypted-pull");
+        ReflectionTestUtils.setField(service, "responseJournal", mock(TkOpenTiktokPublishResponseJournal.class));
+        when(adapter.initVideoPost(eq("token"), eq("DIRECT_POST"), anyMap())).thenReturn(
+                new TkOpenPublishPlatformAdapter.PublishInitResult(true, "pull-id", null, null, null));
+
+        ReflectionTestUtils.invokeMethod(service, "submitDetail", detail);
+        executor.runNext();
+
+        assertTrue(uploads.commands.isEmpty());
+        assertEquals("pull-id", detail.getPublishId());
+        assertEquals("PROCESSING_DOWNLOAD", detail.getTiktokStatus());
+        org.mockito.ArgumentCaptor<java.util.Map> payload = org.mockito.ArgumentCaptor.forClass(java.util.Map.class);
+        verify(adapter).initVideoPost(eq("token"), eq("DIRECT_POST"), payload.capture());
+        java.util.Map source = (java.util.Map) payload.getValue().get("source_info");
+        assertEquals("PULL_FROM_URL", source.get("source"));
+        assertEquals(mapped, source.get("video_url"));
+        assertFalse(source.containsKey("chunk_size"));
+        verify(attempts).savePullSource(any(), eq("encrypted-pull"));
+        verify(attempts).saveResponse(eq(detail), any(), eq("pull-id"), isNull());
+        verify(adapter, never()).uploadVideo(anyString(), any(), any(), any(), any());
     }
 
     @Test void immediateRemoteMediaUsesDurableCopyAndRecoveryReusesIt(@TempDir Path directory) throws Exception {

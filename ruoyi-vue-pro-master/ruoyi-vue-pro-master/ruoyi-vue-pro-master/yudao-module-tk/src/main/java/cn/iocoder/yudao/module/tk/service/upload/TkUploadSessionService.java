@@ -9,6 +9,8 @@ import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.Resource;
@@ -109,6 +111,17 @@ public class TkUploadSessionService {
         return session;
     }
 
+    /** Caller owns the transaction so the row lock spans object validation and the terminal transition. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public TkUploadSessionDO lockAccessible(String uploadId) {
+        TkUploadSessionDO session = TenantUtils.executeIgnore(() -> sessionMapper.selectByUploadIdForUpdate(uploadId));
+        if (session == null) throw exception(TK_UPLOAD_SESSION_INVALID);
+        dataScopeService.validateReadable(session.getTenantId(), session.getCompanyId(), session.getCreator());
+        if (!TkUploadSessionAccessPolicy.canAccess(session, LocalDateTime.now()))
+            throw exception(TK_UPLOAD_SESSION_INVALID);
+        return session;
+    }
+
     /** Called inside the social completion transaction; serializes retries of the same upload. */
     public TkUploadSessionDO lockSocialCompletion(String uploadId) {
         TkUploadSessionDO session = sessionMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<TkUploadSessionDO>()
@@ -192,8 +205,11 @@ public class TkUploadSessionService {
 
     private int expireSessionsIgnoringTenant() {
         List<TkUploadSessionDO> expired = sessionMapper.selectExpired(LocalDateTime.now(), 200);
+        int claimed = 0;
         for (TkUploadSessionDO session : expired) {
-            sessionMapper.updateById(new TkUploadSessionDO().setId(session.getId()).setStatus("EXPIRED"));
+            // Completion holds the same row lock; a stale expiry candidate must win the CAS before deletion.
+            if (sessionMapper.claimExpired(session.getId(), LocalDateTime.now()) != 1) continue;
+            claimed++;
             if ("local".equalsIgnoreCase(session.getStorageMode())) {
                 cn.hutool.core.io.FileUtil.del(localUploadStorageService.getTmpDir(session.getUploadId()).toFile());
             } else if ("oss".equalsIgnoreCase(session.getStorageMode()) && session.getLibraryId() == null
@@ -214,6 +230,6 @@ public class TkUploadSessionService {
                 }
             }
         }
-        return expired.size();
+        return claimed;
     }
 }

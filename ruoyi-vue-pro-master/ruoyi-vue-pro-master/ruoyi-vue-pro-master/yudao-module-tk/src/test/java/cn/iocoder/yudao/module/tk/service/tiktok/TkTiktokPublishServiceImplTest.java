@@ -233,13 +233,13 @@ class TkTiktokPublishServiceImplTest {
         when(tokenService.getValidAccessToken(13L)).thenReturn("access-old");
         when(tokenService.forceRefreshAccessToken(13L))
                 .thenThrow(new IllegalStateException("Refresh Token 已过期，请重新授权账号"));
-        when(apiClient.fetchPostStatus("access-old", "publish-13")).thenReturn(invalid);
+        when(apiClient.fetchPostStatusOnce("access-old", "publish-13")).thenReturn(invalid);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> service.fetchPostStatusWithRetry(13L, "publish-13"));
 
         assertTrue(error.getMessage().contains("重新授权"));
-        verify(apiClient, times(1)).fetchPostStatus("access-old", "publish-13");
+        verify(apiClient, times(1)).fetchPostStatusOnce("access-old", "publish-13");
         verify(tokenService, times(1)).forceRefreshAccessToken(13L);
     }
 
@@ -352,7 +352,7 @@ class TkTiktokPublishServiceImplTest {
                 .build();
         when(accountMapper.selectById(1L)).thenReturn(account);
         when(tokenService.getValidAccessToken(1L)).thenReturn("access-token");
-        when(apiClient.fetchPostStatus("access-token", "publish-1")).thenReturn(
+        when(apiClient.fetchPostStatusOnce("access-token", "publish-1")).thenReturn(
                 new TkTiktokApiClient.PostStatusResult(false, "FAILED", "publish_id 尚未可查询", "not_found"));
 
         ReflectionTestUtils.invokeMethod(service, "syncProcessingDetail", detail);
@@ -708,7 +708,7 @@ class TkTiktokPublishServiceImplTest {
                 .build();
         when(accountMapper.selectById(1L)).thenReturn(account);
         when(tokenService.getValidAccessToken(1L)).thenReturn("access-token");
-        when(apiClient.fetchPostStatus("access-token", "publish-1")).thenReturn(
+        when(apiClient.fetchPostStatusOnce("access-token", "publish-1")).thenReturn(
                 new TkTiktokApiClient.PostStatusResult(true, "PUBLISH_COMPLETE", null, null,
                         Collections.singletonList("post-1")));
         when(apiClient.queryVideoShareUrl("access-token", Collections.singletonList("post-1"))).thenReturn(
@@ -724,7 +724,7 @@ class TkTiktokPublishServiceImplTest {
         assertEquals("https://www.tiktok.com/@demo/video/post-1", detail.getPublishUrl());
         assertNotNull(detail.getPublishUrlRegisteredTime());
         verify(apiClient).queryVideoShareUrl("access-token", Collections.singletonList("post-1"));
-        verify(detailMapper).update(any(), any());
+        verify(detailMapper, times(2)).update(any(), any());
     }
 
     @Test
@@ -749,7 +749,9 @@ class TkTiktokPublishServiceImplTest {
                 .filter(Integer.class::isInstance)
                 .filter(value -> Integer.valueOf(0).equals(value))
                 .count();
-        assertEquals(2, zeroValues);
+        assertTrue(zeroValues >= 2);
+        assertTrue(captor.getValue().getSqlSegment().contains("retry_count"));
+        assertTrue(captor.getValue().getSqlSegment().contains("publish_id"));
     }
 
     @Test
@@ -781,7 +783,7 @@ class TkTiktokPublishServiceImplTest {
                 .build();
         when(accountMapper.selectById(1L)).thenReturn(account);
         when(tokenService.getValidAccessToken(1L)).thenReturn("access-token");
-        when(apiClient.fetchPostStatus("access-token", "publish-1")).thenReturn(
+        when(apiClient.fetchPostStatusOnce("access-token", "publish-1")).thenReturn(
                 new TkTiktokApiClient.PostStatusResult(true, "PUBLISH_COMPLETE", null, null,
                         Collections.emptyList()));
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
@@ -791,7 +793,7 @@ class TkTiktokPublishServiceImplTest {
 
         assertEquals("PROCESSING", detail.getStatus());
         assertEquals("PUBLISH_COMPLETE", detail.getTiktokStatus());
-        verify(detailMapper).updateById(detail);
+        verify(detailMapper).update(eq(detail), any());
         verify(apiClient, never()).queryVideoShareUrl(anyString(), any());
     }
 
@@ -824,7 +826,7 @@ class TkTiktokPublishServiceImplTest {
                 .build();
         when(accountMapper.selectById(1L)).thenReturn(account);
         when(tokenService.getValidAccessToken(1L)).thenReturn("access-token");
-        when(apiClient.fetchPostStatus("access-token", "publish-1")).thenReturn(
+        when(apiClient.fetchPostStatusOnce("access-token", "publish-1")).thenReturn(
                 new TkTiktokApiClient.PostStatusResult(true, "PUBLISH_COMPLETE", null, null,
                         Collections.emptyList()));
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
@@ -884,7 +886,7 @@ class TkTiktokPublishServiceImplTest {
                         "https://www.tiktok.com/static/profile-video?id=post-2", 5L, 6L, 7L, 8L, true));
         when(accountMapper.selectById(1L)).thenReturn(account);
         when(tokenService.getValidAccessToken(1L)).thenReturn("access-token");
-        when(apiClient.fetchPostStatus("access-token", "publish-1")).thenReturn(
+        when(apiClient.fetchPostStatusOnce("access-token", "publish-1")).thenReturn(
                 new TkTiktokApiClient.PostStatusResult(true, "PUBLISH_COMPLETE", null, null, publicPostIds));
         when(apiClient.queryVideoShareUrl("access-token", publicPostIds)).thenReturn(
                 new TkTiktokApiClient.VideoQueryResult(true, videos.get(0).getShareUrl(), videos.get(0).getEmbedLink(),
@@ -921,6 +923,7 @@ class TkTiktokPublishServiceImplTest {
                 .build();
         detail.setTenantId(8L);
         when(detailMapper.selectById(30L)).thenReturn(detail);
+        when(detailMapper.update(any(), any())).thenReturn(1);
         TkTiktokPublishTaskDO task = TkTiktokPublishTaskDO.builder()
                 .id(31L)
                 .companyId(20L)
@@ -945,7 +948,16 @@ class TkTiktokPublishServiceImplTest {
         assertNull(detail.getPublishUrl());
         assertNull(detail.getPublishUrlRegisteredTime());
         assertEquals("PENDING", detail.getStatus());
-        verify(detailMapper).update(any(), any());
+        ArgumentCaptor<Wrapper<TkTiktokPublishDetailDO>> retryUpdate = ArgumentCaptor.forClass(Wrapper.class);
+        verify(detailMapper, times(1)).update(any(), retryUpdate.capture());
+        String conditions = retryUpdate.getValue().getSqlSegment();
+        assertTrue(conditions.contains("retry_count"));
+        assertTrue(conditions.contains("publish_id"));
+        assertTrue(conditions.contains("init_phase"));
+        String assignments = ((com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<?>) retryUpdate.getValue()).getSqlSet();
+        assertTrue(assignments.contains("publish_id"));
+        assertTrue(assignments.contains("init_phase"));
+        assertTrue(assignments.contains("retry_count"));
     }
 
     @Test

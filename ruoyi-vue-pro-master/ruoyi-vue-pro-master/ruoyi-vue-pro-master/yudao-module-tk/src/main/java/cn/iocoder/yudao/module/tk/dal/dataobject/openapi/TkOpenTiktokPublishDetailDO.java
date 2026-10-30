@@ -42,4 +42,6 @@ public class TkOpenTiktokPublishDetailDO extends BaseDO {
     private String failReason;
     private Integer retryCount;
     private LocalDateTime lastSyncTime;
+    private LocalDateTime nextPollTime;
+    private Long downloadedBytes;
 }

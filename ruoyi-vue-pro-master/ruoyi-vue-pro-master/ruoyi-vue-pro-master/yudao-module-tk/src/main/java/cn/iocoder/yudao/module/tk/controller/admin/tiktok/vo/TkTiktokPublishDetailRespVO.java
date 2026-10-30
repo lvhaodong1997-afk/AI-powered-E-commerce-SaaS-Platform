@@ -22,6 +22,8 @@ public class TkTiktokPublishDetailRespVO {
     private String publishId;
     private String publishUrl;
     private String tiktokStatus;
+    private Long downloadedBytes;
+    private Long sourceFileSize;
     private String status;
     private String postMode;
     private String privacyLevel;

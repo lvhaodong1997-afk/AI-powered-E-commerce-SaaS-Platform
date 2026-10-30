@@ -26,6 +26,43 @@ import static org.mockito.Mockito.when;
 class TkTiktokApiClientTest {
 
     @Test
+    void durableStatusQueryMakesExactlyOneTransportCallOnTimeoutOrRateLimit() throws Exception {
+        TkTiktokMediaTransfer timeoutTransfer = mock(TkTiktokMediaTransfer.class);
+        when(timeoutTransfer.post(anyString(), anyString(), anyString(), anyString()))
+                .thenThrow(new java.net.SocketTimeoutException("timeout"));
+        assertThrows(RuntimeException.class,
+                () -> new TkTiktokApiClient(timeoutTransfer).fetchPostStatusOnce("token", "publish"));
+        verify(timeoutTransfer).post(anyString(), anyString(), anyString(), anyString());
+        org.mockito.Mockito.verifyNoMoreInteractions(timeoutTransfer);
+
+        TkTiktokMediaTransfer limitedTransfer = mock(TkTiktokMediaTransfer.class);
+        when(limitedTransfer.post(anyString(), anyString(), anyString(), anyString())).thenReturn(
+                new TkTiktokMediaTransfer.ApiResponse(429, "application/json",
+                        "{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"limit\"}}"));
+        assertThrows(TkTiktokApiClient.TikTokApiException.class,
+                () -> new TkTiktokApiClient(limitedTransfer).fetchPostStatusOnce("token", "publish"));
+        verify(limitedTransfer).post(anyString(), anyString(), anyString(), anyString());
+        org.mockito.Mockito.verifyNoMoreInteractions(limitedTransfer);
+    }
+
+    @Test
+    void parsesPullDownloadProgressWithoutInventingUnknownBytes() {
+        for (String bytes : new String[]{"0", "4294967296"}) {
+            TkTiktokApiClient.PostStatusResult result = TkTiktokApiClient.parsePostStatusResult(JsonUtils.parseTree(
+                    "{\"error\":{\"code\":\"ok\"},\"data\":{\"status\":\"PROCESSING_DOWNLOAD\",\"downloaded_bytes\":" + bytes + "}}"));
+            assertEquals("PROCESSING_DOWNLOAD", result.getStatus());
+            assertEquals(Long.valueOf(bytes), result.getDownloadedBytes());
+            assertNull(result.getUploadedBytes());
+        }
+        for (String bytes : new String[]{"null", "-1", "1.5", "\"42\"", "9223372036854775808"}) {
+            assertNull(TkTiktokApiClient.parsePostStatusResult(JsonUtils.parseTree(
+                    "{\"error\":{\"code\":\"ok\"},\"data\":{\"downloaded_bytes\":" + bytes + "}}")).getDownloadedBytes());
+        }
+        assertNull(new TkTiktokApiClient.PostStatusResult(true, "PROCESSING", null, null,
+                java.util.Collections.emptyList(), 10L).getDownloadedBytes());
+    }
+
+    @Test
     void rejectsHtmlUpstreamResponseAsStructuredRetryableFailure() {
         TkTiktokApiClient.TikTokApiException error = assertThrows(
                 TkTiktokApiClient.TikTokApiException.class,

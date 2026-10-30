@@ -81,6 +81,7 @@ class TkOpenTiktokMediaServiceTest {
         TkOssObjectStorageClient oss = mock(TkOssObjectStorageClient.class);
         TkOpenTiktokMediaDO media = ossMedia();
         when(mapper.selectByClientAndUploadId("client_b", "upload_1")).thenReturn(media);
+        when(mapper.selectByClientAndUploadIdForUpdate("client_b", "upload_1")).thenReturn(media);
         when(oss.headObject("tk/open-api/client_b/upload_1.mp4"))
                 .thenReturn(new TkOssObjectStorageClient.ObjectMetadata(9L, "sha-1"));
         TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, null,
@@ -101,6 +102,7 @@ class TkOpenTiktokMediaServiceTest {
                 .clientId("client_b").uploadMode("LOCAL").fileName("video.mp4").fileSize(3L)
                 .status("UPLOADING").expireTime(LocalDateTime.now().plusMinutes(5)).build();
         when(mapper.selectByClientAndUploadId("client_b", "upload_2")).thenReturn(media);
+        when(mapper.selectByClientAndUploadIdForUpdate("client_b", "upload_2")).thenReturn(media);
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getUpload().setChunkSizeBytes(3);
         properties.getUpload().setRootDir(tempDir.toString());
@@ -122,6 +124,7 @@ class TkOpenTiktokMediaServiceTest {
                 .clientId("client_b").uploadMode("LOCAL").fileName("video.mp4").fileSize(3L)
                 .status("READY").expireTime(LocalDateTime.now().plusMinutes(5)).build();
         when(mapper.selectByClientAndUploadId("client_b", "upload_ready")).thenReturn(media);
+        when(mapper.selectByClientAndUploadIdForUpdate("client_b", "upload_ready")).thenReturn(media);
         TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, null,
                 new TkGenerationProperties(), mock(TkOssObjectStorageClient.class));
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "media"), "req-ready");
@@ -304,6 +307,7 @@ class TkOpenTiktokMediaServiceTest {
     void shouldRejectCompletionWithoutFileSize() {
         TkOpenTiktokMediaMapper mapper = mock(TkOpenTiktokMediaMapper.class);
         when(mapper.selectByClientAndUploadId("client_b", "upload_1")).thenReturn(ossMedia());
+        when(mapper.selectByClientAndUploadIdForUpdate("client_b", "upload_1")).thenReturn(ossMedia());
         TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, null,
                 new TkGenerationProperties(), mock(TkOssObjectStorageClient.class));
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "media"), "req-size");
@@ -321,4 +325,15 @@ class TkOpenTiktokMediaServiceTest {
                 .objectKey("tk/open-api/client_b/upload_1.mp4").status("UPLOADING")
                 .expireTime(LocalDateTime.now().plusMinutes(5)).build();
     }
-}
+    @Test
+    void cancelMustReadTerminalStateUnderLockBeforeAnyOssDelete() {
+        TkOpenTiktokMediaMapper mapper = mock(TkOpenTiktokMediaMapper.class);
+        TkOssObjectStorageClient oss = mock(TkOssObjectStorageClient.class);
+        TkOpenTiktokMediaDO completed = ossMedia().setStatus("READY");
+        when(mapper.selectByClientAndUploadIdForUpdate("client_b", "upload_1")).thenReturn(completed);
+        TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, null, new TkGenerationProperties(), oss);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "media"), "retention-race");
+        assertThrows(TkOpenApiException.class, () -> service.cancel("upload_1"));
+        verify(mapper).selectByClientAndUploadIdForUpdate("client_b", "upload_1");
+        verifyNoInteractions(oss);
+    }}

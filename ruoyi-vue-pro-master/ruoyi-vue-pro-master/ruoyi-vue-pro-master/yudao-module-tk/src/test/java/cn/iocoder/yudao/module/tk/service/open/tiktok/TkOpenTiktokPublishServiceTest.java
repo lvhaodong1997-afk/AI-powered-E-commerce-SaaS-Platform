@@ -21,6 +21,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.dao.DuplicateKeyException;
@@ -43,6 +44,12 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 class TkOpenTiktokPublishServiceTest {
+
+    @BeforeEach
+    void initializeConnectionTableMetadata() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkOpenTiktokConnectionDO.class);
+    }
 
     @AfterEach
     void clearContext() {
@@ -142,6 +149,25 @@ class TkOpenTiktokPublishServiceTest {
 
     @Test
     void shouldCreateScheduledTaskWithoutSubmittingImmediately() {
+        verifyScheduledSourcePolicy(false);
+    }
+
+    @Test
+    void shouldKeepOssReferenceWithoutDownloadingEligibleScheduledVideo() {
+        verifyScheduledSourcePolicy(true);
+    }
+
+    @Test
+    void shouldPreparePrivateSignedScheduledVideoBeforeSignatureExpires() {
+        verifyScheduledSourcePolicy(true, false);
+    }
+
+    private void verifyScheduledSourcePolicy(boolean preferPull) {
+        verifyScheduledSourcePolicy(preferPull, preferPull);
+    }
+
+    private void verifyScheduledSourcePolicy(boolean candidate, boolean anonymousAccessible) {
+        boolean preferPull = candidate && anonymousAccessible;
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
         TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
         TkOpenTiktokMediaMapper mediaMapper = mock(TkOpenTiktokMediaMapper.class);
@@ -149,7 +175,9 @@ class TkOpenTiktokPublishServiceTest {
         TkOpenApiIdempotencyMapper idempotencyMapper = mock(TkOpenApiIdempotencyMapper.class);
         TkOpenTiktokMediaService mediaService = mock(TkOpenTiktokMediaService.class);
         TkOpenTiktokMediaDO media = TkOpenTiktokMediaDO.builder().id(1L).mediaId("media_1")
-                .clientId("client_b").fileName("video.mp4").status("READY").build();
+                .clientId("client_b").fileName("video.mp4").status("READY")
+                .fileUrl("https://tk-video-create.oss-cn-beijing.aliyuncs.com/TK/video.mp4"
+                        + "?OSSAccessKeyId=test&Expires=1&Signature=test").build();
         TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder().id(2L)
                 .connectionId("conn_1").clientId("client_b").authStatus("AUTHORIZED").build();
         when(mediaMapper.selectByClientAndMediaId("client_b", "media_1")).thenReturn(media);
@@ -157,6 +185,23 @@ class TkOpenTiktokPublishServiceTest {
                 .thenReturn(Collections.singletonList(connection));
         TkOpenTiktokPublishService service = newQuickService(taskMapper, detailMapper, mediaMapper,
                 connectionMapper, idempotencyMapper, mediaService);
+        if (candidate) {
+            cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokPullSourceResolver resolver =
+                    mock(cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokPullSourceResolver.class);
+            TkOpenPublishPlatformRegistry registry = mock(TkOpenPublishPlatformRegistry.class);
+            TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+            when(registry.getRequired("TIKTOK")).thenReturn(adapter);
+            when(adapter.verifiedPullDomain()).thenReturn("tkpublish.fnn.net.cn");
+            when(resolver.isCandidate(media.getFileUrl(), 2L, "tkpublish.fnn.net.cn")).thenReturn(true);
+            when(resolver.resolve(media.getFileUrl(), 2L, "tkpublish.fnn.net.cn"))
+                    .thenReturn(anonymousAccessible
+                            ? cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokPullSourceResolver.PullDecision
+                                    .eligible("https://tkpublish.fnn.net.cn/TK/video.mp4", 123L)
+                            : cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokPullSourceResolver.PullDecision
+                                    .fallback("HEAD_STATUS"));
+            ReflectionTestUtils.setField(service, "platformRegistry", registry);
+            ReflectionTestUtils.setField(service, "pullSourceResolver", resolver);
+        }
         TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "req-scheduled-create");
         TkOpenTiktokPublishVO.TaskCreateReq request = request();
         request.setScheduledAt("2099-09-26T18:00:00");
@@ -168,9 +213,11 @@ class TkOpenTiktokPublishServiceTest {
         assertEquals("SCHEDULED", response.getScheduleStatus());
         assertTrue(response.getCanReschedule());
         assertTrue(response.getCanCancel());
-        verify(mediaService).prepareForScheduledPublish(media);
+        if (preferPull) verify(mediaService, never()).prepareForScheduledPublish(any());
+        else verify(mediaService).prepareForScheduledPublish(media);
         ArgumentCaptor<TkOpenTiktokPublishTaskDO> taskCaptor = ArgumentCaptor.forClass(TkOpenTiktokPublishTaskDO.class);
         verify(taskMapper).insert(taskCaptor.capture());
+        assertEquals(preferPull ? "OSS_PULL_V1" : "FILE_UPLOAD", taskCaptor.getValue().getTransferPolicy());
         assertEquals("US", taskCaptor.getValue().getScheduleRegionCode());
         assertEquals("America/Los_Angeles", taskCaptor.getValue().getScheduleTimezone());
         assertEquals(LocalDateTime.of(2099, 9, 27, 1, 0), taskCaptor.getValue().getScheduleUtcTime());
@@ -1223,7 +1270,7 @@ class TkOpenTiktokPublishServiceTest {
                     order.verify(journal).save(detail, attempt, "publish_1", null);
                     order.verify(attempts, times(2)).saveResponse(detail, attempt, "publish_1", null);
                     order.verify(journal).remove("detail_inbox", 0);
-                    assertEquals("PROCESSING", detail.getTiktokStatus());
+                    assertEquals("PROCESSING_DOWNLOAD", detail.getTiktokStatus());
                     verify(callbackService).enqueue(eq("client_b"), eq("publish.processing"),
                             eq("PUBLISH_DETAIL"), eq("detail_inbox"), any());
                 }
@@ -1265,7 +1312,8 @@ class TkOpenTiktokPublishServiceTest {
         TkOpenTiktokPublishDetailDO detail = TkOpenTiktokPublishDetailDO.builder().id(1L)
                 .clientId("c").taskId("t").detailId("d").connectionId("connection")
                 .status("PROCESSING").publishId("official-id").retryCount(0).build();
-        when(details.selectStaleProcessing(any(), eq(100))).thenReturn(Collections.singletonList(detail));
+        when(details.selectDueProcessing(any(), eq(100))).thenReturn(Collections.singletonList(detail));
+        when(details.reserveStatusPoll(eq(1L), any(), any())).thenReturn(1);
         when(connections.selectByClientAndConnectionId("c", "connection")).thenReturn(
                 TkOpenTiktokConnectionDO.builder().accessTokenCipher("cipher")
                         .authStatus("AUTHORIZED")

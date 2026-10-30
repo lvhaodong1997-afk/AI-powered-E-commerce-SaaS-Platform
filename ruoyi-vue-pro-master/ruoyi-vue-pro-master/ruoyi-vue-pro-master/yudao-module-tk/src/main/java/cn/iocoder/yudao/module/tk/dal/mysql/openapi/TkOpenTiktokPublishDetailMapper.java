@@ -6,6 +6,7 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishDeta
 import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDateTime;
@@ -75,6 +76,13 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
                         .apply("(status = 'PENDING' AND publish_id IS NOT NULL AND publish_id <> '')")
                         .or()
                         .apply("(status = 'PROCESSING' AND (tiktok_status IS NULL OR tiktok_status <> 'RECOVERY_REQUIRED')"
+                                + " AND NOT EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt pulling"
+                                + " WHERE pulling.detail_id = tk_open_tiktok_publish_detail.detail_id"
+                                + " AND pulling.attempt_no = COALESCE(tk_open_tiktok_publish_detail.retry_count, 0)"
+                                + " AND pulling.deleted = 0 AND pulling.upload_source = 'PULL_FROM_URL'"
+                                + " AND pulling.phase = 'PLATFORM_PROCESSING'"
+                                + " AND tk_open_tiktok_publish_detail.publish_id IS NOT NULL"
+                                + " AND tk_open_tiktok_publish_detail.publish_id <> '')"
                                 + " AND (EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt a"
                                 + " WHERE a.detail_id = tk_open_tiktok_publish_detail.detail_id"
                                 + " AND a.attempt_no = COALESCE(tk_open_tiktok_publish_detail.retry_count, 0)"
@@ -172,4 +180,29 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
                 .orderByAsc(TkOpenTiktokPublishDetailDO::getLastSyncTime)
                 .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
     }
+
+    default List<TkOpenTiktokPublishDetailDO> selectDueProcessing(LocalDateTime now, int limit) {
+        return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
+                .eq(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
+                .isNotNull(TkOpenTiktokPublishDetailDO::getPublishId)
+                .ne(TkOpenTiktokPublishDetailDO::getPublishId, "")
+                .and(w -> w.isNull(TkOpenTiktokPublishDetailDO::getTiktokStatus)
+                        .or().ne(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED"))
+                .and(w -> w.isNull(TkOpenTiktokPublishDetailDO::getNextPollTime)
+                        .or().le(TkOpenTiktokPublishDetailDO::getNextPollTime, now))
+                .apply("NOT EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt a"
+                        + " WHERE a.detail_id = tk_open_tiktok_publish_detail.detail_id"
+                        + " AND a.attempt_no = COALESCE(tk_open_tiktok_publish_detail.retry_count, 0)"
+                        + " AND a.deleted = 0 AND a.next_reconcile_time > {0})", now)
+                .orderByAsc(TkOpenTiktokPublishDetailDO::getNextPollTime)
+                .orderByAsc(TkOpenTiktokPublishDetailDO::getId)
+                .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
+    }
+
+    @Update("UPDATE tk_open_tiktok_publish_detail SET next_poll_time = #{nextPollTime} "
+            + "WHERE id = #{detailId} AND deleted = 0 AND status = 'PROCESSING' "
+            + "AND publish_id IS NOT NULL AND publish_id <> '' "
+            + "AND (next_poll_time IS NULL OR next_poll_time <= #{now})")
+    int reserveStatusPoll(@Param("detailId") Long detailId, @Param("now") LocalDateTime now,
+                          @Param("nextPollTime") LocalDateTime nextPollTime);
 }

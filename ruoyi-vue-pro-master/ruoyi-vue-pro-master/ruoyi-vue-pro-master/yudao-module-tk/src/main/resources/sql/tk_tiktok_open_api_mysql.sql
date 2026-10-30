@@ -1,3 +1,4 @@
+-- Fresh install: after attempt upgrade, execute tk_tiktok_pull_from_url_upgrade_mysql.sql.
 -- TikTok Open API schema. Public authorization is scoped only by client_id.
 
 CREATE TABLE IF NOT EXISTS `tk_open_api_client` (
@@ -125,6 +126,8 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_media` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_task` (
+  `transfer_policy` varchar(32) DEFAULT 'LEGACY',
+
   `id` bigint NOT NULL AUTO_INCREMENT,
   `task_id` varchar(64) NOT NULL,
   `client_id` varchar(64) NOT NULL,
@@ -170,6 +173,9 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_task` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_detail` (
+  `next_poll_time` datetime DEFAULT NULL,
+  `downloaded_bytes` bigint DEFAULT NULL,
+
   `id` bigint NOT NULL AUTO_INCREMENT,
   `detail_id` varchar(64) NOT NULL,
   `task_id` varchar(64) NOT NULL,
@@ -196,6 +202,7 @@ CREATE TABLE IF NOT EXISTS `tk_open_tiktok_publish_detail` (
   `updater` varchar(64) DEFAULT '',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted` bit(1) NOT NULL DEFAULT b'0',
+  KEY `idx_pull_due` (`status`, `next_poll_time`, `id`),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tk_open_publish_detail_id` (`detail_id`),
   KEY `idx_tk_open_publish_detail_task` (`client_id`, `task_id`),

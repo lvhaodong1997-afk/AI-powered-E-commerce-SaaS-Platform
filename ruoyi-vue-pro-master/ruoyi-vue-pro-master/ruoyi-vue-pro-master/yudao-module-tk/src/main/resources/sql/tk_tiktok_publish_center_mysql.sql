@@ -1,3 +1,4 @@
+-- Fresh install: after attempt upgrade, execute tk_tiktok_pull_from_url_upgrade_mysql.sql.
 ﻿SET NAMES utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `tk_tiktok_account` (
@@ -107,6 +108,8 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_auth_session` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='TK TikTok鎺堟潈浼氳瘽';
 
 CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_task` (
+  `transfer_policy` varchar(32) DEFAULT 'LEGACY',
+
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'TikTok鍙戝竷浠诲姟缂栧彿',
   `tenant_id` bigint NOT NULL DEFAULT 0 COMMENT '绉熸埛缂栧彿',
   `business_trace_id` varchar(64) DEFAULT NULL COMMENT '涓氬姟娴佹按鍙?',
@@ -149,6 +152,14 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_task` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='TK TikTok鍙戝竷浠诲姟';
 
 CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_detail` (
+  `transfer_source` varchar(32) DEFAULT NULL,
+  `pull_url_cipher` text DEFAULT NULL,
+  `source_file_size` bigint DEFAULT NULL,
+  `init_phase` varchar(40) DEFAULT NULL,
+  `init_started_at` datetime DEFAULT NULL,
+  `next_poll_time` datetime DEFAULT NULL,
+  `downloaded_bytes` bigint DEFAULT NULL,
+
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'TikTok鍙戝竷鏄庣粏缂栧彿',
   `tenant_id` bigint NOT NULL DEFAULT 0 COMMENT '绉熸埛缂栧彿',
   `business_trace_id` varchar(64) DEFAULT NULL COMMENT '涓氬姟娴佹按鍙?',
@@ -180,6 +191,7 @@ CREATE TABLE IF NOT EXISTS `tk_tiktok_publish_detail` (
   `updater` varchar(64) DEFAULT '' COMMENT '鏇存柊鑰?',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '鏇存柊鏃堕棿',
   `deleted` bit(1) NOT NULL DEFAULT b'0' COMMENT '鏄惁鍒犻櫎',
+  KEY `idx_pull_due` (`status`, `next_poll_time`, `id`),
   PRIMARY KEY (`id`),
   KEY `idx_tk_tiktok_publish_detail_trace` (`tenant_id`, `business_trace_id`),
   KEY `idx_tk_tiktok_publish_detail_task` (`publish_task_id`),

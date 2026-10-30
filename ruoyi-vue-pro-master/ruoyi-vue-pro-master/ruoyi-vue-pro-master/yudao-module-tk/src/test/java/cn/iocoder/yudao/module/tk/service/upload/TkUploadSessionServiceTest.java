@@ -53,4 +53,58 @@ class TkUploadSessionServiceTest {
         assertSame(session, service.validateAccessible("upload-1"));
         verify(dataScopeService).validateReadable(eq(100L), eq(200L), eq("7"));
     }
-}
+    @Test
+    void lockAccessibleRechecksCompletedStateUnderRowLock() {
+        TkUploadSessionMapper mapper = mock(TkUploadSessionMapper.class);
+        TkDataScopeService scope = mock(TkDataScopeService.class);
+        TkUploadSessionDO completed = new TkUploadSessionDO().setStatus("COMPLETED")
+                .setExpiresAt(LocalDateTime.now().plusHours(1));
+        when(mapper.selectByUploadIdForUpdate("upload-1")).thenReturn(completed);
+        TkUploadSessionService service = new TkUploadSessionService();
+        ReflectionTestUtils.setField(service, "sessionMapper", mapper);
+        ReflectionTestUtils.setField(service, "dataScopeService", scope);
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> service.lockAccessible("upload-1"));
+        verify(mapper).selectByUploadIdForUpdate("upload-1");
+        org.mockito.Mockito.verify(mapper, org.mockito.Mockito.never()).selectByUploadId("upload-1");
+    }
+
+    @Test
+    void expiryLosingAtomicClaimNeverDeletesCompletedSource() {
+        TkUploadSessionMapper mapper = mock(TkUploadSessionMapper.class);
+        TkOssObjectStorageService oss = mock(TkOssObjectStorageService.class);
+        TkUploadSessionDO stale = new TkUploadSessionDO().setId(1L).setUploadId("upload-1")
+                .setStatus("UPLOADING").setStorageMode("oss").setExpiresAt(LocalDateTime.now().minusHours(1));
+        when(mapper.selectExpired(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(java.util.Collections.singletonList(stale));
+        when(mapper.claimExpired(eq(1L), org.mockito.ArgumentMatchers.any())).thenReturn(0);
+        TkUploadSessionService service = new TkUploadSessionService();
+        ReflectionTestUtils.setField(service, "sessionMapper", mapper);
+        ReflectionTestUtils.setField(service, "ossObjectStorageService", oss);
+        org.junit.jupiter.api.Assertions.assertEquals(0, service.expireSessions());
+        verify(mapper).claimExpired(eq(1L), org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verifyNoInteractions(oss);
+        org.mockito.Mockito.verify(mapper, org.mockito.Mockito.never()).updateById(org.mockito.ArgumentMatchers.any(TkUploadSessionDO.class));
+    }
+
+    @Test
+    void expiryWinningClaimDeletesOnlyClaimedSource() {
+        TkUploadSessionMapper mapper = mock(TkUploadSessionMapper.class);
+        TkOssObjectStorageService oss = mock(TkOssObjectStorageService.class);
+        TkUploadSessionDO expired = new TkUploadSessionDO().setId(1L).setUploadId("upload-1")
+                .setStatus("UPLOADING").setStorageMode("oss").setExpiresAt(LocalDateTime.now().minusHours(1));
+        when(mapper.selectExpired(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(java.util.Collections.singletonList(expired));
+        when(mapper.claimExpired(eq(1L), org.mockito.ArgumentMatchers.any())).thenReturn(1);
+        when(oss.isConfigured()).thenReturn(true);
+        when(oss.buildTiktokObjectKey(expired)).thenReturn("immutable/key.mp4");
+        TkUploadSessionService service = new TkUploadSessionService();
+        ReflectionTestUtils.setField(service, "sessionMapper", mapper);
+        ReflectionTestUtils.setField(service, "ossObjectStorageService", oss);
+        org.junit.jupiter.api.Assertions.assertEquals(1, service.expireSessions());
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(mapper, oss);
+        order.verify(mapper).claimExpired(eq(1L), org.mockito.ArgumentMatchers.any());
+        order.verify(oss).isConfigured();
+        order.verify(oss).buildTiktokObjectKey(expired);
+        order.verify(oss).deleteObject("immutable/key.mp4");
+    }}

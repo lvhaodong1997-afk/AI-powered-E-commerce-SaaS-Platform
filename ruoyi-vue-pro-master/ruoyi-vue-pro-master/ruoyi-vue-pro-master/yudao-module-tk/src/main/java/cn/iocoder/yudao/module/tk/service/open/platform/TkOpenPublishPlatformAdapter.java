@@ -13,6 +13,9 @@ import java.util.function.LongFunction;
 public interface TkOpenPublishPlatformAdapter {
 
     String platform();
+    default String applicationKey() {
+        return platform();
+    }
     boolean isConfigured();
     String buildAuthorizeUrl(String state, String redirectUri);
     OAuthTokenResult exchangeCode(String code, String redirectUri);
@@ -166,6 +169,7 @@ public interface TkOpenPublishPlatformAdapter {
         private List<String> publicPostIds;
         /** Uploaded byte count; null means the platform did not report progress. */
         private Long uploadedBytes;
+        private Long downloadedBytes;
 
         public PublishStatusResult(boolean success, String status, String failReason, String errorCode) {
             this(success, status, failReason, errorCode, java.util.Collections.emptyList());
@@ -174,6 +178,11 @@ public interface TkOpenPublishPlatformAdapter {
         public PublishStatusResult(boolean success, String status, String failReason, String errorCode,
                                    List<String> publicPostIds) {
             this(success, status, failReason, errorCode, publicPostIds, null);
+        }
+
+        public PublishStatusResult(boolean success, String status, String failReason, String errorCode,
+                                   List<String> publicPostIds, Long uploadedBytes) {
+            this(success, status, failReason, errorCode, publicPostIds, uploadedBytes, null);
         }
 
         public boolean isAccessTokenInvalid() {

@@ -54,4 +54,11 @@ public class TkTiktokPublishDetailDO extends TenantBaseDO {
     private String linkLastError;
     private Integer publicPostCount;
 
+    private String transferSource;
+    private String pullUrlCipher;
+    private Long sourceFileSize;
+    private String initPhase;
+    private LocalDateTime initStartedAt;
+    private LocalDateTime nextPollTime;
+    private Long downloadedBytes;
 }

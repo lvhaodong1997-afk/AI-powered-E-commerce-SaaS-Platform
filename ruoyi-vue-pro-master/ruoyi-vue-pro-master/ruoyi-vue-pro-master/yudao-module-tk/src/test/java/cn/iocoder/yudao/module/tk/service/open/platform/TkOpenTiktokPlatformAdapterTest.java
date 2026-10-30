@@ -23,6 +23,23 @@ import static org.mockito.Mockito.when;
 class TkOpenTiktokPlatformAdapterTest {
 
     @Test
+    void forwardsDownloadProgressAndUsesActualApplicationIdentity() {
+        TkTiktokApiClient client = mock(TkTiktokApiClient.class);
+        when(client.getClientKey()).thenReturn("configured-app");
+        TkTiktokApiClient.PostStatusResult result = new TkTiktokApiClient.PostStatusResult(
+                true, "PROCESSING_DOWNLOAD", null, null, Collections.emptyList(), null);
+        result.setDownloadedBytes(1234L);
+        when(client.fetchPostStatusOnce("token", "publish")).thenReturn(result);
+        when(client.fetchPostStatus("token", "publish", 99L)).thenReturn(result);
+        TkOpenPublishPlatformAdapter adapter = new TkOpenTiktokPlatformAdapter(client);
+        assertEquals("configured-app", adapter.applicationKey());
+        assertEquals(1234L, adapter.fetchPostStatus("token", "publish").getDownloadedBytes());
+        assertEquals(1234L, adapter.fetchPostStatus("token", "publish", 99L).getDownloadedBytes());
+        assertNull(new TkOpenPublishPlatformAdapter.PublishStatusResult(
+                true, "PROCESSING", null, null, Collections.emptyList(), 12L).getDownloadedBytes());
+    }
+
+    @Test
     void guardedUploadsForwardSameHookToExistingSessionClient() {
         TkTiktokApiClient client = mock(TkTiktokApiClient.class);
         TkOpenPublishPlatformAdapter adapter = new TkOpenTiktokPlatformAdapter(client);
@@ -96,7 +113,7 @@ class TkOpenTiktokPlatformAdapterTest {
     @Test
     void fetchStatusPropagatesUploadedBytesAndExistingFields() {
         TkTiktokApiClient client = mock(TkTiktokApiClient.class);
-        when(client.fetchPostStatus("access", "publish")).thenReturn(new TkTiktokApiClient.PostStatusResult(
+        when(client.fetchPostStatusOnce("access", "publish")).thenReturn(new TkTiktokApiClient.PostStatusResult(
                 true, "PROCESSING_UPLOAD", null, null, Collections.singletonList("123"), 32_000_000L));
 
         TkOpenPublishPlatformAdapter.PublishStatusResult result =

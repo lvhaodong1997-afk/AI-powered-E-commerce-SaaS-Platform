@@ -104,6 +104,10 @@ public class TkOpenTiktokPublishAttemptService {
         boolean publishedPending = "PENDING".equals(detail.getStatus()) && StrUtil.isNotBlank(detail.getPublishId());
         if (!publishedPending && !"PROCESSING".equals(detail.getStatus())) return false;
         TkOpenTiktokPublishAttemptDO attempt = current(detail);
+        if (attempt != null && "PULL_FROM_URL".equals(attempt.getUploadSource())
+                && "PLATFORM_PROCESSING".equals(attempt.getPhase()) && StrUtil.isNotBlank(detail.getPublishId())) {
+            return false;
+        }
         if (!publishedPending && attempt != null && active(attempt, deadline)) return false;
         // No attempt row means no remote side effect was recorded.  Return the
         // detail to the durable pending queue immediately so it cannot occupy a
@@ -196,6 +200,16 @@ public class TkOpenTiktokPublishAttemptService {
         attempt.setUploadSource(source).setFileSize(size).setFileSha256(sha256).setPhase("READY_TO_INIT");
     }
 
+    /** The source snapshot is durable before crossing the remote initialization boundary. */
+    public void savePullSource(TkOpenTiktokPublishAttemptDO attempt, String pullUrlCipher) {
+        if (StrUtil.isBlank(pullUrlCipher)) throw new IllegalArgumentException("Pull URL snapshot is missing");
+        requireWrite(attempts.update(null, owned(attempt)
+                .eq(TkOpenTiktokPublishAttemptDO::getPhase, "READY_TO_INIT")
+                .eq(TkOpenTiktokPublishAttemptDO::getUploadSource, "PULL_FROM_URL")
+                .set(TkOpenTiktokPublishAttemptDO::getPullUrlCipher, pullUrlCipher)));
+        attempt.setPullUrlCipher(pullUrlCipher);
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public void saveResponse(TkOpenTiktokPublishDetailDO expected, TkOpenTiktokPublishAttemptDO attempt,
                              String publishId, String uploadUrlCipher) {
@@ -209,19 +223,23 @@ public class TkOpenTiktokPublishAttemptService {
             throw new IllegalStateException("Execution ownership changed");
         // A webhook can already have confirmed this exact ID. Never regress its phase.
         boolean terminal = "SUCCESS".equals(current.getStatus()) || "FAILED".equals(current.getStatus());
+        String savedPhase = "PULL_FROM_URL".equals(stored.getUploadSource())
+                ? "PLATFORM_PROCESSING" : "PUBLISH_ID_SAVED";
         requireWrite(attempts.update(null, owned(attempt)
                 .set(TkOpenTiktokPublishAttemptDO::getPublishId, publishId)
                 .set(TkOpenTiktokPublishAttemptDO::getUploadUrlCipher, uploadUrlCipher)
-                .set(!terminal, TkOpenTiktokPublishAttemptDO::getPhase, "PUBLISH_ID_SAVED")
+                .set(!terminal, TkOpenTiktokPublishAttemptDO::getPhase, savedPhase)
                 .set(TkOpenTiktokPublishAttemptDO::getHeartbeatTime, LocalDateTime.now())));
         if (!terminal) requireWrite(details.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
                 .eq(TkOpenTiktokPublishDetailDO::getId, current.getId())
                 .set(TkOpenTiktokPublishDetailDO::getPublishId, publishId)
-                .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "UPLOAD_PENDING")
+                .set(TkOpenTiktokPublishDetailDO::getTiktokStatus,
+                        "PULL_FROM_URL".equals(stored.getUploadSource()) ? "PROCESSING_DOWNLOAD" : "UPLOAD_PENDING")
+                .set(TkOpenTiktokPublishDetailDO::getNextPollTime, LocalDateTime.now().plusSeconds(10))
                 .set(TkOpenTiktokPublishDetailDO::getFailReason, null)
                 .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now())));
         attempt.setPublishId(publishId).setUploadUrlCipher(uploadUrlCipher)
-                .setPhase(terminal ? "CONFIRMED_TERMINAL" : "PUBLISH_ID_SAVED");
+                .setPhase(terminal ? "CONFIRMED_TERMINAL" : savedPhase);
     }
 
     /** Return a prepared but unsent attempt to the database when the upload lane is full. */

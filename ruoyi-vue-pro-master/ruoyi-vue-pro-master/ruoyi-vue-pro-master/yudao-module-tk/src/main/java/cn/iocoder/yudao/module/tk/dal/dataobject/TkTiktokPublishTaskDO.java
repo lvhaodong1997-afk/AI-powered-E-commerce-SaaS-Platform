@@ -49,4 +49,5 @@ public class TkTiktokPublishTaskDO extends TenantBaseDO {
     private String scheduledMediaStatus;
     private String scheduledMediaFailReason;
 
+    private String transferPolicy;
 }

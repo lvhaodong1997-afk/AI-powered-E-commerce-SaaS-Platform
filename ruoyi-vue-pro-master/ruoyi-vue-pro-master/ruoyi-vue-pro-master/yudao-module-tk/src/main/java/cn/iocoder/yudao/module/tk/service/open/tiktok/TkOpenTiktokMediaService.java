@@ -300,7 +300,7 @@ public class TkOpenTiktokMediaService {
     @Transactional(rollbackFor = Exception.class)
     public TkOpenTiktokMediaVO.MediaResp complete(String uploadId, Long fileSize, String sha256,
                                                    Long coverTimestampMs) {
-        TkOpenTiktokMediaDO media = requireUpload(uploadId);
+        TkOpenTiktokMediaDO media = requireUploadForUpdate(uploadId);
         requireUploading(media);
         if (fileSize == null || !fileSize.equals(media.getFileSize()) || (StrUtil.isNotBlank(media.getSha256())
                 && !media.getSha256().equalsIgnoreCase(StrUtil.blankToDefault(sha256, "")))) {
@@ -361,8 +361,9 @@ public class TkOpenTiktokMediaService {
         return response;
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public void cancel(String uploadId) {
-        TkOpenTiktokMediaDO media = requireUpload(uploadId);
+        TkOpenTiktokMediaDO media = requireUploadForUpdate(uploadId);
         requireUploading(media);
         if ("LOCAL".equals(media.getUploadMode())) FileUtil.del(localStorageService.getTmpDir(uploadId).toFile());
         else if (StrUtil.isNotBlank(media.getObjectKey()) && ossObjectStorageService.isConfigured())
@@ -374,6 +375,15 @@ public class TkOpenTiktokMediaService {
         String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
         TkOpenTiktokMediaDO media = mediaMapper.selectByClientAndMediaId(clientId, mediaId);
         if (media == null) throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "media does not exist");
+        return media;
+    }
+
+    private TkOpenTiktokMediaDO requireUploadForUpdate(String uploadId) {
+        String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
+        TkOpenTiktokMediaDO media = mediaMapper.selectByClientAndUploadIdForUpdate(clientId, uploadId);
+        if (media == null) throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "upload session does not exist");
+        if (media.getExpireTime().isBefore(LocalDateTime.now()) && "UPLOADING".equals(media.getStatus()))
+            throw TkOpenApiException.badRequest("MEDIA_UPLOAD_EXPIRED", "upload session has expired");
         return media;
     }
 

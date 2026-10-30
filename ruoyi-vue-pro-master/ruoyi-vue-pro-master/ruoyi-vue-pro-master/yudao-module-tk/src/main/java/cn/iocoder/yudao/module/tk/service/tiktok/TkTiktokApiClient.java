@@ -475,6 +475,15 @@ public class TkTiktokApiClient {
                 () -> postJson(STATUS_URL, accessToken, payload, "publish_status")));
     }
 
+    /** Exactly one transport request; durable polling owns retry timing and per-request budget. */
+    public PostStatusResult fetchPostStatusOnce(String accessToken, String publishId) {
+        if (StrUtil.isBlank(accessToken) || StrUtil.isBlank(publishId)) {
+            return new PostStatusResult(false, "FAILED", "账号缺少 Access Token 或发布编号", null);
+        }
+        return parsePostStatusResult(postJson(STATUS_URL, accessToken,
+                Collections.singletonMap("publish_id", publishId), "publish_status"));
+    }
+
     /** One bounded query inside an upload; durable recovery handles unavailable progress. */
     public PostStatusResult fetchPostStatus(String accessToken, String publishId, long deadlineNanos) {
         checkUploadActive(deadlineNanos);
@@ -512,10 +521,13 @@ public class TkTiktokApiClient {
         }
         JsonNode data = root.path("data");
         JsonNode uploadedBytes = data.path("uploaded_bytes");
+        JsonNode downloadedBytes = data.path("downloaded_bytes");
         return new PostStatusResult(true, data.path("status").asText("PROCESSING"),
                 data.path("fail_reason").asText(null), null,
                 parsePublicPostIds(data.path("publicaly_available_post_id")),
-                uploadedBytes.isIntegralNumber() && uploadedBytes.canConvertToLong() ? uploadedBytes.longValue() : null);
+                uploadedBytes.isIntegralNumber() && uploadedBytes.canConvertToLong() ? uploadedBytes.longValue() : null,
+                downloadedBytes.isIntegralNumber() && downloadedBytes.canConvertToLong() && downloadedBytes.longValue() >= 0
+                        ? downloadedBytes.longValue() : null);
     }
 
     static VideoQueryResult parseVideoQueryResult(JsonNode root) {
@@ -926,6 +938,8 @@ public class TkTiktokApiClient {
         private List<String> publicPostIds;
         /** TikTok uploaded_bytes count; null when absent or not a valid int64. */
         private Long uploadedBytes;
+        /** TikTok downloaded_bytes count; null when absent or invalid. */
+        private Long downloadedBytes;
 
         public PostStatusResult(boolean success, String status, String failReason, String errorCode) {
             this(success, status, failReason, errorCode, Collections.emptyList());
@@ -934,6 +948,11 @@ public class TkTiktokApiClient {
         public PostStatusResult(boolean success, String status, String failReason, String errorCode,
                                 List<String> publicPostIds) {
             this(success, status, failReason, errorCode, publicPostIds, null);
+        }
+
+        public PostStatusResult(boolean success, String status, String failReason, String errorCode,
+                                List<String> publicPostIds, Long uploadedBytes) {
+            this(success, status, failReason, errorCode, publicPostIds, uploadedBytes, null);
         }
 
         public boolean isAccessTokenInvalid() {

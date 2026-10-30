@@ -23,7 +23,7 @@ public class TkOpenTiktokPublishStatusJob {
     public TkOpenTiktokPublishStatusJob(TkOpenTiktokPublishService publishService) { this.publishService = publishService; }
 
     @TenantIgnore
-    @Scheduled(fixedDelayString = "${tk.open-api.publish.status-delay-ms:120000}", initialDelay = 60000)
+    @Scheduled(fixedDelayString = "${tk.open-api.publish.status-delay-ms:10000}", initialDelay = 60000)
     public void sync() {
         submit(status, () -> {
             run("journal", () -> publishService.recoverJournal(100));

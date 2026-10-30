@@ -32,4 +32,5 @@ public class TkOpenTiktokPublishAttemptDO extends BaseDO {
     private LocalDateTime terminalTime;
     private LocalDateTime nextReconcileTime;
     private Integer reconcileCount;
+    private String pullUrlCipher;
 }

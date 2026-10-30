@@ -109,5 +109,33 @@ public interface TkTiktokPublishDetailMapper extends BaseMapperX<TkTiktokPublish
             + "WHERE publish_task_id = #{taskId} AND deleted = b'0' AND status = 'SCHEDULED'")
     int cancelScheduled(@Param("taskId") Long taskId, @Param("now") LocalDateTime now);
 
+
+    default List<TkTiktokPublishDetailDO> selectDueProcessingList(LocalDateTime now, int limit) {
+        return selectList(new LambdaQueryWrapperX<TkTiktokPublishDetailDO>()
+                .eq(TkTiktokPublishDetailDO::getStatus, "PROCESSING")
+                .isNotNull(TkTiktokPublishDetailDO::getPublishId)
+                .ne(TkTiktokPublishDetailDO::getPublishId, "")
+                .and(w -> w.isNull(TkTiktokPublishDetailDO::getNextPollTime)
+                        .or().le(TkTiktokPublishDetailDO::getNextPollTime, now))
+                .and(w -> w.isNull(TkTiktokPublishDetailDO::getLinkNextRetryTime)
+                        .or().le(TkTiktokPublishDetailDO::getLinkNextRetryTime, now))
+                .orderByAsc(TkTiktokPublishDetailDO::getNextPollTime)
+                .orderByAsc(TkTiktokPublishDetailDO::getId)
+                .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
+    }
+
+    @Update("UPDATE tk_tiktok_publish_detail SET status = 'PROCESSING', init_phase = 'RECOVERY_REQUIRED', "
+            + "tiktok_status = 'RECOVERY_REQUIRED', fail_reason = 'TikTok 初始化结果待核查，禁止重复提交', "
+            + "update_time = NOW() WHERE deleted = 0 AND status IN ('PENDING', 'PROCESSING') "
+            + "AND init_phase = 'INIT_IN_FLIGHT' AND (publish_id IS NULL OR publish_id = '') "
+            + "AND init_started_at <= #{deadline} ORDER BY id LIMIT #{limit}")
+    int classifyStaleUnknownInit(@Param("deadline") LocalDateTime deadline, @Param("limit") int limit);
+
+    @Update("UPDATE tk_tiktok_publish_detail SET next_poll_time = #{nextPollTime} "
+            + "WHERE id = #{detailId} AND deleted = 0 AND status = 'PROCESSING' "
+            + "AND publish_id IS NOT NULL AND publish_id <> '' "
+            + "AND (next_poll_time IS NULL OR next_poll_time <= #{now})")
+    int reserveStatusPoll(@Param("detailId") Long detailId, @Param("now") LocalDateTime now,
+                          @Param("nextPollTime") LocalDateTime nextPollTime);
 }
 

@@ -19,6 +19,7 @@ import cn.iocoder.yudao.module.tk.service.upload.TkOssRestSigner;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssPostPolicySigner.Policy;
 import cn.iocoder.yudao.module.tk.service.upload.TkUploadSessionService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.multipart.MultipartFile;
 import lombok.extern.slf4j.Slf4j;
@@ -227,10 +228,11 @@ public class TkTiktokPublishMediaUploadServiceImpl implements TkTiktokPublishMed
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TkTiktokPublishMediaDO complete(String uploadId, String coverUrl) {
         Path manifestFile = manifestPath(storageService.getTmpDir(uploadId));
         if (!Files.isRegularFile(manifestFile) && uploadSessionService != null) {
-            TkUploadSessionDO session = uploadSessionService.validateAccessible(uploadId);
+            TkUploadSessionDO session = uploadSessionService.lockAccessible(uploadId);
             if ("oss".equalsIgnoreCase(session.getStorageMode())) {
                 return completeOss(uploadId, coverUrl, session);
             }
@@ -307,10 +309,11 @@ public class TkTiktokPublishMediaUploadServiceImpl implements TkTiktokPublishMed
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void cancel(String uploadId) {
         Path manifestFile = manifestPath(storageService.getTmpDir(uploadId));
         if (!Files.isRegularFile(manifestFile) && uploadSessionService != null) {
-            TkUploadSessionDO session = uploadSessionService.validateAccessible(uploadId);
+            TkUploadSessionDO session = uploadSessionService.lockAccessible(uploadId);
             if ("oss".equalsIgnoreCase(session.getStorageMode())) {
                 TkUserScope scope = requireScope();
                 validatePersistedSessionScope(scope, session);

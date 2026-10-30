@@ -12,6 +12,9 @@ import cn.iocoder.yudao.module.tk.service.open.platform.TkOpenPublishPlatformAda
 import cn.iocoder.yudao.module.tk.service.open.platform.TkOpenPublishPlatformRegistry;
 import cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokApiClient;
 import cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokMediaTransfer;
+import cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokPullSourceResolver;
+import cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokPublishRequestBudget;
+import cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokStatusPollSchedule;
 import cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
@@ -97,6 +100,8 @@ public class TkOpenTiktokPublishService {
     @Resource private TkOpenTiktokPublishAttemptService attemptService;
     @Resource private TkOpenTiktokPublishTerminalService terminalService;
     @Resource private TkOpenTiktokPublishResponseJournal responseJournal;
+    @Resource private TkTiktokPullSourceResolver pullSourceResolver;
+    @Resource private TkTiktokPublishRequestBudget requestBudget;
     private volatile boolean stopping;
 
     @PostConstruct
@@ -254,7 +259,11 @@ public class TkOpenTiktokPublishService {
                 throw TkOpenApiException.badRequest("CONNECTION_NOT_AUTHORIZED", "connection is not authorized");
         }
         boolean scheduled = scheduledAt != null;
-        if (scheduled) {
+        boolean preferPull = pullSourceResolver != null && connections.stream().anyMatch(connection ->
+                scheduled
+                        ? pullSourceResolver.resolve(media.getFileUrl(), connection.getId(), platform().verifiedPullDomain()).isEligible()
+                        : pullSourceResolver.isCandidate(media.getFileUrl(), connection.getId(), platform().verifiedPullDomain()));
+        if (scheduled && !preferPull) {
             if (mediaService == null) {
                 throw TkOpenApiException.unavailable("MEDIA_SERVICE_UNAVAILABLE", "scheduled media service is unavailable");
             }
@@ -277,6 +286,7 @@ public class TkOpenTiktokPublishService {
                 .taskId(taskId)
                 .clientId(clientId)
                 .mediaId(media.getMediaId())
+                .transferPolicy(preferPull ? "OSS_PULL_V1" : "FILE_UPLOAD")
                 .externalRequestId(request.getExternalRequestId())
                 .title(request.getTitle())
                 .caption(request.getCaption())
@@ -795,9 +805,13 @@ public class TkOpenTiktokPublishService {
             return count;
         }
         for (TkOpenTiktokPublishDetailDO detail
-                : detailMapper.selectStaleProcessing(now.minusMinutes(STATUS_STALE_MINUTES), remaining)) {
-            syncDetail(detail);
-            count++;
+                : detailMapper.selectDueProcessing(now, remaining)) {
+            LocalDateTime nextPoll = TkTiktokStatusPollSchedule.nextPollTime(
+                    now, detail.getLastSyncTime(), detail.getNextPollTime(), detail.getId());
+            if (detailMapper.reserveStatusPoll(detail.getId(), now, nextPoll) == 1) {
+                syncDetail(detail);
+                count++;
+            }
         }
         return count;
     }
@@ -943,10 +957,19 @@ public class TkOpenTiktokPublishService {
                 creator = adapter.queryCreatorInfo(token);
             }
             if (!creator.isSuccess()) throw new IllegalStateException(creator.getFailReason());
-            source = resolveSource(media, adapter.verifiedPullDomain());
+            source = "LEGACY".equals(task.getTransferPolicy()) || StrUtil.isBlank(task.getTransferPolicy())
+                    ? resolveSource(media, adapter.verifiedPullDomain())
+                    : resolveSource(media, adapter.verifiedPullDomain(), connection.getId(),
+                            "OSS_PULL_V1".equals(task.getTransferPolicy()));
             Map<String, Object> payload = buildPayload(task, media, creator, source);
             attemptService.ready(attempt, source.pullFromUrl ? "PULL_FROM_URL" : "FILE_UPLOAD",
                     source.size, source.pullFromUrl ? null : fileSha256(source.file));
+            if (source.pullFromUrl) {
+                attemptService.savePullSource(attempt, secretCipher.encrypt(source.pullUrl));
+                // Pull initialization is a short control request; no upload worker is occupied.
+                publishPrepared(detail, attempt, task, connection, media, adapter, token, source, payload);
+                return;
+            }
             final TkOpenTiktokPublishAttemptDO preparedAttempt = attempt;
             final UploadSource preparedSource = source;
             final ScheduledFuture<?> preparedHeartbeat = heartbeat;
@@ -985,6 +1008,10 @@ public class TkOpenTiktokPublishService {
                 attemptService.deferUnsent(detail, attempt);
                 return;
             }
+            if (requestBudget != null && !requestBudget.tryAcquireInit(adapter.applicationKey(), connection.getOpenId())) {
+                attemptService.deferUnsent(detail, attempt);
+                return;
+            }
             // This fenced durable transition must succeed before contacting TikTok.
             attemptService.beginRemoteInit(attempt, LocalDateTime.now().minusMinutes(WORKER_LEASE_MINUTES));
             initSent = true;
@@ -993,6 +1020,11 @@ public class TkOpenTiktokPublishService {
                 // An explicit invalid-token rejection has no accepted publish; one refreshed request is safe.
                 token = validAccessToken(connection, adapter, true);
                 heartbeatOrRecover(attempt);
+                if (requestBudget != null && !requestBudget.tryAcquireInit(adapter.applicationKey(), connection.getOpenId())) {
+                    initSent = false;
+                    failureSource = "INIT_REJECTED";
+                    throw new IllegalStateException("TikTok initialization budget exhausted after explicit token rejection");
+                }
                 initialized = adapter.initVideoPost(token, task.getPostMode(), payload);
             }
             if (!initialized.isSuccess()) {
@@ -1024,13 +1056,16 @@ public class TkOpenTiktokPublishService {
                 String uploadAccessToken = token;
                 adapter.uploadVideo(initialized.getUploadUrl(), source.file, media.getContentType(),
                         () -> heartbeatOrRecover(attempt),
-                        deadline -> confirmedUploadProgress(uploadAccessToken, adapter, detail.getPublishId(), source.size, deadline));
+                        deadline -> confirmedUploadProgress(uploadAccessToken, adapter, detail.getPublishId(),
+                                source.size, deadline, connection.getOpenId()));
             }
             attemptService.stage(attempt, "PLATFORM_PROCESSING");
-            detail.setTiktokStatus("PROCESSING");
+            String processingStatus = source.pullFromUrl ? "PROCESSING_DOWNLOAD" : "PROCESSING";
+            detail.setTiktokStatus(processingStatus);
             int changed = detailMapper.update(null, processingUpdate(detail)
-                    .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "PROCESSING")
+                    .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, processingStatus)
                     .set(TkOpenTiktokPublishDetailDO::getFailReason, null)
+                    .set(TkOpenTiktokPublishDetailDO::getNextPollTime, LocalDateTime.now().plusSeconds(10))
                     .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
             connectionMapper.updateById(new TkOpenTiktokConnectionDO().setId(connection.getId()).setLastPublishTime(LocalDateTime.now()));
             if (changed > 0) publishEvent(detail, task, "publish.processing");
@@ -1165,9 +1200,13 @@ public class TkOpenTiktokPublishService {
             TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(detail.getClientId(), detail.getConnectionId());
             if (connection == null || StrUtil.isBlank(detail.getPublishId())) return;
             TkOpenPublishPlatformAdapter adapter = platform();
+            if (requestBudget != null && !requestBudget.tryAcquireStatus(adapter.applicationKey(), connection.getOpenId())) return;
             String token = validAccessToken(connection, adapter, false);
             TkOpenPublishPlatformAdapter.PublishStatusResult status = adapter.fetchPostStatus(token, detail.getPublishId());
-            if (status.isAccessTokenInvalid()) status = adapter.fetchPostStatus(validAccessToken(connection, adapter, true), detail.getPublishId());
+            if (status.isAccessTokenInvalid()) {
+                if (requestBudget != null && !requestBudget.tryAcquireStatus(adapter.applicationKey(), connection.getOpenId())) return;
+                status = adapter.fetchPostStatus(validAccessToken(connection, adapter, true), detail.getPublishId());
+            }
             if (!status.isSuccess()) throw new IllegalStateException(status.getFailReason());
             String postId = status.getPublicPostIds() == null || status.getPublicPostIds().isEmpty() ? null : status.getPublicPostIds().get(0);
             if (isSuccess(status.getStatus()) || isFailed(status.getStatus())) {
@@ -1178,6 +1217,8 @@ public class TkOpenTiktokPublishService {
                 attemptService.clearReconcileBackoff(attempt);
                 detailMapper.update(null, processingUpdate(detail)
                         .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, status.getStatus())
+                        .set(status.getDownloadedBytes() != null, TkOpenTiktokPublishDetailDO::getDownloadedBytes,
+                                status.getDownloadedBytes() == null ? 0L : Math.max(0L, status.getDownloadedBytes()))
                         .set(TkOpenTiktokPublishDetailDO::getFailReason, null)
                         .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
                 if ("PROCESSING_UPLOAD".equals(status.getStatus()) && status.getUploadedBytes() != null) {
@@ -1224,6 +1265,7 @@ public class TkOpenTiktokPublishService {
                     TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(
                             currentDetail.getClientId(), currentDetail.getConnectionId());
                     TkOpenPublishPlatformAdapter adapter = platform();
+                    requireStatusBudget(adapter, connection.getOpenId());
                     String uploadAccessToken = validAccessToken(connection, adapter, false);
                     TkOpenPublishPlatformAdapter.PublishStatusResult current = adapter.fetchPostStatus(
                             uploadAccessToken, currentDetail.getPublishId());
@@ -1232,7 +1274,8 @@ public class TkOpenTiktokPublishService {
                         TkOpenTiktokPublishAttemptDO activeAttempt = attempt;
                         adapter.resumeUploadVideo(secretCipher.decrypt(attempt.getUploadUrlCipher()), source.file,
                                 media.getContentType(), current.getUploadedBytes(), () -> heartbeatOrRecover(activeAttempt),
-                                deadline -> confirmedUploadProgress(uploadAccessToken, adapter, currentDetail.getPublishId(), activeAttempt.getFileSize(), deadline));
+                                deadline -> confirmedUploadProgress(uploadAccessToken, adapter, currentDetail.getPublishId(),
+                                        activeAttempt.getFileSize(), deadline, connection.getOpenId()));
                         attemptService.stage(attempt, "PLATFORM_PROCESSING");
                     } else if (current.isSuccess() && (isSuccess(current.getStatus()) || isFailed(current.getStatus()))) {
                         terminalService.confirm(currentDetail, current.getStatus(),
@@ -1262,6 +1305,17 @@ public class TkOpenTiktokPublishService {
     }
 
     private Long confirmedUploadProgress(String accessToken, TkOpenPublishPlatformAdapter adapter,
+                                         String publishId, long fileSize, long deadlineNanos, String openId) {
+        requireStatusBudget(adapter, openId);
+        return confirmedUploadProgress(accessToken, adapter, publishId, fileSize, deadlineNanos);
+    }
+
+    private void requireStatusBudget(TkOpenPublishPlatformAdapter adapter, String openId) {
+        if (requestBudget != null && !requestBudget.tryAcquireStatus(adapter.applicationKey(), openId))
+            throw new IllegalStateException("TikTok status query deferred by shared request budget");
+    }
+
+    private Long confirmedUploadProgress(String accessToken, TkOpenPublishPlatformAdapter adapter,
                                          String publishId, long fileSize, long deadlineNanos) {
         TkOpenPublishPlatformAdapter.PublishStatusResult current = adapter.fetchPostStatus(
                 accessToken, publishId, deadlineNanos);
@@ -1283,9 +1337,11 @@ public class TkOpenTiktokPublishService {
                     detail.getClientId(), detail.getConnectionId());
             if (connection == null || StrUtil.isBlank(detail.getPublishId())) return false;
             TkOpenPublishPlatformAdapter adapter = platform();
+            requireStatusBudget(adapter, connection.getOpenId());
             TkOpenPublishPlatformAdapter.PublishStatusResult status = adapter.fetchPostStatus(
                     validAccessToken(connection, adapter, false), detail.getPublishId());
             if (status.isAccessTokenInvalid()) {
+                requireStatusBudget(adapter, connection.getOpenId());
                 status = adapter.fetchPostStatus(validAccessToken(connection, adapter, true), detail.getPublishId());
             }
             return applyExpiredUploadStatus(detail, attempt, status);
@@ -1437,7 +1493,7 @@ public class TkOpenTiktokPublishService {
         post.put("is_aigc", Boolean.TRUE.equals(task.getAigcContent()));
         Map<String, Object> sourceInfo = new LinkedHashMap<>();
         sourceInfo.put("source", source.pullFromUrl ? "PULL_FROM_URL" : "FILE_UPLOAD");
-        if (source.pullFromUrl) sourceInfo.put("video_url", media.getFileUrl());
+        if (source.pullFromUrl) sourceInfo.put("video_url", source.pullUrl);
         else {
             sourceInfo.put("video_size", source.size);
             sourceInfo.put("chunk_size", source.chunkSize);
@@ -1453,7 +1509,8 @@ public class TkOpenTiktokPublishService {
             Path scheduled = java.nio.file.Paths.get(media.getScheduledLocalPath()).toAbsolutePath().normalize();
             if (Files.isRegularFile(scheduled)) return UploadSource.file(scheduled, false);
         }
-        if (isVerifiedPullUrl(media.getFileUrl(), verifiedDomain)) return UploadSource.pull();
+        if (isVerifiedPullUrl(media.getFileUrl(), verifiedDomain))
+            return UploadSource.pull(media.getFileUrl(), media.getFileSize() == null ? 0L : media.getFileSize());
         if (mediaService != null && (StrUtil.isBlank(media.getUploadMode())
                 || "REMOTE".equalsIgnoreCase(media.getUploadMode()))) {
             mediaService.prepareForScheduledPublish(media);
@@ -1477,6 +1534,18 @@ public class TkOpenTiktokPublishService {
             Files.deleteIfExists(temporary); throw ex;
         }
         return UploadSource.file(temporary, true);
+    }
+
+    private UploadSource resolveSource(TkOpenTiktokMediaDO media, String verifiedDomain,
+                                       Long accountId, boolean preferPull) throws Exception {
+        if (!preferPull || pullSourceResolver == null) return resolveSource(media, null);
+        TkTiktokPullSourceResolver.PullDecision decision =
+                pullSourceResolver.resolve(media.getFileUrl(), accountId, verifiedDomain);
+        if (decision.isEligible()) return UploadSource.pull(decision.getPullUrl(), decision.getFileSize());
+        log.info("[resolveSource][mediaId({}) using FILE_UPLOAD; pull precheck({})]",
+                media.getMediaId(), decision.getReasonCode());
+        // A failed pull preflight must not re-enter the legacy verified-URL shortcut.
+        return resolveSource(media, null);
     }
 
     private void refreshSummary(String clientId, String taskId) {
@@ -1814,11 +1883,16 @@ public class TkOpenTiktokPublishService {
         private static final long MAX_VIDEO_SIZE = 4_000_000_000L;
 
         private final boolean pullFromUrl; private final Path file; private final boolean temporary;
+        private String pullUrl;
         private final long size; private final long chunkSize; private final int totalChunks;
         private UploadSource(boolean pull, Path file, boolean temporary, long size, long chunkSize, int totalChunks) {
             this.pullFromUrl = pull; this.file = file; this.temporary = temporary; this.size = size; this.chunkSize = chunkSize; this.totalChunks = totalChunks;
         }
-        static UploadSource pull() { return new UploadSource(true, null, false, 0, 0, 0); }
+        static UploadSource pull(String url, long size) {
+            UploadSource source = new UploadSource(true, null, false, size, 0, 0);
+            source.pullUrl = url;
+            return source;
+        }
         static UploadSource file(Path path, boolean temporary) throws Exception {
             long size = Files.size(path);
             if (size <= 0 || size > MAX_VIDEO_SIZE) {

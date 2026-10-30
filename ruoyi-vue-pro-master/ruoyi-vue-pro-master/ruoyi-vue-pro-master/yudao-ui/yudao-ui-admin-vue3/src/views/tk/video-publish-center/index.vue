@@ -1509,9 +1509,12 @@ const authStatusLabel = (status?: string) => ({ AUTHORIZED: 'Authorized', UNAUTH
 const tokenStatusLabel = (status?: string) => ({ VALID: '有效', AUTO_REFRESH: '自动刷新中', EXPIRED: '需重新授权' })[status || ''] || status || '-'
 const tokenStatusType = (status?: string) => ({ VALID: 'success', AUTO_REFRESH: 'warning', EXPIRED: 'danger' }[status || ''] || 'info') as 'success' | 'warning' | 'danger' | 'info'
 const postModeLabel = (mode?: string) => ({ DIRECT_POST: 'Direct post', UPLOAD_TO_INBOX: 'Upload to inbox', MANUAL_REGISTER: 'Manual register' })[mode || ''] || mode || '-'
-const publishStatusLabel = (status?: string) => ({ SCHEDULED: '等待定时发布', PENDING: 'Pending', PROCESSING: 'Processing', SUCCESS: 'Success', PARTIAL_SUCCESS: 'Partial success', FAILED: 'Failed', CANCELLED: '已取消' })[status || ''] || status || '-'
+const publishStatusLabel = (status?: string) => ({ SCHEDULED: '等待定时发布', PENDING: 'Pending', PROCESSING: 'Processing', SUCCESS: 'Success', PARTIAL_SUCCESS: 'Partial success', FAILED: 'Failed', RECOVERY_REQUIRED: '待核查', CANCELLED: '已取消' })[status || ''] || status || '-'
 const tiktokStatusLabel = (status?: string) => ({
   UPLOAD_PENDING: '上传待确认',
+  PROCESSING_DOWNLOAD: 'TikTok拉取中',
+  PROCESSING_UPLOAD: '上传中',
+  RECOVERY_REQUIRED: '待核查',
   PROCESSING: '平台处理中',
   PUBLISH_COMPLETE: '已发布',
   SEND_TO_USER_INBOX: '已提交草稿箱',

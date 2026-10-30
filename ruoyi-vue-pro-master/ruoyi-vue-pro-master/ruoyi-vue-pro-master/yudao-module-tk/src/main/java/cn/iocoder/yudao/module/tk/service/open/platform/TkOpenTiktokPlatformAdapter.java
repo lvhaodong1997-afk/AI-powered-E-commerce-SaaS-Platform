@@ -31,6 +31,11 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
     }
 
     @Override
+    public String applicationKey() {
+        return apiClient.getClientKey();
+    }
+
+    @Override
     public boolean isConfigured() {
         return apiClient.isConfigured();
     }
@@ -138,16 +143,16 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
 
     @Override
     public PublishStatusResult fetchPostStatus(String accessToken, String publishId) {
-        TkTiktokApiClient.PostStatusResult result = apiClient.fetchPostStatus(accessToken, publishId);
+        TkTiktokApiClient.PostStatusResult result = apiClient.fetchPostStatusOnce(accessToken, publishId);
         return new PublishStatusResult(result.isSuccess(), result.getStatus(), result.getFailReason(), result.getErrorCode(),
-                result.getPublicPostIds(), result.getUploadedBytes());
+                result.getPublicPostIds(), result.getUploadedBytes(), result.getDownloadedBytes());
     }
 
     @Override
     public PublishStatusResult fetchPostStatus(String accessToken, String publishId, long deadlineNanos) {
         TkTiktokApiClient.PostStatusResult result = apiClient.fetchPostStatus(accessToken, publishId, deadlineNanos);
         return new PublishStatusResult(result.isSuccess(), result.getStatus(), result.getFailReason(), result.getErrorCode(),
-                result.getPublicPostIds(), result.getUploadedBytes());
+                result.getPublicPostIds(), result.getUploadedBytes(), result.getDownloadedBytes());
     }
 
     @Override

@@ -18,6 +18,12 @@ public interface TkOpenTiktokMediaMapper extends BaseMapperX<TkOpenTiktokMediaDO
                 .eq(TkOpenTiktokMediaDO::getUploadId, uploadId));
     }
 
+    default TkOpenTiktokMediaDO selectByClientAndUploadIdForUpdate(String clientId, String uploadId) {
+        return selectOne(new LambdaQueryWrapperX<TkOpenTiktokMediaDO>()
+                .eq(TkOpenTiktokMediaDO::getClientId, clientId)
+                .eq(TkOpenTiktokMediaDO::getUploadId, uploadId).last("FOR UPDATE"));
+    }
+
     default TkOpenTiktokMediaDO selectByClientAndMediaId(String clientId, String mediaId) {
         return selectOne(new LambdaQueryWrapperX<TkOpenTiktokMediaDO>()
                 .eq(TkOpenTiktokMediaDO::getClientId, clientId)

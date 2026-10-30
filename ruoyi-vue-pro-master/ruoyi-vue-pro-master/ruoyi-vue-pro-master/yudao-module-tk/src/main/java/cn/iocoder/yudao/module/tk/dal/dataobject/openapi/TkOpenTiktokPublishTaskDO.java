@@ -51,4 +51,5 @@ public class TkOpenTiktokPublishTaskDO extends BaseDO {
     private String scheduleUtcOffset;
     private String scheduleStatus;
     private Integer scheduleVersion;
+    private String transferPolicy;
 }

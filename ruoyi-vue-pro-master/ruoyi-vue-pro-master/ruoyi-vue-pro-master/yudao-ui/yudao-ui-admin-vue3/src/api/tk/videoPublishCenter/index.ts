@@ -111,6 +111,8 @@ export interface TkTiktokPublishDetailVO {
   publishId?: string
   publishUrl?: string
   tiktokStatus?: string
+  downloadedBytes?: number
+  sourceFileSize?: number
   status: string
   postMode: string
   privacyLevel?: string

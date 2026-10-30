@@ -77,6 +77,12 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     private final Set<Long> queuedPublishTaskIds = ConcurrentHashMap.newKeySet();
 
     @Resource
+    private TkTiktokPullSourceResolver pullSourceResolver;
+    @Resource
+    private TkTiktokPublishRequestBudget requestBudget;
+    @Resource
+    private cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher secretCipher;
+    @Resource
     private TkTiktokAccountMapper accountMapper;
     @Resource
     private TkTiktokPublishTaskMapper publishTaskMapper;
@@ -281,6 +287,46 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         if (task != null && "CLEANED".equals(task.getScheduledMediaStatus())) {
             throw new IllegalStateException("定时发布素材已清理，请重新创建发布任务");
         }
+        if ("INIT_IN_FLIGHT".equals(detail.getInitPhase()) || "RECOVERY_REQUIRED".equals(detail.getInitPhase())
+                || (StrUtil.isNotBlank(detail.getPublishId()) && !("FAILED".equals(detail.getTiktokStatus()) && "REMOTE_FAILED".equals(detail.getInitPhase())))) {
+            throw new IllegalStateException("远端发布尚未确认失败，禁止重复提交");
+        }
+        int nextRetry = detail.getRetryCount() == null ? 1 : detail.getRetryCount() + 1;
+        LocalDateTime now = LocalDateTime.now();
+        int reset = publishDetailMapper.update(null, executionFence(detail, detail.getPublishId())
+                .eq(TkTiktokPublishDetailDO::getStatus, STATUS_FAILED)
+                .and(w -> w.isNull(TkTiktokPublishDetailDO::getInitPhase)
+                        .or().notIn(TkTiktokPublishDetailDO::getInitPhase, "INIT_IN_FLIGHT", "RECOVERY_REQUIRED"))
+                .set(TkTiktokPublishDetailDO::getStatus, STATUS_PENDING)
+                .set(TkTiktokPublishDetailDO::getTiktokStatus, "RETRY_PENDING")
+                .set(TkTiktokPublishDetailDO::getRetryCount, nextRetry)
+                .set(TkTiktokPublishDetailDO::getInitPhase, null)
+                .set(TkTiktokPublishDetailDO::getInitStartedAt, null)
+                .set(TkTiktokPublishDetailDO::getTransferSource, null)
+                .set(TkTiktokPublishDetailDO::getPullUrlCipher, null)
+                .set(TkTiktokPublishDetailDO::getSourceFileSize, null)
+                .set(TkTiktokPublishDetailDO::getNextPollTime, null)
+                .set(TkTiktokPublishDetailDO::getDownloadedBytes, null)
+                .set(TkTiktokPublishDetailDO::getPublishId, null)
+                .set(TkTiktokPublishDetailDO::getPublishUrl, null)
+                .set(TkTiktokPublishDetailDO::getPublishUrlRegisteredTime, null)
+                .set(TkTiktokPublishDetailDO::getLinkCaptureStatus, null)
+                .set(TkTiktokPublishDetailDO::getLinkRetryCount, 0)
+                .set(TkTiktokPublishDetailDO::getLinkNextRetryTime, null)
+                .set(TkTiktokPublishDetailDO::getLinkLastError, null)
+                .set(TkTiktokPublishDetailDO::getPublicPostCount, 0)
+                .set(TkTiktokPublishDetailDO::getFailReason, null)
+                .set(TkTiktokPublishDetailDO::getLastSyncTime, now));
+        if (reset != 1) {
+            throw new IllegalStateException("发布明细已被其他请求更新，请刷新后重试");
+        }
+        detail.setInitPhase(null);
+        detail.setInitStartedAt(null);
+        detail.setTransferSource(null);
+        detail.setPullUrlCipher(null);
+        detail.setSourceFileSize(null);
+        detail.setNextPollTime(null);
+        detail.setDownloadedBytes(null);
         detail.setStatus(STATUS_PENDING);
         detail.setTiktokStatus("RETRY_PENDING");
         detail.setPublishId(null);
@@ -292,15 +338,13 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         detail.setLinkLastError(null);
         detail.setPublicPostCount(0);
         detail.setFailReason(null);
-        detail.setRetryCount(detail.getRetryCount() == null ? 1 : detail.getRetryCount() + 1);
-        detail.setLastSyncTime(LocalDateTime.now());
-        updateDetailClearingFailReason(detail);
+        detail.setRetryCount(nextRetry);
+        detail.setLastSyncTime(now);
         refreshTaskSummary(detail.getPublishTaskId());
         submitRetryAfterCommit(detail.getTenantId(), detail.getId(), detail.getPublishTaskId());
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void syncStatus(Long taskId) {
         TkTiktokPublishTaskDO task = validateTaskReadable(taskId);
         if (STATUS_SCHEDULED.equals(task.getStatus())
@@ -392,10 +436,19 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public int syncStaleProcessingStatus(int limit) {
-        List<TkTiktokPublishDetailDO> details = publishDetailMapper.selectStaleProcessingList(getStatusSyncDeadline(), limit);
-        return syncProcessingDetails(details).size();
+        LocalDateTime now = LocalDateTime.now();
+        publishDetailMapper.classifyStaleUnknownInit(now.minusMinutes(15), Math.max(1, Math.min(limit, 200)));
+        List<TkTiktokPublishDetailDO> details = publishDetailMapper.selectDueProcessingList(now, limit);
+        List<TkTiktokPublishDetailDO> reserved = new ArrayList<>();
+        for (TkTiktokPublishDetailDO detail : details) {
+            LocalDateTime next = TkTiktokStatusPollSchedule.nextPollTime(now, detail.getLastSyncTime(), detail.getNextPollTime(), detail.getId());
+            if (publishDetailMapper.reserveStatusPoll(detail.getId(), now, next) == 1) {
+                detail.setNextPollTime(next);
+                reserved.add(detail);
+            }
+        }
+        return syncProcessingDetails(reserved).size();
     }
 
     @Override
@@ -524,7 +577,11 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         String defaultTitle = uploaded ? uploadedVideo.getFileName() : generationTask.getTitle();
         LocalDateTime scheduledAt = validateScheduledRequest(reqVO, accounts.size(), LocalDateTime.now());
         boolean scheduled = scheduledAt != null;
-        String scheduledLocalPath = scheduled ? scheduledMediaService.persist(tenantId, companyId, videoUrl,
+        boolean preferPull = pullSourceResolver != null && accounts.stream().anyMatch(account ->
+                scheduled
+                        ? pullSourceResolver.resolve(videoUrl, account.getId(), apiClient.getVerifiedPullDomain()).isEligible()
+                        : pullSourceResolver.isCandidate(videoUrl, account.getId(), apiClient.getVerifiedPullDomain()));
+        String scheduledLocalPath = scheduled && !preferPull ? scheduledMediaService.persist(tenantId, companyId, videoUrl,
                 uploaded ? uploadedVideo.getId() : null, uploaded ? uploadedVideo.getMimeType() : null) : null;
         registerScheduledMediaRollbackCleanup(scheduledLocalPath);
         TkTiktokPublishTaskDO publishTask = TkTiktokPublishTaskDO.builder()
@@ -536,6 +593,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 .title(StrUtil.blankToDefault(reqVO.getTitle(), StrUtil.blankToDefault(defaultTitle, "TikTok 视频发布")))
                 .caption(reqVO.getCaption())
                 .videoUrl(videoUrl)
+                .transferPolicy(preferPull ? "OSS_PULL_V1" : "FILE_UPLOAD")
                 .coverUrl(uploaded ? uploadedVideo.getCoverUrl() : null)
                 .coverTimestampMs(reqVO.getCoverTimestampMs())
                 .postMode(postMode)
@@ -609,6 +667,10 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     }
 
     private void processDetail(TkTiktokPublishDetailDO detail) {
+        if (StrUtil.isNotBlank(detail.getPublishId()) || "INIT_IN_FLIGHT".equals(detail.getInitPhase())
+                || "RECOVERY_REQUIRED".equals(detail.getInitPhase())) {
+            return;
+        }
         if (!claimPendingDetail(detail)) {
             return;
         }
@@ -633,9 +695,6 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             failDetail(detail, "生成视频不存在或没有输出文件");
             return;
         }
-        if (mediaUploadService != null) {
-            videoUrl = mediaUploadService.refreshReadUrl(videoUrl);
-        }
         if (!apiClient.isConfigured()) {
             failDetail(detail, "请先配置 TIKTOK/client-key 与 client-secret 后再发布");
             return;
@@ -645,21 +704,62 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         String videoMimeType = uploadedVideo == null
                 ? inferVideoMimeType(videoUrl) : uploadedVideo.getMimeType();
         UploadSource uploadSource = null;
+        String durablePublishId = null;
         try {
             TkTiktokApiClient.CreatorInfo creatorInfo = queryCreatorInfoWithRetry(account.getId());
             if (!creatorInfo.isSuccess()) {
                 failDetail(detail, creatorInfo.getFailReason());
                 return;
             }
-            uploadSource = resolveUploadSource(videoUrl, videoMimeType);
+            String policy = publishTask.getTransferPolicy();
+            uploadSource = StrUtil.isBlank(policy) || "LEGACY".equals(policy)
+                    ? resolveUploadSource(mediaUploadService == null ? videoUrl : mediaUploadService.refreshReadUrl(videoUrl), videoMimeType)
+                    : resolveUploadSource(videoUrl, videoMimeType, account.getId(), "OSS_PULL_V1".equals(policy));
+            if (!acquireBudget(account.getId(), true)) {
+                publishDetailMapper.update(null, executionFence(detail, null)
+                        .eq(TkTiktokPublishDetailDO::getStatus, STATUS_PROCESSING)
+                        .isNull(TkTiktokPublishDetailDO::getInitPhase)
+                        .set(TkTiktokPublishDetailDO::getStatus, STATUS_PENDING));
+                detail.setStatus(STATUS_PENDING);
+                uploadSource.cleanup();
+                return;
+            }
+            detail.setTransferSource(uploadSource.isPullFromUrl() ? "PULL_FROM_URL" : "FILE_UPLOAD");
+            detail.setSourceFileSize(uploadSource.getVideoSize());
+            detail.setPullUrlCipher(uploadSource.isPullFromUrl() ? secretCipher.encrypt(uploadSource.pullUrl) : null);
+            detail.setInitStartedAt(LocalDateTime.now());
+            int initClaimed = publishDetailMapper.update(null, executionFence(detail, null)
+                    .eq(TkTiktokPublishDetailDO::getStatus, STATUS_PROCESSING)
+                    .isNull(TkTiktokPublishDetailDO::getPublishId)
+                    .isNull(TkTiktokPublishDetailDO::getInitPhase)
+                    .set(TkTiktokPublishDetailDO::getTransferSource, detail.getTransferSource())
+                    .set(TkTiktokPublishDetailDO::getSourceFileSize, detail.getSourceFileSize())
+                    .set(TkTiktokPublishDetailDO::getPullUrlCipher, detail.getPullUrlCipher())
+                    .set(TkTiktokPublishDetailDO::getInitStartedAt, detail.getInitStartedAt())
+                    .set(TkTiktokPublishDetailDO::getInitPhase, "INIT_IN_FLIGHT"));
+            if (initClaimed != 1) {
+                uploadSource.cleanup();
+                return;
+            }
+            detail.setInitPhase("INIT_IN_FLIGHT");
             try {
                 TkTiktokApiClient.PublishResult result = initVideoPostWithRetry(account.getId(), detail.getPostMode(),
                         buildPublishPayload(detail, publishTask.getTitle(), publishTask.getCaption(), videoUrl, uploadSource, creatorInfo));
                 if (!result.isSuccess()) {
-                    failDetail(detail, result.getFailReason());
+                    if (isDefinitiveInitRejection(result.getErrorCode())) {
+                        detail.setInitPhase("INIT_REJECTED");
+                        failDetail(detail, result.getFailReason());
+                    } else {
+                        markInitRecovery(detail);
+                    }
+                    return;
+                }
+                if (StrUtil.isBlank(result.getPublishId())) {
+                    markInitRecovery(detail);
                     return;
                 }
                 persistInitializedPublish(detail, result);
+                durablePublishId = result.getPublishId();
                 if (uploadSource.getVideoFile() != null) {
                     if (StrUtil.isBlank(result.getUploadUrl())) {
                         failDetail(detail, "TikTok 未返回文件上传地址");
@@ -668,11 +768,13 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                     apiClient.uploadVideoChunks(result.getUploadUrl(), uploadSource.getVideoFile(), uploadSource.getMimeType());
                 }
                 detail.setPublishId(result.getPublishId());
-                detail.setTiktokStatus(StrUtil.isBlank(result.getPublishId()) ? "SEND_TO_USER_INBOX" : "PROCESSING");
+                detail.setTiktokStatus(uploadSource.isPullFromUrl() ? "PROCESSING_DOWNLOAD" : "PROCESSING");
                 detail.setStatus(STATUS_PROCESSING);
                 detail.setFailReason(null);
                 detail.setLastSyncTime(LocalDateTime.now());
-                updateDetailClearingFailReason(detail);
+                if (updateDetailClearingFailReason(detail) != 1) {
+                    return;
+                }
                 account.setLastPublishTime(LocalDateTime.now());
                 accountMapper.updateById(account);
                 businessLogService.info(detail.getBusinessTraceId(), "TIKTOK_PUBLISH", detail.getPublishTaskId(), "DETAIL_PROCESSING", STATUS_PROCESSING,
@@ -689,6 +791,10 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 markUploadPending(detail, ex);
                 return;
             }
+            if ("INIT_IN_FLIGHT".equals(detail.getInitPhase()) || StrUtil.isNotBlank(detail.getPublishId())) {
+                markInitRecovery(detail, durablePublishId);
+                return;
+            }
             failDetail(detail, "TikTok 发布调用失败：" + ex.getMessage());
         }
     }
@@ -696,12 +802,75 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     private void persistInitializedPublish(TkTiktokPublishDetailDO detail,
                                            TkTiktokApiClient.PublishResult result) {
         detail.setPublishId(result.getPublishId());
+        detail.setInitPhase("INIT_CONFIRMED");
+        detail.setNextPollTime(LocalDateTime.now().plusSeconds(10));
         detail.setTiktokStatus(StrUtil.isBlank(result.getPublishId())
                 ? "SEND_TO_USER_INBOX" : TIKTOK_STATUS_UPLOAD_PENDING);
         detail.setStatus(STATUS_PROCESSING);
         detail.setFailReason(null);
         detail.setLastSyncTime(LocalDateTime.now());
-        updateDetailClearingFailReason(detail);
+        if (updateDetailClearingFailReason(detail, null) != 1) {
+            throw new IllegalStateException("TikTok publish_id persistence failed");
+        }
+    }
+
+    private com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<TkTiktokPublishDetailDO> executionFence(
+            TkTiktokPublishDetailDO detail, String expectedPublishId) {
+        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<TkTiktokPublishDetailDO> wrapper =
+                Wrappers.lambdaUpdate(TkTiktokPublishDetailDO.class)
+                        .eq(TkTiktokPublishDetailDO::getId, detail.getId());
+        int retry = detail.getRetryCount() == null ? 0 : detail.getRetryCount();
+        if (retry == 0) {
+            wrapper.and(w -> w.isNull(TkTiktokPublishDetailDO::getRetryCount)
+                    .or().eq(TkTiktokPublishDetailDO::getRetryCount, 0));
+        } else {
+            wrapper.eq(TkTiktokPublishDetailDO::getRetryCount, retry);
+        }
+        if (expectedPublishId == null) {
+            wrapper.isNull(TkTiktokPublishDetailDO::getPublishId);
+        } else {
+            wrapper.eq(TkTiktokPublishDetailDO::getPublishId, expectedPublishId);
+        }
+        return wrapper;
+    }
+
+    private int updateActiveDetail(TkTiktokPublishDetailDO detail) {
+        return updateActiveDetail(detail, detail.getPublishId());
+    }
+
+    private int updateActiveDetail(TkTiktokPublishDetailDO detail, String expectedPublishId) {
+        return publishDetailMapper.update(detail, executionFence(detail, expectedPublishId)
+                .in(TkTiktokPublishDetailDO::getStatus, STATUS_PENDING, STATUS_PROCESSING));
+    }
+
+    private static boolean isDefinitiveInitRejection(String errorCode) {
+        return StrUtil.equalsAny(errorCode, "access_token_invalid", "scope_not_authorized", "invalid_param",
+                "spam_risk_too_many_posts", "spam_risk_user_banned_from_posting", "reached_active_user_cap",
+                "unaudited_client_can_only_post_to_private_accounts", "url_ownership_unverified",
+                "privacy_level_option_mismatch", "spam_risk_too_many_pending_share", "rate_limit_exceeded");
+    }
+
+    private void markInitRecovery(TkTiktokPublishDetailDO detail) {
+        markInitRecovery(detail, detail.getPublishId());
+    }
+
+    private void markInitRecovery(TkTiktokPublishDetailDO detail, String expectedPublishId) {
+        detail.setNextPollTime(LocalDateTime.now().plusSeconds(60));
+        detail.setInitPhase("RECOVERY_REQUIRED");
+        detail.setStatus(STATUS_PROCESSING);
+        detail.setTiktokStatus("RECOVERY_REQUIRED");
+        detail.setFailReason("TikTok 初始化结果待核查，禁止重复提交");
+        updateActiveDetail(detail, expectedPublishId);
+    }
+
+    private boolean acquireBudget(Long accountId, boolean init) {
+        if (requestBudget == null) {
+            return true;
+        }
+        TkTiktokAccountDO account = accountMapper.selectById(accountId);
+        return account != null && (init
+                ? requestBudget.tryAcquireInit(apiClient.getClientKey(), account.getOpenId())
+                : requestBudget.tryAcquireStatus(apiClient.getClientKey(), account.getOpenId()));
     }
 
     private boolean isUploadFailure(Throwable throwable) {
@@ -760,14 +929,18 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     }
 
     private void failExpiredUpload(TkTiktokPublishDetailDO detail, long uploadedBytes, long fileSize) {
-        detail.setStatus(STATUS_FAILED);
+        detail.setStatus(STATUS_PROCESSING);
+        detail.setInitPhase("RECOVERY_REQUIRED");
+        detail.setNextPollTime(LocalDateTime.now().plusSeconds(60));
         detail.setTiktokStatus("PROCESSING_UPLOAD");
         detail.setFailReason(StrUtils.maxLength(StrUtil.format(
                 "TikTok 分片上传地址已过期，上传未完成（{}/{} 字节）", uploadedBytes, fileSize), 512));
         detail.setLastSyncTime(LocalDateTime.now());
-        publishDetailMapper.updateById(detail);
+        if (updateActiveDetail(detail) != 1) {
+            return;
+        }
         businessLogService.error(detail.getBusinessTraceId(), "TIKTOK_PUBLISH", detail.getPublishTaskId(),
-                "DETAIL_UPLOAD_EXPIRED", STATUS_FAILED,
+                "DETAIL_UPLOAD_EXPIRED", STATUS_PROCESSING,
                 StrUtil.format("账号 {} 上传地址已过期且未完成上传", detail.getAccountDisplayName()), detail);
     }
 
@@ -780,7 +953,9 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         detail.setTiktokStatus(TIKTOK_STATUS_UPLOAD_PENDING);
         detail.setFailReason(StrUtils.maxLength(reason, 512));
         detail.setLastSyncTime(LocalDateTime.now());
-        publishDetailMapper.updateById(detail);
+        if (updateActiveDetail(detail) != 1) {
+            return;
+        }
         businessLogService.warn(detail.getBusinessTraceId(), "TIKTOK_PUBLISH", detail.getPublishTaskId(),
                 "DETAIL_UPLOAD_PENDING", STATUS_PROCESSING,
                 StrUtil.format("账号 {} 上传阶段待平台确认：{}", detail.getAccountDisplayName(), reason), detail);
@@ -791,9 +966,11 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             return false;
         }
         LocalDateTime now = LocalDateTime.now();
-        int updated = publishDetailMapper.update(null, Wrappers.lambdaUpdate(TkTiktokPublishDetailDO.class)
-                .eq(TkTiktokPublishDetailDO::getId, detail.getId())
+        int updated = publishDetailMapper.update(null, executionFence(detail, null)
                 .eq(TkTiktokPublishDetailDO::getStatus, STATUS_PENDING)
+                .isNull(TkTiktokPublishDetailDO::getPublishId)
+                .and(wrapper -> wrapper.isNull(TkTiktokPublishDetailDO::getInitPhase)
+                        .or().eq(TkTiktokPublishDetailDO::getInitPhase, "INIT_REJECTED"))
                 .set(TkTiktokPublishDetailDO::getStatus, STATUS_PROCESSING)
                 .set(TkTiktokPublishDetailDO::getTiktokStatus, "LOCAL_PROCESSING")
                 .set(TkTiktokPublishDetailDO::getLastSyncTime, now)
@@ -809,26 +986,31 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     }
 
     private void syncProcessingDetail(TkTiktokPublishDetailDO detail) {
+        LocalDateTime pollNow = LocalDateTime.now();
+        if (detail.getNextPollTime() == null || !detail.getNextPollTime().isAfter(pollNow)) {
+            detail.setNextPollTime(TkTiktokStatusPollSchedule.nextPollTime(pollNow,
+                    detail.getLastSyncTime(), detail.getNextPollTime(), detail.getId()));
+        }
         if (StrUtil.isBlank(detail.getPublishId())) {
             return;
         }
         TkTiktokAccountDO account = accountMapper.selectById(detail.getAccountId());
         if (account == null) {
-            failDetail(detail, "TikTok 账号不存在");
+            markInitRecovery(detail);
             return;
         }
         if (!"AUTHORIZED".equals(account.getAuthStatus())) {
-            failDetail(detail, "TikTok 账号未授权，请重新授权账号");
+            markInitRecovery(detail);
             return;
         }
         try {
             TkTiktokApiClient.PostStatusResult result = fetchPostStatusWithRetry(account.getId(), detail.getPublishId());
-            if (!result.isSuccess()) {
+            if (result == null || !result.isSuccess()) {
                 if (isUploadPending(detail)) {
-                    markUploadPending(detail, result.getFailReason());
+                    markUploadPending(detail, result == null ? "TikTok 状态响应为空" : result.getFailReason());
                     return;
                 }
-                failDetail(detail, result.getFailReason());
+                markStatusPending(detail);
                 return;
             }
             applyPostStatusResult(detail, account.getId(), result);
@@ -837,13 +1019,25 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 markUploadPending(detail, "TikTok 状态同步暂未确认：" + ex.getMessage());
                 return;
             }
-            failDetail(detail, "TikTok 状态同步失败：" + ex.getMessage());
+            markStatusPending(detail);
         }
+    }
+
+    private void markStatusPending(TkTiktokPublishDetailDO detail) {
+        detail.setNextPollTime(LocalDateTime.now().plusSeconds(30));
+        detail.setLastSyncTime(LocalDateTime.now());
+        updateActiveDetail(detail);
     }
 
     private void applyPostStatusResult(TkTiktokPublishDetailDO detail, Long accountId,
                                        TkTiktokApiClient.PostStatusResult result) {
             String tiktokStatus = StrUtil.blankToDefault(result.getStatus(), STATUS_PROCESSING);
+            if (StrUtil.isNotBlank(detail.getPublishId())) {
+                detail.setInitPhase("INIT_CONFIRMED");
+            }
+            if ("PULL_FROM_URL".equals(detail.getTransferSource()) && result.getDownloadedBytes() != null) {
+                detail.setDownloadedBytes(result.getDownloadedBytes());
+            }
             detail.setTiktokStatus(tiktokStatus);
             detail.setLastSyncTime(LocalDateTime.now());
             if (isTikTokPublishSuccess(tiktokStatus)) {
@@ -852,7 +1046,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                     if (scheduleLinkRetry(detail, null)) {
                         detail.setStatus(STATUS_PROCESSING);
                         detail.setFailReason(null);
-                        publishDetailMapper.updateById(detail);
+                        updateActiveDetail(detail);
                         return;
                     }
                 }
@@ -861,7 +1055,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                         && scheduleLinkRetry(detail, captureResult.getFailReason())) {
                     detail.setStatus(STATUS_PROCESSING);
                     detail.setFailReason(null);
-                    publishDetailMapper.updateById(detail);
+                    updateActiveDetail(detail);
                     return;
                 }
                 detail.setLinkCaptureStatus(captureResult.isPermissionRequired()
@@ -871,11 +1065,13 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 detail.setLinkNextRetryTime(null);
                 detail.setStatus(STATUS_SUCCESS);
                 detail.setFailReason(null);
+                updateLinkMetadata(detail);
                 updateDetailClearingFailReason(detail);
             } else if (isTikTokPublishFailed(tiktokStatus)) {
+                detail.setInitPhase("REMOTE_FAILED");
                 failDetail(detail, StrUtil.blankToDefault(result.getFailReason(), "TikTok 发布失败：" + tiktokStatus));
             } else {
-                publishDetailMapper.updateById(detail);
+                updateActiveDetail(detail);
             }
     }
 
@@ -1131,15 +1327,15 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     }
 
     private void processRetryDetail(Long detailId, Long publishTaskId) {
+        TkTiktokPublishDetailDO detail = null;
         try {
-            TkTiktokPublishDetailDO detail = publishDetailMapper.selectById(detailId);
+            detail = publishDetailMapper.selectById(detailId);
             if (detail == null || !STATUS_PENDING.equals(detail.getStatus())) {
                 return;
             }
             processDetail(detail);
         } catch (Exception ex) {
             log.error("[processRetryDetail][detailId({}) TikTok 发布重试失败]", detailId, ex);
-            TkTiktokPublishDetailDO detail = publishDetailMapper.selectById(detailId);
             if (detail != null) {
                 failDetail(detail, "TikTok 发布重试失败：" + ex.getMessage());
             }
@@ -1160,11 +1356,28 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         return StrUtil.containsIgnoreCase(tiktokStatus, "FAIL") || StrUtil.containsIgnoreCase(tiktokStatus, "REJECT");
     }
 
-    private void updateDetailClearingFailReason(TkTiktokPublishDetailDO detail) {
-        publishDetailMapper.update(null, Wrappers.lambdaUpdate(TkTiktokPublishDetailDO.class)
-                .eq(TkTiktokPublishDetailDO::getId, detail.getId())
+    private int updateLinkMetadata(TkTiktokPublishDetailDO detail) {
+        return publishDetailMapper.update(null, executionFence(detail, detail.getPublishId())
+                .set(TkTiktokPublishDetailDO::getPublishUrl, detail.getPublishUrl())
+                .set(TkTiktokPublishDetailDO::getPublishUrlRegisteredTime, detail.getPublishUrlRegisteredTime())
+                .set(TkTiktokPublishDetailDO::getLinkCaptureStatus, detail.getLinkCaptureStatus())
+                .set(TkTiktokPublishDetailDO::getLinkRetryCount, detail.getLinkRetryCount())
+                .set(TkTiktokPublishDetailDO::getLinkNextRetryTime, detail.getLinkNextRetryTime())
+                .set(TkTiktokPublishDetailDO::getLinkLastError, detail.getLinkLastError()));
+    }
+
+    private int updateDetailClearingFailReason(TkTiktokPublishDetailDO detail) {
+        return updateDetailClearingFailReason(detail, detail.getPublishId());
+    }
+
+    private int updateDetailClearingFailReason(TkTiktokPublishDetailDO detail, String expectedPublishId) {
+        return publishDetailMapper.update(null, executionFence(detail, expectedPublishId)
+                .in(TkTiktokPublishDetailDO::getStatus, STATUS_PENDING, STATUS_PROCESSING)
                 .set(TkTiktokPublishDetailDO::getStatus, detail.getStatus())
                 .set(TkTiktokPublishDetailDO::getTiktokStatus, detail.getTiktokStatus())
+                .set(TkTiktokPublishDetailDO::getInitPhase, detail.getInitPhase())
+                .set(TkTiktokPublishDetailDO::getNextPollTime, detail.getNextPollTime())
+                .set(TkTiktokPublishDetailDO::getDownloadedBytes, detail.getDownloadedBytes())
                 .set(TkTiktokPublishDetailDO::getPublishId, detail.getPublishId())
                 .set(TkTiktokPublishDetailDO::getPublishUrl, detail.getPublishUrl())
                 .set(TkTiktokPublishDetailDO::getPublishUrlRegisteredTime, detail.getPublishUrlRegisteredTime())
@@ -1201,7 +1414,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         Map<String, Object> sourceInfo = new LinkedHashMap<>();
         sourceInfo.put("source", uploadSource.isPullFromUrl() ? "PULL_FROM_URL" : "FILE_UPLOAD");
         if (uploadSource.isPullFromUrl()) {
-            sourceInfo.put("video_url", videoUrl);
+            sourceInfo.put("video_url", uploadSource.pullUrl);
         } else {
             sourceInfo.put("video_size", uploadSource.getVideoSize());
             sourceInfo.put("chunk_size", uploadSource.getChunkSize());
@@ -1229,11 +1442,21 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     }
 
     private void failDetail(TkTiktokPublishDetailDO detail, String reason) {
+        if ("INIT_IN_FLIGHT".equals(detail.getInitPhase()) || "RECOVERY_REQUIRED".equals(detail.getInitPhase())) {
+            markInitRecovery(detail);
+            return;
+        }
+        if (StrUtil.isNotBlank(detail.getPublishId()) && !isTikTokPublishFailed(detail.getTiktokStatus())) {
+            markInitRecovery(detail);
+            return;
+        }
         detail.setStatus(STATUS_FAILED);
         detail.setTiktokStatus("FAILED");
         detail.setFailReason(StrUtils.maxLength(reason, 512));
         detail.setLastSyncTime(LocalDateTime.now());
-        publishDetailMapper.updateById(detail);
+        if (updateActiveDetail(detail) != 1) {
+            return;
+        }
         businessLogService.error(detail.getBusinessTraceId(), "TIKTOK_PUBLISH", detail.getPublishTaskId(), "DETAIL_FAILED", STATUS_FAILED,
                 StrUtil.format("账号 {} 发布失败：{}", detail.getAccountDisplayName(), reason), detail);
     }
@@ -1319,17 +1542,20 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                                                            Map<String, Object> payload) {
         String accessToken = tokenService.getValidAccessToken(accountId);
         TkTiktokApiClient.PublishResult result = apiClient.initVideoPost(accessToken, postMode, payload);
-        if (result.isAccessTokenInvalid()) {
+        if (result.isAccessTokenInvalid() && acquireBudget(accountId, true)) {
             result = apiClient.initVideoPost(tokenService.forceRefreshAccessToken(accountId), postMode, payload);
         }
         return result;
     }
 
     TkTiktokApiClient.PostStatusResult fetchPostStatusWithRetry(Long accountId, String publishId) {
+        if (!acquireBudget(accountId, false)) {
+            throw new IllegalStateException("TikTok status budget deferred");
+        }
         String accessToken = tokenService.getValidAccessToken(accountId);
-        TkTiktokApiClient.PostStatusResult result = apiClient.fetchPostStatus(accessToken, publishId);
-        if (result.isAccessTokenInvalid()) {
-            result = apiClient.fetchPostStatus(tokenService.forceRefreshAccessToken(accountId), publishId);
+        TkTiktokApiClient.PostStatusResult result = apiClient.fetchPostStatusOnce(accessToken, publishId);
+        if (result != null && result.isAccessTokenInvalid() && acquireBudget(accountId, false)) {
+            result = apiClient.fetchPostStatusOnce(tokenService.forceRefreshAccessToken(accountId), publishId);
         }
         return result;
     }
@@ -1349,6 +1575,31 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     }
 
     private UploadSource resolveUploadSource(String outputUrl, String contentType) {
+        return resolveLegacyUploadSource(outputUrl, contentType, true);
+    }
+
+    private UploadSource resolveUploadSource(String outputUrl, String contentType, Long accountId, boolean preferPull) {
+        if (preferPull && pullSourceResolver != null) {
+            TkTiktokPullSourceResolver.PullDecision decision;
+            try {
+                decision = pullSourceResolver.resolve(outputUrl, accountId, apiClient.getVerifiedPullDomain());
+            } catch (RuntimeException ex) {
+                decision = null; // Pre-init probe failure always retains the FILE_UPLOAD fallback.
+            }
+            if (decision != null && decision.isEligible()) {
+                UploadSource source = UploadSource.pullFromUrl(normalizeVideoMimeType(contentType, outputUrl));
+                source.pullUrl = decision.getPullUrl();
+                source.videoSize = decision.getFileSize();
+                return source;
+            }
+        }
+        if (mediaUploadService != null) {
+            outputUrl = mediaUploadService.refreshReadUrl(outputUrl);
+        }
+        return resolveLegacyUploadSource(outputUrl, contentType, false);
+    }
+
+    private UploadSource resolveLegacyUploadSource(String outputUrl, String contentType, boolean allowLegacyPull) {
         if (scheduledMediaService != null && StrUtil.isNotBlank(outputUrl)
                 && !StrUtil.startWithIgnoreCase(outputUrl, "http://")
                 && !StrUtil.startWithIgnoreCase(outputUrl, "https://")) {
@@ -1360,8 +1611,10 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 throw new IllegalStateException("读取定时发布素材失败：" + ex.getMessage(), ex);
             }
         }
-        if (isVerifiedPullUrl(outputUrl)) {
-            return UploadSource.pullFromUrl(normalizeVideoMimeType(contentType, outputUrl));
+        if (allowLegacyPull && isVerifiedPullUrl(outputUrl)) {
+            UploadSource source = UploadSource.pullFromUrl(normalizeVideoMimeType(contentType, outputUrl));
+            source.pullUrl = outputUrl;
+            return source;
         }
         if (!StrUtil.startWithIgnoreCase(outputUrl, "http://") && !StrUtil.startWithIgnoreCase(outputUrl, "https://")) {
             throw new IllegalStateException("输出视频不是公网 HTTPS，且服务端无法读取本地相对地址：" + outputUrl);
@@ -1452,7 +1705,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
 
         private final boolean pullFromUrl;
         private final Path videoFile;
-        private final long videoSize;
+        private long videoSize;
+        private String pullUrl;
         private final long chunkSize;
         private final int totalChunkCount;
         private final String mimeType;
