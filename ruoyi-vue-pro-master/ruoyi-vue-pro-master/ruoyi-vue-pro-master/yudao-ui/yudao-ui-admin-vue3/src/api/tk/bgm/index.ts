@@ -11,6 +11,8 @@ export interface TkBgmAssetVO {
   duration?: number
   format?: string
   status?: number
+  canDelete?: boolean
+  referencedPresetCount?: number
   createTime?: string
 }
 
@@ -31,7 +33,11 @@ export const TkBgmAssetApi = {
       timeout: 180_000
     })
   },
-  delete: async (id: number) => {
-    return await request.delete({ url: '/tk/bgm/delete', params: { id } })
+  references: async (
+    id: number
+  ): Promise<Array<{ id: number; audienceCode: string; version: number }>> =>
+    request.get({ url: '/tk/bgm/references', params: { id } }),
+  delete: async (id: number, unbindPresets = false) => {
+    return await request.delete({ url: '/tk/bgm/delete', params: { id, unbindPresets } })
   }
 }
