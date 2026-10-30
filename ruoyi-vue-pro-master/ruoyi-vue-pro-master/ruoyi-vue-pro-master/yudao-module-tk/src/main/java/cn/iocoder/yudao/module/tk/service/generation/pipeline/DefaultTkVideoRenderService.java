@@ -106,8 +106,9 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                         File output = new File(taskDir, "final-video.mp4");
                         File bgmFile = resolveBgmFile(taskDir, task);
                         List<String> renderCommand = buildFinalRenderCommand(ffmpeg(), mergedVideo, renderMedia.audioFile, bgmFile,
-                                normalizeBgmVolume(task.getBgmVolume()), TkVideoDurationSupport.normalize(task.getTargetDuration()),
-                                renderMedia.subtitleAssets.assFile, output, ffmpegPreset(), nativeOpeningDurationSeconds(task), subtitleFontsDir());
+                                task.getBgmVolume(), TkVideoDurationSupport.normalize(task.getTargetDuration()),
+                                renderMedia.subtitleAssets.assFile, output, ffmpegPreset(), nativeOpeningDurationSeconds(task),
+                                subtitleFontsDir(), task.getAudioMixVersion());
                         runCommand(renderCommand);
                         return output;
                     });
@@ -297,6 +298,15 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                                                 File bgmFile, Double bgmVolume, double videoDuration,
                                                 File assFile, File finalVideo, String preset,
                                                 double nativeOpeningDuration, String fontsDir) {
+        return buildFinalRenderCommand(ffmpeg, mergedVideo, finalAudioFile, bgmFile, bgmVolume, videoDuration,
+                assFile, finalVideo, preset, nativeOpeningDuration, fontsDir, 1);
+    }
+
+    static List<String> buildFinalRenderCommand(String ffmpeg, File mergedVideo, File finalAudioFile,
+                                                File bgmFile, Double bgmVolume, double videoDuration,
+                                                File assFile, File finalVideo, String preset,
+                                                double nativeOpeningDuration, String fontsDir, Integer audioMixVersion) {
+        int mixVersion = TkAudioMixSupport.normalizeVersion(audioMixVersion);
         List<String> renderCommand = new ArrayList<>(Arrays.asList(ffmpeg, "-y", "-i", mergedVideo.getAbsolutePath()));
         boolean hasVoice = finalAudioFile != null;
         if (hasVoice) {
@@ -309,6 +319,16 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
             renderCommand.add("-vf");
             renderCommand.add("ass=" + escapeSubtitlePath(assFile)
                     + (StrUtil.isBlank(fontsDir) ? "" : ":fontsdir=" + escapeSubtitlePath(new File(fontsDir))));
+        }
+        if (mixVersion == 2 && (hasVoice || bgmFile != null
+                || nativeOpeningDuration > SECTION_COMPRESS_EPSILON_SECONDS)) {
+            renderCommand.addAll(Arrays.asList("-filter_complex",
+                    buildVersionTwoAudioMixFilter(bgmVolume, videoDuration, nativeOpeningDuration, hasVoice, bgmFile != null),
+                    "-map", "0:v:0", "-map", "[aout]",
+                    "-c:v", "libx264", "-preset", normalizePreset(preset),
+                    "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+                    "-t", formatDecimal(videoDuration), finalVideo.getAbsolutePath()));
+            return renderCommand;
         }
         if (nativeOpeningDuration > SECTION_COMPRESS_EPSILON_SECONDS) {
             renderCommand.addAll(Arrays.asList("-filter_complex",
@@ -348,6 +368,51 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                 "-c:v", "libx264", "-preset", normalizePreset(preset),
                 "-an", "-t", formatDecimal(videoDuration), finalVideo.getAbsolutePath()));
         return renderCommand;
+    }
+
+    private static String buildVersionTwoAudioMixFilter(Double bgmVolume, double videoDuration,
+                                                        double nativeOpeningDuration, boolean hasVoice, boolean hasBgm) {
+        double opening = nativeOpeningDuration > SECTION_COMPRESS_EPSILON_SECONDS
+                ? Math.min(videoDuration, nativeOpeningDuration) : 0D;
+        double body = Math.max(0D, videoDuration - opening);
+        long delay = Math.round(opening * 1000D);
+        String delayFilter = opening > 0D ? ",adelay=" + delay + "|" + delay : "";
+        StringBuilder filter = new StringBuilder();
+        List<String> inputs = new ArrayList<>();
+        if (opening > 0D) {
+            filter.append("[0:a]atrim=duration=").append(formatDecimal(opening))
+                    .append(",asetpts=PTS-STARTPTS,aformat=sample_rates=44100:channel_layouts=stereo[opening];");
+            inputs.add("[opening]");
+        }
+        if (hasVoice && body > 0D) {
+            filter.append("[1:a]atrim=duration=").append(formatDecimal(body)).append(',').append(FINAL_AUDIO_FILTER)
+                    .append(",apad,atrim=duration=").append(formatDecimal(body))
+                    .append(",asetpts=PTS-STARTPTS,aformat=sample_rates=44100:channel_layouts=stereo")
+                    .append(delayFilter).append("[voice];");
+            inputs.add("[voice]");
+        }
+        if (hasBgm && body > 0D) {
+            double fade = Math.min(1D, body / 2D);
+            filter.append('[').append(hasVoice ? 2 : 1).append(":a]atrim=duration=")
+                    .append(formatDecimal(body)).append(',').append(FINAL_AUDIO_FILTER)
+                    .append(",aformat=sample_rates=44100:channel_layouts=stereo,volume=")
+                    .append(formatDecimal(TkAudioMixSupport.normalizeVolume(bgmVolume, 2)))
+                    .append(",afade=t=in:ss=0:d=").append(formatDecimal(fade))
+                    .append(",afade=t=out:st=").append(formatDecimal(body - fade))
+                    .append(":d=").append(formatDecimal(fade))
+                    .append(",asetpts=PTS-STARTPTS").append(delayFilter).append("[bgm];");
+            inputs.add("[bgm]");
+        }
+        filter.append(String.join("", inputs));
+        if (inputs.size() > 1) {
+            filter.append("amix=inputs=").append(inputs.size())
+                    .append(":duration=longest:dropout_transition=0:normalize=0,");
+        }
+        // FFmpeg 4.4 lacks alimiter's latency option. Pad and trim the 5 ms lookahead explicitly.
+        return filter.append("apad,atrim=duration=").append(formatDecimal(videoDuration))
+                .append(",apad=pad_dur=0.005,alimiter=limit=0.84:level=false:attack=5:release=50")
+                .append(",atrim=start=0.005:duration=").append(formatDecimal(videoDuration))
+                .append(",asetpts=PTS-STARTPTS[aout]").toString();
     }
 
     private static String buildNativeAudioMixFilter(Double bgmVolume, double videoDuration,
