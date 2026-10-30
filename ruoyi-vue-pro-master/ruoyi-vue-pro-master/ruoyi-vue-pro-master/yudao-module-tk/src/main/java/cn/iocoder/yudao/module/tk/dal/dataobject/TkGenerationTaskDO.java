@@ -111,6 +111,14 @@ public class TkGenerationTaskDO extends TenantBaseDO {
 
     private Double bgmVolume;
 
+    private String audienceCode;
+
+    private Long audioPresetId;
+
+    private Integer audioPresetVersion;
+
+    private Integer audioMixVersion;
+
     private String subtitleUrl;
 
     private Boolean subtitleEnabled;

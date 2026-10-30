@@ -69,6 +69,9 @@ public class TkGenerationTaskCreateReqVO {
     private Boolean bgmEnabled;
     private Long bgmAssetId;
     private Double bgmVolume;
+    private Long audioPresetId;
+    private Integer audioPresetVersion;
+    private Integer audioMixVersion;
     private Boolean subtitleEnabled;
     private String subtitleStyle;
     private String subtitlePositionMode;
