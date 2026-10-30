@@ -686,6 +686,14 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
     }
 
     private AudioSnapshot resolveAudioSnapshot(TkGenerationTaskCreateReqVO request, Long companyId) {
+        try {
+            return resolveAudioSnapshotValidated(request, companyId);
+        } catch (IllegalArgumentException exception) {
+            throw new cn.iocoder.yudao.framework.common.exception.ServiceException(400, exception.getMessage());
+        }
+    }
+
+    private AudioSnapshot resolveAudioSnapshotValidated(TkGenerationTaskCreateReqVO request, Long companyId) {
         int version = TkAudioMixSupport.normalizeVersion(request.getAudioMixVersion());
         TkGenerationTaskCreateReqVO effective = copyCreateReqVO(request);
         TkAudioAudiencePresetDO preset = null;

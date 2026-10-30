@@ -71,7 +71,11 @@ class TkGenerationAudioSnapshotTest {
     void staleOrInaccessiblePresetFailsBeforeAnyCreditFreezeOrTaskInsert() {
         Fixture f = new Fixture();
         when(f.presets.resolveForGeneration(12L, 4, 20L)).thenThrow(new IllegalArgumentException("预设已更新"));
-        assertThrows(IllegalArgumentException.class, () -> f.service.createGenerationTask(f.request));
+        cn.iocoder.yudao.framework.common.exception.ServiceException error = assertThrows(
+                cn.iocoder.yudao.framework.common.exception.ServiceException.class,
+                () -> f.service.createGenerationTask(f.request));
+        assertEquals(400, error.getCode());
+        assertEquals("预设已更新", error.getMessage());
         verify(f.credits, never()).freezeForGenerationTask(any());
         verify(f.tasks, never()).insert(any(TkGenerationTaskDO.class));
     }
@@ -93,7 +97,8 @@ class TkGenerationAudioSnapshotTest {
         invalid.request.setAudioPresetId(null);
         invalid.request.setBgmEnabled(false);
         invalid.request.setAudioMixVersion(99);
-        assertThrows(IllegalArgumentException.class, () -> invalid.service.createGenerationTask(invalid.request));
+        assertThrows(cn.iocoder.yudao.framework.common.exception.ServiceException.class,
+                () -> invalid.service.createGenerationTask(invalid.request));
         verify(invalid.credits, never()).freezeForGenerationTask(any());
     }
 
