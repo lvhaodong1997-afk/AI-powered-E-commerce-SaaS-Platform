@@ -12,6 +12,10 @@ import java.util.List;
 @Mapper
 public interface TkBgmAssetMapper extends BaseMapperX<TkBgmAssetDO> {
 
+    default TkBgmAssetDO selectForUpdate(Long id) {
+        return selectOne(new QueryWrapper<TkBgmAssetDO>().eq("id", id).last("FOR UPDATE"));
+    }
+
     default List<TkBgmAssetDO> selectAvailableList(TkUserScope scope) {
         QueryWrapper<TkBgmAssetDO> query = new QueryWrapper<TkBgmAssetDO>()
                 .eq("status", 1);

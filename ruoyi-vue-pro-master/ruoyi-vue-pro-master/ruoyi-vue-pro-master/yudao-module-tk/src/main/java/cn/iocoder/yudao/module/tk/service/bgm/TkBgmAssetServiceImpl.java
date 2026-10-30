@@ -15,6 +15,10 @@ import javax.annotation.Resource;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.stream.Collectors;
+import cn.iocoder.yudao.module.tk.dal.mysql.TkAudioAudiencePresetMapper;
+import cn.iocoder.yudao.module.tk.dal.dataobject.TkAudioAudiencePresetDO;
 
 @Service
 public class TkBgmAssetServiceImpl implements TkBgmAssetService {
@@ -28,6 +32,8 @@ public class TkBgmAssetServiceImpl implements TkBgmAssetService {
     private TkDataScopeService dataScopeService;
     @Resource
     private FileApi fileApi;
+    @Resource
+    private TkAudioAudiencePresetMapper presetMapper;
 
     @Override
     public List<TkBgmAssetDO> getAvailableList() {
@@ -66,18 +72,57 @@ public class TkBgmAssetServiceImpl implements TkBgmAssetService {
                 .status(1)
                 .build();
         asset.setTenantId(scope.getTenantId());
+        asset.setCreator(scope.getUserIdString());
         bgmAssetMapper.insert(asset);
         return asset.getId();
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteUserBgm(Long id) {
-        TkBgmAssetDO asset = validateReadable(id);
-        if (!"USER".equals(asset.getSourceType())) {
-            throw new IllegalArgumentException("系统 BGM 不能删除");
-        }
+        deleteUserBgm(id, false);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteUserBgm(Long id, boolean unbindPresets) {
+        TkBgmAssetDO asset = validateReadableForUpdate(id);
+        if (!canDelete(asset)) throw new IllegalArgumentException("只能删除自己上传的 BGM");
+        List<TkAudioAudiencePresetDO> references = presetMapper.selectBgmReferences(id);
+        if (!references.isEmpty() && !unbindPresets)
+            throw new IllegalArgumentException("BGM 已被人群预设引用，请确认解除绑定");
+        if (!references.isEmpty()) presetMapper.invalidateBgmReferences(id);
         asset.setStatus(0);
         bgmAssetMapper.updateById(asset);
+    }
+
+    @Override
+    public boolean canDelete(TkBgmAssetDO asset) {
+        TkUserScope scope = dataScopeService.getCurrentScope();
+        return asset != null && "USER".equals(asset.getSourceType()) && Integer.valueOf(1).equals(asset.getStatus())
+                && scope.hasTenantScope() && scope.getUserId() != null
+                && Objects.equals(scope.getTenantId(), asset.getTenantId())
+                && Objects.equals(scope.getCompanyId(), asset.getCompanyId())
+                && Objects.equals(scope.getUserIdString(), asset.getCreator());
+    }
+
+    @Override
+    public List<TkAudioAudiencePresetDO> getReferences(Long id) {
+        validateReadable(id);
+        TkUserScope scope = dataScopeService.getCurrentScope();
+        return presetMapper.selectBgmReferences(id).stream()
+                .filter(row -> Objects.equals(scope.getTenantId(), row.getTenantId())
+                        && Objects.equals(scope.getCompanyId() == null ? 0L : scope.getCompanyId(), row.getCompanyId())
+                        && Objects.equals(scope.getUserId(), row.getUserId()))
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public TkBgmAssetDO validateReadableForUpdate(Long id) {
+        if (id == null) throw new IllegalArgumentException("请选择背景音乐");
+        TkBgmAssetDO asset = bgmAssetMapper.selectForUpdate(id);
+        validateAssetReadable(asset);
+        return asset;
     }
 
     @Override
@@ -86,13 +131,17 @@ public class TkBgmAssetServiceImpl implements TkBgmAssetService {
             return null;
         }
         TkBgmAssetDO asset = bgmAssetMapper.selectById(id);
+        validateAssetReadable(asset);
+        return asset;
+    }
+
+    private void validateAssetReadable(TkBgmAssetDO asset) {
         if (asset == null || asset.getStatus() == null || asset.getStatus() != 1) {
             throw new IllegalArgumentException("BGM 不存在或已停用");
         }
         if (!"SYSTEM".equals(asset.getSourceType())) {
             dataScopeService.validateReadable(asset.getTenantId(), asset.getCompanyId(), null);
         }
-        return asset;
     }
 
     private void validateUpload(MultipartFile file) {

@@ -15,6 +15,14 @@ public interface TkBgmAssetService {
 
     void deleteUserBgm(Long id);
 
+    void deleteUserBgm(Long id, boolean unbindPresets);
+
+    boolean canDelete(TkBgmAssetDO asset);
+
+    List<cn.iocoder.yudao.module.tk.dal.dataobject.TkAudioAudiencePresetDO> getReferences(Long id);
+
+    TkBgmAssetDO validateReadableForUpdate(Long id);
+
     TkBgmAssetDO validateReadable(Long id);
 
 }

@@ -34,7 +34,14 @@ public class TkBgmAssetController {
     @Operation(summary = "获得可用 BGM 列表")
     @PreAuthorize("@ss.hasPermission('tk:generation:query')")
     public CommonResult<List<TkBgmAssetRespVO>> list() {
-        return success(BeanUtils.toBean(bgmAssetService.getAvailableList(), TkBgmAssetRespVO.class));
+        List<TkBgmAssetRespVO> result = new java.util.ArrayList<>();
+        for (cn.iocoder.yudao.module.tk.dal.dataobject.TkBgmAssetDO asset : bgmAssetService.getAvailableList()) {
+            TkBgmAssetRespVO vo = BeanUtils.toBean(asset, TkBgmAssetRespVO.class);
+            vo.setCanDelete(bgmAssetService.canDelete(asset));
+            vo.setReferencedPresetCount(bgmAssetService.getReferences(asset.getId()).size());
+            result.add(vo);
+        }
+        return success(result);
     }
 
     @GetMapping("/system-list")
@@ -56,9 +63,25 @@ public class TkBgmAssetController {
     @DeleteMapping("/delete")
     @Operation(summary = "删除用户 BGM")
     @PreAuthorize("@ss.hasPermission('tk:generation:create')")
-    public CommonResult<Boolean> delete(@RequestParam("id") Long id) {
-        bgmAssetService.deleteUserBgm(id);
+    public CommonResult<Boolean> delete(@RequestParam("id") Long id,
+            @RequestParam(value = "unbindPresets", defaultValue = "false") boolean unbindPresets) {
+        bgmAssetService.deleteUserBgm(id, unbindPresets);
         return success(true);
+    }
+
+    @GetMapping("/references")
+    @PreAuthorize("@ss.hasPermission('tk:generation:query')")
+    public CommonResult<List<cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO>>
+            references(@RequestParam("id") Long id) {
+        List<cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO> result =
+                new java.util.ArrayList<>();
+        for (cn.iocoder.yudao.module.tk.dal.dataobject.TkAudioAudiencePresetDO row : bgmAssetService.getReferences(id)) {
+            cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO vo =
+                    new cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO();
+            vo.setId(row.getId()); vo.setAudienceCode(row.getAudienceCode()); vo.setVersion(row.getVersion());
+            result.add(vo);
+        }
+        return success(result);
     }
 
 }

@@ -21,6 +21,53 @@ import static org.mockito.Mockito.when;
 class TkBgmAssetServiceImplTest {
 
     @Test
+    void referencedBgmRequiresExplicitConfirmation() {
+        TkBgmAssetMapper mapper = mock(TkBgmAssetMapper.class);
+        TkDataScopeService scopes = mock(TkDataScopeService.class);
+        cn.iocoder.yudao.module.tk.dal.mysql.TkAudioAudiencePresetMapper presets =
+                mock(cn.iocoder.yudao.module.tk.dal.mysql.TkAudioAudiencePresetMapper.class);
+        TkBgmAssetServiceImpl service = new TkBgmAssetServiceImpl();
+        ReflectionTestUtils.setField(service, "bgmAssetMapper", mapper);
+        ReflectionTestUtils.setField(service, "dataScopeService", scopes);
+        ReflectionTestUtils.setField(service, "presetMapper", presets);
+        when(scopes.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L, "COMPANY_USER", 200L));
+        TkBgmAssetDO asset = TkBgmAssetDO.builder().id(1L).companyId(200L).sourceType("USER").status(1).build();
+        asset.setTenantId(100L); asset.setCreator("7");
+        when(mapper.selectForUpdate(1L)).thenReturn(asset);
+        when(mapper.selectById(1L)).thenReturn(asset);
+        when(mapper.selectForUpdate(1L)).thenReturn(asset);
+        when(presets.selectBgmReferences(1L)).thenReturn(java.util.Collections.singletonList(
+                new cn.iocoder.yudao.module.tk.dal.dataobject.TkAudioAudiencePresetDO()));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.deleteUserBgm(1L, false));
+        org.mockito.Mockito.verify(presets, org.mockito.Mockito.never()).invalidateBgmReferences(1L);
+        org.mockito.Mockito.verify(mapper, org.mockito.Mockito.never()).updateById(asset);
+        service.deleteUserBgm(1L, true);
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(presets, mapper);
+        order.verify(presets).invalidateBgmReferences(1L);
+        order.verify(mapper).updateById(asset);
+        assertEquals(0, asset.getStatus());
+    }
+
+    @Test
+    void anotherUsersBgmCannotBeDeletedEvenInSameCompany() {
+        TkBgmAssetMapper mapper = mock(TkBgmAssetMapper.class);
+        TkDataScopeService scope = mock(TkDataScopeService.class);
+        TkBgmAssetServiceImpl service = new TkBgmAssetServiceImpl();
+        ReflectionTestUtils.setField(service, "bgmAssetMapper", mapper);
+        ReflectionTestUtils.setField(service, "dataScopeService", scope);
+        when(scope.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L,
+                TkUserLevelEnum.COMPANY_USER.getCode(), 200L));
+        TkBgmAssetDO asset = TkBgmAssetDO.builder().id(1L).companyId(200L).sourceType("USER").status(1).build();
+        asset.setTenantId(100L);
+        asset.setCreator("8");
+        when(mapper.selectById(1L)).thenReturn(asset);
+        when(mapper.selectForUpdate(1L)).thenReturn(asset);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.deleteUserBgm(1L));
+    }
+
+    @Test
     void uploadUserBgmStoresFileUnderBgmOssUserDirectory() {
         TkBgmAssetMapper mapper = mock(TkBgmAssetMapper.class);
         TkDataScopeService dataScopeService = mock(TkDataScopeService.class);
