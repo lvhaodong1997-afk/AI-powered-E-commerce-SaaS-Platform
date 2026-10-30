@@ -33,6 +33,8 @@ export const TkBgmAssetApi = {
       timeout: 180_000
     })
   },
+  referenceCount: async (id: number): Promise<number> =>
+    request.get({ url: '/tk/bgm/reference-count', params: { id } }),
   references: async (
     id: number
   ): Promise<Array<{ id: number; audienceCode: string; version: number }>> =>

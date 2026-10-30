@@ -1,16 +1,16 @@
 package cn.iocoder.yudao.module.tk.enums;
 
 public enum TkAudioAudienceEnum {
-    SILVER("银发人群"),
-    GEN_Z("Z世代"),
-    WOMEN("女性"),
-    SINGLE("单身人群"),
-    PET("宠物人群"),
-    MATERNAL("母婴人群"),
-    EMOTIONAL("情感人群"),
-    LOWER_TIER("下沉市场"),
-    MIDDLE_CLASS("中产人群"),
-    HIGH_NET_WORTH("高净值人群");
+    SILVER("银发经济"),
+    GEN_Z("Z世代经济"),
+    WOMEN("她经济（女性消费）"),
+    SINGLE("单身经济"),
+    PET("宠物经济"),
+    MATERNAL("母婴经济"),
+    EMOTIONAL("情绪消费"),
+    LOWER_TIER("下沉市场消费"),
+    MIDDLE_CLASS("中产品质消费"),
+    HIGH_NET_WORTH("高净值消费");
     private final String label;
 
     TkAudioAudienceEnum(String label) {

@@ -91,6 +91,8 @@ const remove = async (row: TkBgmAssetVO) => {
   pending.value = true
   try {
     const references = await TkBgmAssetApi.references(row.id)
+    const totalReferences = await TkBgmAssetApi.referenceCount(row.id)
+    const hasOtherReferences = totalReferences > references.length
     const names = references
       .map((item) => {
         const category = audienceCategories.find((category) => category.code === item.audienceCode)
@@ -100,17 +102,22 @@ const remove = async (row: TkBgmAssetVO) => {
       .join('、')
     try {
       await message.confirm(
-        references.length
+        hasOtherReferences
           ? text(
-              `删除后以下预设将失效，需重新配置：${names}。确认解绑并删除？`,
-              `These presets will need reconfiguration: ${names}. Unbind and delete?`
+              '此音乐被其他用户的人群预设引用，删除后其他用户及你引用此音乐的预设均需重新配置。确认解绑全部引用并删除？',
+              'Other users reference this music. All referencing presets, including theirs and yours, will need reconfiguration. Unbind all references and delete?'
             )
-          : text(`删除“${row.name}”？`, `Delete “${row.name}”?`)
+          : references.length
+            ? text(
+                `删除后以下预设将失效，需重新配置：${names}。其他用户及后续新增引用此音乐的预设也需重新配置。确认解绑全部引用并删除？`,
+                `These presets will need reconfiguration: ${names}. This includes other users and newly added references. Unbind all references and delete?`
+              )
+            : text(`删除“${row.name}”？`, `Delete “${row.name}”?`)
       )
     } catch {
       return
     }
-    await TkBgmAssetApi.delete(row.id, references.length > 0)
+    await TkBgmAssetApi.delete(row.id, totalReferences > 0)
     stop()
     emit('deleted', row.id)
     emit('changed')

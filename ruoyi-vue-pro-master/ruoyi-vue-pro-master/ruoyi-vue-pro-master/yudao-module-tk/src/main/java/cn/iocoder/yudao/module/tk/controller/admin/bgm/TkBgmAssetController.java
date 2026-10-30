@@ -74,6 +74,13 @@ public class TkBgmAssetController {
         return success(true);
     }
 
+    @GetMapping("/reference-count")
+    @Operation(summary = "获得自有 BGM 删除确认所需的引用总数")
+    @PreAuthorize("@ss.hasPermission('tk:generation:query')")
+    public CommonResult<Integer> referenceCount(@RequestParam("id") Long id) {
+        return success(bgmAssetService.getReferenceCount(id));
+    }
+
     @GetMapping("/references")
     @PreAuthorize("@ss.hasPermission('tk:generation:query')")
     public CommonResult<

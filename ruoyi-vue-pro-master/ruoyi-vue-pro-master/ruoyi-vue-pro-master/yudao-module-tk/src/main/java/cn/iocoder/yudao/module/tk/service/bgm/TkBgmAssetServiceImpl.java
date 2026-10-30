@@ -128,6 +128,14 @@ public class TkBgmAssetServiceImpl implements TkBgmAssetService {
     }
 
     @Override
+    public int getReferenceCount(Long id) {
+        TkBgmAssetDO asset = validateReadable(id);
+        if (!canDelete(asset)) throw new IllegalArgumentException("只能删除自己上传的 BGM");
+        // Return aggregate only: other users' preset details stay private.
+        return presetMapper.selectBgmReferences(id).size();
+    }
+
+    @Override
     public TkBgmAssetDO validateReadableForUpdate(Long id) {
         if (id == null) throw new IllegalArgumentException("请选择背景音乐");
         TkBgmAssetDO asset = bgmAssetMapper.selectForUpdate(id);

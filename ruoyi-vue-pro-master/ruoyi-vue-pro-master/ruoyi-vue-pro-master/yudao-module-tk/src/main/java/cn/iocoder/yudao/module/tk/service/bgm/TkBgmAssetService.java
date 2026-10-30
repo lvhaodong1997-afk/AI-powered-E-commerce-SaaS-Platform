@@ -22,6 +22,8 @@ public interface TkBgmAssetService {
 
     List<cn.iocoder.yudao.module.tk.dal.dataobject.TkAudioAudiencePresetDO> getReferences(Long id);
 
+    int getReferenceCount(Long id);
+
     TkBgmAssetDO validateReadableForUpdate(Long id);
 
     TkBgmAssetDO validateReadable(Long id);
