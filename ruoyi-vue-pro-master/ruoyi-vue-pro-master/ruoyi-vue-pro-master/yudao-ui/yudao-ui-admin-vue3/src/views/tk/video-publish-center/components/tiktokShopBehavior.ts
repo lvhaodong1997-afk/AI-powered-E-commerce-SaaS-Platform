@@ -95,7 +95,7 @@ export function createShopSubmitter(api: {
 /** Revision is changed before requests begin, so old pages cannot repopulate another account. */
 export function createShopRevision() {
   let revision = 0
-  return { next: () => ++revision, current: (value: number) => value === revision, invalidate: () => { revision++ } }
+  return { begin: () => ++revision, next: () => ++revision, current: (value: number) => value === revision, invalidate: () => { revision++ } }
 }
 
 export function createShopPoller(

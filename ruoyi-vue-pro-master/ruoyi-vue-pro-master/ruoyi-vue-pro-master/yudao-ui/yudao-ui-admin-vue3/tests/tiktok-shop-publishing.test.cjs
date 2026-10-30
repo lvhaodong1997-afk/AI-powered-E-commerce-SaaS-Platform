@@ -77,6 +77,16 @@ test('products reject an earlier account response after account source or filter
   assert.equal(revision.current(second), false)
 })
 
+test('draft and upload revisions reject late results after invalidation', () => {
+  const { createShopRevision } = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
+  const gate = createShopRevision()
+  const first = gate.begin()
+  gate.invalidate()
+  assert.equal(gate.current(first), false)
+  const second = gate.begin()
+  assert.equal(gate.current(second), true)
+})
+
 test('poller is nonoverlapping finite and cannot resurrect after unmount', async () => {
   const { createShopPoller } = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
   const timers = new Map()
@@ -147,6 +157,7 @@ test('Shop API uses only frozen Shop endpoints and multipart field file', async 
   assert.equal(calls[0].url, '/tk/tiktok-shop/capabilities')
   assert.equal(calls[1].url, '/tk/tiktok-shop/accounts/3/products')
   assert.deepEqual(calls[2].data, { confirm: true, version: 1, requestHash: 'h' })
+  assert.equal(calls[2].skipAuthReplay, true)
   assert.equal(calls[3].data.get('file').size, 3)
   assert.equal(calls[3].data.get('chunk'), null)
   assert.equal(calls[3].params.chunkIndex, 0)
@@ -174,4 +185,142 @@ test('canceling Shop upload aborts transport and rejects late completion media i
   completeResolve({ id: 99, status: 'READY' })
   await assert.rejects(upload.result, /CANCELLED/)
   assert.equal(canceled, 1)
+})
+
+function deferred() {
+  let resolve, reject
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
+function componentScript(name, names, imports = {}, globals = {}) {
+  const source = fs.readFileSync(path.join(__dirname, '../src/views/tk/video-publish-center/components', name), 'utf8')
+  const script = source.match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
+  const output = ts.transpileModule(`${script}\nexport { ${names.join(', ')} }`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
+  }).outputText
+  const module = { exports: {} }
+  new Function('require', 'module', 'exports', ...Object.keys(globals), output)(
+    name => imports[name] || (name.endsWith('.vue') ? {} : require(name)), module, module.exports, ...Object.values(globals))
+  return module.exports
+}
+
+function panelHarness(overrides = {}, grants = ['*']) {
+  const vue = require('vue'), timers = new Map(), listeners = new Set(), cleanups = [], calls = []
+  let timerId = 0
+  const window = {
+    setTimeout: fn => { timers.set(++timerId, fn); return timerId },
+    clearTimeout: id => timers.delete(id),
+    addEventListener: (_type, fn) => listeners.add(fn),
+    removeEventListener: (_type, fn) => listeners.delete(fn),
+    open: () => ({ location: { href: 'about:blank' }, closed: false, close() { this.closed = true } })
+  }
+  const configured = { enabled: true, configured: true, publishingConfigured: true, callbackOrigin: 'https://shop.example', maxVideoBytes: 500 * 1024 ** 2, supportedVideoFormats: ['MP4', 'MOV', 'WEBM'] }
+  const api = {
+    capabilities: async () => configured,
+    accounts: async () => [], tasks: async () => ({ list: [], total: 0 }),
+    create: async () => { calls.push('create'); return { id: 7, stage: 'CREATED' } },
+    get: async id => ({ id, stage: 'PROCESSING' }), confirm: async () => ({ id: 7, stage: 'PROCESSING' }),
+    authorize: async () => ({ sessionId: 42, authorizationUrl: 'https://services.tiktokshop.com/open/authorize' }),
+    disconnect: async () => {}, ...overrides
+  }
+  const helper = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
+  const exposed = componentScript('TiktokShopPublishPanel.vue', [
+    'capabilities', 'accountId', 'accounts', 'activeTask', 'form', 'mediaMode', 'history', 'submitted', 'error',
+    'load', 'loadAccounts', 'loadHistory', 'connect', 'onOAuth', 'resetDependent', 'resetProduct', 'invalidate',
+    'createTask', 'confirmTask', 'selectHistory', 'upload', 'cancelUpload', 'poller', 'selectedAccount'
+  ], {
+    vue: { ...vue, onMounted: () => {}, onBeforeUnmount: fn => cleanups.push(fn) },
+    'element-plus': { ElMessageBox: { confirm: async () => {} } },
+    '@/api/tk/tiktokShop': { TiktokShopApi: api },
+    '@/api/tk/generation': { TkGenerationApi: { getGenerationPage: async () => { calls.push('generation'); return { list: [] } } } },
+    './tiktokShopBehavior': helper,
+    '@/utils/tiktokShopUpload': { createShopUpload: overrides.createShopUpload || (() => { throw new Error('unexpected upload') }) },
+    '@/hooks/web/useTkI18n': { useTkI18n: () => ({ tt: key => key }) },
+    '@/directives/permission/hasPermi': { hasPermission: requested => grants.includes('*') || requested.some(p => grants.includes(p)) }
+  }, { window })
+  if (!overrides.capabilities) exposed.capabilities.value = configured
+  return { ...exposed, window, timers, listeners, calls, api, configured, stop: () => cleanups.forEach(fn => fn()) }
+}
+
+test('actual panel does not query disabled capabilities or send unauthorized mutations', async () => {
+  let reads = 0
+  const panel = panelHarness({ capabilities: async () => ({ enabled: false, configured: false }), accounts: async () => { reads++; return [] }, tasks: async () => { reads++; return { list: [] } } }, ['tk:tiktok-shop-account:query'])
+  await panel.load()
+  assert.equal(reads, 0)
+  Object.assign(panel.form, { accountId: 1, mediaId: 4, title: 'hi', productId: 'p', productSource: 'SHOP', selectionProof: 'proof', productLinkTitle: 'Mug', isAiGenerated: false })
+  panel.accountId.value = 1
+  await panel.createTask()
+  assert.equal(panel.calls.includes('create'), false)
+  await panel.connect()
+  assert.equal(panel.listeners.size, 0)
+  panel.stop()
+})
+
+test('actual panel clears parent product proof and ignores create after a draft edit', async () => {
+  const pending = deferred(), panel = panelHarness({ create: () => pending.promise })
+  panel.accountId.value = 1
+  Object.assign(panel.form, { mediaId: 4, title: 'hi', productId: 'p', selectionProof: 'proof', productLinkTitle: 'Mug', isAiGenerated: false })
+  const creating = panel.createTask()
+  panel.resetProduct()
+  assert.equal(panel.form.productId, undefined)
+  assert.equal(panel.form.selectionProof, undefined)
+  pending.resolve({ id: 7, stage: 'AWAITING_CONFIRMATION' })
+  await creating
+  assert.equal(panel.activeTask.value, undefined)
+  assert.equal(panel.timers.size, 0)
+  panel.stop()
+})
+
+test('actual panel stops and fences a pending poll when the draft is invalidated', async () => {
+  const pending = deferred(), panel = panelHarness({ get: () => pending.promise })
+  panel.activeTask.value = { id: 7, stage: 'PROCESSING' }
+  panel.poller.start()
+  const callback = [...panel.timers.values()][0]; panel.timers.clear()
+  const polling = callback()
+  panel.invalidate()
+  pending.resolve({ id: 7, stage: 'SUCCESS' })
+  await polling
+  assert.equal(panel.activeTask.value, undefined)
+  assert.equal(panel.timers.size, 0)
+  panel.stop()
+})
+
+test('actual panel cancels old upload on account/media change and cannot restore its media', async () => {
+  const pending = deferred(); let canceled = 0
+  const panel = panelHarness({ createShopUpload: () => ({ result: pending.promise, cancel() { canceled++ } }) })
+  panel.mediaMode.value = 'upload'
+  const uploading = panel.upload({ target: { files: [{ name: 'a.mp4', size: 3, type: 'video/mp4' }] } })
+  panel.resetDependent()
+  assert.equal(canceled, 1)
+  pending.resolve({ id: 99, status: 'READY' }); await uploading
+  assert.equal(panel.form.mediaId, undefined)
+  panel.stop()
+})
+
+test('actual panel authorizes twice, rejects unknown callback statuses and disposes pending OAuth', async () => {
+  let id = 0
+  const panel = panelHarness({ authorize: async () => ({ sessionId: ++id, authorizationUrl: 'https://services.tiktokshop.com/open/authorize' }) })
+  const popups = []; panel.window.open = () => { const popup = { location: { href: '' }, close() {} }; popups.push(popup); return popup }
+  for (let session = 1; session <= 2; session++) {
+    await panel.connect()
+    assert.equal(panel.listeners.size, 1)
+    panel.onOAuth({ origin: 'https://shop.example', source: popups.at(-1), data: { type: 'tiktok-shop-auth', sessionId: session, status: 'PROCESSING' } })
+    assert.equal(panel.listeners.size, 1)
+    panel.onOAuth({ origin: 'https://shop.example', source: popups.at(-1), data: { type: 'tiktok-shop-auth', sessionId: session, status: 'SUCCESS' } })
+    assert.equal(panel.listeners.size, 0)
+  }
+  panel.stop()
+  assert.equal(panel.timers.size, 0)
+})
+
+test('actual panel history resumes polling and uses the immutable task account', async () => {
+  const panel = panelHarness()
+  panel.accounts.value = [{ id: 1, displayName: 'Draft' }, { id: 2, displayName: 'History' }]
+  panel.accountId.value = 1
+  panel.api.get = async () => ({ id: 8, accountId: 2, stage: 'PROCESSING' })
+  await panel.selectHistory({ id: 8 })
+  assert.ok(panel.timers.size > 0)
+  assert.equal(panel.selectedAccount.value.id, 1) // Editing account remains independent.
+  panel.stop()
 })

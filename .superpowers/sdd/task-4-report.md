@@ -6,10 +6,11 @@ Status: DONE_WITH_CONCERNS (local frontend implementation and focused checks com
 
 - Added frozen Shop API types and wrappers for capabilities, OAuth sessions/accounts, product pages, immutable task create/get/confirm, and Shop media sessions. Multipart chunks use the Shop `file` field; ordinary TikTok upload wrappers remain untouched.
 - Added cancellable Shop upload wrapper with AbortController, per-operation revision checks, bounded retry inherited from the generic chunk helper, and late completion rejection. Publish POST is never retried; ambiguous confirm reconciles with GET only.
-- Added pure behavior controller helpers for strict OAuth origin/source/session filtering, cryptographic idempotency keys, immutable-form invalidation, precheck advisory/blocking normalization, stale product protection, bounded non-overlapping polling, and Shop-only startup permissions. Added 12 node:test behavioral checks with RED before helper implementation and GREEN after implementation.
+- Added pure behavior controller helpers for strict OAuth origin/source/session filtering, cryptographic idempotency keys, immutable-form invalidation, precheck advisory/blocking normalization, stale product protection, bounded non-overlapping polling, and Shop-only startup permissions. Added helper and component lifecycle checks with RED before the review fixes and GREEN after implementation.
 - Added `TiktokShopPublishPanel.vue`, `TiktokShopProductPicker.vue`, and `TiktokShopPublishConfirm.vue`, integrated the Shop tab with the existing publish center, and added a Shop-only startup branch that does not invoke ordinary TikTok lists when only parent + Shop query permissions are present.
 - Added Chinese/English Shop message catalog and loader wiring. Confirmation displays server task snapshot identifiers and exact requestHash/version metadata; no mutable source URL is presented as the locked snapshot.
 - Added `docs/tiktok-shop/P0-联调与审核.md` with callback, permissions, environment, shared media root, recording flow and external gate checklist.
+- Added component-level lifecycle guards after review: product proof is cleared on picker reset, OAuth listeners are reusable and exact-status filtered, stale create/confirm/poll/upload responses are fenced, pending history resumes polling, and disabled publishing configuration blocks task creation. Shop create/confirm requests opt out of the shared Axios 401 replay path.
 
 ## TDD evidence
 
@@ -23,7 +24,7 @@ Status: DONE_WITH_CONCERNS (local frontend implementation and focused checks com
 
 ```text
 node --test tests/tiktok-shop-publishing.test.cjs
-12 tests, 0 failures, 0 errors, 0 skipped
+19 tests, 0 failures, 0 errors, 0 skipped
 node ./node_modules/vue-tsc/bin/vue-tsc.js --noEmit --incremental false
 exit 0
 ```

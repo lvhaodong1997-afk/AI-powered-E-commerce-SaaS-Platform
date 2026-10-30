@@ -82,10 +82,10 @@ export const TiktokShopApi = {
   disconnect: (id: number) => request.delete<boolean>({ url: `${base}/accounts/${id}` }),
   products: (id: number, params: { source: ShopProductSource; pageSize: number; pageToken?: string; titleKeyword?: string }) =>
     request.get<{ products: ShopProduct[]; nextPageToken?: string }>({ url: `${base}/accounts/${id}/products`, params }),
-  create: (data: ShopCreate) => request.post<ShopTask>({ url: `${base}/publish/tasks`, data, timeout: 120_000 }),
+  create: (data: ShopCreate) => request.post<ShopTask>({ url: `${base}/publish/tasks`, data, timeout: 120_000, skipAuthReplay: true }),
   tasks: (params: { pageNo: number; pageSize: number; accountId?: number }) => request.get<{ list: ShopTask[]; total: number }>({ url: `${base}/publish/tasks`, params }),
   get: (id: number) => request.get<ShopTask>({ url: `${base}/publish/tasks/${id}` }),
-  confirm: (id: number, data: { confirm: true; version: number; requestHash: string }) => request.post<ShopTask>({ url: `${base}/publish/tasks/${id}/confirm`, data }),
+  confirm: (id: number, data: { confirm: true; version: number; requestHash: string }) => request.post<ShopTask>({ url: `${base}/publish/tasks/${id}/confirm`, data, skipAuthReplay: true }),
   createMediaSession: (data: { fileName: string; fileSize: number; contentType: string }) => request.post<TkChunkUploadSession>({ url: `${base}/media/sessions`, data }),
   uploadChunk: (id: string, chunkIndex: number, chunk: Blob, signal: AbortSignal, onProgress?: (loaded: number, total: number) => void) => {
     const data = new FormData()
