@@ -1528,7 +1528,7 @@ import { TkBgmAssetApi, type TkBgmAssetVO } from '@/api/tk/bgm'
 import { AudioAudiencePresetApi, type AudioAudiencePresetVO } from '@/api/tk/audio-audience-preset'
 import AudioAudiencePresetDialog from './components/AudioAudiencePresetDialog.vue'
 import BgmManagerDialog from './components/BgmManagerDialog.vue'
-import { audienceCategories, createAudioSelection, selectAudioPreset, clearAudioPreset, captureAudioSubmission } from './audioSettings.mjs'
+import { audienceCategories, createAudioSelection, selectAudioPreset, clearAudioPreset, invalidateAudioPreset, captureAudioSubmission } from './audioSettings.mjs'
 import { TkGenerationApi } from '@/api/tk/generation'
 import type {
   TkAudioExportTaskVO,
@@ -3180,7 +3180,7 @@ const refreshAudioPresets = async () => {
       await applyAudioChange(() => {
         if (current?.configStatus === 'READY')
           selectAudioPreset(audioSelection, createForm, current)
-        else clearAudioPreset(audioSelection, createForm)
+        else invalidateAudioPreset(audioSelection, createForm)
       })
     }
   } finally {
@@ -3194,7 +3194,7 @@ const handleBgmDeleted = async (id: number) => {
   await applyAudioChange(() => {
     if (audioSelection.manualDraft?.bgmAssetId === id)
       audioSelection.manualDraft.bgmAssetId = undefined
-    if (audioSelection.selected?.bgmAssetId === id) clearAudioPreset(audioSelection, createForm)
+    if (audioSelection.selected?.bgmAssetId === id) invalidateAudioPreset(audioSelection, createForm)
     if (createForm.bgmAssetId === id) createForm.bgmAssetId = undefined
   })
 }
@@ -4920,6 +4920,7 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     createForm.productCategoryCode = normalizeProductCategoryCode(task.productCategoryCode)
     createForm.clipPlanMode = resolveClipPlanModeFromRouteConfig(task.generationRouteConfig)
     createForm.analysisProvider = ANALYSIS_PROVIDER_GEMINI
+    await applyAudioChange(() => clearAudioPreset(audioSelection, createForm))
     await restoreVoiceSelection(task)
     createForm.referenceDuration =
       task.referenceDuration || task.targetDuration || DEFAULT_TARGET_DURATION
@@ -4929,7 +4930,6 @@ async function hydrateReplayFromGeneration(task: TkGenerationTaskVO) {
     createForm.openingClipEndSecond =
       task.openingClipEndSecond ?? createForm.openingClipStartSecond + DEFAULT_OPENING_CLIP_DURATION
     restoreSubtitleReplay(createForm, task)
-    await applyAudioChange(() => clearAudioPreset(audioSelection, createForm))
     createForm.bgmEnabled = Boolean(task.bgmEnabled)
     createForm.bgmAssetId = task.bgmAssetId
     createForm.bgmVolume = task.bgmVolume ?? 0.1

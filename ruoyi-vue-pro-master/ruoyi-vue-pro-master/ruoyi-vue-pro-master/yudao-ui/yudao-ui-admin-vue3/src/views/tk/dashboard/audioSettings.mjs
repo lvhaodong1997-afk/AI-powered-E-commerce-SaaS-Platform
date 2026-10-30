@@ -81,6 +81,12 @@ export function clearAudioPreset(state, form) {
   state.selected = undefined
   state.manualDraft = undefined
 }
+/** Invalidation is not a user clear: never substitute a previous manual track. */
+export function invalidateAudioPreset(state, form) {
+  state.selected = undefined
+  state.manualDraft = undefined
+  form.bgmAssetId = undefined
+}
 export function captureAudioSubmission(state, form) {
   return Object.freeze({
     voicePayload: Object.freeze(formVoicePayload(form)),

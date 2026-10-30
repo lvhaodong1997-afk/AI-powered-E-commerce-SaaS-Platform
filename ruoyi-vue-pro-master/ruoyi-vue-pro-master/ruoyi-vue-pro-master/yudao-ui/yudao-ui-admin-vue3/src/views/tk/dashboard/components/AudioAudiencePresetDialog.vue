@@ -247,7 +247,10 @@ const statusLabel = (code: string) => {
 const voicePreviewing = ref(false)
 let voiceAudio: HTMLAudioElement | undefined
 let voiceUrl: string | undefined
+let voicePreviewRevision = 0
 const stopVoice = () => {
+  voicePreviewRevision++
+  voicePreviewing.value = false
   voiceAudio?.pause()
   voiceAudio = undefined
   if (voiceUrl) URL.revokeObjectURL(voiceUrl)
@@ -257,22 +260,26 @@ const previewVoice = async () => {
   if (voicePreviewing.value) return
   stopVoice()
   voicePreviewing.value = true
+  const revision = voicePreviewRevision
   try {
     const blob = await TkGenerationApi.previewVoice({
       ...formVoicePayload(draft),
       targetLanguage: props.targetLanguage
     })
+    if (revision !== voicePreviewRevision || !props.modelValue) return
     voiceUrl = URL.createObjectURL(blob)
     voiceAudio = new Audio(voiceUrl)
     voiceAudio.onended = stopVoice
     await voiceAudio.play()
   } finally {
-    voicePreviewing.value = false
+    if (revision === voicePreviewRevision) voicePreviewing.value = false
   }
 }
 watch(
   () => [
     props.modelValue,
+    activeCode.value,
+    props.targetLanguage,
     draft.ttsProvider,
     draft.voiceCode,
     draft.mimoVoiceProfileId,
@@ -281,7 +288,8 @@ watch(
     draft.mimoVoicePrompt,
     draft.mimoVoiceSampleUrl
   ],
-  stopVoice
+  stopVoice,
+  { flush: 'sync' }
 )
 onBeforeUnmount(stopVoice)
 const changeProvider = () => {
