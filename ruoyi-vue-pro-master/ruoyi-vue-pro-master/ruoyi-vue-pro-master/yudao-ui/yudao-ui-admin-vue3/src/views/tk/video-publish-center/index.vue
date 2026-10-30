@@ -68,8 +68,9 @@
           <el-tab-pane label="发布任务" name="tasks" />
           <el-tab-pane label="发布明细" name="details" />
           <el-tab-pane v-if="hasPermission(['tk:social-publish:query'])" :label="tt('meta.title')" name="meta" />
+          <el-tab-pane v-if="shopAvailable" :label="tt('shop.title')" name="shop" />
         </el-tabs>
-        <div v-if="activeTab !== 'meta'" class="toolbar-actions">
+        <div v-if="activeTab !== 'meta' && activeTab !== 'shop'" class="toolbar-actions">
           <el-button @click="refreshAll"><Icon icon="ep:refresh" class="mr-5px" /> 刷新</el-button>
           <el-button type="primary" plain @click="startRedirectAuth" v-hasPermi="['tk:tiktok-account:authorize']">
             <Icon icon="ep:link" class="mr-5px" /> 官方授权
@@ -86,6 +87,7 @@
 
 
     <MetaPublishPanel v-if="activeTab === 'meta' && hasPermission(['tk:social-publish:query'])" />
+    <TiktokShopPublishPanel v-if="activeTab === 'shop' && shopAvailable" />
 
     <ContentWrap v-if="activeTab === 'videos'">
       <el-form :model="videoQuery" ref="videoQueryFormRef" :inline="true" label-width="90px" class="-mb-15px">
@@ -687,6 +689,8 @@
 
 <script setup lang="ts">
 import MetaPublishPanel from './components/MetaPublishPanel.vue'
+import TiktokShopPublishPanel from './components/TiktokShopPublishPanel.vue'
+import { shopStartup } from './components/tiktokShopBehavior'
 import { hasPermission } from '@/directives/permission/hasPermi'
 import { Qrcode } from '@/components/Qrcode'
 import { TkGenerationApi } from '@/api/tk/generation'
@@ -737,7 +741,9 @@ type TkTiktokAuthMessage = {
   message?: string
 }
 
-const activeTab = ref<'videos' | 'accounts' | 'tasks' | 'details' | 'meta'>('videos')
+const activeTab = ref<'videos' | 'accounts' | 'tasks' | 'details' | 'meta' | 'shop'>('videos')
+const shopAvailable = computed(() => hasPermission(['tk:tiktok-shop-account:query']) && hasPermission(['tk:video-publish-center:query']))
+const shopOnlyStartup = computed(() => shopStartup((permissions) => hasPermission(permissions)).shopOnly)
 const overview = reactive({
   authorizedAccountCount: 0,
   pendingPublishCount: 0,
@@ -1570,9 +1576,13 @@ const loadRouteGeneration = async () => {
 
 onMounted(async () => {
   window.addEventListener('message', handleRedirectAuthResult)
-  await Promise.all([getOverview(), loadQueue(), getVideoList(), getAccountList(), getGroupList()])
-  startPublishStatusPolling()
-  await loadRouteGeneration()
+  if (shopOnlyStartup.value) {
+    activeTab.value = 'shop'
+  } else {
+    await Promise.all([getOverview(), loadQueue(), getVideoList(), getAccountList(), getGroupList()])
+    startPublishStatusPolling()
+    await loadRouteGeneration()
+  }
 })
 
 onBeforeUnmount(() => {

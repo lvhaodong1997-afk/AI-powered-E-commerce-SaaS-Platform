@@ -1,4 +1,5 @@
 import { metaZh } from './metaPublishMessages'
+import { tiktokShopZh } from './tiktokShopMessages'
 
 export const tkZhCN: Record<string, string> = {
   'common.search': '搜索',
@@ -601,6 +602,7 @@ export const tkZhCN: Record<string, string> = {
   'businessLog.message': '消息',
 
   ...metaZh
+  , ...tiktokShopZh
 }
 
 export default tkZhCN

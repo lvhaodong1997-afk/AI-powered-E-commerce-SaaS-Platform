@@ -1,4 +1,5 @@
 import { metaEn } from './metaPublishMessages'
+import { tiktokShopEn } from './tiktokShopMessages'
 
 export const tkEn: Record<string, string> = {
   'common.search': 'Search',
@@ -620,6 +621,7 @@ export const tkEn: Record<string, string> = {
   'businessLog.message': 'Message',
 
   ...metaEn
+  , ...tiktokShopEn
 }
 
 export default tkEn
