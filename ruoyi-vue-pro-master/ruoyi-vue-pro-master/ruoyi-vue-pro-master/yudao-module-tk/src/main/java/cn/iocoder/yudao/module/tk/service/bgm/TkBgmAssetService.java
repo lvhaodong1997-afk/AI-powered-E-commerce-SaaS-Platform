@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.bgm;
 
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkBgmAssetDO;
+
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -24,5 +25,4 @@ public interface TkBgmAssetService {
     TkBgmAssetDO validateReadableForUpdate(Long id);
 
     TkBgmAssetDO validateReadable(Long id);
-
 }

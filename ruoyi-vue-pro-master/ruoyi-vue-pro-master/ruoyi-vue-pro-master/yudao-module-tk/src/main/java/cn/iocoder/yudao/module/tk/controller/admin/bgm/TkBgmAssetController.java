@@ -1,11 +1,15 @@
 package cn.iocoder.yudao.module.tk.controller.admin.bgm;
 
+import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
+
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.module.tk.controller.admin.bgm.vo.TkBgmAssetRespVO;
 import cn.iocoder.yudao.module.tk.service.bgm.TkBgmAssetService;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -16,10 +20,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.annotation.Resource;
 import java.util.List;
 
-import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
+import javax.annotation.Resource;
 
 @Tag(name = "管理后台 - TK BGM 素材")
 @RestController
@@ -27,15 +30,15 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 @Validated
 public class TkBgmAssetController {
 
-    @Resource
-    private TkBgmAssetService bgmAssetService;
+    @Resource private TkBgmAssetService bgmAssetService;
 
     @GetMapping("/list")
     @Operation(summary = "获得可用 BGM 列表")
     @PreAuthorize("@ss.hasPermission('tk:generation:query')")
     public CommonResult<List<TkBgmAssetRespVO>> list() {
         List<TkBgmAssetRespVO> result = new java.util.ArrayList<>();
-        for (cn.iocoder.yudao.module.tk.dal.dataobject.TkBgmAssetDO asset : bgmAssetService.getAvailableList()) {
+        for (cn.iocoder.yudao.module.tk.dal.dataobject.TkBgmAssetDO asset :
+                bgmAssetService.getAvailableList()) {
             TkBgmAssetRespVO vo = BeanUtils.toBean(asset, TkBgmAssetRespVO.class);
             vo.setCanDelete(bgmAssetService.canDelete(asset));
             vo.setReferencedPresetCount(bgmAssetService.getReferences(asset.getId()).size());
@@ -54,16 +57,18 @@ public class TkBgmAssetController {
     @PostMapping("/upload")
     @Operation(summary = "上传用户 BGM")
     @PreAuthorize("@ss.hasPermission('tk:generation:create')")
-    public CommonResult<Long> upload(@RequestParam("name") String name,
-                                     @RequestParam(value = "style", required = false) String style,
-                                     @RequestParam("file") MultipartFile file) {
+    public CommonResult<Long> upload(
+            @RequestParam("name") String name,
+            @RequestParam(value = "style", required = false) String style,
+            @RequestParam("file") MultipartFile file) {
         return success(bgmAssetService.uploadUserBgm(name, style, file));
     }
 
     @DeleteMapping("/delete")
     @Operation(summary = "删除用户 BGM")
     @PreAuthorize("@ss.hasPermission('tk:generation:create')")
-    public CommonResult<Boolean> delete(@RequestParam("id") Long id,
+    public CommonResult<Boolean> delete(
+            @RequestParam("id") Long id,
             @RequestParam(value = "unbindPresets", defaultValue = "false") boolean unbindPresets) {
         bgmAssetService.deleteUserBgm(id, unbindPresets);
         return success(true);
@@ -71,17 +76,24 @@ public class TkBgmAssetController {
 
     @GetMapping("/references")
     @PreAuthorize("@ss.hasPermission('tk:generation:query')")
-    public CommonResult<List<cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO>>
+    public CommonResult<
+                    List<
+                            cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo
+                                    .TkAudioAudiencePresetRespVO>>
             references(@RequestParam("id") Long id) {
-        List<cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO> result =
-                new java.util.ArrayList<>();
-        for (cn.iocoder.yudao.module.tk.dal.dataobject.TkAudioAudiencePresetDO row : bgmAssetService.getReferences(id)) {
-            cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO vo =
-                    new cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO();
-            vo.setId(row.getId()); vo.setAudienceCode(row.getAudienceCode()); vo.setVersion(row.getVersion());
+        List<cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO>
+                result = new java.util.ArrayList<>();
+        for (cn.iocoder.yudao.module.tk.dal.dataobject.TkAudioAudiencePresetDO row :
+                bgmAssetService.getReferences(id)) {
+            cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO
+                    vo =
+                            new cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo
+                                    .TkAudioAudiencePresetRespVO();
+            vo.setId(row.getId());
+            vo.setAudienceCode(row.getAudienceCode());
+            vo.setVersion(row.getVersion());
             result.add(vo);
         }
         return success(result);
     }
-
 }
