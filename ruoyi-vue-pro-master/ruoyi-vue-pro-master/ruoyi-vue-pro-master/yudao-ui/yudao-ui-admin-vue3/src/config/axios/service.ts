@@ -171,6 +171,11 @@ service.interceptors.response.use(
       // 如果是忽略的错误码，直接返回 msg 异常
       return Promise.reject(msg)
     } else if (code === 401) {
+      // Publish confirmation/create requests must reconcile explicitly instead of
+      // being replayed after a browser token refresh.
+      if ((config as any).skipAuthReplay) {
+        return Promise.reject(msg)
+      }
       // 如果未认证，并且未进行刷新令牌，说明可能是访问令牌过期了
       if (!isRefreshToken) {
         isRefreshToken = true
