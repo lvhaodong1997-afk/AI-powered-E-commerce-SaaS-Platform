@@ -27,6 +27,8 @@ node --test tests/tiktok-shop-publishing.test.cjs
 19 tests, 0 failures, 0 errors, 0 skipped
 node ./node_modules/vue-tsc/bin/vue-tsc.js --noEmit --incremental false
 exit 0
+
+Combined focused regression (Shop + Meta + scheduled TikTok + i18n): 80 tests, 0 failures, 0 errors, 0 skipped.
 ```
 
 No backend files were changed. No live TikTok authorization, product catalog, precheck, publish, migration, deployment or real secret was used. Existing ordinary TikTok and Meta services were preserved. Existing compiler/toolchain warnings are outside this focused check; a full frontend lint/build remains a follow-up if needed by the integration owner.
