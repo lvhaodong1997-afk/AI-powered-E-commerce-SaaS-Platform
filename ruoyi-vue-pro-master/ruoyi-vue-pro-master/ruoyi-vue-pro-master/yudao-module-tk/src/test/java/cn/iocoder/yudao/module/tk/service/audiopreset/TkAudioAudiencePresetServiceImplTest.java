@@ -10,7 +10,9 @@ import cn.iocoder.yudao.module.tk.service.bgm.TkBgmAssetService;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import cn.iocoder.yudao.module.tk.service.voice.TkVoiceProfileService;
+import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -20,6 +22,7 @@ class TkAudioAudiencePresetServiceImplTest {
     private TkAudioAudiencePresetServiceImpl service;
     private TkVoiceProfileService voices;
     private TkBgmAssetService bgm;
+    private TkDataScopeService scopes;
 
     @BeforeEach
     void setup() {
@@ -27,12 +30,17 @@ class TkAudioAudiencePresetServiceImplTest {
         voices = mock(TkVoiceProfileService.class);
         bgm = mock(TkBgmAssetService.class);
         service = new TkAudioAudiencePresetServiceImpl();
-        TkDataScopeService scopes = mock(TkDataScopeService.class);
+        scopes = mock(TkDataScopeService.class);
         when(scopes.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L, "COMPANY_USER", 200L));
         ReflectionTestUtils.setField(service, "presetMapper", mapper);
         ReflectionTestUtils.setField(service, "dataScopeService", scopes);
         ReflectionTestUtils.setField(service, "voiceProfileService", voices);
         ReflectionTestUtils.setField(service, "bgmAssetService", bgm);
+    }
+
+    @AfterEach
+    void clearTenant() {
+        TenantContextHolder.clear();
     }
 
     private TkAudioAudiencePresetDO row() {
@@ -68,6 +76,49 @@ class TkAudioAudiencePresetServiceImplTest {
         row();
         assertThrows(
                 IllegalArgumentException.class, () -> service.resolveForGeneration(1L, 3, 201L));
+    }
+
+    @Test
+    void acceptsOwnedCompanyPresetForLegacyTenantScopedTask() {
+        TkAudioAudiencePresetDO preset = row();
+        TenantContextHolder.setTenantId(100L);
+        assertSame(preset, service.resolveForGeneration(1L, 3, 100L));
+    }
+
+    @Test
+    void acceptsExistingTenantPresetWithoutRewritingItsScope() {
+        TkAudioAudiencePresetDO preset = row();
+        preset.setCompanyId(0L);
+        when(scopes.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L, "TENANT_ADMIN", null));
+        TenantContextHolder.setTenantId(100L);
+        assertSame(preset, service.resolveForGeneration(1L, 3, 100L));
+        assertEquals(0L, preset.getCompanyId());
+        verify(mapper, never()).updateById(any(TkAudioAudiencePresetDO.class));
+    }
+
+    @Test
+    void tenantPresetCanUseAnAuthorizedCompanyWithinTheSameTenant() {
+        TkAudioAudiencePresetDO preset = row();
+        preset.setCompanyId(0L);
+        when(scopes.getCurrentScope()).thenReturn(new TkUserScope(7L, 100L, "PLATFORM_ADMIN", null));
+        TenantContextHolder.setTenantId(100L);
+        assertSame(preset, service.resolveForGeneration(1L, 3, 300L));
+    }
+
+    @Test
+    void rejectsAnotherTaskTenantEvenWhenCompanyMatches() {
+        row();
+        TenantContextHolder.setTenantId(101L);
+        assertThrows(IllegalArgumentException.class, () -> service.resolveForGeneration(1L, 3, 200L));
+        verifyNoInteractions(voices, bgm);
+    }
+
+    @Test
+    void rejectsAnotherCompanysPresetEvenForTenantScopedTask() {
+        row().setCompanyId(201L);
+        TenantContextHolder.setTenantId(100L);
+        assertThrows(IllegalArgumentException.class, () -> service.resolveForGeneration(1L, 3, 100L));
+        verifyNoInteractions(voices, bgm);
     }
 
     @Test
