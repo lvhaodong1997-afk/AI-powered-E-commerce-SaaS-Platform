@@ -38,6 +38,8 @@ public final class TkOpenTiktokAuthVO {
 
     @Data
     public static class SessionStatusResp {
+        // SHA-256 of the trusted TikTok provider subject; never the raw openId.
+        private String providerIdentity;
         private String authSessionId;
         private String externalAccountId;
         private String clientState;
@@ -60,6 +62,8 @@ public final class TkOpenTiktokAuthVO {
 
     @Data
     public static class ConnectionResp {
+        // SHA-256 of the trusted TikTok provider subject; never the raw openId.
+        private String providerIdentity;
         private String connectionId;
         private String externalAccountId;
         private String accountName;

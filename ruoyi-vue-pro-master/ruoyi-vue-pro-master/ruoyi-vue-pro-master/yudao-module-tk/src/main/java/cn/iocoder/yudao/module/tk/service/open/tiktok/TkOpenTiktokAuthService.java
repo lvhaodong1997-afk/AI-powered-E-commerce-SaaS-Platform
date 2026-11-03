@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.open.tiktok;
 
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.crypto.digest.DigestUtil;
 import cn.hutool.extra.qrcode.QrCodeUtil;
 import cn.iocoder.yudao.module.tk.controller.open.tiktok.vo.TkOpenTiktokAuthVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokAuthSessionDO;
@@ -131,7 +132,10 @@ public class TkOpenTiktokAuthService {
                 && StrUtil.isNotBlank(session.getQrcodeToken())) {
             pollQrSession(session);
         }
-        return toStatusResp(session);
+        TkOpenTiktokAuthVO.SessionStatusResp response = toStatusResp(session);
+        // The browser launch poll is public and must not expose the provider identity.
+        response.setProviderIdentity(null);
+        return response;
     }
 
     public String renderLaunchPage(String authSessionId) {
@@ -497,6 +501,7 @@ public class TkOpenTiktokAuthService {
 
     private TkOpenTiktokAuthVO.ConnectionResp toConnectionResp(TkOpenTiktokConnectionDO connection) {
         TkOpenTiktokAuthVO.ConnectionResp response = new TkOpenTiktokAuthVO.ConnectionResp();
+        response.setProviderIdentity(providerIdentity(connection));
         response.setConnectionId(connection.getConnectionId());
         response.setExternalAccountId(connection.getExternalAccountId());
         response.setAccountName(connection.getDisplayName());
@@ -518,6 +523,7 @@ public class TkOpenTiktokAuthService {
 
     private void applyConnectionProfile(TkOpenTiktokAuthVO.SessionStatusResp response,
                                         TkOpenTiktokConnectionDO connection) {
+        response.setProviderIdentity(providerIdentity(connection));
         response.setAccountName(connection.getDisplayName());
         response.setUsername(connection.getUsername());
         response.setAvatarUrl(connection.getAvatarUrl());
@@ -530,4 +536,12 @@ public class TkOpenTiktokAuthService {
         response.setVideoCount(connection.getVideoCount());
         response.setStatsUpdatedAt(connection.getStatsUpdatedAt());
     }
+
+    private String providerIdentity(TkOpenTiktokConnectionDO connection) {
+        if (TkOpenApiContext.getPrincipal() == null || connection == null || StrUtil.isBlank(connection.getOpenId())) {
+            return null;
+        }
+        return DigestUtil.sha256Hex(("tiktok:" + connection.getOpenId()).getBytes(StandardCharsets.UTF_8));
+    }
+
 }
