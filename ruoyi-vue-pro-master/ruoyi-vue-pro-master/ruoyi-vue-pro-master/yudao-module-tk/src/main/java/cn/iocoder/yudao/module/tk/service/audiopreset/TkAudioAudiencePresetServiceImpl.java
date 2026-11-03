@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.tk.service.audiopreset;
 
 import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetRespVO;
 import cn.iocoder.yudao.module.tk.controller.admin.audiopreset.vo.TkAudioAudiencePresetSaveReqVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.TkAudioAudiencePresetDO;
@@ -126,7 +127,17 @@ public class TkAudioAudiencePresetServiceImpl implements TkAudioAudiencePresetSe
             Long id, Integer expected, Long requestedCompany) {
         TkAudioAudiencePresetDO row = owned(id);
         version(row, expected);
-        if (!Objects.equals(row.getCompanyId(), company(requestedCompany)))
+        Long taskTenant = TenantContextHolder.getTenantId();
+        if (taskTenant != null && !Objects.equals(row.getTenantId(), taskTenant))
+            throw new IllegalArgumentException("预设租户范围不匹配");
+        // Ownership uses tkCompanyId (0 means tenant scope), while legacy material/task
+        // writes use tenantId as companyId. Preserve stored ownership and accept that
+        // existing task representation only within the already validated tenant.
+        boolean tenantPreset = Objects.equals(row.getCompanyId(), 0L)
+                && Objects.equals(row.getTenantId(), taskTenant);
+        if (!tenantPreset
+                && !Objects.equals(row.getCompanyId(), company(requestedCompany))
+                && !Objects.equals(row.getTenantId(), requestedCompany))
             throw new IllegalArgumentException("预设公司范围不匹配");
         if (!"READY".equals(row.getConfigStatus())) throw new IllegalArgumentException("预设尚未完整配置");
         TkAudioAudiencePresetSaveReqVO req =

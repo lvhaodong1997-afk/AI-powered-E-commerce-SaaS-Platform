@@ -239,7 +239,7 @@ service.interceptors.response.use(
       } else {
         ElNotification.error({ title: msg })
       }
-      return Promise.reject(new Error(msg))
+      return Promise.reject(Object.assign(new Error(msg), { businessCode: code, displayedByAxios: true }))
     } else {
       return data
     }

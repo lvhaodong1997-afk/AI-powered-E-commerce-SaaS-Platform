@@ -1245,7 +1245,7 @@
                     <p>{{
                       precheckFailure?.message ||
                       (generationProgress.failed
-                        ? friendlyGenerationFailureReason(currentGenerationTask)
+                        ? (!currentGenerationTask && generationSubmissionError) || friendlyGenerationFailureReason(currentGenerationTask)
                         : currentGenerationStepDescription)
                     }}</p>
                   </div>
@@ -1382,7 +1382,7 @@
                     precheckFailure
                       ? precheckFailure.title
                       : generationProgress.failed
-                        ? taskProgressCopy.generationFailed
+                        ? (!currentGenerationTask && generationSubmissionError) || taskProgressCopy.generationFailed
                         : taskProgressCopy.generationHint
                   }}</span>
                 </div>
@@ -3048,6 +3048,7 @@ const createTaskProgress = (): TaskProgressState => ({
 })
 const analysisProgress = reactive<TaskProgressState>(createTaskProgress())
 const generationProgress = reactive<TaskProgressState>(createTaskProgress())
+const generationSubmissionError = ref('')
 const suppressAnalysisProgress = ref(false)
 let analysisProgressTimer: number | undefined
 let generationProgressTimer: number | undefined
@@ -5472,6 +5473,7 @@ const handleCreateGeneration = async () => {
   generationSubmittingCount.value += 1
   precheckFailure.value = undefined
   if (resetGenerationView) {
+    generationSubmissionError.value = ''
     currentGenerationTask.value = undefined
     batchGenerationTasks.value = []
     resetTaskProgress(analysisProgress, 'analysis')
@@ -5538,6 +5540,12 @@ const handleCreateGeneration = async () => {
     if (resetGenerationView && !recoveredTaskIds.length) {
       clearGenerationPolling()
       finishTaskProgress(generationProgress, generationPhases.value, 'generation', true)
+    }
+    const rejection = error as Error & { businessCode?: number; displayedByAxios?: boolean }
+    if (rejection?.businessCode === 400) {
+      if (resetGenerationView) generationSubmissionError.value = rejection.message
+      if (!rejection.displayedByAxios) message.error(rejection.message)
+      return
     }
     message.error(copy.value.generationSubmissionFailed)
   } finally {

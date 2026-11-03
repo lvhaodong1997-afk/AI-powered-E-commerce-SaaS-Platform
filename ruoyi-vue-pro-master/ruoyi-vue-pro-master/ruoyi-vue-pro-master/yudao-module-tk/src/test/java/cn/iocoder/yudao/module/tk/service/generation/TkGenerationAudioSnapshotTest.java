@@ -13,6 +13,9 @@ import cn.iocoder.yudao.module.tk.dal.mysql.TkGenerationTaskMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.TkGenerationBatchMapper;
 import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.service.audiopreset.TkAudioAudiencePresetService;
+import cn.iocoder.yudao.module.tk.service.audiopreset.TkAudioAudiencePresetServiceImpl;
+import cn.iocoder.yudao.module.tk.dal.mysql.TkAudioAudiencePresetMapper;
+import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeServiceImpl;
 import cn.iocoder.yudao.module.tk.service.credit.TkCreditService;
 import cn.iocoder.yudao.module.tk.service.generation.pipeline.TkGenerationPipelineService;
 import cn.iocoder.yudao.module.tk.service.log.TkBusinessLogService;
@@ -33,6 +36,53 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class TkGenerationAudioSnapshotTest {
+    @Test
+    void realPresetResolutionAcceptsTenantMappedCompanyInSingleAndBatchCreation() {
+        for (boolean batch : new boolean[] {false, true}) {
+            Fixture f = new Fixture();
+            TkDataScopeServiceImpl scopes = new TkDataScopeServiceImpl() {
+                @Override
+                public TkUserScope getCurrentScope() {
+                    return new TkUserScope(7L, 8L, "COMPANY_USER", 20L);
+                }
+            };
+            ReflectionTestUtils.setField(f.service, "dataScopeService", scopes);
+            TkAudioAudiencePresetServiceImpl presets = new TkAudioAudiencePresetServiceImpl();
+            TkAudioAudiencePresetMapper mapper = mock(TkAudioAudiencePresetMapper.class);
+            TkAudioAudiencePresetDO preset = new TkAudioAudiencePresetDO();
+            preset.setId(12L);
+            preset.setTenantId(8L);
+            preset.setCompanyId(20L);
+            preset.setUserId(7L);
+            preset.setVersion(4);
+            preset.setAudienceCode("SILVER");
+            preset.setConfigStatus("READY");
+            preset.setTtsProvider("DASHSCOPE");
+            preset.setVoiceConfig("{\"voiceCode\":\"preset-voice\"}");
+            preset.setBgmEnabled(false);
+            when(mapper.selectById(12L)).thenReturn(preset);
+            ReflectionTestUtils.setField(presets, "presetMapper", mapper);
+            ReflectionTestUtils.setField(presets, "dataScopeService", scopes);
+            ReflectionTestUtils.setField(presets, "voiceProfileService", f.voices);
+            ReflectionTestUtils.setField(f.service, "audioAudiencePresetService", presets);
+            when(f.voices.resolveVoiceSelection(null, "preset-voice")).thenReturn("resolved-preset");
+            f.request.setCompanyId(8L);
+            if (batch) {
+                f.request.setScriptOptionIds(Arrays.asList(101L));
+                f.request.setVideosPerScript(2);
+                f.service.createGenerationTasks(f.request);
+            } else {
+                f.service.createGenerationTask(f.request);
+            }
+            for (TkGenerationTaskDO task : f.created(batch ? 2 : 1)) {
+                assertEquals(8L, task.getCompanyId());
+                assertEquals(12L, task.getAudioPresetId());
+                assertEquals(4, task.getAudioPresetVersion());
+                assertEquals("resolved-preset", task.getVoiceCode());
+            }
+        }
+    }
+
     @Test
     void selectedPresetOverridesAudioAndPreservesExplicitVoiceOff() {
         Fixture f = new Fixture();
