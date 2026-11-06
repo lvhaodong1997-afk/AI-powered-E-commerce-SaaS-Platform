@@ -20,6 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -263,6 +266,12 @@ public class TkOpenTiktokAuthService {
             failSession(session, result.getFailReason());
             return;
         }
+        boolean ticketRequired = "confirmed".equalsIgnoreCase(result.getStatus())
+                || "scanned".equalsIgnoreCase(result.getStatus());
+        if (ticketRequired && StrUtil.isBlank(result.getClientTicket())) {
+            failSession(session, "TikTok QR authorization failed: client_ticket is missing");
+            return;
+        }
         if (StrUtil.isNotBlank(result.getClientTicket())
                 && !StrUtil.equals(result.getClientTicket(), session.getClientTicket())) {
             failSession(session, "TikTok QR authorization failed: client_ticket does not match");
@@ -418,6 +427,9 @@ public class TkOpenTiktokAuthService {
         response.setLaunchUrl(launchBaseUrl + "/" + session.getAuthSessionId() + "/launch");
         response.setStatus(session.getStatus());
         response.setExpireTime(session.getExpireTime());
+        Instant expiresAt = session.getExpireTime().atZone(ZoneId.systemDefault()).toInstant();
+        response.setExpiresAt(expiresAt.toString());
+        response.setExpiresInSeconds(Math.max(0L, Duration.between(Instant.now(), expiresAt).getSeconds()));
         return response;
     }
 
@@ -496,6 +508,9 @@ public class TkOpenTiktokAuthService {
         response.setStatus(session.getStatus());
         response.setFailReason(session.getFailReason());
         response.setExpireTime(session.getExpireTime());
+        Instant expiresAt = session.getExpireTime().atZone(ZoneId.systemDefault()).toInstant();
+        response.setExpiresAt(expiresAt.toString());
+        response.setExpiresInSeconds(Math.max(0L, Duration.between(Instant.now(), expiresAt).getSeconds()));
         return response;
     }
 

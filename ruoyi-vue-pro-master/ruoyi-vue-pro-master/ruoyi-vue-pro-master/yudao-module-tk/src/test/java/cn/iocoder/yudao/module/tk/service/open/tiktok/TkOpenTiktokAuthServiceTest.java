@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.open.tiktok;
 
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokAuthSessionDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokConnectionDO;
 import cn.iocoder.yudao.module.tk.controller.open.tiktok.vo.TkOpenTiktokAuthVO;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokAuthSessionMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokConnectionMapper;
@@ -17,6 +18,14 @@ import org.mockito.ArgumentCaptor;
 import javax.validation.constraints.Pattern;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.util.TimeZone;
+import java.util.Map;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,6 +34,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 
@@ -33,6 +44,102 @@ class TkOpenTiktokAuthServiceTest {
     @AfterEach
     void clearContext() {
         TkOpenApiContext.clear();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"confirmed,", "scanned,", "confirmed, ''", "confirmed, ' '",
+            "scanned, ''", "scanned, ' '", "confirmed, other", "scanned, other"})
+    void shouldRejectMissingOrMismatchedTicketBeforeCodeExchange(String status, String ticket) {
+        QrFixture fixture = new QrFixture(status, ticket);
+        TkOpenTiktokAuthVO.SessionStatusResp response = fixture.service.getSession("auth_qr");
+        assertEquals("FAILED", response.getStatus());
+        assertTrue(response.getFailReason().contains("client_ticket"));
+        verify(fixture.adapter, never()).exchangeCode(any(), any());
+        verifyNoInteractions(fixture.connectionMapper, fixture.cipher);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"new", "expired"})
+    void shouldAllowEmptyTicketForInitialOrExpiredQr(String status) {
+        QrFixture fixture = new QrFixture(status, null);
+        TkOpenTiktokAuthVO.SessionStatusResp response = fixture.service.getSession("auth_qr");
+        assertEquals("expired".equals(status) ? "EXPIRED" : "WAITING", response.getStatus());
+        verify(fixture.adapter, never()).exchangeCode(any(), any());
+        verifyNoInteractions(fixture.callbacks);
+    }
+
+    @Test
+    void shouldCompleteConfirmedQrWithMatchingTicket() {
+        QrFixture fixture = new QrFixture("confirmed", "ticket-expected");
+        when(fixture.adapter.exchangeCode("qr-code", null)).thenReturn(
+                new TkOpenPublishPlatformAdapter.OAuthTokenResult(true, "access", "refresh",
+                        3600L, 7200L, "user.info.basic", "open-id", null, null));
+        when(fixture.adapter.queryUserInfo("access")).thenReturn(
+                new TkOpenPublishPlatformAdapter.PlatformUser(true, "open-id", "Name", "user", null, null));
+        TkOpenTiktokAuthVO.SessionStatusResp response = fixture.service.getSession("auth_qr");
+        assertEquals("SUCCESS", response.getStatus());
+        verify(fixture.adapter).exchangeCode("qr-code", null);
+        verify(fixture.connectionMapper).insert(any(TkOpenTiktokConnectionDO.class));
+        verify(fixture.callbacks).enqueue(eq("client_a"), eq("authorization.completed"), eq("CONNECTION"), any(), any());
+    }
+
+    @Test
+    void shouldExposeUnambiguousExpiryInNonUtcTimezone() throws Exception {
+        TimeZone original = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+            QrFixture fixture = new QrFixture("new", null);
+            fixture.session.setExpireTime(LocalDateTime.now().plusSeconds(120));
+            TkOpenTiktokAuthVO.SessionStatusResp response = fixture.service.getSession("auth_qr");
+            Map<?, ?> json = new ObjectMapper().findAndRegisterModules().convertValue(response, Map.class);
+            assertTrue(json.containsKey("expiresAt"));
+            assertEquals(fixture.session.getExpireTime().atZone(ZoneId.systemDefault()).toInstant(),
+                    Instant.parse((String) json.get("expiresAt")));
+            long remaining = ((Number) json.get("expiresInSeconds")).longValue();
+            assertTrue(remaining >= 118 && remaining <= 120);
+            assertEquals(fixture.session.getExpireTime(), response.getExpireTime());
+            fixture.session.setExpireTime(LocalDateTime.now().minusSeconds(1));
+            Map<?, ?> expired = new ObjectMapper().findAndRegisterModules().convertValue(
+                    fixture.service.getSession("auth_qr"), Map.class);
+            assertEquals(0L, ((Number) expired.get("expiresInSeconds")).longValue());
+        } finally {
+            TimeZone.setDefault(original);
+        }
+    }
+
+    @Test
+    void shouldKeepPublicProviderIdentityHidden() {
+        QrFixture fixture = new QrFixture("new", null);
+        fixture.session.setConnectionId("conn-1");
+        TkOpenTiktokConnectionDO connection = TkOpenTiktokConnectionDO.builder()
+                .openId("provider-secret").build();
+        when(fixture.connectionMapper.selectByClientAndConnectionId("client_a", "conn-1")).thenReturn(connection);
+        when(fixture.sessions.selectByAuthSessionIdForUpdate("auth_qr")).thenReturn(fixture.session);
+        assertNull(fixture.service.getPublicSessionStatus("auth_qr").getProviderIdentity());
+    }
+
+    private static class QrFixture {
+        final TkOpenTiktokAuthSessionMapper sessions = mock(TkOpenTiktokAuthSessionMapper.class);
+        final TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
+        final TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        final TkOpenApiCallbackService callbacks = mock(TkOpenApiCallbackService.class);
+        final TkOpenApiSecretCipher cipher = mock(TkOpenApiSecretCipher.class);
+        final TkOpenTiktokAuthSessionDO session = TkOpenTiktokAuthSessionDO.builder()
+                .id(1L).authSessionId("auth_qr").clientId("client_a").authMode("QR_CODE")
+                .clientTicket("ticket-expected").qrcodeToken("qr-token").status("WAITING")
+                .expireTime(LocalDateTime.now().plusMinutes(5)).build();
+        final TkOpenTiktokAuthService service;
+
+        QrFixture(String status, String ticket) {
+            TkOpenPublishPlatformRegistry registry = mock(TkOpenPublishPlatformRegistry.class);
+            when(registry.getRequired("TIKTOK")).thenReturn(adapter);
+            when(sessions.selectByClientAndSessionIdForUpdate("client_a", "auth_qr")).thenReturn(session);
+            when(adapter.checkQrCode("qr-token")).thenReturn(
+                    new TkOpenPublishPlatformAdapter.QrStatusResult(true, status, "qr-code", ticket, null));
+            service = new TkOpenTiktokAuthService(sessions, connectionMapper, registry, cipher, callbacks, null,
+                    "https://example.com/callback", "https://example.com/sessions");
+            TkOpenApiContext.set(new TkOpenApiPrincipal("client_a", "A", "auth"), "req-qr");
+        }
     }
 
     @Test
@@ -133,6 +240,11 @@ class TkOpenTiktokAuthServiceTest {
         assertFalse(session.getQrcodeUrl().contains("tobefilled"));
         assertEquals("https://www.tiktok.com/v2/auth/authorize/?state=state", response.getAuthorizeUrl());
         assertTrue(response.getQrcodeImageUrl().startsWith("data:image/png;base64,"));
+        Map<?, ?> json = new ObjectMapper().findAndRegisterModules().convertValue(response, Map.class);
+        assertTrue(json.containsKey("expiresAt"));
+        assertEquals(session.getExpireTime().atZone(ZoneId.systemDefault()).toInstant(),
+                Instant.parse((String) json.get("expiresAt")));
+        assertTrue(((Number) json.get("expiresInSeconds")).longValue() > 890);
         assertEquals("https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions/"
                 + session.getAuthSessionId() + "/launch", response.getLaunchUrl());
     }

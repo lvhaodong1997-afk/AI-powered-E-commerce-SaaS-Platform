@@ -34,6 +34,9 @@ public final class TkOpenTiktokAuthVO {
         private String launchUrl;
         private String status;
         private LocalDateTime expireTime;
+        // UTC ISO-8601 instant; expireTime is retained for existing clients.
+        private String expiresAt;
+        private Long expiresInSeconds;
     }
 
     @Data
@@ -58,6 +61,9 @@ public final class TkOpenTiktokAuthVO {
         private String status;
         private String failReason;
         private LocalDateTime expireTime;
+        // UTC ISO-8601 instant; expireTime is retained for existing clients.
+        private String expiresAt;
+        private Long expiresInSeconds;
     }
 
     @Data
