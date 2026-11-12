@@ -40,8 +40,8 @@ public class TkPublishFilePreparationService {
             return prepareOpenStaged(media, clientId);
         }
         String key = source.objectKeyForUrl(media.getFileUrl());
-        // Existing records in the public destination need no grant on private material data.
-        if (source.bucket().equals(storage.publishStorage().bucket())) return storage.publishStorage().unsignedUrl(key);
+        // Historical client-authorized records may have private object ACLs even in the public bucket.
+        if (source.bucket().equals(storage.publishStorage().bucket())) return prepare(source, key);
         if (!"OSS".equalsIgnoreCase(media.getUploadMode()) || !key.startsWith("tk/open-api/" + clientId + "/") || !key.equals(media.getObjectKey()))
             throw new IllegalArgumentException("发布源文件不属于当前 API 客户端");
         return prepare(source, key);
@@ -69,10 +69,10 @@ public class TkPublishFilePreparationService {
         if (!java.util.Arrays.asList("mp4", "mov", "webm", "jpg", "jpeg", "webp").contains(extension))
             throw new IllegalArgumentException("只能准备视频或发布图片，内部附件禁止公开");
         TkOssObjectStorageService target = storage.publishStorage();
+        if (source.bucket().equals(target.bucket()) && !source.hasPrivateObjectAcl(key)) return target.unsignedUrl(key);
         ObjectMetadata identity = source.headObject(key);
         if (identity.getContentLength() <= 0 || identity.getContentLength() > 4_000_000_000L
                 || StrUtil.isBlank(identity.getEtag())) throw new IllegalArgumentException("发布源文件无效");
-        if (source.bucket().equals(target.bucket())) return target.unsignedUrl(key);
         String id = DigestUtil.sha256Hex(source.bucket() + "\n" + key + "\n" + identity.getEtag()
                 + "\n" + StrUtil.blankToDefault(identity.getVersionId(), "") + "\n" + identity.getContentLength()
                 + "\n" + target.bucket());

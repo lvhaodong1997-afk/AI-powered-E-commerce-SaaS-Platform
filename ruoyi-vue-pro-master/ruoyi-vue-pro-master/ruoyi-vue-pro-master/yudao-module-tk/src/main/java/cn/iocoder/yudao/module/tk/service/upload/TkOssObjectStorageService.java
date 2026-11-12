@@ -363,6 +363,14 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
         return connection;
     }
 
+    /** An explicit private object ACL overrides even the configured public publish bucket. */
+    public boolean hasPrivateObjectAcl(String key) {
+        String acl = xmlValue(copyRequest("GET", key, "acl", java.util.Collections.emptyMap(), ""), "Grant");
+        if ("private".equals(acl)) return true;
+        if (java.util.Arrays.asList("default", "public-read", "public-read-write").contains(acl)) return false;
+        throw new IllegalStateException("OSS 对象读取权限响应无效");
+    }
+
     /** Conditional server-side OSS copy. Source credentials are never put in a URL. */
     public ObjectMetadata copyFrom(TkOssObjectStorageService source, String sourceKey, String targetKey, ObjectMetadata identity) {
         if (identity == null || StrUtil.isBlank(identity.getEtag()) || identity.getContentLength() <= 0
@@ -373,13 +381,16 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
         headers.put("x-oss-copy-source", copySource);
         headers.put("x-oss-copy-source-if-match", identity.getEtag());
         if (identity.getContentLength() <= 128L * 1024 * 1024) {
+            headers.put("x-oss-object-acl", "default");
             String xml = copyRequest("PUT", targetKey, "", headers, "");
             if (!xml.contains("<CopyObjectResult")) throw new IllegalStateException("OSS 发布副本复制失败");
         } else {
             String mime = identity.getContentType();
             if (StrUtil.isBlank(mime) || mime.contains("\r") || mime.contains("\n"))
                 throw new IllegalArgumentException("OSS 源文件缺少有效 Content-Type");
-            String uploadId = xmlValue(copyRequest("POST", targetKey, "uploads", java.util.Collections.singletonMap("Content-Type", mime), ""), "UploadId");
+            java.util.Map<String, String> initHeaders = new java.util.TreeMap<>();
+            initHeaders.put("Content-Type", mime); initHeaders.put("x-oss-object-acl", "default");
+            String uploadId = xmlValue(copyRequest("POST", targetKey, "uploads", initHeaders, ""), "UploadId");
             try {
                 StringBuilder complete = new StringBuilder("<CompleteMultipartUpload>");
                 long partSize = 64L * 1024 * 1024;

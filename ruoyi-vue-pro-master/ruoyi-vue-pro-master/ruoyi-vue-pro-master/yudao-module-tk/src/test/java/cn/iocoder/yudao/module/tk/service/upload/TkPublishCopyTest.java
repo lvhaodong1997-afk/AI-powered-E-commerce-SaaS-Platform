@@ -14,7 +14,7 @@ class TkPublishCopyTest {
             String type = exchange.getRequestHeaders().getFirst("Content-Type");
             String date = exchange.getRequestHeaders().getFirst("Date");
             String query = exchange.getRequestURI().getRawQuery();
-            String canonicalHeaders = query == null ? "x-oss-copy-source:/source/key.mp4\nx-oss-copy-source-if-match:etag\n" : "";
+            String canonicalHeaders = query == null ? "x-oss-copy-source:/source/key.mp4\nx-oss-copy-source-if-match:etag\nx-oss-object-acl:default\n" : "";
             String canonical = canonicalHeaders + "/tk-material-factory/key.mp4" + (query == null ? "" : "?" + query);
             String auth = "OSS tk-material-factory-key:" + TkOssRestSigner.sign(exchange.getRequestMethod(), "", type, date, canonical, "secret");
             if (!auth.equals(exchange.getRequestHeaders().getFirst("Authorization"))) failure.set("Wire content type differs from signed content type: " + type);
@@ -30,7 +30,9 @@ class TkPublishCopyTest {
             };
             ReflectionTestUtils.setField(storage, "generationProperties", TkDualBucketStorageTest.configured());
             Map<String,String> headers = new TreeMap<>(); headers.put("x-oss-copy-source", "/source/key.mp4"); headers.put("x-oss-copy-source-if-match", "etag");
+            headers.put("x-oss-object-acl", "default");
             storage.copyRequest("PUT", "key.mp4", "", headers, ""); assertNull(failure.get());
+            storage.copyRequest("GET", "key.mp4", "acl", Collections.emptyMap(), ""); assertNull(failure.get());
             storage.copyRequest("POST", "key.mp4", "uploads", Collections.singletonMap("Content-Type", "video/webm"), ""); assertNull(failure.get());
             storage.copyRequest("POST", "key.mp4", "uploadId=abc", Collections.emptyMap(), "<CompleteMultipartUpload/>"); assertNull(failure.get());
         } finally { server.stop(0); }
@@ -40,6 +42,7 @@ class TkPublishCopyTest {
         target.copyFrom(source, "tk/1/2/old.mp4", "tk/1/2/copy.mp4", source.metadata);
         assertEquals(Collections.singletonList("PUT:"), target.requests);
         assertEquals("\"etag\"", target.headers.get("x-oss-copy-source-if-match"));
+        assertEquals("default", target.headers.get("x-oss-object-acl"), "destination must inherit publish bucket read permission");
         assertTrue(target.headers.get("x-oss-copy-source").startsWith("/tk-material-factory/tk/1/2/old.mp4"));
     }
     @Test void largeCopyUsesMultipartAndAbortsOnFailure() {
@@ -49,19 +52,20 @@ class TkPublishCopyTest {
         assertTrue(target.requests.get(0).startsWith("POST:uploads"));
         assertTrue(target.requests.get(4).startsWith("POST:uploadId="));
         assertEquals("video/mp4", target.initiateContentType, "multipart init must retain source MIME");
+        assertEquals("default", target.initiateAcl, "multipart destination must inherit publish bucket permission");
         FakeStorage failed = new FakeStorage(source.metadata.getContentLength()); failed.failPart = true;
         assertThrows(IllegalStateException.class, () -> failed.copyFrom(source, "tk/1/2/old.mp4", "tk/1/2/copy.mp4", source.metadata));
         assertTrue(failed.requests.get(failed.requests.size() - 1).startsWith("DELETE:uploadId="));
     }
     static class FakeStorage extends TkOssObjectStorageService {
         final ObjectMetadata metadata; final List<String> requests = new ArrayList<>();
-        Map<String,String> headers; String initiateContentType; boolean failPart;
+        Map<String,String> headers; String initiateContentType, initiateAcl; boolean failPart;
         FakeStorage(long size) { metadata = new ObjectMetadata(size, null, "\"etag\"", null, "video/mp4"); ReflectionTestUtils.setField(this, "generationProperties", TkDualBucketStorageTest.configured()); }
         @Override public ObjectMetadata headObject(String key) { return metadata; }
         @Override String copyRequest(String method, String key, String query, Map<String,String> h, String body) {
             requests.add(method + ":" + query); headers = h;
             if (query.startsWith("partNumber=")) { if (failPart) throw new IllegalStateException("retryable"); return "<CopyPartResult><ETag>etag</ETag></CopyPartResult>"; }
-            if ("uploads".equals(query)) { initiateContentType = h.get("Content-Type"); return "<InitiateMultipartUploadResult><UploadId>upload1</UploadId></InitiateMultipartUploadResult>"; }
+            if ("uploads".equals(query)) { initiateContentType = h.get("Content-Type"); initiateAcl = h.get("x-oss-object-acl"); return "<InitiateMultipartUploadResult><UploadId>upload1</UploadId></InitiateMultipartUploadResult>"; }
             return query.isEmpty() ? "<CopyObjectResult/>" : "<CompleteMultipartUploadResult/>";
         }
     }
