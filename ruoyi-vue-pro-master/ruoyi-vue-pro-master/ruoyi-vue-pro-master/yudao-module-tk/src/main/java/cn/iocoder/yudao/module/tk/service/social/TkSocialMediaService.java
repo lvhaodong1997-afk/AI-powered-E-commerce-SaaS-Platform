@@ -198,13 +198,14 @@ public class TkSocialMediaService {
         }
         scope.validateReadable(task.getTenantId(), task.getCompanyId(), task.getCreator());
         validateOssUploadConfig();
-        String key = ossObjectStorageService.requireOwnedObjectKey(task.getOutputUrl(), task.getTenantId(), task.getCompanyId());
+        TkOssObjectStorageService owner = ossObjectStorageService.storageForUrl(task.getOutputUrl());
+        String key = owner.requireOwnedObjectKey(task.getOutputUrl(), task.getTenantId(), task.getCompanyId());
         if (!uploadSlot.tryAcquire()) throw new IllegalArgumentException("已有媒体正在上传，请稍后重试");
         try (TkSocialVideoInspector.Workspace workspace = videoInspector.openWorkspace()) {
             Path source = workspace.getDirectory().resolve("source.mp4");
-            ObjectMetadata identity = ossObjectStorageService.headObject(key);
-            ossObjectStorageService.downloadToFile(key, source, identity, MAX_VIDEO_BYTES);
-            TkOssObjectStorageService.requireIdentity(identity, ossObjectStorageService.headObject(key));
+            ObjectMetadata identity = owner.headObject(key);
+            owner.downloadToFile(key, source, identity, MAX_VIDEO_BYTES);
+            TkOssObjectStorageService.requireIdentity(identity, owner.headObject(key));
             return saveVideoPath(source, "generation-" + taskId + ".mp4", workspace.getDirectory());
         } catch (IOException ex) {
             throw new IllegalStateException("读取生成视频失败，请稍后重试");

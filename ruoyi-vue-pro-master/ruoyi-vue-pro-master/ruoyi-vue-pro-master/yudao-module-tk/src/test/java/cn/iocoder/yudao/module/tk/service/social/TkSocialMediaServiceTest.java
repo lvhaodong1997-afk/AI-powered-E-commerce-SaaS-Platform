@@ -20,6 +20,22 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class TkSocialMediaServiceTest {
+    @Test void importGeneratedReadsActualBucketWithoutChangingSocialWriteDestination(@org.junit.jupiter.api.io.TempDir java.nio.file.Path temp) {
+        TkOssObjectStorageService defaultStorage=prepareDirect(directRequest()),owner=mock(TkOssObjectStorageService.class);
+        cn.iocoder.yudao.module.tk.service.generation.TkGenerationTaskService generation=mock(cn.iocoder.yudao.module.tk.service.generation.TkGenerationTaskService.class);
+        TkSocialVideoInspector inspector=mock(TkSocialVideoInspector.class);TkSocialVideoInspector.Workspace workspace=mock(TkSocialVideoInspector.Workspace.class);
+        when(inspector.openWorkspace()).thenReturn(workspace);when(workspace.getDirectory()).thenReturn(temp);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"generationService",generation);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"videoInspector",inspector);
+        for(String base:new String[]{"https://material.example", "https://tkpublish.fnn.net.cn"}) {
+            String url=base+"/tk/100/100/generation-tasks/4/video.mp4",key="tk/100/100/generation-tasks/4/video.mp4";
+            cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO task=new cn.iocoder.yudao.module.tk.dal.dataobject.TkGenerationTaskDO();task.setTenantId(100L);task.setCompanyId(100L);task.setCreator("7");task.setStatus("SUCCESS");task.setOutputUrl(url);
+            when(generation.getGenerationTask(4L)).thenReturn(task);when(defaultStorage.storageForUrl(url)).thenReturn(owner);
+            when(owner.requireOwnedObjectKey(url,100L,100L)).thenReturn(key);doThrow(new IllegalStateException("probe stopped after route")).when(owner).headObject(key);
+            assertThrows(IllegalStateException.class,()->service.importGenerated(4L));verify(owner).requireOwnedObjectKey(url,100L,100L);
+        }
+        verify(defaultStorage,never()).headObject("tk/100/100/generation-tasks/4/video.mp4");
+    }
     @Test void historicalOwnedUnpublishedVideoIsRequeuedForTrueInspection() {
         TkSocialMediaDO historical = prepareHistorical(0L);
         TkSocialMediaDO result = service.getReadable(1L);

@@ -75,6 +75,7 @@ public class TkFileCleanupService {
     private TkLocalUploadStorageService localUploadStorageService;
     @Resource
     private TkMaterialOssUploadService ossUploadService;
+    @Resource private cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService objectStorageService;
 
     public CleanupResult cleanupExpiredFiles() {
         TkGenerationProperties.Cleanup cleanup = generationProperties.getCleanup();
@@ -196,6 +197,10 @@ public class TkFileCleanupService {
         if (StrUtil.isBlank(fileUrl)) {
             throw new IllegalStateException("发布上传视频 URL 为空");
         }
+        if (objectStorageService != null && objectStorageService.isOwnedObjectUrl(fileUrl)) {
+            if (!isManagedPublishMediaUrl(fileUrl)) throw new IllegalStateException("发布媒体不属于受管路径");
+            objectStorageService.deleteByUrl(fileUrl); return;
+        }
         if (ossUploadService != null && ossUploadService.isEnabled()) {
             if (!isManagedPublishMediaUrl(fileUrl) || !ossUploadService.isManagedUrl(fileUrl)) {
                 throw new IllegalStateException("发布上传视频 URL 不属于受管 OSS 路径");
@@ -222,7 +227,7 @@ public class TkFileCleanupService {
 
     private boolean isManagedPublishMediaUrl(String url) {
         String cleanUrl = StrUtil.subBefore(StrUtil.blankToDefault(url, ""), "?", false);
-        return StrUtil.contains(cleanUrl, "/tiktok-publish-media/");
+        return StrUtil.contains(cleanUrl, "/tiktok-publish-media/") || StrUtil.contains(cleanUrl, "/tiktok-photo/");
     }
 
     private int cleanupExpiredGeneratedTaskFiles(LocalDateTime now, TkGenerationProperties.Cleanup cleanup) {
@@ -418,15 +423,17 @@ public class TkFileCleanupService {
 
     private Set<String> deleteManagedOssGenerationUrls(Set<String> urls) {
         Set<String> deletedUrls = new LinkedHashSet<>();
-        if (ossUploadService == null || !ossUploadService.isEnabled()) {
+        if (objectStorageService == null && (ossUploadService == null || !ossUploadService.isEnabled())) {
             return deletedUrls;
         }
         for (String url : urls) {
-            if (!ossUploadService.isManagedUrl(url)) {
+            boolean owned = objectStorageService != null && objectStorageService.isOwnedObjectUrl(url);
+            if (!owned && (ossUploadService == null || !ossUploadService.isEnabled() || !ossUploadService.isManagedUrl(url))) {
                 continue;
             }
             try {
-                ossUploadService.deleteByUrl(url);
+                if (owned) objectStorageService.deleteByUrl(url);
+                else ossUploadService.deleteByUrl(url);
                 deletedUrls.add(url);
             } catch (Exception ex) {
                 log.warn("[deleteManagedOssGenerationUrls][url({}) TK 过期生成文件 OSS 删除失败]",

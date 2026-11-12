@@ -92,6 +92,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
 
     @Resource
     private TkTiktokPullSourceResolver pullSourceResolver;
+    @Resource private cn.iocoder.yudao.module.tk.service.upload.TkPublishFilePreparationService filePreparationService;
+    private boolean dualBucketEnabled() { return filePreparationService != null && filePreparationService.isEnabled(); }
     @Resource
     private TkTiktokPublishRequestBudget requestBudget;
     @Resource
@@ -687,13 +689,13 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                     throw new IllegalArgumentException("图文账号和图片必须属于同一租户和公司");
                 }
                 for (String url : JsonUtils.parseArray(reqVO.getPhotoUrls(), String.class)) {
-                    if (!pullSourceResolver.isCandidate(url, account.getId(), apiClient.getVerifiedPullDomain())) {
+                    if (!dualBucketEnabled() && !pullSourceResolver.isCandidate(url, account.getId(), apiClient.getVerifiedPullDomain())) {
                         throw invalidParamException("图文需要启用图片域名直拉，并将所选账号加入拉取白名单；请检查 TikTok 已验证域名配置");
                     }
                 }
             }
         }
-        boolean preferPull = photo || pullSourceResolver != null && accounts.stream().anyMatch(account ->
+        boolean preferPull = dualBucketEnabled() || photo || pullSourceResolver != null && accounts.stream().anyMatch(account ->
                 scheduled
                         ? pullSourceResolver.resolve(videoUrl, account.getId(), apiClient.getVerifiedPullDomain()).isEligible()
                         : pullSourceResolver.isCandidate(videoUrl, account.getId(), apiClient.getVerifiedPullDomain()));
@@ -838,6 +840,13 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 }
             }
             String policy = publishTask.getTransferPolicy();
+            if (dualBucketEnabled()) {
+                detail.setTiktokStatus("PREPARING_MEDIA");
+                publishDetailMapper.update(null, executionFence(detail, null)
+                        .eq(TkTiktokPublishDetailDO::getStatus, STATUS_PROCESSING)
+                        .isNull(TkTiktokPublishDetailDO::getPublishId)
+                        .set(TkTiktokPublishDetailDO::getTiktokStatus, "PREPARING_MEDIA"));
+            }
             Map<String, Object> payload;
             if (photo) {
                 List<String> storedUrls = JsonUtils.parseArray(publishTask.getPhotoUrls(), String.class);
@@ -847,6 +856,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 List<String> pullUrls = new ArrayList<>();
                 uploadSource = UploadSource.pullFromUrl("image/jpeg");
                 for (String storedUrl : storedUrls) {
+                    if (dualBucketEnabled()) storedUrl = filePreparationService.prepareOwned(storedUrl,
+                            publishTask.getTenantId(), publishTask.getCompanyId());
                     TkTiktokPullSourceResolver.PullDecision decision = pullSourceResolver.resolvePhoto(
                             storedUrl, account.getId(), apiClient.getVerifiedPullDomain());
                     if (!decision.isEligible()) throw new IllegalArgumentException("图片公开拉取校验失败：" + decision.getReasonCode());
@@ -856,7 +867,9 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 uploadSource.pullUrl = pullUrls.get(0);
                 payload = buildPhotoPublishPayload(publishTask, detail, pullUrls, creatorInfo);
             } else {
-                uploadSource = StrUtil.isBlank(policy) || "LEGACY".equals(policy)
+                uploadSource = dualBucketEnabled()
+                        ? resolvePreparedSource(publishTask.getVideoUrl(), videoMimeType, account.getId(), publishTask.getTenantId(), publishTask.getCompanyId())
+                        : StrUtil.isBlank(policy) || "LEGACY".equals(policy)
                         ? resolveUploadSource(mediaUploadService == null ? videoUrl : mediaUploadService.refreshReadUrl(videoUrl), videoMimeType)
                         : resolveUploadSource(videoUrl, videoMimeType, account.getId(), "OSS_PULL_V1".equals(policy));
                 payload = buildPublishPayload(detail, publishTask.getTitle(), publishTask.getCaption(), videoUrl, uploadSource, creatorInfo);
@@ -1763,6 +1776,14 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     public void destroy() {
         creatorPreviewExecutor.shutdownNow();
         retryExecutorService.shutdown();
+    }
+
+    private UploadSource resolvePreparedSource(String url, String contentType, Long accountId, Long tenantId, Long companyId) {
+        String prepared = filePreparationService.prepareOwned(url, tenantId, companyId);
+        TkTiktokPullSourceResolver.PullDecision decision = pullSourceResolver.resolveStrict(prepared, accountId, apiClient.getVerifiedPullDomain());
+        if (decision == null || !decision.isEligible()) throw new IllegalStateException("发布文件直拉校验失败：" + (decision == null ? "PULL_RESOLVER_UNAVAILABLE" : decision.getReasonCode()));
+        UploadSource source = UploadSource.pullFromUrl(normalizeVideoMimeType(contentType, prepared));
+        source.pullUrl = decision.getPullUrl(); source.videoSize = decision.getFileSize(); return source;
     }
 
     private UploadSource resolveUploadSource(String outputUrl, String contentType) {

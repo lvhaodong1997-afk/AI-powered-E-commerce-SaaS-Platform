@@ -34,6 +34,9 @@ public class TkUploadSessionDO extends TenantBaseDO {
 
     private String storageMode;
 
+    /** Unsigned object URL fixed at session creation; null means historical material bucket. */
+    private String storageUrl;
+
     private String status;
 
     private LocalDateTime expiresAt;

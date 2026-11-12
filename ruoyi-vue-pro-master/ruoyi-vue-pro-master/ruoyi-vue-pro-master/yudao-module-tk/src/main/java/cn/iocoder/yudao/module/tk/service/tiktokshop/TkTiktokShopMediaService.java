@@ -39,9 +39,9 @@ public class TkTiktokShopMediaService {
                 if(!file.startsWith(trusted)||!Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS)||Files.size(file)>TkTiktokShopUploadService.MAX_BYTES)throw invalid();
                 try(InputStream in=Files.newInputStream(file);OutputStream out=Files.newOutputStream(target,StandardOpenOption.CREATE_NEW)){TkOssObjectStorageService.copyBounded(in,out,TkTiktokShopUploadService.MAX_BYTES);}
             } else {
-                String key=oss.requireOwnedObjectKey(url,tenant,company);TkOssObjectStorageClient.ObjectMetadata metadata=oss.headObject(key);
+                TkOssObjectStorageService owner=oss.storageForUrl(url);String key=owner.requireOwnedObjectKey(url,tenant,company);TkOssObjectStorageClient.ObjectMetadata metadata=owner.headObject(key);
                 if(metadata.getContentLength()<=0||metadata.getContentLength()>TkTiktokShopUploadService.MAX_BYTES)throw invalid();
-                oss.downloadToFile(key,target,metadata,TkTiktokShopUploadService.MAX_BYTES);
+                owner.downloadToFile(key,target,metadata,TkTiktokShopUploadService.MAX_BYTES);
             }
             String mime=probe(target);String extension="video/webm".equals(mime)?".webm":"video/quicktime".equals(mime)?".mov":".mp4";
             Path finalPath=target.resolveSibling(UUID.randomUUID()+extension);Files.move(target,finalPath);target=finalPath;

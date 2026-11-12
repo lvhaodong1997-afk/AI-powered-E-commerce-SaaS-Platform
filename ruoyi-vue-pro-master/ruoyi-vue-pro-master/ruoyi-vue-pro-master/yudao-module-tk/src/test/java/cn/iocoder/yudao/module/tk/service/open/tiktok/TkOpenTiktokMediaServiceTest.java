@@ -41,6 +41,7 @@ class TkOpenTiktokMediaServiceTest {
                 .uploadMode("OSS").objectKey("tk/open-api/c/20261104/a.mp4")
                 .fileUrl("https://bucket.oss-cn-beijing.aliyuncs.com/tk/open-api/c/20261104/a.mp4").build();
         when(mapper.selectByClientAndMediaId("c", "m")).thenReturn(owned);
+        when(oss.storageForUrl(owned.getFileUrl())).thenReturn(oss);
         when(oss.createPullReadUrl(owned.getObjectKey(), "https://pull.example.com", 86400))
                 .thenReturn("https://pull.example.com/signed");
         assertEquals("https://pull.example.com/signed", service.resolvePullReadUrl(owned, "https://pull.example.com"));

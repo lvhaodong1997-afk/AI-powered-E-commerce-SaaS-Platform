@@ -15,6 +15,19 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class TkTiktokShopMediaServiceTest {
+    @Test void snapshotReadsRealBucketForBothHistoricalAndNewGeneratedUrls() {
+        TkTiktokShopMediaService s=service(); TkOssObjectStorageService owner=mock(TkOssObjectStorageService.class);
+        for(String base:new String[]{"https://material.example", "https://tkpublish.fnn.net.cn"}) {
+            String url=base+"/tk/1/2/generation-tasks/4/video.mp4",key="tk/1/2/generation-tasks/4/video.mp4";
+            TkGenerationTaskDO task=new TkGenerationTaskDO();task.setTenantId(1L);task.setCompanyId(2L);task.setCreator("3");task.setStatus("SUCCESS");task.setOutputUrl(url);
+            when(generations.selectById(4L)).thenReturn(task);when(local.resolveLocalPath(url)).thenReturn(java.util.Optional.empty());
+            when(oss.storageForUrl(url)).thenReturn(owner);when(owner.requireOwnedObjectKey(url,1L,2L)).thenReturn(key);
+            doThrow(new IllegalStateException("probe stopped after route")).when(owner).headObject(key);
+            assertThrows(IllegalArgumentException.class,()->s.snapshot(account(),4L,null));
+            verify(owner).requireOwnedObjectKey(url,1L,2L);
+        }
+        verify(oss,never()).headObject(anyString());verify(owner,times(2)).headObject("tk/1/2/generation-tasks/4/video.mp4");
+    }
     @TempDir Path dir;
     TkGenerationTaskMapper generations=mock(TkGenerationTaskMapper.class);
     TkTiktokPublishMediaMapper media=mock(TkTiktokPublishMediaMapper.class);

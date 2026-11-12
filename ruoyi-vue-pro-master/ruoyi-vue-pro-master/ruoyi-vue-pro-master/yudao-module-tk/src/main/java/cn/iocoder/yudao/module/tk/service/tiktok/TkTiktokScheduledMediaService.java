@@ -80,18 +80,19 @@ public class TkTiktokScheduledMediaService {
     }
 
     private void downloadOwnedOss(Long tenantId, Long companyId, String sourceUrl, Path partial) throws Exception {
-        String objectKey = ossObjectStorageService.requireOwnedObjectKey(sourceUrl, tenantId, companyId);
-        ObjectMetadata expected = ossObjectStorageService.headObject(objectKey);
+        TkOssObjectStorageService owner = ossObjectStorageService.storageForUrl(sourceUrl);
+        String objectKey = owner.requireOwnedObjectKey(sourceUrl, tenantId, companyId);
+        ObjectMetadata expected = owner.headObject(objectKey);
         long maxBytes = maxFileSizeBytes();
         if (expected == null || expected.getContentLength() <= 0L || expected.getContentLength() > maxBytes) {
             throw new IllegalArgumentException("OSS 定时发布素材大小无效");
         }
-        ossObjectStorageService.downloadToFile(objectKey, partial, expected, maxBytes);
+        owner.downloadToFile(objectKey, partial, expected, maxBytes);
         if (!Files.isRegularFile(partial, LinkOption.NOFOLLOW_LINKS)
                 || Files.size(partial) != expected.getContentLength()) {
             throw new IllegalStateException("OSS 定时发布素材大小校验失败");
         }
-        TkOssObjectStorageService.requireIdentity(expected, ossObjectStorageService.headObject(objectKey));
+        TkOssObjectStorageService.requireIdentity(expected, owner.headObject(objectKey));
     }
 
     private long maxFileSizeBytes() {

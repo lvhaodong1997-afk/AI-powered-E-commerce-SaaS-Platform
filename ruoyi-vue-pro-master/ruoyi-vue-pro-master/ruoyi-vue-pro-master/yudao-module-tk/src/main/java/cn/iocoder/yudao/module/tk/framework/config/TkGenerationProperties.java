@@ -222,6 +222,8 @@ public class TkGenerationProperties {
         private Integer sessionExpireHours = 24;
         private String scheduledPublishRootDir;
         private Oss oss = new Oss();
+        /** Independent public publishing bucket; disabled preserves legacy deployments. */
+        private Oss publishOss = new Oss();
 
     }
 

@@ -67,21 +67,22 @@ public class TkTiktokPublishMediaServiceImpl implements TkTiktokPublishMediaServ
             TkUserScope scope = dataScopeService.getCurrentScope();
             Long companyId = dataScopeService.getWritableCompanyId(null);
             if (scope.getTenantId() == null || companyId == null) throw exception(TK_USER_SCOPE_NOT_CONFIGURED);
-            if (!ossObjectStorageService.isConfigured()) throw new IllegalStateException("图文发布需要先配置 OSS 和 TikTok 已验证的拉取域名");
-            String prefix = StrUtil.removeSuffix(StrUtil.blankToDefault(generationProperties.getUpload().getOss().getUploadPathPrefix(), "tk"), "/");
+            TkOssObjectStorageService target = ossObjectStorageService.publishStorage();
+            if (!target.isConfigured()) throw new IllegalStateException("图文发布需要先配置 OSS 和 TikTok 已验证的拉取域名");
+            String prefix = StrUtil.removeSuffix(StrUtil.blankToDefault(ossObjectStorageService.publishConfig().getUploadPathPrefix(), "tk"), "/");
             String key = prefix + "/" + scope.getTenantId() + "/" + companyId + "/tiktok-photo/" + UUID.randomUUID() + ".jpg";
-            ossObjectStorageService.validateOwnedKey(key, scope.getTenantId(), companyId);
+            target.validateOwnedKey(key, scope.getTenantId(), companyId);
             try {
-                ossObjectStorageService.uploadFile(key, temp, MAX_PHOTO_SIZE, "image/jpeg");
+                target.uploadFile(key, temp, MAX_PHOTO_SIZE, "image/jpeg");
                 TkTiktokPublishMediaDO media = TkTiktokPublishMediaDO.builder().companyId(companyId)
                         .fileName(StrUtil.maxLength(file.getOriginalFilename(), 255))
-                        .fileUrl(ossObjectStorageService.publicUrlForObjectKey(key)).fileSize(file.getSize())
+                        .fileUrl(target.unsignedUrl(key)).fileSize(file.getSize())
                         .mimeType("image/jpeg").status("READY").build();
                 media.setTenantId(scope.getTenantId());
                 mediaMapper.insert(media);
                 return media;
             } catch (RuntimeException ex) {
-                try { ossObjectStorageService.deleteObject(key); } catch (RuntimeException cleanup) { ex.addSuppressed(cleanup); }
+                try { target.deleteObject(key); } catch (RuntimeException cleanup) { ex.addSuppressed(cleanup); }
                 throw ex;
             }
         } catch (IOException ex) {
@@ -120,15 +121,21 @@ public class TkTiktokPublishMediaServiceImpl implements TkTiktokPublishMediaServ
         if (scope.getTenantId() == null || companyId == null) throw exception(TK_USER_SCOPE_NOT_CONFIGURED);
         String name = UUID.randomUUID().toString().replace("-", "") + "." + extension;
         String relative = StrUtil.format("tk/{}/{}/tiktok-publish-media/{}", scope.getTenantId(), companyId, name);
+        String uploadedUrl = storageService.toPublicUrl(relative);
         try {
             Path target = storageService.resolveRelativePath(relative);
             Files.createDirectories(target.getParent());
             file.transferTo(target.toFile());
+            if (ossObjectStorageService != null && ossObjectStorageService.isPublishEnabled()) {
+                TkOssObjectStorageService publish = ossObjectStorageService.publishStorage();
+                publish.uploadFile(relative, target, MAX_SIZE, StrUtil.blankToDefault(file.getContentType(), "video/mp4"));
+                uploadedUrl = publish.unsignedUrl(relative); Files.deleteIfExists(target);
+            }
         } catch (Exception ex) {
             throw new IllegalStateException("保存 TikTok 发布视频失败：" + ex.getMessage(), ex);
         }
         TkTiktokPublishMediaDO media = TkTiktokPublishMediaDO.builder()
-                .companyId(companyId).fileName(file.getOriginalFilename()).fileUrl(storageService.toPublicUrl(relative))
+                .companyId(companyId).fileName(file.getOriginalFilename()).fileUrl(uploadedUrl)
                 .fileSize(file.getSize()).mimeType(file.getContentType()).status("READY").build();
         media.setTenantId(scope.getTenantId());
         mediaMapper.insert(media);

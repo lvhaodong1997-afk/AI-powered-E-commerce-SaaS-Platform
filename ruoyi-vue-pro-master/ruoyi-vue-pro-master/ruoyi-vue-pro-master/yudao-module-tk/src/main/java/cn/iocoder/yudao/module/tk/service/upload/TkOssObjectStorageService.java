@@ -41,6 +41,61 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
 
     @Resource
     private TkGenerationProperties generationProperties;
+    private TkGenerationProperties.Oss fixedOss;
+
+    public TkOssObjectStorageService() { }
+    private TkOssObjectStorageService(TkGenerationProperties properties, TkGenerationProperties.Oss oss) {
+        this.generationProperties = properties; this.fixedOss = oss;
+    }
+    @javax.annotation.PostConstruct
+    public void validateEnabledPublishConfiguration() { if (isPublishEnabled()) publishConfig(); }
+    public boolean isPublishEnabled() {
+        return generationProperties != null && Boolean.TRUE.equals(generationProperties.getUpload().getPublishOss().getEnabled());
+    }
+    public TkGenerationProperties.Oss publishConfig() {
+        TkGenerationProperties.Oss p = generationProperties.getUpload().getPublishOss();
+        if (!Boolean.TRUE.equals(p.getEnabled())) return getOss();
+        validatePublishConfig(p, generationProperties.getUpload().getOss());
+        return p;
+    }
+    public static void validatePublishConfig(TkGenerationProperties.Oss p, TkGenerationProperties.Oss source) {
+        if (StrUtil.hasBlank(p.getBucket(), p.getEndpoint(), p.getRegion(), p.getPublicBaseUrl(),
+                p.getAccessKeyId(), p.getAccessKeySecret()) || source == null || StrUtil.isBlank(source.getRegion())
+                || !p.getRegion().equals(source.getRegion()) || p.getBucket().equals(source.getBucket())
+                || !"https://tkpublish.fnn.net.cn".equals(StrUtil.removeSuffix(p.getPublicBaseUrl(), "/"))
+                || p.getReadUrlExpireSeconds() == null || p.getReadUrlExpireSeconds() != 0
+                || !p.getBucket().matches("[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
+                || !p.getEndpoint().matches("(?:https://)?(?:[a-z0-9-]+\\.)?oss-[a-z0-9-]+(?:-internal)?\\.aliyuncs\\.com"))
+            throw new IllegalStateException("独立发布 OSS 配置不完整：须独立桶、同地域、tkpublish HTTPS 域名及无签名读取");
+    }
+    public TkOssObjectStorageService publishStorage() {
+        return isPublishEnabled() ? new TkOssObjectStorageService(generationProperties, publishConfig()) : this;
+    }
+    /** Select using a persisted URL; never fall back to the current write destination. */
+    public TkOssObjectStorageService storageForUrl(String url) {
+        if (generationProperties == null || generationProperties.getUpload() == null)
+            throw new IllegalArgumentException("文件不是受信 OSS 来源");
+        TkGenerationProperties.Oss material = generationProperties.getUpload().getOss();
+        TkGenerationProperties.Oss publish = generationProperties.getUpload().getPublishOss();
+        for (TkGenerationProperties.Oss candidate : new TkGenerationProperties.Oss[]{material, publish}) {
+            TkOssObjectStorageService storage = new TkOssObjectStorageService(generationProperties, candidate);
+            if (StrUtil.isNotBlank(storage.toObjectKey(url))) return storage;
+        }
+        throw new IllegalArgumentException("文件不是受信 OSS 来源");
+    }
+    public String objectKeyForUrl(String url) {
+        String key = toObjectKey(url);
+        if (StrUtil.isBlank(key) || key.startsWith("/") || key.contains("..") || key.contains("\\")
+                || key.contains("%") || key.contains("?") || key.contains("#") || key.contains(":"))
+            throw new IllegalArgumentException("OSS 对象路径无效");
+        return key;
+    }
+    public String bucket() { return getOss().getBucket(); }
+    public String unsignedUrl(String key) { return StrUtil.removeSuffix(getOss().getPublicBaseUrl(), "/") + "/" + encodePath(key); }
+    public void deleteByUrl(String url) { TkOssObjectStorageService owner = storageForUrl(url); owner.deleteObject(owner.objectKeyForUrl(url)); }
+    public TkOssObjectStorageService storageForSession(TkUploadSessionDO session) {
+        return StrUtil.isBlank(session.getStorageUrl()) ? new TkOssObjectStorageService(generationProperties, generationProperties.getUpload().getOss()) : storageForUrl(session.getStorageUrl());
+    }
 
     public boolean isConfigured() {
         TkGenerationProperties.Oss oss = getOss();
@@ -150,7 +205,7 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
             }
             try {
                 return new ObjectMetadata(Long.parseLong(response.header("Content-Length")),
-                        response.header("x-oss-meta-sha256"), response.header("ETag"), response.header("x-oss-version-id"));
+                        response.header("x-oss-meta-sha256"), response.header("ETag"), response.header("x-oss-version-id"), response.header("Content-Type"));
             } catch (NumberFormatException ex) {
                 throw new IllegalStateException("OSS 文件大小元数据无效：" + objectKey, ex);
             }
@@ -164,6 +219,9 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
     public String resolveReadUrl(String url) {
         if (StrUtil.isBlank(url) || !isConfigured()) {
             return url;
+        }
+        if (fixedOss == null) {
+            try { return storageForUrl(url).resolveReadUrl(url); } catch (IllegalArgumentException ignored) { return url; }
         }
         String objectKey = toObjectKey(url);
         return StrUtil.isBlank(objectKey) ? url : toReadUrl(objectKey);
@@ -191,13 +249,15 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
 
     /** Returns whether the URL belongs to the currently configured OSS public base URL. */
     public boolean isOwnedObjectUrl(String url) {
-        return StrUtil.isNotBlank(url) && StrUtil.isNotBlank(toObjectKey(url));
+        if (fixedOss != null) return StrUtil.isNotBlank(url) && StrUtil.isNotBlank(toObjectKey(url));
+        try { storageForUrl(url).objectKeyForUrl(url); return true; } catch (IllegalArgumentException ex) { return false; }
     }
 
     /** Resolve only URLs belonging to configured OSS; never fetch a URL supplied by the browser. */
     public String requireOwnedObjectKey(String url, Long tenantId, Long companyId) {
-        String key = toObjectKey(url);
-        validateOwnedKey(key, tenantId, companyId);
+        TkOssObjectStorageService owner = fixedOss == null ? storageForUrl(url) : this;
+        String key = owner.objectKeyForUrl(url);
+        owner.validateOwnedKey(key, tenantId, companyId);
         return key;
     }
 
@@ -251,7 +311,7 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
     }
 
     public ObjectMetadata uploadFile(String objectKey, Path source, long maxBytes, String contentType) {
-        if (!"video/mp4".equals(contentType) && !"image/jpeg".equals(contentType)) {
+        if (!java.util.Arrays.asList("video/mp4", "video/quicktime", "video/mov", "video/webm", "image/jpeg").contains(contentType)) {
             throw new IllegalArgumentException("不支持的 OSS 媒体类型");
         }
         HttpURLConnection connection = null;
@@ -293,6 +353,107 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
         connection.setRequestProperty("Authorization", "OSS " + oss.getAccessKeyId() + ":" + signature);
         if (!contentType.isEmpty()) connection.setRequestProperty("Content-Type", contentType);
         return connection;
+    }
+
+    /** Conditional server-side OSS copy. Source credentials are never put in a URL. */
+    public ObjectMetadata copyFrom(TkOssObjectStorageService source, String sourceKey, String targetKey, ObjectMetadata identity) {
+        if (identity == null || StrUtil.isBlank(identity.getEtag()) || identity.getContentLength() <= 0
+                || identity.getContentLength() > 4_000_000_000L) throw new IllegalArgumentException("发布源文件信息无效");
+        String copySource = "/" + source.bucket() + "/" + encodePath(sourceKey);
+        if (StrUtil.isNotBlank(identity.getVersionId())) copySource += "?versionId=" + encodeQuery(identity.getVersionId());
+        java.util.Map<String, String> headers = new java.util.TreeMap<>();
+        headers.put("x-oss-copy-source", copySource);
+        headers.put("x-oss-copy-source-if-match", identity.getEtag());
+        if (identity.getContentLength() <= 128L * 1024 * 1024) {
+            String xml = copyRequest("PUT", targetKey, "", headers, "");
+            if (!xml.contains("<CopyObjectResult")) throw new IllegalStateException("OSS 发布副本复制失败");
+        } else {
+            String mime = identity.getContentType();
+            if (StrUtil.isBlank(mime) || mime.contains("\r") || mime.contains("\n"))
+                throw new IllegalArgumentException("OSS 源文件缺少有效 Content-Type");
+            String uploadId = xmlValue(copyRequest("POST", targetKey, "uploads", java.util.Collections.singletonMap("Content-Type", mime), ""), "UploadId");
+            try {
+                StringBuilder complete = new StringBuilder("<CompleteMultipartUpload>");
+                long partSize = 64L * 1024 * 1024;
+                for (long start = 0, part = 1; start < identity.getContentLength(); start += partSize, part++) {
+                    java.util.Map<String, String> partHeaders = new java.util.TreeMap<>(headers);
+                    partHeaders.put("x-oss-copy-source-range", "bytes=" + start + "-" + Math.min(start + partSize - 1, identity.getContentLength() - 1));
+                    String etag = xmlValue(copyRequest("PUT", targetKey, "partNumber=" + part + "&uploadId=" + encodeQuery(uploadId), partHeaders, ""), "ETag");
+                    complete.append("<Part><PartNumber>").append(part).append("</PartNumber><ETag>")
+                            .append(etag.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;"))
+                            .append("</ETag></Part>");
+                }
+                complete.append("</CompleteMultipartUpload>");
+                String result = copyRequest("POST", targetKey, "uploadId=" + encodeQuery(uploadId), java.util.Collections.emptyMap(), complete.toString());
+                if (!result.contains("<CompleteMultipartUploadResult")) throw new IllegalStateException("OSS 分片副本合并失败");
+            } catch (RuntimeException failure) {
+                try { copyRequest("DELETE", targetKey, "uploadId=" + encodeQuery(uploadId), java.util.Collections.emptyMap(), ""); }
+                catch (RuntimeException cleanup) { failure.addSuppressed(cleanup); }
+                throw failure;
+            }
+        }
+        requireIdentity(identity, source.headObject(sourceKey));
+        ObjectMetadata result = headObject(targetKey);
+        if (result.getContentLength() != identity.getContentLength()) throw new IllegalStateException("OSS 发布副本大小校验失败");
+        return result;
+    }
+
+    String copyRequest(String method, String key, String query, java.util.Map<String, String> headers, String body) {
+        TkGenerationProperties.Oss oss = getOss();
+        if (!isConfigured()) throw new IllegalStateException("发布 OSS 配置不完整");
+        String date = OSS_GMT_DATE_FORMATTER.format(Instant.now());
+        StringBuilder canonical = new StringBuilder();
+        new java.util.TreeMap<>(headers).forEach((name, value) -> {
+            if (name.startsWith("x-oss-")) canonical.append(name).append(":").append(value).append("\n");
+        });
+        canonical.append("/").append(oss.getBucket()).append("/").append(key);
+        if (!query.isEmpty()) canonical.append("?").append(query);
+        String contentType = body.isEmpty() ? headers.getOrDefault("Content-Type", "") : "application/xml";
+        String signature = TkOssRestSigner.sign(method, "", contentType, date, canonical.toString(), oss.getAccessKeySecret());
+        HttpURLConnection connection = null; ScheduledFuture<?> deadline = null;
+        try {
+            connection = openCopyConnection(uploadUrl(oss) + "/" + encodePath(key) + (query.isEmpty() ? "" : "?" + query));
+            connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(15000); connection.setReadTimeout(60000);
+            connection.setRequestMethod(method); connection.setRequestProperty("Date", date);
+            connection.setRequestProperty("Authorization", "OSS " + oss.getAccessKeyId() + ":" + signature);
+            for (java.util.Map.Entry<String,String> header : headers.entrySet()) connection.setRequestProperty(header.getKey(), header.getValue());
+            if (!contentType.isEmpty()) connection.setRequestProperty("Content-Type", contentType);
+            final HttpURLConnection active = connection;
+            deadline = TRANSFER_TIMEOUT.schedule(active::disconnect, 90, TimeUnit.SECONDS);
+            if (!body.isEmpty()) {
+                byte[] bytes = body.getBytes(StandardCharsets.UTF_8); connection.setDoOutput(true); connection.setFixedLengthStreamingMode(bytes.length);
+                try (OutputStream output = connection.getOutputStream()) { output.write(bytes); }
+            }
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) throw new IllegalStateException("OSS 发布副本准备失败，HTTP " + status);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            try (InputStream input = connection.getInputStream()) {
+                byte[] buffer = new byte[4096]; int count;
+                while ((count = input.read(buffer)) != -1) {
+                    if (output.size() + count > 65536) throw new IllegalStateException("OSS 副本响应过大");
+                    output.write(buffer, 0, count);
+                }
+            }
+            String xml = new String(output.toByteArray(), StandardCharsets.UTF_8);
+            if (xml.contains("<Error>")) throw new IllegalStateException("OSS 发布副本准备失败");
+            return xml;
+        } catch (IOException ex) { throw new IllegalStateException("OSS 发布副本请求失败或超时", ex); }
+        finally { if (deadline != null) deadline.cancel(false); if (connection != null) connection.disconnect(); }
+    }
+    HttpURLConnection openCopyConnection(String url) throws IOException {
+        return (HttpURLConnection) URI.create(url).toURL().openConnection();
+    }
+    private static String xmlValue(String xml, String tag) {
+        try {
+            javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            org.w3c.dom.Node node = factory.newDocumentBuilder().parse(new java.io.ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)))
+                    .getElementsByTagName(tag).item(0);
+            if (node == null || StrUtil.isBlank(node.getTextContent())) throw new IllegalStateException("OSS 副本响应缺少 " + tag);
+            return node.getTextContent();
+        } catch (Exception ex) { throw new IllegalStateException("OSS 副本响应无效", ex); }
     }
 
     public static long copyBounded(InputStream input, OutputStream output, long limit) throws IOException {
@@ -340,7 +501,7 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
     }
 
     private TkGenerationProperties.Oss getOss() {
-        return generationProperties == null || generationProperties.getUpload() == null
+        return fixedOss != null ? fixedOss : generationProperties == null || generationProperties.getUpload() == null
                 ? null : generationProperties.getUpload().getOss();
     }
 
@@ -396,18 +557,20 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
         }
         String normalizedBaseUrl = StrUtil.removeSuffix(baseUrl, "/");
         String normalizedUrl = StrUtil.subBefore(url, "?", false);
-        if (!StrUtil.startWithIgnoreCase(normalizedUrl, normalizedBaseUrl + "/")) {
-            return null;
-        }
         try {
             URI uri = URI.create(normalizedUrl);
+            URI base = URI.create(normalizedBaseUrl);
+            if (uri.getHost() == null || !uri.getHost().equalsIgnoreCase(base.getHost())
+                    || !Objects.equals(uri.getScheme(), base.getScheme()) || uri.getPort() != base.getPort()
+                    || !uri.getRawPath().startsWith(StrUtil.removeSuffix(StrUtil.blankToDefault(base.getRawPath(), ""), "/") + "/")) return null;
+            if (uri.getUserInfo() != null || uri.getFragment() != null || uri.getRawPath().toLowerCase(Locale.ROOT).matches(".*%(?:2e|2f|5c|25).*")) return null;
             String objectPath = uri.getRawPath();
             String basePath = URI.create(normalizedBaseUrl).getRawPath();
             if (StrUtil.isNotBlank(basePath) && !"/".equals(basePath)) {
                 objectPath = StrUtil.removePrefix(objectPath, basePath);
             }
             objectPath = StrUtil.removePrefix(objectPath, "/");
-            return StrUtil.isBlank(objectPath) ? null : URLDecoder.decode(objectPath, StandardCharsets.UTF_8.name());
+            return StrUtil.isBlank(objectPath) ? null : URLDecoder.decode(objectPath.replace("+", "%2B"), StandardCharsets.UTF_8.name());
         } catch (Exception ignored) {
             return null;
         }

@@ -24,6 +24,23 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class TkGenerationOutputStorageServiceImplTest {
+    @Test void independentPublishConfigurationRoutesGeneratedOutputOnly() {
+        TkGenerationProperties properties = TkDualBucketStorageTest.configured();
+        properties.getUpload().setStorageType("oss");
+        properties.getUpload().setPublishOss(TkDualBucketStorageTest.oss("tk-video-create", "https://tkpublish.fnn.net.cn"));
+        TkGenerationOutputStorageServiceImpl service = new TkGenerationOutputStorageServiceImpl();
+        TkGenerationOutputStorageServiceImpl.OssObjectUploader uploader = mock(TkGenerationOutputStorageServiceImpl.OssObjectUploader.class);
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        ReflectionTestUtils.setField(service, "ossObjectUploader", uploader);
+        TkGenerationTaskDO task = TkGenerationTaskDO.builder().id(42L).companyId(2L).build(); task.setTenantId(1L);
+        String url = service.uploadGeneratedAsset(task, new byte[]{1}, "generated-42.mp4", "video/mp4");
+        assertTrue(url.startsWith("https://tkpublish.fnn.net.cn/"));
+        assertTrue(!url.contains("Signature="));
+        assertEquals("tk-material-factory", properties.getUpload().getOss().getBucket());
+        String internal = service.uploadGeneratedAsset(task, new byte[]{1}, "clip-plan-42.json", "application/json");
+        assertTrue(internal.startsWith("https://material.example/"));
+        assertTrue(internal.contains("Signature="));
+    }
 
     @Test
     void uploadGeneratedAssetStoresGeneratedOutputOnOss() {

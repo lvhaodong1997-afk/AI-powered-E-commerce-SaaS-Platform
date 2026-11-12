@@ -101,6 +101,8 @@ public class TkOpenTiktokPublishService {
     @Resource private TkOpenTiktokPublishTerminalService terminalService;
     @Resource private TkOpenTiktokPublishResponseJournal responseJournal;
     @Resource private TkTiktokPullSourceResolver pullSourceResolver;
+    @Resource private cn.iocoder.yudao.module.tk.service.upload.TkPublishFilePreparationService filePreparationService;
+    private boolean dualBucketEnabled() { return filePreparationService != null && filePreparationService.isEnabled(); }
     @Resource private TkTiktokPublishRequestBudget requestBudget;
     private volatile boolean stopping;
 
@@ -262,9 +264,9 @@ public class TkOpenTiktokPublishService {
         long strictAccounts = pullSourceResolver != null && pullSourceResolver.isStrictEnabled()
                 ? connections.stream().filter(connection -> pullSourceResolver.isStrictCandidate(
                         media.getFileUrl(), connection.getId(), platform().verifiedPullDomain())).count() : 0;
-        if (strictAccounts > 0 && strictAccounts != connections.size())
+        if (!dualBucketEnabled() && strictAccounts > 0 && strictAccounts != connections.size())
             throw TkOpenApiException.badRequest("PULL_ACCOUNT_POLICY_MIXED", "直拉白名单内外账号请分开创建发布任务");
-        boolean strictPull = strictAccounts > 0;
+        boolean strictPull = dualBucketEnabled() || strictAccounts > 0;
         if (strictPull && scheduled) validatePullSchedule(media, scheduleTime);
         boolean preferPull = strictPull || pullSourceResolver != null && connections.stream().anyMatch(connection ->
                 scheduled
@@ -985,7 +987,14 @@ public class TkOpenTiktokPublishService {
                 creator = adapter.queryCreatorInfo(token);
             }
             if (!creator.isSuccess()) throw new IllegalStateException(creator.getFailReason());
-            source = "OSS_PULL_V2_STRICT".equals(task.getTransferPolicy())
+            if (dualBucketEnabled()) {
+                detail.setTiktokStatus("PREPARING_MEDIA");
+                detailMapper.update(null, processingUpdate(detail).isNull(TkOpenTiktokPublishDetailDO::getPublishId)
+                        .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "PREPARING_MEDIA"));
+            }
+            source = dualBucketEnabled()
+                    ? resolvePreparedSource(media, detail.getClientId(), adapter.verifiedPullDomain(), connection.getId())
+                    : "OSS_PULL_V2_STRICT".equals(task.getTransferPolicy())
                     ? resolveStrictSource(media, adapter.verifiedPullDomain(), connection.getId())
                     : "LEGACY".equals(task.getTransferPolicy()) || StrUtil.isBlank(task.getTransferPolicy())
                     ? resolveSource(media, adapter.verifiedPullDomain())
@@ -1584,6 +1593,16 @@ public class TkOpenTiktokPublishService {
                 media.getMediaId(), decision.getReasonCode());
         // A failed pull preflight must not re-enter the legacy verified-URL shortcut.
         return resolveSource(media, null);
+    }
+
+    private UploadSource resolvePreparedSource(TkOpenTiktokMediaDO media, String clientId, String verifiedDomain, Long accountId) {
+        String url = filePreparationService.prepareOpen(media, clientId);
+        TkTiktokPullSourceResolver.PullDecision decision = pullSourceResolver.resolveStrict(url, accountId, verifiedDomain);
+        if (decision == null) throw new PullPreflightException("PULL_RESOLVER_UNAVAILABLE", false);
+        if (!decision.isEligible()) throw new PullPreflightException(decision.getReasonCode(), "PULL_TEMPORARILY_UNAVAILABLE".equals(decision.getReasonCode()));
+        if (media.getFileSize() != null && media.getFileSize() > 0 && media.getFileSize() != decision.getFileSize())
+            throw new PullPreflightException("PULL_FILE_SIZE_CHANGED", false);
+        return UploadSource.pull(decision.getPullUrl(), decision.getFileSize());
     }
 
     private UploadSource resolveStrictSource(TkOpenTiktokMediaDO media, String verifiedDomain, Long accountId) {

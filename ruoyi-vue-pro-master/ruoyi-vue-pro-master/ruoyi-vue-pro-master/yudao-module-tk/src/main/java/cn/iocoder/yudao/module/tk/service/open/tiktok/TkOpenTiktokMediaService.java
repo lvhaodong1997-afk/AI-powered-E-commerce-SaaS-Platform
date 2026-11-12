@@ -82,16 +82,16 @@ public class TkOpenTiktokMediaService {
                 .expireTime(LocalDateTime.now().plusHours(expireHours()))
                 .build();
         if (oss) {
-            if (!ossObjectStorageService.isConfigured() || properties.getUpload().getOss().getPublicBaseUrl() == null) {
+            if (!ossObjectStorageService.isConfigured() || uploadOss().getPublicBaseUrl() == null) {
                 throw TkOpenApiException.unavailable("OSS_CONFIG_REQUIRED", "OSS upload is not configured");
             }
             String objectKey = buildObjectKey(clientId, uploadId, fileName, LocalDate.now().format(DATE));
             Policy policy = TkOssPostPolicySigner.signExact(
-                    properties.getUpload().getOss().getAccessKeyId(), properties.getUpload().getOss().getAccessKeySecret(),
-                    objectKey, maxFileSize(), properties.getUpload().getOss().getPolicyExpireSeconds(), sha256,
+                    uploadOss().getAccessKeyId(), uploadOss().getAccessKeySecret(),
+                    objectKey, maxFileSize(), uploadOss().getPolicyExpireSeconds(), sha256,
                     Clock.systemUTC());
             media.setObjectKey(objectKey);
-            media.setFileUrl(StrUtil.removeSuffix(properties.getUpload().getOss().getPublicBaseUrl(), "/") + "/" + objectKey);
+            media.setFileUrl(StrUtil.removeSuffix(uploadOss().getPublicBaseUrl(), "/") + "/" + objectKey);
             mediaMapper.insert(media);
             return toOssResp(media, policy);
         }
@@ -151,7 +151,7 @@ public class TkOpenTiktokMediaService {
                 || !media.getObjectKey().startsWith(prefix)
                 || !(ossObjectStorageService instanceof TkOssObjectStorageService))
             throw new IllegalArgumentException("OSS 素材归属校验失败，无法刷新发布授权");
-        return ((TkOssObjectStorageService) ossObjectStorageService)
+        return ((TkOssObjectStorageService) storageForMedia(stored))
                 .createPullReadUrl(stored.getObjectKey(), pullBaseUrl, pullUrlExpireSeconds);
     }
 
@@ -359,7 +359,7 @@ public class TkOpenTiktokMediaService {
             }
             TkOssObjectStorageClient.ObjectMetadata metadata;
             try {
-                metadata = ossObjectStorageService.headObject(media.getObjectKey());
+                metadata = storageForMedia(media).headObject(media.getObjectKey());
             } catch (Exception ex) {
                 throw TkOpenApiException.badRequest("MEDIA_NOT_READY", "OSS object is unavailable");
             }
@@ -390,7 +390,7 @@ public class TkOpenTiktokMediaService {
         requireUploading(media);
         if ("LOCAL".equals(media.getUploadMode())) FileUtil.del(localStorageService.getTmpDir(uploadId).toFile());
         else if (StrUtil.isNotBlank(media.getObjectKey()) && ossObjectStorageService.isConfigured())
-            ossObjectStorageService.deleteObject(media.getObjectKey());
+            storageForMedia(media).deleteObject(media.getObjectKey());
         mediaMapper.updateById(new TkOpenTiktokMediaDO().setId(media.getId()).setStatus("CANCELLED"));
     }
 
@@ -437,9 +437,22 @@ public class TkOpenTiktokMediaService {
         return "tk/open-api/" + clientId + "/" + date + "/" + uploadId + "." + normalizeExtension(fileName);
     }
 
+    private TkGenerationProperties.Oss uploadOss() {
+        TkGenerationProperties.Oss publish = properties.getUpload().getPublishOss();
+        if (Boolean.TRUE.equals(publish.getEnabled())) {
+            TkOssObjectStorageService.validatePublishConfig(publish, properties.getUpload().getOss());
+            return publish;
+        }
+        return properties.getUpload().getOss();
+    }
+    private TkOssObjectStorageClient storageForMedia(TkOpenTiktokMediaDO media) {
+        return ossObjectStorageService instanceof TkOssObjectStorageService
+                ? ((TkOssObjectStorageService) ossObjectStorageService).storageForUrl(media.getFileUrl()) : ossObjectStorageService;
+    }
+
     private boolean isOssEnabled() {
-        return properties.getUpload() != null && properties.getUpload().getOss() != null
-                && Boolean.TRUE.equals(properties.getUpload().getOss().getEnabled());
+        return properties.getUpload() != null && uploadOss() != null
+                && Boolean.TRUE.equals(uploadOss().getEnabled());
     }
 
     private int expireHours() {
@@ -574,7 +587,7 @@ public class TkOpenTiktokMediaService {
     }
 
     private String ossUploadUrl() {
-        TkGenerationProperties.Oss oss = properties.getUpload().getOss();
+        TkGenerationProperties.Oss oss = uploadOss();
         String endpoint = StrUtil.removePrefix(StrUtil.removePrefix(oss.getEndpoint(), "https://"), "http://");
         return endpoint.startsWith(oss.getBucket() + ".") ? "https://" + endpoint : "https://" + oss.getBucket() + "." + endpoint;
     }

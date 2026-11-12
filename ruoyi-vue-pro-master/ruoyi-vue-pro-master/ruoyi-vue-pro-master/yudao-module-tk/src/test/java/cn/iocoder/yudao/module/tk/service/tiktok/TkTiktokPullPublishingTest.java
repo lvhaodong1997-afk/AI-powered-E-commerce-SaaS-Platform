@@ -19,6 +19,26 @@ import static org.mockito.Mockito.*;
 class TkTiktokPullPublishingTest {
     private static final String ORIGINAL = "https://tk-video-create.oss-cn-beijing.aliyuncs.com/TK/video.mp4";
     private static final String PULL = "https://tkpublish.fnn.net.cn/TK/video.mp4";
+    @Test void dualBucketPreparationRunsBeforeStrictPullAndNeverFallsBack() {
+        cn.iocoder.yudao.module.tk.service.upload.TkPublishFilePreparationService prepare = mock(cn.iocoder.yudao.module.tk.service.upload.TkPublishFilePreparationService.class);
+        when(prepare.prepareOwned(ORIGINAL, 1L, 2L)).thenReturn(PULL);
+        TkTiktokPullSourceResolver resolver = mock(TkTiktokPullSourceResolver.class);
+        when(resolver.resolveStrict(PULL, 7L, "tkpublish.fnn.net.cn"))
+                .thenReturn(TkTiktokPullSourceResolver.PullDecision.eligible(PULL, 123L));
+        TkTiktokApiClient api = mock(TkTiktokApiClient.class); when(api.getVerifiedPullDomain()).thenReturn("tkpublish.fnn.net.cn");
+        TkTiktokPublishServiceImpl service = new TkTiktokPublishServiceImpl();
+        ReflectionTestUtils.setField(service, "filePreparationService", prepare);
+        ReflectionTestUtils.setField(service, "pullSourceResolver", resolver);
+        ReflectionTestUtils.setField(service, "apiClient", api);
+        try {
+            Object source = ReflectionTestUtils.invokeMethod(service, "resolvePreparedSource", ORIGINAL, "video/mp4", 7L, 1L, 2L);
+            assertEquals(PULL, ReflectionTestUtils.getField(source, "pullUrl"));
+            assertNull(ReflectionTestUtils.getField(source, "videoFile"));
+            when(resolver.resolveStrict(PULL, 7L, "tkpublish.fnn.net.cn")).thenReturn(TkTiktokPullSourceResolver.PullDecision.fallback("PULL_TEMPORARILY_UNAVAILABLE"));
+            assertThrows(IllegalStateException.class, () -> ReflectionTestUtils.invokeMethod(service, "resolvePreparedSource", ORIGINAL, "video/mp4", 7L, 1L, 2L));
+            verify(prepare, times(2)).prepareOwned(ORIGINAL, 1L, 2L);
+        } finally { service.destroy(); }
+    }
 
     @Test void openPublishCarriesMappedUrlAndSizeWithoutLocalDownload() {
         TkTiktokPullSourceResolver resolver = mock(TkTiktokPullSourceResolver.class);
