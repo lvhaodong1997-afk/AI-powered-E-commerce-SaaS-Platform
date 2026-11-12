@@ -1678,6 +1678,7 @@ const tokenStatusType = (status?: string) => ({ VALID: 'success', AUTO_REFRESH: 
 const postModeLabel = (mode?: string) => ({ DIRECT_POST: 'Direct post', UPLOAD_TO_INBOX: 'Upload to inbox', MANUAL_REGISTER: 'Manual register' })[mode || ''] || mode || '-'
 const publishStatusLabel = (status?: string) => ({ SCHEDULED: '等待定时发布', PENDING: 'Pending', PROCESSING: 'Processing', SUCCESS: 'Success', PARTIAL_SUCCESS: 'Partial success', FAILED: 'Failed', RECOVERY_REQUIRED: '待核查', CANCELLED: '已取消' })[status || ''] || status || '-'
 const tiktokStatusLabel = (status?: string) => ({
+  PREPARING_MEDIA: '正在准备发布文件',
   UPLOAD_PENDING: '上传待确认',
   PROCESSING_DOWNLOAD: 'TikTok拉取中',
   PROCESSING_UPLOAD: '上传中',

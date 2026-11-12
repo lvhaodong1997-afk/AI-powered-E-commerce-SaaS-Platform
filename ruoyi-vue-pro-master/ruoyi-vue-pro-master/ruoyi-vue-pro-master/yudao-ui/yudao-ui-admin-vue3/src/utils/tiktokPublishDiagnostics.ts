@@ -21,6 +21,7 @@ export const publishQueueStageLabel = (row: PublishDiagnostic): string => {
   if (row.status === 'FAILED') return '发布失败'
   if (row.status === 'CANCELLED') return '已取消'
   if (row.status === 'SCHEDULED') return '等待定时发布'
+  if (row.tiktokStatus === 'PREPARING_MEDIA') return '正在准备发布文件'
   if (row.tiktokStatus === 'PULL_PREFLIGHT_RETRY') return '链接校验等待重试'
   if (row.tiktokStatus === 'RECOVERY_REQUIRED') return '等待后台核验'
   if (row.tiktokStatus === 'PROCESSING_DOWNLOAD') return '平台下载中'
