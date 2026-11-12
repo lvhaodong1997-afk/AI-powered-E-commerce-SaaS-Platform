@@ -6,13 +6,17 @@ import cn.iocoder.yudao.module.tk.dal.mysql.*;
 import cn.iocoder.yudao.module.tk.service.log.TkBusinessLogService;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher;
+import cn.iocoder.yudao.framework.common.exception.ServiceException;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -131,6 +135,54 @@ class TkTiktokPhotoPublishingTest {
             Map<Long, TkTiktokApiClient.CreatorInfo> creators = ReflectionTestUtils.invokeMethod(f.service, "queryPublishCreators", request);
             assertEquals(Collections.singletonList("SELF_ONLY"), creators.get(7L).getPrivacyLevelOptions());
             verify(f.api).queryCreatorInfo("token");
+        }
+    }
+
+    @Test void photoConfigurationFailureRemainsAnActionableBusinessError() {
+        try (Fixture f = new Fixture()) {
+            TkTiktokPublishCreateReqVO request = new TkTiktokPublishCreateReqVO();
+            request.setMediaType("PHOTO"); request.setUploadedPhotoIds(Collections.singletonList(1L));
+            request.setTitle("Photo title"); request.setPostMode("DIRECT_POST");
+            request.setAccountIds(Collections.singletonList(7L));
+            when(f.media.selectById(1L)).thenReturn(image(1L, URL));
+            when(f.accounts.getReadableAccounts(anyCollection())).thenReturn(Collections.singletonList(f.account));
+            TkTiktokPullSourceResolver resolver = (TkTiktokPullSourceResolver) ReflectionTestUtils.getField(f.service, "pullSourceResolver");
+            when(resolver.isCandidate(anyString(), eq(7L), anyString())).thenReturn(false);
+            ServiceException error = assertThrows(ServiceException.class, () -> f.service.createPublishTask(request));
+            assertEquals(400, error.getCode());
+            assertTrue(error.getMessage().contains("TikTok 已验证域名"));
+            verify(f.tasks, never()).insert(any(TkTiktokPublishTaskDO.class));
+        }
+    }
+
+    @Test void creatorPreviewHasAnOverallDeadlineAndCancelsTheUpstreamRequest() throws Exception {
+        String property = "tk.tiktok.creator-preview-timeout-millis";
+        String previous = System.getProperty(property);
+        System.setProperty(property, "100");
+        CountDownLatch interrupted = new CountDownLatch(1);
+        try (Fixture f = new Fixture()) {
+            TkTiktokPublishCreateReqVO request = new TkTiktokPublishCreateReqVO();
+            request.setAccountIds(Collections.singletonList(7L));
+            when(f.accounts.getReadableAccounts(anyCollection())).thenReturn(Collections.singletonList(f.account));
+            when(f.api.queryCreatorInfo("token")).thenAnswer(invocation -> {
+                try { new CountDownLatch(1).await(5, TimeUnit.SECONDS); }
+                catch (InterruptedException error) {
+                    interrupted.countDown(); Thread.currentThread().interrupt();
+                    throw new IllegalStateException("upstream interrupted", error);
+                }
+                throw new IllegalStateException("upstream stalled");
+            });
+            assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+                ServiceException error = assertThrows(ServiceException.class,
+                        () -> f.service.queryPublishCreators(request));
+                assertEquals(400, error.getCode());
+                assertTrue(error.getMessage().contains("超时"));
+                assertTrue(error.getMessage().contains("重试"));
+            });
+            assertTrue(interrupted.await(1, TimeUnit.SECONDS), "the upstream call must be interrupted");
+            verify(f.tasks, never()).insert(any(TkTiktokPublishTaskDO.class));
+        } finally {
+            if (previous == null) System.clearProperty(property); else System.setProperty(property, previous);
         }
     }
 

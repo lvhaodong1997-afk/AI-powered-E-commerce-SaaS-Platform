@@ -41,6 +41,18 @@ test('selection enforces 35 photos, supported formats and 20MB before upload', (
   assert.doesNotThrow(() => context.exports.validatePhotoSelection([{ name: 'a.webp', size: 10 }], 0))
 })
 
+test('creator query timeouts explain that uploaded photos can be kept and permissions retried', () => {
+  for (const error of [{ response: { status: 524 }, message: 'Request failed with status code 524' },
+    { code: 'ECONNABORTED', message: 'timeout of 55000ms exceeded' }]) {
+    const message = context.exports.photoCreatorErrorMessage(error)
+    assert.match(message, /账号发布权限.*超时/)
+    assert.match(message, /重试/)
+    assert.match(message, /图片无需重新上传/)
+    assert.doesNotMatch(message, /Request failed/)
+  }
+  assert.equal(context.exports.photoCreatorErrorMessage(new Error('所选 TikTok 账号未授权')), '所选 TikTok 账号未授权')
+})
+
 function browserHarness({ bitmap, imageFails = false, encodeFails = false } = {}) {
   const revoked = []
   const canvas = {

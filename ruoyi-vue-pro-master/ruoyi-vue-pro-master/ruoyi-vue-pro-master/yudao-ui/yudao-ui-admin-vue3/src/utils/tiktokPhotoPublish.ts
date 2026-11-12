@@ -34,6 +34,13 @@ export function photoPublishSource(photos: { id: number }[], coverIndex: number)
   }
 }
 
+export function photoCreatorErrorMessage(error: any): string {
+  if ([408, 504, 524].includes(error?.response?.status) || ['ECONNABORTED', 'ETIMEDOUT'].includes(error?.code)) {
+    return '读取 TikTok 账号发布权限超时，请点击重试；已上传的图片无需重新上传'
+  }
+  return (typeof error === 'string' ? error : error?.message) || '无法读取账号发布权限，请点击重试'
+}
+
 async function decodePhoto(file: File): Promise<{
   image: CanvasImageSource; width: number; height: number; close: () => void
 }> {

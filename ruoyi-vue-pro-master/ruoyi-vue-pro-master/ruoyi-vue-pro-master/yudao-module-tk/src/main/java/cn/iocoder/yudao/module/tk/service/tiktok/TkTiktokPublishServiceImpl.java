@@ -43,9 +43,17 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.stream.Collectors;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
+import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.invalidParamException;
 import static cn.iocoder.yudao.module.tk.enums.ErrorCodeConstants.*;
 
 @Service
@@ -75,6 +83,11 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     private static final long PENDING_RECOVERY_DELAY_MINUTES = 1L;
 
     private final ExecutorService retryExecutorService = Executors.newFixedThreadPool(2);
+    // Bound interactive permission queries independently of background publishing retries.
+    private final ExecutorService creatorPreviewExecutor = new ThreadPoolExecutor(2, 2, 0L,
+            TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(2));
+    private final long creatorPreviewTimeoutMillis = Math.max(1L, Math.min(45_000L,
+            Long.getLong("tk.tiktok.creator-preview-timeout-millis", 45_000L)));
     private final Set<Long> queuedPublishTaskIds = ConcurrentHashMap.newKeySet();
 
     @Resource
@@ -155,8 +168,9 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         Long[] result = new Long[1];
         TkGenerationTaskDO finalGenerationTask = generationTask;
         TkTiktokPublishMediaDO finalUploadedVideo = uploadedVideo;
-        TenantUtils.execute(tenantId, () -> result[0] = createPublishTaskWithinTenant(
-                reqVO, finalGenerationTask, finalUploadedVideo, accounts));
+        TenantUtils.execute(tenantId, () -> {
+            result[0] = createPublishTaskWithinTenant(reqVO, finalGenerationTask, finalUploadedVideo, accounts);
+        });
         return result[0];
     }
 
@@ -164,12 +178,36 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     public Map<Long, TkTiktokApiClient.CreatorInfo> queryPublishCreators(TkTiktokPublishCreateReqVO reqVO) {
         List<TkTiktokAccountDO> accounts = resolveAccounts(reqVO);
         if (CollUtil.isEmpty(accounts)) throw exception(TK_TIKTOK_PUBLISH_ACCOUNT_REQUIRED);
+        for (TkTiktokAccountDO account : accounts) {
+            if (!"AUTHORIZED".equals(account.getAuthStatus())) throw exception(TK_TIKTOK_ACCOUNT_NOT_AUTHORIZED);
+        }
+        Future<Map<Long, TkTiktokApiClient.CreatorInfo>> future;
+        try {
+            future = creatorPreviewExecutor.submit(() -> loadPublishCreators(accounts));
+        } catch (RejectedExecutionException ex) {
+            throw invalidParamException("读取账号发布权限繁忙，请稍后点击重试；已上传的图片无需重新上传");
+        }
+        try {
+            return future.get(creatorPreviewTimeoutMillis, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException ex) {
+            future.cancel(true);
+            throw invalidParamException("读取 TikTok 账号发布权限超时，请点击重试；已上传的图片无需重新上传");
+        } catch (InterruptedException ex) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw invalidParamException("读取账号发布权限已中断，请稍后重试");
+        } catch (ExecutionException ex) {
+            if (ex.getCause() instanceof RuntimeException) throw (RuntimeException) ex.getCause();
+            throw new IllegalStateException("读取账号发布权限失败，请稍后重试", ex.getCause());
+        }
+    }
+
+    private Map<Long, TkTiktokApiClient.CreatorInfo> loadPublishCreators(List<TkTiktokAccountDO> accounts) {
         Map<Long, TkTiktokApiClient.CreatorInfo> result = new LinkedHashMap<>();
         for (TkTiktokAccountDO account : accounts) {
-            if (!"AUTHORIZED".equals(account.getAuthStatus())) throw new IllegalArgumentException("所选 TikTok 账号未授权");
             TenantUtils.execute(account.getTenantId(), () -> {
                 TkTiktokApiClient.CreatorInfo creator = queryCreatorInfoWithRetry(account.getId());
-                if (!creator.isSuccess()) throw new IllegalStateException(creator.getFailReason());
+                if (!creator.isSuccess()) throw invalidParamException("读取 TikTok 账号发布权限失败：{}", creator.getFailReason());
                 result.put(account.getId(), creator);
             });
         }
@@ -650,7 +688,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 }
                 for (String url : JsonUtils.parseArray(reqVO.getPhotoUrls(), String.class)) {
                     if (!pullSourceResolver.isCandidate(url, account.getId(), apiClient.getVerifiedPullDomain())) {
-                        throw new IllegalArgumentException("图文需要启用图片域名直拉，并将所选账号加入拉取白名单；请检查 TikTok 已验证域名配置");
+                        throw invalidParamException("图文需要启用图片域名直拉，并将所选账号加入拉取白名单；请检查 TikTok 已验证域名配置");
                     }
                 }
             }
@@ -1723,6 +1761,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
 
     @PreDestroy
     public void destroy() {
+        creatorPreviewExecutor.shutdownNow();
         retryExecutorService.shutdown();
     }
 

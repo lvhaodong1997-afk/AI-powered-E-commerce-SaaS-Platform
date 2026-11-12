@@ -579,7 +579,10 @@
           <el-select v-model="publishForm.privacyLevel" clearable class="!w-full" :loading="photoCreatorLoading" placeholder="请选择隐私设置">
             <el-option v-for="option in publishPrivacyOptions" :key="option" :label="privacyOptionLabel(option)" :value="option" />
           </el-select>
-          <div v-if="photoCreatorError" class="upload-error">{{ photoCreatorError }}</div>
+          <div v-if="photoCreatorError" class="upload-error">
+            {{ photoCreatorError }}
+            <el-button link type="primary" :loading="photoCreatorLoading" @click="loadPhotoCreators">重试读取权限</el-button>
+          </div>
           <div v-if="publishForm.mediaType === 'PHOTO'" class="sub-text">根据所选账号当前权限显示共同可用的选项。</div>
         </el-form-item>
         <el-form-item label="互动">
@@ -730,7 +733,7 @@ import {
   TkVideoPublishCenterApi
 } from '@/api/tk/videoPublishCenter'
 import { uploadTikTokMediaInChunks } from '@/utils/tiktokMediaUpload'
-import { validatePhotoSelection, movePhoto, removePhoto, photoPublishSource, prepareTikTokPhoto } from '@/utils/tiktokPhotoPublish'
+import { validatePhotoSelection, movePhoto, removePhoto, photoPublishSource, prepareTikTokPhoto, photoCreatorErrorMessage } from '@/utils/tiktokPhotoPublish'
 import { getTkUploadErrorMessage } from '@/utils/tkChunkUpload'
 import { formatDate, formatTimestamp } from '@/utils/formatTime'
 import type {
@@ -910,7 +913,7 @@ const publishPrivacyOptions = computed(() => {
 })
 const photoCommentDisabled = computed(() => Object.values(photoCreators.value).some((c) => c.commentDisabled))
 const privacyOptionLabel = (value: string) => ({ SELF_ONLY: '仅自己', MUTUAL_FOLLOW_FRIENDS: '好友可见', FOLLOWER_OF_CREATOR: '粉丝可见', PUBLIC_TO_EVERYONE: '公开' }[value] || value)
-watch(() => [publishDrawerVisible.value, publishForm.mediaType, publishForm.postMode, publishForm.accountIds.join(','), publishForm.groupIds.join(',')], async () => {
+const loadPhotoCreators = async () => {
   const version = ++photoCreatorVersion
   photoCreators.value = {}
   photoCreatorError.value = ''
@@ -926,11 +929,12 @@ watch(() => [publishDrawerVisible.value, publishForm.mediaType, publishForm.post
     if (photoCommentDisabled.value) publishForm.allowComment = false
     if (!publishPrivacyOptions.value.length) photoCreatorError.value = '所选账号没有共同可用的隐私设置，请调整账号选择'
   } catch (error: any) {
-    if (version === photoCreatorVersion) photoCreatorError.value = error?.message || '无法读取账号发布权限，请重新选择账号重试'
+    if (version === photoCreatorVersion) photoCreatorError.value = photoCreatorErrorMessage(error)
   } finally {
     if (version === photoCreatorVersion) photoCreatorLoading.value = false
   }
-})
+}
+watch(() => [publishDrawerVisible.value, publishForm.mediaType, publishForm.postMode, publishForm.accountIds.join(','), publishForm.groupIds.join(',')], loadPhotoCreators)
 const rescheduleDialogVisible = ref(false)
 const rescheduleSubmitting = ref(false)
 const rescheduleForm = reactive({
