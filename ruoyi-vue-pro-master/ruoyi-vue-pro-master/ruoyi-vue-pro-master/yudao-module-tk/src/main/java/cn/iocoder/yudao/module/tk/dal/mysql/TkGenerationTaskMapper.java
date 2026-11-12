@@ -72,6 +72,7 @@ public interface TkGenerationTaskMapper extends BaseMapperX<TkGenerationTaskDO> 
                 TkGenerationTaskDO::getCreateTime);
         return selectList(wrapper
                 .lt(TkGenerationTaskDO::getCreateTime, deadline)
+                .notExists(TkPublishReferenceSql.generationReferences("tk_generation_task"))
                 .in(TkGenerationTaskDO::getStatus, TkGenerationStatusEnum.SUCCESS, TkGenerationStatusEnum.FAILED)
                 .and(item -> item
                         .isNotNull(TkGenerationTaskDO::getOutputUrl).ne(TkGenerationTaskDO::getOutputUrl, "")

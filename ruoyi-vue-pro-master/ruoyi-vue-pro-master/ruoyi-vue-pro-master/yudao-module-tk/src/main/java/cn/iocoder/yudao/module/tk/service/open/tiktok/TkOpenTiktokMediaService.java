@@ -567,7 +567,7 @@ public class TkOpenTiktokMediaService {
             return;
         }
         URI remoteUrl = validateRemoteVideoUrl(media.getFileUrl());
-        TkTiktokMediaTransfer.download(remoteUrl.toString(), target, maxFileSize());
+        TkTiktokMediaTransfer.downloadPublic(remoteUrl.toString(), target, maxFileSize());
     }
 
     private String safeSegment(String value) {

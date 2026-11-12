@@ -39,10 +39,31 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TkFileCleanupServiceTest {
+    @Test void newReferenceAfterPublishMediaCandidatePreventsPhysicalDeletion() {
+        TkFileCleanupService service=createService();
+        TkTiktokPublishMediaMapper media=(TkTiktokPublishMediaMapper)ReflectionTestUtils.getField(service,"publishMediaMapper");
+        cn.iocoder.yudao.module.tk.dal.mysql.TkPublishFileReferenceMapper references=mock(cn.iocoder.yudao.module.tk.dal.mysql.TkPublishFileReferenceMapper.class);
+        ReflectionTestUtils.setField(service,"publishReferenceMapper",references);
+        TkTiktokPublishMediaDO value=TkTiktokPublishMediaDO.builder().id(19L).fileUrl("https://tkpublish.fnn.net.cn/tk/1/2/tiktok-photo/a.jpg").build();
+        when(media.selectExpiredCleanupCandidates(any(),any(),anyInt())).thenReturn(Collections.singletonList(value));when(media.claimForCleanup(19L)).thenReturn(1);
+        when(references.countActive(isNull(),any())).thenReturn(0,1);
+        assertEquals(0,service.cleanupExpiredPublishMedia());verify(media).restoreReadyAfterCleanupFailure(19L);verify(media,never()).deleteById(19L);
+    }
+    @Test void newReferenceAfterGenerationCandidatePreventsFinalOssDelete() {
+        TkFileCleanupService service=createService();
+        TkGenerationTaskMapper generations=(TkGenerationTaskMapper)ReflectionTestUtils.getField(service,"generationTaskMapper");
+        TkMaterialOssUploadService storage=(TkMaterialOssUploadService)ReflectionTestUtils.getField(service,"ossUploadService");
+        cn.iocoder.yudao.module.tk.dal.mysql.TkPublishFileReferenceMapper references=mock(cn.iocoder.yudao.module.tk.dal.mysql.TkPublishFileReferenceMapper.class);ReflectionTestUtils.setField(service,"publishReferenceMapper",references);
+        TkGenerationTaskDO task=task(44L,TkGenerationStatusEnum.SUCCESS);String url="https://tkpublish.fnn.net.cn/tk/1/2/generation-tasks/44/video.mp4";task.setOutputUrl(url);
+        when(generations.selectExpiredTasksWithGenerationUrls(any(),anyInt())).thenReturn(Collections.singletonList(task));when(references.countActive(org.mockito.ArgumentMatchers.eq(44L),any())).thenReturn(0,1);
+        when(storage.isEnabled()).thenReturn(true);when(storage.isManagedUrl(url)).thenReturn(true);
+        service.cleanupExpiredFiles();verify(references,org.mockito.Mockito.times(2)).countActive(org.mockito.ArgumentMatchers.eq(44L),any());verify(storage,never()).deleteByUrl(url);verify(generations,never()).update(isNull(),any());
+    }
 
     @Test
     void cleanupExpiredFilesDeletesOnlyCleanableTkFiles() throws Exception {
         TkFileCleanupService service = new TkFileCleanupService();
+        ReflectionTestUtils.setField(service, "publishReferenceMapper", mock(cn.iocoder.yudao.module.tk.dal.mysql.TkPublishFileReferenceMapper.class));
         TkGenerationProperties properties = new TkGenerationProperties();
         TkCleanupFileMapper cleanupFileMapper = mock(TkCleanupFileMapper.class);
         TkGenerationTaskMapper generationTaskMapper = mock(TkGenerationTaskMapper.class);
@@ -119,6 +140,7 @@ class TkFileCleanupServiceTest {
     @Test
     void cleanupExpiredFilesSkipsAllDeletesWhenDisabled() throws Exception {
         TkFileCleanupService service = new TkFileCleanupService();
+        ReflectionTestUtils.setField(service, "publishReferenceMapper", mock(cn.iocoder.yudao.module.tk.dal.mysql.TkPublishFileReferenceMapper.class));
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getCleanup().setEnabled(false);
         TkCleanupFileMapper cleanupFileMapper = mock(TkCleanupFileMapper.class);
@@ -138,6 +160,7 @@ class TkFileCleanupServiceTest {
     @Test
     void cleanupExpiredFilesClearsAndDeletesExpiredSignedGenerationTaskUrlsWithoutFileRecords() {
         TkFileCleanupService service = new TkFileCleanupService();
+        ReflectionTestUtils.setField(service, "publishReferenceMapper", mock(cn.iocoder.yudao.module.tk.dal.mysql.TkPublishFileReferenceMapper.class));
         TkGenerationProperties properties = new TkGenerationProperties();
         TkCleanupFileMapper cleanupFileMapper = mock(TkCleanupFileMapper.class);
         TkGenerationTaskMapper generationTaskMapper = mock(TkGenerationTaskMapper.class);
@@ -177,6 +200,7 @@ class TkFileCleanupServiceTest {
     @Test
     void cleanupExpiredFilesKeepsGenerationTaskUrlsWhenOssDeleteFails() {
         TkFileCleanupService service = new TkFileCleanupService();
+        ReflectionTestUtils.setField(service, "publishReferenceMapper", mock(cn.iocoder.yudao.module.tk.dal.mysql.TkPublishFileReferenceMapper.class));
         TkGenerationProperties properties = new TkGenerationProperties();
         TkCleanupFileMapper cleanupFileMapper = mock(TkCleanupFileMapper.class);
         TkGenerationTaskMapper generationTaskMapper = mock(TkGenerationTaskMapper.class);
@@ -419,6 +443,7 @@ class TkFileCleanupServiceTest {
 
     private TkFileCleanupService createService(TkGenerationProperties properties) {
         TkFileCleanupService service = new TkFileCleanupService();
+        ReflectionTestUtils.setField(service, "publishReferenceMapper", mock(cn.iocoder.yudao.module.tk.dal.mysql.TkPublishFileReferenceMapper.class));
         TkTiktokPublishMediaMapper mediaMapper = mock(TkTiktokPublishMediaMapper.class);
         TkGenerationTaskMapper generationTaskMapper = mock(TkGenerationTaskMapper.class);
         TkMaterialOssUploadService ossUploadService = mock(TkMaterialOssUploadService.class);

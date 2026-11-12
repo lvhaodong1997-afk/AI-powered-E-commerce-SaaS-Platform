@@ -16,6 +16,7 @@ public interface TkCleanupFileMapper extends BaseMapperX<FileDO> {
                 .lt(FileDO::getCreateTime, deadline)
                 .likeRight(FileDO::getPath, "tk/")
                 .like(FileDO::getPath, "/generation-tasks/")
+                .notExists("SELECT 1 FROM tk_generation_task refg WHERE LOCATE(CONCAT('/generation-tasks/',refg.id,'/'),CONCAT('/',infra_file.path))>0 AND EXISTS (" + TkPublishReferenceSql.generationReferences("refg") + ")")
                 .orderByAsc(FileDO::getId)
                 .last("LIMIT " + limit));
     }

@@ -52,6 +52,17 @@ class TkDualBucketStorageTest {
         props.getUpload().getPublishOss().setEnabled(false);
         assertEquals("tk-video-create", storage.storageForSession(captured.getValue()).bucket());
     }
+    @Test void cleanupAliasesPreserveBucketIdentityAndStripSignatures() {
+        TkGenerationProperties props = configured();
+        props.getUpload().setPublishOss(oss("tk-video-create", "https://tkpublish.fnn.net.cn"));
+        TkOssObjectStorageService storage = new TkOssObjectStorageService();
+        ReflectionTestUtils.setField(storage, "generationProperties", props);
+        String key = "/tk/1/2/generation-tasks/44/video.mp4";
+        java.util.Set<String> aliases = storage.objectUrlAliases("https://tk-video-create.oss-cn-beijing.aliyuncs.com" + key + "?Signature=old");
+        assertEquals(new java.util.LinkedHashSet<>(java.util.Arrays.asList("https://tkpublish.fnn.net.cn" + key,
+                "https://tk-video-create.oss-cn-beijing.aliyuncs.com" + key)), aliases);
+        assertFalse(aliases.contains("https://material.example" + key));
+    }
     static TkGenerationProperties configured() { TkGenerationProperties p = new TkGenerationProperties(); p.getUpload().setOss(oss("tk-material-factory", "https://material.example")); p.getUpload().getOss().setReadUrlExpireSeconds(3600); return p; }
     static TkGenerationProperties.Oss oss(String bucket, String base) { TkGenerationProperties.Oss o = new TkGenerationProperties.Oss(); o.setEnabled(true); o.setBucket(bucket); o.setEndpoint("oss-cn-beijing.aliyuncs.com"); o.setRegion("cn-beijing"); o.setPublicBaseUrl(base); o.setAccessKeyId(bucket + "-key"); o.setAccessKeySecret("secret"); return o; }
 }

@@ -122,13 +122,14 @@ public class TkTiktokPublishMediaServiceImpl implements TkTiktokPublishMediaServ
         String name = UUID.randomUUID().toString().replace("-", "") + "." + extension;
         String relative = StrUtil.format("tk/{}/{}/tiktok-publish-media/{}", scope.getTenantId(), companyId, name);
         String uploadedUrl = storageService.toPublicUrl(relative);
+        String normalizedMime = TkPublishVideoMime.normalize(file.getOriginalFilename(), file.getContentType());
         try {
             Path target = storageService.resolveRelativePath(relative);
             Files.createDirectories(target.getParent());
             file.transferTo(target.toFile());
             if (ossObjectStorageService != null && ossObjectStorageService.isPublishEnabled()) {
                 TkOssObjectStorageService publish = ossObjectStorageService.publishStorage();
-                publish.uploadFile(relative, target, MAX_SIZE, StrUtil.blankToDefault(file.getContentType(), "video/mp4"));
+                publish.uploadFile(relative, target, MAX_SIZE, normalizedMime);
                 uploadedUrl = publish.unsignedUrl(relative); Files.deleteIfExists(target);
             }
         } catch (Exception ex) {
@@ -136,7 +137,7 @@ public class TkTiktokPublishMediaServiceImpl implements TkTiktokPublishMediaServ
         }
         TkTiktokPublishMediaDO media = TkTiktokPublishMediaDO.builder()
                 .companyId(companyId).fileName(file.getOriginalFilename()).fileUrl(uploadedUrl)
-                .fileSize(file.getSize()).mimeType(file.getContentType()).status("READY").build();
+                .fileSize(file.getSize()).mimeType(normalizedMime).status("READY").build();
         media.setTenantId(scope.getTenantId());
         mediaMapper.insert(media);
         return media;

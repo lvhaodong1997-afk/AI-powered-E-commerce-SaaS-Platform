@@ -92,6 +92,14 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
     }
     public String bucket() { return getOss().getBucket(); }
     public String unsignedUrl(String key) { return StrUtil.removeSuffix(getOss().getPublicBaseUrl(), "/") + "/" + encodePath(key); }
+    /** Equivalent trusted URL forms for lifecycle checks; queries never identify different owned bytes. */
+    public java.util.Set<String> objectUrlAliases(String url) {
+        TkOssObjectStorageService owner = storageForUrl(url);
+        String key = owner.objectKeyForUrl(url);
+        java.util.Set<String> aliases = new java.util.LinkedHashSet<>();
+        aliases.add(owner.unsignedUrl(key)); aliases.add(owner.uploadUrl(owner.getOss()) + "/" + owner.encodePath(key));
+        return aliases;
+    }
     public void deleteByUrl(String url) { TkOssObjectStorageService owner = storageForUrl(url); owner.deleteObject(owner.objectKeyForUrl(url)); }
     public TkOssObjectStorageService storageForSession(TkUploadSessionDO session) {
         return StrUtil.isBlank(session.getStorageUrl()) ? new TkOssObjectStorageService(generationProperties, generationProperties.getUpload().getOss()) : storageForUrl(session.getStorageUrl());

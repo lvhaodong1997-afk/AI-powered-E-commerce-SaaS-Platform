@@ -245,9 +245,10 @@ public class TkTiktokPublishMediaUploadServiceImpl implements TkTiktokPublishMed
             throw new IllegalStateException("合并 TikTok 上传视频失败：" + ex.getMessage(), ex);
         }
         String completedUrl = storageService.toPublicUrl(relativePath);
+        String normalizedMime = TkPublishVideoMime.normalize(fileName, manifest.getProperty("contentType"));
         if (ossObjectStorageService != null && ossObjectStorageService.isPublishEnabled()) {
             TkOssObjectStorageService target = ossObjectStorageService.publishStorage();
-            target.uploadFile(relativePath, finalPath, getMaxFileSize(), manifest.getProperty("contentType"));
+            target.uploadFile(relativePath, finalPath, getMaxFileSize(), normalizedMime);
             completedUrl = target.unsignedUrl(relativePath);
             try { Files.deleteIfExists(finalPath); } catch (IOException ignored) { }
         }
@@ -257,7 +258,7 @@ public class TkTiktokPublishMediaUploadServiceImpl implements TkTiktokPublishMed
                 .fileUrl(completedUrl)
                 .coverUrl(coverUrl)
                 .fileSize(fileSize)
-                .mimeType(manifest.getProperty("contentType"))
+                .mimeType(normalizedMime)
                 .status("READY")
                 .build();
         media.setTenantId(scope.getTenantId());

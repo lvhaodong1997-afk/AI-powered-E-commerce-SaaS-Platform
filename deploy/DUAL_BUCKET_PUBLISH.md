@@ -16,6 +16,7 @@ tk:
         access-key-id: ${TK_MATERIAL_OSS_ACCESS_KEY_ID}
         access-key-secret: ${TK_MATERIAL_OSS_ACCESS_KEY_SECRET}
         upload-path-prefix: tk
+        read-url-expire-seconds: 3600
       publish-oss:
         enabled: true
         bucket: tk-video-create
@@ -28,7 +29,7 @@ tk:
         read-url-expire-seconds: 0
 ```
 
-`publish-oss.enabled` 默认 false，保留旧部署行为；启用后配置不完整应失败，不能退回素材桶。发布域名需在当前 TikTok 应用验证，并保持 HTTPS、无跳转和下载全程可访问。素材桶启用阻止公共访问，通过凭据读取。发布桶禁止公共写，上传使用服务端授权。
+`publish-oss.enabled` 默认 false，保留旧部署行为；启用后配置不完整应失败，不能退回素材桶。发布域名需在当前 TikTok 应用验证，并保持 HTTPS、无跳转和下载全程可访问。素材桶启用阻止公共访问，通过凭据读取；素材读取签名有效期必须为正数（示例 3600 秒，已有生产正数值保留）。发布桶保持 0，供平台匿名直拉。发布桶禁止公共写，上传使用服务端授权。
 
 当前生产桶还被历史 OpenAPI 文件和其它项目使用。上线先将发布桶从 public-read-write 收敛为 public-read，保留既有匿名读取，素材桶改 private 且保留公共访问阻止。未经其它使用方核验，不能直接关闭历史目录读取。后续收紧为 private + 目录级匿名 Get 属于单独权限调整。
 
