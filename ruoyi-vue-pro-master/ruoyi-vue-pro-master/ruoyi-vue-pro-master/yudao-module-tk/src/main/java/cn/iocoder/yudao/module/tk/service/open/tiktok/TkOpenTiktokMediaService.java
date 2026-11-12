@@ -13,6 +13,7 @@ import cn.iocoder.yudao.module.tk.service.reference.TkSafeRemoteUrlValidator;
 import cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokMediaTransfer;
 import cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient;
+import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssPostPolicySigner;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssPostPolicySigner.Policy;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,8 @@ public class TkOpenTiktokMediaService {
     private final TkGenerationProperties properties;
     private final TkOssObjectStorageClient ossObjectStorageService;
     private final Object[] scheduledPreparationLocks = createPreparationLocks();
+    @org.springframework.beans.factory.annotation.Value("${tk.open-api.publish.pull-url-expire-seconds:86400}")
+    private int pullUrlExpireSeconds = 86400;
 
     public TkOpenTiktokMediaService(TkOpenTiktokMediaMapper mediaMapper,
                                     TkLocalUploadStorageService localStorageService,
@@ -130,6 +133,26 @@ public class TkOpenTiktokMediaService {
                 .build();
         mediaMapper.insert(media);
         return media;
+    }
+
+    public boolean canRefreshPullAuthorization(TkOpenTiktokMediaDO media) {
+        return media != null && "OSS".equalsIgnoreCase(media.getUploadMode())
+                && StrUtil.isNotBlank(media.getObjectKey());
+    }
+
+    /** External URLs retain only their existing authorization; never sign browser-supplied paths. */
+    public String resolvePullReadUrl(TkOpenTiktokMediaDO media, String pullBaseUrl) {
+        if (!canRefreshPullAuthorization(media)) return media.getFileUrl();
+        TkOpenTiktokMediaDO stored = mediaMapper.selectByClientAndMediaId(media.getClientId(), media.getMediaId());
+        String prefix = "tk/open-api/" + media.getClientId() + "/";
+        if (stored == null || !java.util.Objects.equals(stored.getClientId(), media.getClientId())
+                || !java.util.Objects.equals(stored.getObjectKey(), media.getObjectKey())
+                || !"OSS".equalsIgnoreCase(stored.getUploadMode())
+                || !media.getObjectKey().startsWith(prefix)
+                || !(ossObjectStorageService instanceof TkOssObjectStorageService))
+            throw new IllegalArgumentException("OSS 素材归属校验失败，无法刷新发布授权");
+        return ((TkOssObjectStorageService) ossObjectStorageService)
+                .createPullReadUrl(stored.getObjectKey(), pullBaseUrl, pullUrlExpireSeconds);
     }
 
     /**

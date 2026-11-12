@@ -73,6 +73,25 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
                 null);
     }
 
+    /** Read-only diagnostics, scoped to the current attempt; one query for an entire queue page. */
+    public Map<String, TkOpenApiEventDO> currentPublishCallbacks(java.util.List<TkOpenTiktokPublishDetailDO> details) {
+        Map<String, String> keys = new LinkedHashMap<>();
+        for (TkOpenTiktokPublishDetailDO detail : details) {
+            if (!java.util.Arrays.asList("SUCCESS", "FAILED", "CANCELLED").contains(detail.getStatus())) continue;
+            String key = buildDedupeKey(detail.getClientId(), "publish." + detail.getStatus().toLowerCase(java.util.Locale.ROOT),
+                    "PUBLISH_DETAIL", detail.getDetailId()) + "|" + (detail.getRetryCount() == null ? 0 : detail.getRetryCount());
+            keys.put(key, detail.getClientId() + "|" + detail.getDetailId());
+        }
+        Map<String, TkOpenApiEventDO> result = new LinkedHashMap<>();
+        if (keys.isEmpty()) return result;
+        for (TkOpenApiEventDO event : eventMapper.selectList(Wrappers.<TkOpenApiEventDO>lambdaQuery()
+                .in(TkOpenApiEventDO::getDedupeKey, keys.keySet()))) {
+            String key = keys.get(event.getDedupeKey());
+            if (key != null) result.put(key, event);
+        }
+        return result;
+    }
+
     public String enqueueOnce(String clientId, String eventType, String resourceType, String resourceId,
                               Map<String, Object> payload) {
         return enqueueOnce(clientId, eventType, resourceType, resourceId, payload, 0);
@@ -279,18 +298,33 @@ public class TkOpenApiCallbackService implements TkOpenApiCallbackOperations {
     }
 
     private String staleProcessingReason(TkOpenApiEventDO event) {
-        if (!"publish.processing".equals(event.getEventType()) || publishDetailMapper == null) return null;
+        if (!("publish.processing".equals(event.getEventType()) || isTerminalPublishCallback(event.getEventType()))
+                || !"PUBLISH_DETAIL".equals(event.getResourceType()) || publishDetailMapper == null) return null;
+        String prefix = event.getEventType() + " callback skipped because ";
         TkOpenTiktokPublishDetailDO current = publishDetailMapper.selectByClientAndDetailId(
                 event.getClientId(), event.getResourceId());
         if (current == null) {
-            return "publish.processing callback skipped because publish detail no longer exists";
+            return prefix + "publish detail no longer exists";
         }
-        if ("SUCCESS".equals(current.getStatus()) || "FAILED".equals(current.getStatus())) {
-            return "publish.processing callback skipped because publish detail is already terminal";
+        if ("publish.processing".equals(event.getEventType())
+                && ("SUCCESS".equals(current.getStatus()) || "FAILED".equals(current.getStatus()) || "CANCELLED".equals(current.getStatus()))) {
+            return prefix + "publish detail is already terminal";
         }
         if (!Objects.equals(normalize(payloadValue(event, "publishId")), normalize(current.getPublishId()))) {
-            return "publish.processing callback skipped because publishId no longer matches the current attempt";
+            return prefix + "publishId no longer matches the current attempt";
         }
+        String retry = payloadValue(event, "retryCount");
+        if (retry != null && !Objects.equals(retry, String.valueOf(current.getRetryCount() == null ? 0 : current.getRetryCount())))
+            return prefix + "publish attempt no longer matches";
+        if (isTerminalPublishCallback(event.getEventType()) && StrUtil.isNotBlank(event.getDedupeKey())
+                && !event.getDedupeKey().equals(buildDedupeKey(event.getClientId(), event.getEventType(),
+                event.getResourceType(), event.getResourceId()) + "|" + (current.getRetryCount() == null ? 0 : current.getRetryCount())))
+            return prefix + "publish attempt no longer matches";
+        String expectedStatus = "publish.success".equals(event.getEventType()) ? "SUCCESS"
+                : "publish.failed".equals(event.getEventType()) ? "FAILED"
+                : "publish.cancelled".equals(event.getEventType()) ? "CANCELLED" : null;
+        if (expectedStatus != null && !expectedStatus.equals(current.getStatus()))
+            return prefix + "publish status no longer matches";
         return null;
     }
 

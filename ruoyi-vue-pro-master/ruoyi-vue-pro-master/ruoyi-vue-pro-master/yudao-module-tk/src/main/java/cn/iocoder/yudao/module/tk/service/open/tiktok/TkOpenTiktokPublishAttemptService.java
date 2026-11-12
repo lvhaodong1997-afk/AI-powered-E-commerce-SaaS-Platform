@@ -57,6 +57,8 @@ public class TkOpenTiktokPublishAttemptService {
         TkOpenTiktokPublishAttemptDO attempt = current(current);
         if (attempt != null && !canRestart(attempt.getPhase())) return null;
         LocalDateTime now = LocalDateTime.now();
+        if (attempt != null && attempt.getNextReconcileTime() != null && attempt.getNextReconcileTime().isAfter(now))
+            return null;
         if (attempt == null) {
             attempt = TkOpenTiktokPublishAttemptDO.builder().clientId(current.getClientId())
                     .taskId(current.getTaskId()).detailId(current.getDetailId()).attemptNo(number(current.getRetryCount()))
@@ -266,6 +268,30 @@ public class TkOpenTiktokPublishAttemptService {
                     .eq(TkOpenTiktokPublishTaskDO::getStatus, "PROCESSING")
                     .set(TkOpenTiktokPublishTaskDO::getStatus, "PENDING"));
         }
+    }
+
+    /** A durable bounded retry only before remote initialization; never increments the publish attempt. */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean deferPullPreflight(TkOpenTiktokPublishDetailDO expected, TkOpenTiktokPublishAttemptDO attempt, String reason) {
+        int count = number(attempt.getReconcileCount());
+        if (count >= 3) return false;
+        TkOpenTiktokPublishDetailDO detail = lock(expected);
+        if (detail == null || !sameAttempt(detail, expected) || !"PROCESSING".equals(detail.getStatus())
+                || StrUtil.isNotBlank(detail.getPublishId())) return false;
+        LocalDateTime next = LocalDateTime.now().plusSeconds(new long[]{30, 60, 120}[count]);
+        requireWrite(attempts.update(null, owned(attempt)
+                .eq(TkOpenTiktokPublishAttemptDO::getPhase, "MATERIAL_PREPARATION")
+                .set(TkOpenTiktokPublishAttemptDO::getOwnerToken, UUID.randomUUID().toString())
+                .set(TkOpenTiktokPublishAttemptDO::getReconcileCount, count + 1)
+                .set(TkOpenTiktokPublishAttemptDO::getNextReconcileTime, next)
+                .set(TkOpenTiktokPublishAttemptDO::getLastError, reason)
+                .set(TkOpenTiktokPublishAttemptDO::getHeartbeatTime, LocalDateTime.now())));
+        requireWrite(details.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishDetailDO.class)
+                .eq(TkOpenTiktokPublishDetailDO::getId, detail.getId())
+                .set(TkOpenTiktokPublishDetailDO::getStatus, "PENDING")
+                .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "PULL_PREFLIGHT_RETRY")
+                .set(TkOpenTiktokPublishDetailDO::getFailReason, reason)));
+        return true;
     }
 
     /** Fences a dead worker before making definitely unsent work runnable again. */

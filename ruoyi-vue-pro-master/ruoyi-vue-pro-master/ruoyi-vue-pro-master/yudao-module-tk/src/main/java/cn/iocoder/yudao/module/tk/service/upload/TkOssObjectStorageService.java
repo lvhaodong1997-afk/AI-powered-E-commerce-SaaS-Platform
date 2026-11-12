@@ -169,6 +169,26 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
         return StrUtil.isBlank(objectKey) ? url : toReadUrl(objectKey);
     }
 
+    /** Called only after the caller has checked the persisted object's client ownership. */
+    public String createPullReadUrl(String objectKey, String pullBaseUrl, int expireSeconds) {
+        if (!isConfigured()) throw new IllegalStateException("OSS pull signing is unavailable");
+        URI base = URI.create(pullBaseUrl);
+        if (!"https".equalsIgnoreCase(base.getScheme()) || base.getHost() == null
+                || base.getRawUserInfo() != null || base.getPort() != -1 || base.getRawQuery() != null
+                || base.getRawFragment() != null || !(base.getPath().isEmpty() || "/".equals(base.getPath()))
+                || StrUtil.isBlank(objectKey) || objectKey.startsWith("/") || objectKey.contains("..")
+                || objectKey.contains("\\") || objectKey.contains("%") || objectKey.contains("?") || objectKey.contains("#")
+                || expireSeconds < 3600 || expireSeconds > 604800)
+            throw new IllegalArgumentException("Invalid OSS pull signing request");
+        TkGenerationProperties.Oss oss = getOss();
+        long expires = Instant.now().getEpochSecond() + expireSeconds;
+        String signature = TkOssRestSigner.sign("GET", "", "", String.valueOf(expires),
+                "/" + oss.getBucket() + "/" + objectKey, oss.getAccessKeySecret());
+        return "https://" + base.getHost() + "/" + encodePath(objectKey)
+                + "?OSSAccessKeyId=" + encodeQuery(oss.getAccessKeyId())
+                + "&Expires=" + expires + "&Signature=" + encodeQuery(signature);
+    }
+
     /** Returns whether the URL belongs to the currently configured OSS public base URL. */
     public boolean isOwnedObjectUrl(String url) {
         return StrUtil.isNotBlank(url) && StrUtil.isNotBlank(toObjectKey(url));

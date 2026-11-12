@@ -14,6 +14,29 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class TkOpenTiktokPublishAttemptServiceTest {
+    @Test void transientPullPreflightHasThreeDurableRetriesAndCannotDeferRemoteInitialization() {
+        TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailDO detail = detail("PROCESSING", null);
+        when(tasks.selectByClientAndTaskIdForUpdate("c", "t")).thenReturn(task());
+        when(details.selectByClientAndDetailIdForUpdate("c", "t", "d")).thenReturn(detail);
+        when(details.selectOne(any())).thenReturn(detail);
+        when(attempts.update(isNull(), any())).thenReturn(1);
+        when(details.update(isNull(), any())).thenReturn(1);
+        TkOpenTiktokPublishAttemptService service = new TkOpenTiktokPublishAttemptService(attempts, details, tasks);
+        for (int count = 0; count < 3; count++)
+            assertTrue(service.deferPullPreflight(detail, attempt("MATERIAL_PREPARATION", "owner").setReconcileCount(count), "temporary"));
+        assertFalse(service.deferPullPreflight(detail, attempt("MATERIAL_PREPARATION", "owner").setReconcileCount(3), "temporary"));
+        detail.setPublishId("official");
+        assertFalse(service.deferPullPreflight(detail, attempt("MATERIAL_PREPARATION", "owner"), "temporary"));
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper> updates =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(attempts, times(3)).update(isNull(), updates.capture());
+        updates.getValue().getSqlSegment();
+        assertTrue(updates.getValue().getParamNameValuePairs().containsValue("MATERIAL_PREPARATION"));
+        assertFalse(updates.getValue().getParamNameValuePairs().containsValue("INIT_SENT"));
+    }
     @Test void fullUploadLaneCanReturnOnlyOwnedUnsentWork() {
         TkOpenTiktokPublishAttemptMapper attempts = mock(TkOpenTiktokPublishAttemptMapper.class);
         TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);

@@ -130,6 +130,18 @@ class TkOpenTiktokPublishExecutionTest {
                 ReflectionTestUtils.getField(service, "connectionMapper"));
     }
 
+    @Test void metricsStatusReadRecordsRecoveryWithoutEnqueuingUpload(@TempDir Path directory) throws Exception {
+        TkOpenTiktokPublishDetailDO detail = detail().setConnectionId("conn");
+        TkOpenPublishPlatformAdapter adapter = prepareFixture(detail, directory);
+        when(adapter.fetchPostStatus("token", "official-id")).thenReturn(
+                new TkOpenPublishPlatformAdapter.PublishStatusResult(true, "PROCESSING_UPLOAD", null, null, Collections.emptyList(), 0L));
+        when(details.update(isNull(), any())).thenReturn(1);
+        ReflectionTestUtils.invokeMethod(service, "syncDetail", detail, false);
+        assertTrue(recoveries.commands.isEmpty());
+        assertEquals("RECOVERY_REQUIRED", detail.getTiktokStatus());
+        verify(adapter, never()).initVideoPost(any(), any(), any());
+    }
+
     @Test void statusQueryFailurePersistsBackoffWithoutFailingPublish() {
         TkOpenTiktokPublishDetailDO detail = detail().setConnectionId("connection");
         TkOpenTiktokPublishAttemptDO attempt = TkOpenTiktokPublishAttemptDO.builder()
@@ -330,7 +342,9 @@ class TkOpenTiktokPublishExecutionTest {
         return adapter;
     }
 
-    @Test void pullInitializationUsesMappedUrlWithoutUploadLaneOrUploadUrl(@TempDir Path directory) throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"OSS_PULL_V1", "OSS_PULL_V2_STRICT"})
+    void pullInitializationUsesMappedUrlWithoutUploadLaneOrUploadUrl(String policy, @TempDir Path directory) throws Exception {
         TkOpenTiktokPublishDetailDO detail = detail().setStatus("PENDING").setPublishId(null).setConnectionId("conn");
         TkOpenPublishPlatformAdapter adapter = prepareFixture(detail, directory);
         TkOpenTiktokPublishTaskMapper tasks = (TkOpenTiktokPublishTaskMapper) ReflectionTestUtils.getField(service, "taskMapper");
@@ -340,11 +354,13 @@ class TkOpenTiktokPublishExecutionTest {
         String original = "https://tk-video-create.oss-cn-beijing.aliyuncs.com/TK/video.mp4";
         String mapped = "https://tkpublish.fnn.net.cn/TK/video.mp4";
         when(tasks.selectByClientAndTaskId("c", "t")).thenReturn(TkOpenTiktokPublishTaskDO.builder()
-                .taskId("t").mediaId("media").transferPolicy("OSS_PULL_V1")
+                .taskId("t").mediaId("media").transferPolicy(policy)
                 .postMode("DIRECT_POST").privacyLevel("SELF_ONLY").build());
         when(media.selectByClientAndMediaId("c", "media")).thenReturn(TkOpenTiktokMediaDO.builder()
                 .fileUrl(original).contentType("video/mp4").build());
         when(resolver.resolve(eq(original), any(), any())).thenReturn(
+                TkTiktokPullSourceResolver.PullDecision.eligible(mapped, 123L));
+        when(resolver.resolveStrict(eq(original), any(), any())).thenReturn(
                 TkTiktokPullSourceResolver.PullDecision.eligible(mapped, 123L));
         TkOpenApiSecretCipher cipher = (TkOpenApiSecretCipher) ReflectionTestUtils.getField(service, "secretCipher");
         when(cipher.encrypt(mapped)).thenReturn("encrypted-pull");
@@ -367,6 +383,26 @@ class TkOpenTiktokPublishExecutionTest {
         verify(attempts).savePullSource(any(), eq("encrypted-pull"));
         verify(attempts).saveResponse(eq(detail), any(), eq("pull-id"), isNull());
         verify(adapter, never()).uploadVideo(anyString(), any(), any(), any(), any());
+    }
+
+    @Test void strictPullNeverUsesExistingCacheOrFileUploadWhenPreflightFails(@TempDir Path directory) throws Exception {
+        TkOpenTiktokPublishDetailDO detail = detail().setStatus("PENDING").setPublishId(null).setConnectionId("conn");
+        TkOpenPublishPlatformAdapter adapter = prepareFixture(detail, directory);
+        TkOpenTiktokPublishTaskMapper tasks = (TkOpenTiktokPublishTaskMapper) ReflectionTestUtils.getField(service, "taskMapper");
+        TkTiktokPullSourceResolver resolver = mock(TkTiktokPullSourceResolver.class);
+        ReflectionTestUtils.setField(service, "pullSourceResolver", resolver);
+        TkOpenTiktokPublishTerminalService terminal = mock(TkOpenTiktokPublishTerminalService.class);
+        ReflectionTestUtils.setField(service, "terminalService", terminal);
+        when(resolver.resolveStrict(any(), any(), any())).thenReturn(
+                TkTiktokPullSourceResolver.PullDecision.fallback("PULL_ACCESS_DENIED"));
+        when(tasks.selectByClientAndTaskId("c", "t")).thenReturn(TkOpenTiktokPublishTaskDO.builder()
+                .taskId("t").mediaId("media").transferPolicy("OSS_PULL_V2_STRICT")
+                .postMode("DIRECT_POST").privacyLevel("SELF_ONLY").build());
+        ReflectionTestUtils.invokeMethod(service, "submitDetail", detail);
+        executor.runNext();
+        assertTrue(uploads.commands.isEmpty(), "strict pull must not silently enqueue a file upload");
+        verify(adapter, never()).initVideoPost(any(), any(), any());
+        verify(terminal).confirmLocal(eq(detail), any(), contains("PULL_ACCESS_DENIED"), eq("PRE_INIT_FAILURE"));
     }
 
     @Test void immediateRemoteMediaUsesDurableCopyAndRecoveryReusesIt(@TempDir Path directory) throws Exception {
