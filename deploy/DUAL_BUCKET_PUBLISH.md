@@ -33,6 +33,8 @@ tk:
 
 当前生产桶还被历史 OpenAPI 文件和其它项目使用。上线先将发布桶从 public-read-write 收敛为 public-read，保留既有匿名读取，素材桶改 private 且保留公共访问阻止。未经其它使用方核验，不能直接关闭历史目录读取。后续收紧为 private + 目录级匿名 Get 属于单独权限调整。
 
+发布桶的 CORS 还必须允许现有前端来源 `https://clipforgestudio.fnn.net.cn` 与 `https://tkassetplant.fnn.net.cn`，支持 GET/POST/PUT/HEAD、上传请求头和 ETag 响应头。变更前备份完整 CORS，保留其它项目的所有原规则，仅追加本站规则；以实际 OPTIONS 和带 Origin 的对象读取验证。权限收敛与 CORS 独立，CORS 不授予匿名写入权限。部署时 region 字符串须与现有素材配置保持一致，生产现有值为 `oss-cn-beijing`。
+
 ```mermaid
 flowchart TD
   U[素材上传] --> M[(tk-material-factory)]
