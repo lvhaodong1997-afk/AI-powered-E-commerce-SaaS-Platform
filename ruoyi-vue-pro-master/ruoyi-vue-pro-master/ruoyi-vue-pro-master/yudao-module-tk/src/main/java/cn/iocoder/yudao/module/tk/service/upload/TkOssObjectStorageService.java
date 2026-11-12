@@ -227,12 +227,19 @@ public class TkOssObjectStorageService implements TkOssObjectStorageClient {
     }
 
     public ObjectMetadata uploadFile(String objectKey, Path source, long maxBytes) {
+        return uploadFile(objectKey, source, maxBytes, "video/mp4");
+    }
+
+    public ObjectMetadata uploadFile(String objectKey, Path source, long maxBytes, String contentType) {
+        if (!"video/mp4".equals(contentType) && !"image/jpeg".equals(contentType)) {
+            throw new IllegalArgumentException("不支持的 OSS 媒体类型");
+        }
         HttpURLConnection connection = null;
         ScheduledFuture<?> deadline = null;
         try {
             long size = Files.size(source);
             if (size <= 0 || size > maxBytes) throw new IllegalArgumentException("视频文件超过大小限制");
-            connection = openTransfer("PUT", objectKey, "video/mp4");
+            connection = openTransfer("PUT", objectKey, contentType);
             connection.setDoOutput(true);
             connection.setFixedLengthStreamingMode(size);
             final HttpURLConnection active = connection;

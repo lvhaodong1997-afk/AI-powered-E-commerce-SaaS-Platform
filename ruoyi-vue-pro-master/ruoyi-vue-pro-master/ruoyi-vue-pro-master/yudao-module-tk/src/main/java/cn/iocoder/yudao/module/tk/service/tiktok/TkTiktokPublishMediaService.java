@@ -5,4 +5,5 @@ import org.springframework.web.multipart.MultipartFile;
 
 public interface TkTiktokPublishMediaService {
     TkTiktokPublishMediaDO uploadVideo(MultipartFile file);
+    TkTiktokPublishMediaDO uploadPhoto(MultipartFile file);
 }

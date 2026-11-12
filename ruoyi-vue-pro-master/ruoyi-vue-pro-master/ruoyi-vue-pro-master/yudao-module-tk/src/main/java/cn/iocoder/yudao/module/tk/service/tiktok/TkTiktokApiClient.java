@@ -41,6 +41,7 @@ public class TkTiktokApiClient {
     private static final String CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/";
     private static final String DIRECT_POST_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
     private static final String INBOX_POST_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/";
+    private static final String PHOTO_POST_URL = "https://open.tiktokapis.com/v2/post/publish/content/init/";
     private static final String STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
     private static final String VIDEO_LIST_URL = "https://open.tiktokapis.com/v2/video/list/";
     private static final String VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/"
@@ -225,6 +226,41 @@ public class TkTiktokApiClient {
                 numberAsLong(user.path("following_count")),
                 numberAsLong(user.path("likes_count")),
                 numberAsLong(user.path("video_count")));
+    }
+
+    public PublishResult initPhotoPost(String accessToken, Map<String, Object> payload) {
+        if (StrUtil.isBlank(accessToken)) {
+            return new PublishResult(false, null, null, "账号缺少 Access Token", null);
+        }
+        return parsePublishResult(postJson(PHOTO_POST_URL, accessToken, payload, "photo_publish_init"));
+    }
+
+    public static Map<String, Object> buildPhotoPostPayload(String title, String caption, List<String> photoUrls, int coverIndex) {
+        if (photoUrls == null || photoUrls.isEmpty() || photoUrls.size() > 35
+                || coverIndex < 0 || coverIndex >= photoUrls.size()) {
+            throw new IllegalArgumentException("图文需要 1-35 张图片，封面必须在图片列表中");
+        }
+        if ((title != null && title.length() > 90) || (caption != null && caption.length() > 4000)) {
+            throw new IllegalArgumentException("图文标题最多 90 字，描述最多 4000 字（按 UTF-16 计数）");
+        }
+        for (String url : photoUrls) {
+            if (StrUtil.isBlank(url) || !url.startsWith("https://")) {
+                throw new IllegalArgumentException("图文图片必须使用 HTTPS 地址");
+            }
+        }
+        Map<String, Object> postInfo = new HashMap<>();
+        postInfo.put("title", StrUtil.blankToDefault(title, "TikTok 图文发布"));
+        postInfo.put("description", StrUtil.nullToEmpty(caption));
+        Map<String, Object> sourceInfo = new HashMap<>();
+        sourceInfo.put("source", "PULL_FROM_URL");
+        sourceInfo.put("photo_images", photoUrls);
+        sourceInfo.put("photo_cover_index", coverIndex);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("media_type", "PHOTO");
+        payload.put("post_mode", "DIRECT_POST");
+        payload.put("post_info", postInfo);
+        payload.put("source_info", sourceInfo);
+        return payload;
     }
 
     public PublishResult initVideoPost(String accessToken, String postMode, Map<String, Object> payload) {

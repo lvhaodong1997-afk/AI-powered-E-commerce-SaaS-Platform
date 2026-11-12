@@ -86,6 +86,16 @@ public class TkTiktokPullSourceResolver {
     }
 
     private PullDecision head(String pullUrl) {
+        return head(pullUrl, false);
+    }
+
+    /** Photo URLs have the same ownership and account gates as video, but cannot fall back to FILE_UPLOAD. */
+    public PullDecision resolvePhoto(String originalUrl, Long accountId, String verifiedProperty) {
+        PullDecision candidate = candidate(originalUrl, accountId, verifiedProperty);
+        return candidate.isEligible() ? head(candidate.getPullUrl(), true) : candidate;
+    }
+
+    private PullDecision head(String pullUrl, boolean photo) {
         HttpURLConnection connection = null;
         try {
             URI target = URI.create(pullUrl);
@@ -97,11 +107,12 @@ public class TkTiktokPullSourceResolver {
             connection.setRequestMethod("HEAD");
             if (connection.getResponseCode() != 200) return PullDecision.fallback("HEAD_STATUS");
             long size = connection.getContentLengthLong();
-            if (size <= 0 || size > MAX_SIZE) return PullDecision.fallback("INVALID_FILE_SIZE");
+            if (size <= 0 || size > (photo ? 20L * 1024 * 1024 : MAX_SIZE)) return PullDecision.fallback("INVALID_FILE_SIZE");
             String mime = connection.getContentType();
             if (mime != null && !mime.trim().isEmpty()) {
                 mime = mime.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
-                if (!mime.startsWith("video/") && !"application/octet-stream".equals(mime)) {
+                if (photo ? !Arrays.asList("image/jpeg", "image/webp").contains(mime)
+                        : !mime.startsWith("video/") && !"application/octet-stream".equals(mime)) {
                     return PullDecision.fallback("INVALID_CONTENT_TYPE");
                 }
             }

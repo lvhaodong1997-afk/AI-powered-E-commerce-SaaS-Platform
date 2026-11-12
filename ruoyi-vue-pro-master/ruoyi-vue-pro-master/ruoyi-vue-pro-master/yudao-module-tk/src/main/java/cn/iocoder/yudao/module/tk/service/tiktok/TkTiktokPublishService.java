@@ -11,6 +11,7 @@ public interface TkTiktokPublishService {
     TkTiktokOverviewRespVO getOverview();
 
     Long createPublishTask(TkTiktokPublishCreateReqVO reqVO);
+    Map<Long, TkTiktokApiClient.CreatorInfo> queryPublishCreators(TkTiktokPublishCreateReqVO reqVO);
 
     PageResult<TkTiktokPublishTaskRespVO> getTaskPage(TkTiktokPublishTaskPageReqVO reqVO);
 

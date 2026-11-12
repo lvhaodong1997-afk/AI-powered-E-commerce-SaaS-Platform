@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.tk.service.tiktok;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
@@ -132,7 +133,9 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         validateVideoSource(reqVO);
         TkGenerationTaskDO generationTask = null;
         TkTiktokPublishMediaDO uploadedVideo = null;
-        if (reqVO.getGenerationTaskId() != null) {
+        if (isPhoto(reqVO.getMediaType())) {
+            uploadedVideo = validatePhotoMedia(reqVO);
+        } else if (reqVO.getGenerationTaskId() != null) {
             generationTask = generationTaskService.getGenerationTask(reqVO.getGenerationTaskId());
             if (!"SUCCESS".equals(generationTask.getStatus()) || StrUtil.isBlank(generationTask.getOutputUrl())) {
                 throw exception(TK_TIKTOK_PUBLISH_VIDEO_REQUIRED);
@@ -157,7 +160,39 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         return result[0];
     }
 
+    @Override
+    public Map<Long, TkTiktokApiClient.CreatorInfo> queryPublishCreators(TkTiktokPublishCreateReqVO reqVO) {
+        List<TkTiktokAccountDO> accounts = resolveAccounts(reqVO);
+        if (CollUtil.isEmpty(accounts)) throw exception(TK_TIKTOK_PUBLISH_ACCOUNT_REQUIRED);
+        Map<Long, TkTiktokApiClient.CreatorInfo> result = new LinkedHashMap<>();
+        for (TkTiktokAccountDO account : accounts) {
+            if (!"AUTHORIZED".equals(account.getAuthStatus())) throw new IllegalArgumentException("所选 TikTok 账号未授权");
+            TenantUtils.execute(account.getTenantId(), () -> {
+                TkTiktokApiClient.CreatorInfo creator = queryCreatorInfoWithRetry(account.getId());
+                if (!creator.isSuccess()) throw new IllegalStateException(creator.getFailReason());
+                result.put(account.getId(), creator);
+            });
+        }
+        return result;
+    }
+
     static void validateVideoSource(TkTiktokPublishCreateReqVO reqVO) {
+        if (reqVO == null) throw new IllegalArgumentException("发布请求不能为空");
+        if (StrUtil.isNotBlank(reqVO.getMediaType()) && !"VIDEO".equals(reqVO.getMediaType()) && !isPhoto(reqVO.getMediaType())) {
+            throw new IllegalArgumentException("不支持的媒体类型");
+        }
+        if (isPhoto(reqVO.getMediaType())) {
+            if (reqVO.getGenerationTaskId() != null || reqVO.getUploadedVideoId() != null
+                    || StrUtil.isNotBlank(reqVO.getPhotoUrls()) || CollUtil.isEmpty(reqVO.getUploadedPhotoIds())
+                    || reqVO.getUploadedPhotoIds().size() > 35 || reqVO.getUploadedPhotoIds().contains(null)) {
+                throw new IllegalArgumentException("图文请只提交 1-35 个已上传的图片 ID");
+            }
+            String mode = reqVO.getPostMode();
+            if (StrUtil.isNotBlank(mode) && !StrUtil.equalsAny(mode, "DIRECT_POST", "UPLOAD_TO_INBOX")) {
+                throw new IllegalArgumentException("图文发布模式无效");
+            }
+            return;
+        }
         boolean generated = reqVO != null && reqVO.getGenerationTaskId() != null;
         boolean uploaded = reqVO != null && reqVO.getUploadedVideoId() != null;
         if (generated == uploaded) {
@@ -168,7 +203,37 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     static boolean isUsableUploadedVideo(TkTiktokPublishMediaDO media) {
         return media != null
                 && StrUtil.isNotBlank(media.getFileUrl())
+                && (media.getMimeType() == null || !media.getMimeType().startsWith("image/"))
                 && "READY".equalsIgnoreCase(media.getStatus());
+    }
+
+    private static boolean isPhoto(String mediaType) {
+        return "PHOTO".equalsIgnoreCase(mediaType);
+    }
+
+    private TkTiktokPublishMediaDO validatePhotoMedia(TkTiktokPublishCreateReqVO reqVO) {
+        TkTiktokPublishMediaDO first = null;
+        List<String> urls = new ArrayList<>();
+        for (Long id : reqVO.getUploadedPhotoIds()) {
+            TkTiktokPublishMediaDO media = publishMediaMapper.selectById(id);
+            if (media == null || !"READY".equals(media.getStatus()) || StrUtil.isBlank(media.getFileUrl())
+                    || !Arrays.asList("image/jpeg", "image/webp").contains(media.getMimeType())
+                    || media.getFileSize() == null || media.getFileSize() <= 0 || media.getFileSize() > 20L * 1024 * 1024) {
+                throw new IllegalArgumentException("图片不存在、未就绪或格式不受支持");
+            }
+            dataScopeService.validateWritable(media.getTenantId(), media.getCompanyId());
+            if (first != null && (!Objects.equals(first.getTenantId(), media.getTenantId())
+                    || !Objects.equals(first.getCompanyId(), media.getCompanyId()))) {
+                throw new IllegalArgumentException("同一图文的图片必须属于同一租户和公司");
+            }
+            if (first == null) first = media;
+            urls.add(media.getFileUrl());
+        }
+        int coverIndex = reqVO.getPhotoCoverIndex() == null ? 0 : reqVO.getPhotoCoverIndex();
+        TkTiktokApiClient.buildPhotoPostPayload(reqVO.getTitle(), reqVO.getCaption(), urls, coverIndex);
+        reqVO.setPhotoCoverIndex(coverIndex);
+        reqVO.setPhotoUrls(JsonUtils.toJsonString(urls));
+        return first;
     }
 
     static LocalDateTime validateScheduledRequest(TkTiktokPublishCreateReqVO reqVO, int accountCount,
@@ -567,17 +632,30 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
     private Long createPublishTaskWithinTenant(TkTiktokPublishCreateReqVO reqVO, TkGenerationTaskDO generationTask,
                                                TkTiktokPublishMediaDO uploadedVideo, List<TkTiktokAccountDO> accounts) {
         String postMode = StrUtil.blankToDefault(reqVO.getPostMode(), apiClient.getDefaultPostMode());
+        boolean photo = isPhoto(reqVO.getMediaType());
         boolean uploaded = uploadedVideo != null;
         Long tenantId = uploaded ? uploadedVideo.getTenantId() : generationTask.getTenantId();
         Long companyId = uploaded ? uploadedVideo.getCompanyId() : generationTask.getCompanyId();
         String businessTraceId = uploaded
                 ? "UPLOAD-" + UUID.randomUUID().toString().replace("-", "")
                 : generationTask.getBusinessTraceId();
-        String videoUrl = uploaded ? uploadedVideo.getFileUrl() : generationTask.getOutputUrl();
-        String defaultTitle = uploaded ? uploadedVideo.getFileName() : generationTask.getTitle();
+        String videoUrl = photo ? null : uploaded ? uploadedVideo.getFileUrl() : generationTask.getOutputUrl();
+        String defaultTitle = photo ? "TikTok 图文发布" : uploaded ? uploadedVideo.getFileName() : generationTask.getTitle();
         LocalDateTime scheduledAt = validateScheduledRequest(reqVO, accounts.size(), LocalDateTime.now());
         boolean scheduled = scheduledAt != null;
-        boolean preferPull = pullSourceResolver != null && accounts.stream().anyMatch(account ->
+        if (photo) {
+            for (TkTiktokAccountDO account : accounts) {
+                if (!Objects.equals(tenantId, account.getTenantId()) || !Objects.equals(companyId, account.getCompanyId())) {
+                    throw new IllegalArgumentException("图文账号和图片必须属于同一租户和公司");
+                }
+                for (String url : JsonUtils.parseArray(reqVO.getPhotoUrls(), String.class)) {
+                    if (!pullSourceResolver.isCandidate(url, account.getId(), apiClient.getVerifiedPullDomain())) {
+                        throw new IllegalArgumentException("图文需要启用图片域名直拉，并将所选账号加入拉取白名单；请检查 TikTok 已验证域名配置");
+                    }
+                }
+            }
+        }
+        boolean preferPull = photo || pullSourceResolver != null && accounts.stream().anyMatch(account ->
                 scheduled
                         ? pullSourceResolver.resolve(videoUrl, account.getId(), apiClient.getVerifiedPullDomain()).isEligible()
                         : pullSourceResolver.isCandidate(videoUrl, account.getId(), apiClient.getVerifiedPullDomain()));
@@ -588,13 +666,18 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 .businessTraceId(businessTraceId)
                 .companyId(companyId)
                 .generationTaskId(uploaded ? null : generationTask.getId())
-                .uploadedVideoId(uploaded ? uploadedVideo.getId() : null)
+                .uploadedVideoId(uploaded && !photo ? uploadedVideo.getId() : null)
+                .mediaType(photo ? "PHOTO" : "VIDEO")
+                .photoUrls(reqVO.getPhotoUrls())
+                .photoCoverIndex(reqVO.getPhotoCoverIndex())
+                .autoAddMusic(photo && Boolean.TRUE.equals(reqVO.getAutoAddMusic()))
                 .sourceType(uploaded ? SOURCE_UPLOADED : SOURCE_GENERATED)
                 .title(StrUtil.blankToDefault(reqVO.getTitle(), StrUtil.blankToDefault(defaultTitle, "TikTok 视频发布")))
                 .caption(reqVO.getCaption())
                 .videoUrl(videoUrl)
                 .transferPolicy(preferPull ? "OSS_PULL_V1" : "FILE_UPLOAD")
-                .coverUrl(uploaded ? uploadedVideo.getCoverUrl() : null)
+                .coverUrl(photo ? JsonUtils.parseArray(reqVO.getPhotoUrls(), String.class).get(reqVO.getPhotoCoverIndex())
+                        : uploaded ? uploadedVideo.getCoverUrl() : null)
                 .coverTimestampMs(reqVO.getCoverTimestampMs())
                 .postMode(postMode)
                 .privacyLevel(reqVO.getPrivacyLevel())
@@ -620,7 +703,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                     .companyId(companyId)
                     .publishTaskId(publishTask.getId())
                     .generationTaskId(uploaded ? null : generationTask.getId())
-                    .uploadedVideoId(uploaded ? uploadedVideo.getId() : null)
+                    .uploadedVideoId(uploaded && !photo ? uploadedVideo.getId() : null)
                     .sourceType(uploaded ? SOURCE_UPLOADED : SOURCE_GENERATED)
                     .accountId(account.getId())
                     .accountDisplayName(StrUtil.blankToDefault(account.getDisplayName(), account.getUsername()))
@@ -628,7 +711,7 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                     .tiktokStatus(scheduled ? STATUS_SCHEDULED : "LOCAL_PENDING")
                     .postMode(postMode)
                     .privacyLevel(StrUtil.blankToDefault(reqVO.getPrivacyLevel(), account.getDefaultPrivacyLevel()))
-                    .coverUrl(uploaded ? uploadedVideo.getCoverUrl() : null)
+                    .coverUrl(publishTask.getCoverUrl())
                     .coverTimestampMs(reqVO.getCoverTimestampMs())
                     .allowComment(defaultBool(reqVO.getAllowComment(), account.getAllowComment(), true))
                     .allowDuet(defaultBool(reqVO.getAllowDuet(), account.getAllowDuet(), false))
@@ -691,7 +774,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             failDetail(detail, "TikTok 账号未授权，请重新授权账号");
             return;
         }
-        if (publishTask == null || StrUtil.isBlank(videoUrl)) {
+        boolean photo = publishTask != null && isPhoto(publishTask.getMediaType());
+        if (publishTask == null || (!photo && StrUtil.isBlank(videoUrl))) {
             failDetail(detail, "生成视频不存在或没有输出文件");
             return;
         }
@@ -701,20 +785,44 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         }
         TkTiktokPublishMediaDO uploadedVideo = detail.getUploadedVideoId() == null
                 ? null : publishMediaMapper.selectById(detail.getUploadedVideoId());
-        String videoMimeType = uploadedVideo == null
+        String videoMimeType = photo ? null : uploadedVideo == null
                 ? inferVideoMimeType(videoUrl) : uploadedVideo.getMimeType();
         UploadSource uploadSource = null;
         String durablePublishId = null;
         try {
-            TkTiktokApiClient.CreatorInfo creatorInfo = queryCreatorInfoWithRetry(account.getId());
-            if (!creatorInfo.isSuccess()) {
-                failDetail(detail, creatorInfo.getFailReason());
-                return;
+            TkTiktokApiClient.CreatorInfo creatorInfo = null;
+            // Photo inbox uploads require video.upload, while creator info requires video.publish.
+            if (!photo || !"UPLOAD_TO_INBOX".equals(detail.getPostMode())) {
+                creatorInfo = queryCreatorInfoWithRetry(account.getId());
+                if (!creatorInfo.isSuccess()) {
+                    failDetail(detail, creatorInfo.getFailReason());
+                    return;
+                }
             }
             String policy = publishTask.getTransferPolicy();
-            uploadSource = StrUtil.isBlank(policy) || "LEGACY".equals(policy)
-                    ? resolveUploadSource(mediaUploadService == null ? videoUrl : mediaUploadService.refreshReadUrl(videoUrl), videoMimeType)
-                    : resolveUploadSource(videoUrl, videoMimeType, account.getId(), "OSS_PULL_V1".equals(policy));
+            Map<String, Object> payload;
+            if (photo) {
+                List<String> storedUrls = JsonUtils.parseArray(publishTask.getPhotoUrls(), String.class);
+                // Validate persisted tasks as well, before any network request or init fence.
+                TkTiktokApiClient.buildPhotoPostPayload(publishTask.getTitle(), publishTask.getCaption(), storedUrls,
+                        publishTask.getPhotoCoverIndex() == null ? 0 : publishTask.getPhotoCoverIndex());
+                List<String> pullUrls = new ArrayList<>();
+                uploadSource = UploadSource.pullFromUrl("image/jpeg");
+                for (String storedUrl : storedUrls) {
+                    TkTiktokPullSourceResolver.PullDecision decision = pullSourceResolver.resolvePhoto(
+                            storedUrl, account.getId(), apiClient.getVerifiedPullDomain());
+                    if (!decision.isEligible()) throw new IllegalArgumentException("图片公开拉取校验失败：" + decision.getReasonCode());
+                    pullUrls.add(decision.getPullUrl());
+                    uploadSource.videoSize += decision.getFileSize();
+                }
+                uploadSource.pullUrl = pullUrls.get(0);
+                payload = buildPhotoPublishPayload(publishTask, detail, pullUrls, creatorInfo);
+            } else {
+                uploadSource = StrUtil.isBlank(policy) || "LEGACY".equals(policy)
+                        ? resolveUploadSource(mediaUploadService == null ? videoUrl : mediaUploadService.refreshReadUrl(videoUrl), videoMimeType)
+                        : resolveUploadSource(videoUrl, videoMimeType, account.getId(), "OSS_PULL_V1".equals(policy));
+                payload = buildPublishPayload(detail, publishTask.getTitle(), publishTask.getCaption(), videoUrl, uploadSource, creatorInfo);
+            }
             if (!acquireBudget(account.getId(), true)) {
                 publishDetailMapper.update(null, executionFence(detail, null)
                         .eq(TkTiktokPublishDetailDO::getStatus, STATUS_PROCESSING)
@@ -743,8 +851,9 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             }
             detail.setInitPhase("INIT_IN_FLIGHT");
             try {
-                TkTiktokApiClient.PublishResult result = initVideoPostWithRetry(account.getId(), detail.getPostMode(),
-                        buildPublishPayload(detail, publishTask.getTitle(), publishTask.getCaption(), videoUrl, uploadSource, creatorInfo));
+                TkTiktokApiClient.PublishResult result = photo
+                        ? initPhotoPostWithRetry(account.getId(), payload)
+                        : initVideoPostWithRetry(account.getId(), detail.getPostMode(), payload);
                 if (!result.isSuccess()) {
                     if (isDefinitiveInitRejection(result.getErrorCode())) {
                         detail.setInitPhase("INIT_REJECTED");
@@ -804,8 +913,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         detail.setPublishId(result.getPublishId());
         detail.setInitPhase("INIT_CONFIRMED");
         detail.setNextPollTime(LocalDateTime.now().plusSeconds(10));
-        detail.setTiktokStatus(StrUtil.isBlank(result.getPublishId())
-                ? "SEND_TO_USER_INBOX" : TIKTOK_STATUS_UPLOAD_PENDING);
+        detail.setTiktokStatus("PULL_FROM_URL".equals(detail.getTransferSource()) ? "PROCESSING_DOWNLOAD"
+                : StrUtil.isBlank(result.getPublishId()) ? "SEND_TO_USER_INBOX" : TIKTOK_STATUS_UPLOAD_PENDING);
         detail.setStatus(STATUS_PROCESSING);
         detail.setFailReason(null);
         detail.setLastSyncTime(LocalDateTime.now());
@@ -847,7 +956,8 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         return StrUtil.equalsAny(errorCode, "access_token_invalid", "scope_not_authorized", "invalid_param",
                 "spam_risk_too_many_posts", "spam_risk_user_banned_from_posting", "reached_active_user_cap",
                 "unaudited_client_can_only_post_to_private_accounts", "url_ownership_unverified",
-                "privacy_level_option_mismatch", "spam_risk_too_many_pending_share", "rate_limit_exceeded");
+                "privacy_level_option_mismatch", "spam_risk_too_many_pending_share", "rate_limit_exceeded",
+                "app_version_check_failed");
     }
 
     private void markInitRecovery(TkTiktokPublishDetailDO detail) {
@@ -1041,6 +1151,18 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
             detail.setTiktokStatus(tiktokStatus);
             detail.setLastSyncTime(LocalDateTime.now());
             if (isTikTokPublishSuccess(tiktokStatus)) {
+                TkTiktokPublishTaskDO task = publishTaskMapper.selectById(detail.getPublishTaskId());
+                if (task != null && isPhoto(task.getMediaType())) {
+                    // Display API video/query does not provide photo details. The posting status is authoritative.
+                    detail.setStatus(STATUS_SUCCESS);
+                    detail.setFailReason(null);
+                    detail.setPublicPostCount(result.getPublicPostIds() == null ? 0 : result.getPublicPostIds().size());
+                    detail.setLinkCaptureStatus("NOT_SUPPORTED");
+                    detail.setLinkNextRetryTime(null);
+                    updateLinkMetadata(detail);
+                    updateDetailClearingFailReason(detail);
+                    return;
+                }
                 PublicLinkCaptureResult captureResult = capturePublishUrl(detail, accountId, result);
                 if (shouldWaitForPublicPost(detail, result)) {
                     if (scheduleLinkRetry(detail, null)) {
@@ -1393,6 +1515,29 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
                 .set(TkTiktokPublishDetailDO::getFailReason, null));
     }
 
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> buildPhotoPublishPayload(TkTiktokPublishTaskDO task, TkTiktokPublishDetailDO detail,
+                                                         List<String> urls, TkTiktokApiClient.CreatorInfo creatorInfo) {
+        Map<String, Object> payload = TkTiktokApiClient.buildPhotoPostPayload(task.getTitle(), task.getCaption(), urls,
+                task.getPhotoCoverIndex() == null ? 0 : task.getPhotoCoverIndex());
+        Map<String, Object> postInfo = (Map<String, Object>) payload.get("post_info");
+        boolean inbox = "UPLOAD_TO_INBOX".equals(detail.getPostMode());
+        payload.put("post_mode", inbox ? "MEDIA_UPLOAD" : "DIRECT_POST");
+        payload.put("is_aigc", Boolean.TRUE.equals(detail.getAigcContent()));
+        if (!inbox) {
+            String privacy = StrUtil.blankToDefault(detail.getPrivacyLevel(), "SELF_ONLY");
+            if (CollUtil.isNotEmpty(creatorInfo.getPrivacyLevelOptions()) && !creatorInfo.getPrivacyLevelOptions().contains(privacy)) {
+                throw new IllegalArgumentException("所选隐私设置不在此 TikTok 账号允许的范围内，请重新选择");
+            }
+            postInfo.put("privacy_level", privacy);
+            postInfo.put("disable_comment", creatorInfo.isCommentDisabled() || !Boolean.TRUE.equals(detail.getAllowComment()));
+            postInfo.put("auto_add_music", Boolean.TRUE.equals(task.getAutoAddMusic()));
+            postInfo.put("brand_content_toggle", Boolean.TRUE.equals(detail.getBrandContent()));
+            postInfo.put("brand_organic_toggle", Boolean.TRUE.equals(detail.getCommercialContent()));
+        }
+        return payload;
+    }
+
     private Map<String, Object> buildPublishPayload(TkTiktokPublishDetailDO detail, String title, String caption, String videoUrl,
                                                     UploadSource uploadSource,
                                                     TkTiktokApiClient.CreatorInfo creatorInfo) {
@@ -1535,6 +1680,13 @@ public class TkTiktokPublishServiceImpl implements TkTiktokPublishService {
         if (result.isAccessTokenInvalid()) {
             result = apiClient.queryCreatorInfo(tokenService.forceRefreshAccessToken(accountId));
         }
+        return result;
+    }
+
+    private TkTiktokApiClient.PublishResult initPhotoPostWithRetry(Long accountId, Map<String, Object> payload) {
+        String token = tokenService.getValidAccessToken(accountId);
+        TkTiktokApiClient.PublishResult result = apiClient.initPhotoPost(token, payload);
+        if (result.isAccessTokenInvalid() && acquireBudget(accountId, true)) result = apiClient.initPhotoPost(tokenService.forceRefreshAccessToken(accountId), payload);
         return result;
     }
 

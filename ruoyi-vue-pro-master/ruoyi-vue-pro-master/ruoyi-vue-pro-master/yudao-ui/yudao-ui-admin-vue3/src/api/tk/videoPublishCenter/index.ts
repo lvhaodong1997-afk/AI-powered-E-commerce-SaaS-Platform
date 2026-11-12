@@ -73,10 +73,13 @@ export interface TkTiktokPublishTaskVO {
   companyId: number
   generationTaskId?: number
   uploadedVideoId?: number
+  mediaType?: 'VIDEO' | 'PHOTO'
+  photoUrls?: string
+  photoCoverIndex?: number
   sourceType?: string
   title: string
   caption?: string
-  videoUrl: string
+  videoUrl?: string
   coverUrl?: string
   coverTimestampMs?: number
   postMode: string
@@ -327,6 +330,15 @@ export const TkTiktokAccountGroupApi = {
 }
 
 export const TkTiktokPublishApi = {
+  queryCreators: async (data: { accountIds: number[]; groupIds: number[] }): Promise<Record<string, {
+    privacyLevelOptions: string[]; commentDisabled: boolean
+  }>> => request.post({ url: '/tk/tiktok-publish/creator-info', data }),
+  uploadPhoto: async (data: FormData) => {
+    const res = await request.upload<{ data: TkTiktokPublishMediaVO }>({
+      url: '/tk/tiktok-publish/media/photo/upload', data, timeout: 2 * 60 * 1000
+    })
+    return res.data as TkTiktokPublishMediaVO
+  },
   uploadMedia: async (data: FormData, option: any = {}) => {
     const res = await request.upload<{ data: TkTiktokPublishMediaVO }>({
       url: '/tk/tiktok-publish/media/upload',
@@ -339,6 +351,10 @@ export const TkTiktokPublishApi = {
   create: async (data: {
     generationTaskId?: number
     uploadedVideoId?: number
+    mediaType?: 'VIDEO' | 'PHOTO'
+    uploadedPhotoIds?: number[]
+    photoCoverIndex?: number
+    autoAddMusic?: boolean
     coverTimestampMs?: number
     accountIds?: number[]
     groupIds?: number[]

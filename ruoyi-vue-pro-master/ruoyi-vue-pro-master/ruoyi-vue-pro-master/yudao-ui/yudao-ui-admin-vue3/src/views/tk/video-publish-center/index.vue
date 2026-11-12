@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="publish-center">
     <div class="overview-grid">
       <ContentWrap v-for="item in overviewCards" :key="item.label">
@@ -79,7 +79,7 @@
             <Icon icon="ep:full-screen" class="mr-5px" /> 二维码授权
           </el-button>
           <el-button type="primary" @click="openUploadPublishDrawer" v-hasPermi="['tk:tiktok-publish:create']">
-            <Icon icon="ep:upload" class="mr-5px" /> 上传视频发布
+            <Icon icon="ep:upload" class="mr-5px" /> 上传素材发布
           </el-button>
         </div>
       </div>
@@ -288,7 +288,7 @@
                 复制
               </el-button>
             </div>
-            <div class="sub-text">{{ displayVideoFileName(scope.row.videoUrl) }}</div>
+            <div class="sub-text">{{ scope.row.mediaType === 'PHOTO' ? '图文发布' : displayVideoFileName(scope.row.videoUrl) }}</div>
           </template>
         </el-table-column>
         <el-table-column label="模式" width="140">
@@ -483,12 +483,35 @@
       </template>
     </el-dialog>
 
-    <el-drawer v-model="publishDrawerVisible" title="发布到 TikTok" size="520px" @closed="resetPublishSource">
+    <el-drawer v-model="publishDrawerVisible" title="发布到 TikTok" size="520px" @close="invalidatePhotoUpload" @closed="resetPublishSource">
       <el-form ref="publishFormRef" :model="publishForm" :rules="publishRules" label-width="110px">
-        <el-form-item label="视频来源">
+        <el-form-item label="发布类型">
+          <el-segmented v-model="publishForm.mediaType" :disabled="publishUploadLoading || publishLoading" :options="[{ label: '视频', value: 'VIDEO' }, { label: '图文', value: 'PHOTO' }]" />
+        </el-form-item>
+        <el-form-item v-if="publishForm.mediaType === 'PHOTO'" label="上传图片">
+          <div class="photo-publish-content">
+            <input ref="photoFileInput" type="file" accept="image/jpeg,image/webp,.jpg,.jpeg,.webp" multiple class="hidden" @change="handlePhotoFilesChange" />
+            <el-button :loading="publishUploadLoading" :disabled="photoMedia.length >= 35 || publishLoading" @click="photoFileInput?.click()">添加图片（{{ photoMedia.length }}/35）</el-button>
+            <div class="sub-text">JPEG / WebP，单张不超过 20MB；自动转为 JPEG 并缩放至 1080p。按下方顺序发布。</div>
+            <el-progress v-if="publishUploadLoading" :percentage="publishUploadPercent" />
+            <div v-if="publishUploadError" class="upload-error">{{ publishUploadError }}</div>
+            <div class="photo-publish-grid">
+              <div v-for="(photo, index) in photoMedia" :key="photo.id" class="photo-publish-item">
+                <img :src="photo.preview" :alt="photo.fileName" />
+                <el-radio v-model="publishForm.photoCoverIndex" :value="index" :disabled="publishUploadLoading || publishLoading">{{ index + 1 }} · 封面</el-radio>
+                <div>
+                  <el-button size="small" :disabled="!index || publishUploadLoading || publishLoading" :aria-label="`前移第 ${index + 1} 张图片`" @click="movePublishPhoto(index, -1)">前移</el-button>
+                  <el-button size="small" :disabled="index === photoMedia.length - 1 || publishUploadLoading || publishLoading" :aria-label="`后移第 ${index + 1} 张图片`" @click="movePublishPhoto(index, 1)">后移</el-button>
+                  <el-button size="small" type="danger" link :disabled="publishUploadLoading || publishLoading" @click="removePublishPhoto(index)">移除</el-button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item v-if="publishForm.mediaType === 'VIDEO'" label="视频来源">
           <el-segmented v-model="publishForm.sourceType" :options="[{ label: '系统成片', value: 'GENERATED' }, { label: '用户上传', value: 'UPLOADED' }]" />
         </el-form-item>
-        <el-form-item v-if="publishForm.sourceType === 'UPLOADED'" label="上传视频">
+        <el-form-item v-if="publishForm.mediaType === 'VIDEO' && publishForm.sourceType === 'UPLOADED'" label="上传视频">
           <input ref="publishFileInput" type="file" accept="video/mp4,video/quicktime,video/webm" class="hidden" @change="handlePublishFileChange" />
           <el-button type="primary" plain :loading="publishUploadLoading" @click="publishFileInput?.click()">
             <Icon icon="ep:upload" class="mr-5px" /> 选择视频
@@ -497,7 +520,7 @@
           <el-progress v-if="publishUploadLoading || publishUploadPercent > 0" :percentage="publishUploadPercent" />
           <span v-if="publishUploadError" class="upload-error">{{ publishUploadError }}</span>
         </el-form-item>
-        <el-form-item v-if="publishForm.sourceType === 'GENERATED'" label="成片任务">
+        <el-form-item v-if="publishForm.mediaType === 'VIDEO' && publishForm.sourceType === 'GENERATED'" label="成片任务">
           <div>
             <div class="main-title">{{ selectedVideo?.title || '-' }}</div>
             <div v-if="selectedVideo?.scriptTitle" class="sub-text">文案标题：{{ selectedVideo.scriptTitle }}</div>
@@ -516,10 +539,10 @@
           </div>
         </el-form-item>
         <el-form-item label="发布标题" prop="title">
-          <el-input v-model="publishForm.title" maxlength="255" />
+          <el-input v-model="publishForm.title" :maxlength="publishForm.mediaType === 'PHOTO' ? 90 : 255" show-word-limit />
         </el-form-item>
         <el-form-item label="发布文案" prop="caption">
-          <el-input v-model="publishForm.caption" type="textarea" :rows="4" maxlength="2200" show-word-limit />
+          <el-input v-model="publishForm.caption" type="textarea" :rows="4" :maxlength="publishForm.mediaType === 'PHOTO' ? 4000 : 2200" show-word-limit />
         </el-form-item>
         <el-form-item label="发布账号">
           <el-select v-model="publishForm.accountIds" multiple filterable clearable class="!w-full" placeholder="请选择账号">
@@ -533,6 +556,7 @@
         </el-form-item>
         <el-form-item label="发布模式" prop="postMode">
           <el-segmented v-model="publishForm.postMode" :options="postModeOptions" />
+          <div v-if="publishForm.mediaType === 'PHOTO' && publishForm.postMode === 'UPLOAD_TO_INBOX'" class="sub-text">上传后需在 TikTok 收件箱通知中继续编辑并完成发布。</div>
         </el-form-item>
         <el-form-item label="发布时间">
           <el-segmented
@@ -551,19 +575,18 @@
           />
           <div class="sub-text">定时发布首版仅支持单个账号和直接发布，提交后可在发布任务中改期或取消。</div>
         </el-form-item>
-        <el-form-item label="隐私" prop="privacyLevel">
-          <el-select v-model="publishForm.privacyLevel" clearable class="!w-full" placeholder="默认使用账号配置">
-            <el-option label="Self only" value="SELF_ONLY" />
-            <el-option label="好友可见" value="MUTUAL_FOLLOW_FRIENDS" />
-            <el-option label="粉丝可见" value="FOLLOWER_OF_CREATOR" />
-            <el-option label="公开" value="PUBLIC_TO_EVERYONE" />
+        <el-form-item v-if="publishForm.mediaType === 'VIDEO' || publishForm.postMode === 'DIRECT_POST'" label="隐私" prop="privacyLevel">
+          <el-select v-model="publishForm.privacyLevel" clearable class="!w-full" :loading="photoCreatorLoading" placeholder="请选择隐私设置">
+            <el-option v-for="option in publishPrivacyOptions" :key="option" :label="privacyOptionLabel(option)" :value="option" />
           </el-select>
+          <div v-if="photoCreatorError" class="upload-error">{{ photoCreatorError }}</div>
+          <div v-if="publishForm.mediaType === 'PHOTO'" class="sub-text">根据所选账号当前权限显示共同可用的选项。</div>
         </el-form-item>
         <el-form-item label="互动">
           <div class="check-row">
-            <el-checkbox v-model="publishForm.allowComment">允许评论</el-checkbox>
-            <el-checkbox v-model="publishForm.allowDuet">允许合拍</el-checkbox>
-            <el-checkbox v-model="publishForm.allowStitch">允许拼接</el-checkbox>
+            <el-checkbox v-model="publishForm.allowComment" :disabled="publishForm.mediaType === 'PHOTO' && photoCommentDisabled">允许评论</el-checkbox>
+            <el-checkbox v-if="publishForm.mediaType === 'VIDEO'" v-model="publishForm.allowDuet">允许合拍</el-checkbox>
+            <el-checkbox v-if="publishForm.mediaType === 'VIDEO'" v-model="publishForm.allowStitch">允许拼接</el-checkbox>
           </div>
         </el-form-item>
         <el-form-item label="内容标识">
@@ -572,6 +595,9 @@
             <el-checkbox v-model="publishForm.commercialContent">商业内容</el-checkbox>
             <el-checkbox v-model="publishForm.brandContent">品牌内容</el-checkbox>
           </div>
+        </el-form-item>
+        <el-form-item v-if="publishForm.mediaType === 'PHOTO' && publishForm.postMode === 'DIRECT_POST'" label="配乐">
+          <el-checkbox v-model="publishForm.autoAddMusic">由 TikTok 自动添加推荐音乐</el-checkbox>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -704,6 +730,7 @@ import {
   TkVideoPublishCenterApi
 } from '@/api/tk/videoPublishCenter'
 import { uploadTikTokMediaInChunks } from '@/utils/tiktokMediaUpload'
+import { validatePhotoSelection, movePhoto, removePhoto, photoPublishSource, prepareTikTokPhoto } from '@/utils/tiktokPhotoPublish'
 import { getTkUploadErrorMessage } from '@/utils/tkChunkUpload'
 import { formatDate, formatTimestamp } from '@/utils/formatTime'
 import type {
@@ -838,6 +865,9 @@ const publishLoading = ref(false)
 const publishFormRef = ref()
 const selectedVideo = ref<TkGenerationTaskVO>()
 const publishFileInput = ref<HTMLInputElement>()
+const photoFileInput = ref<HTMLInputElement>()
+const photoMedia = ref<{ id: number; fileName: string; preview: string }[]>([])
+let photoUploadVersion = 0
 const publishUploadLoading = ref(false)
 const publishUploadPercent = ref(0)
 const publishUploadError = ref('')
@@ -845,6 +875,9 @@ const uploadedPublishMedia = ref<{ id: number; fileName: string; fileUrl: string
 const publishForm = reactive({
   generationTaskId: undefined as number | undefined,
   uploadedVideoId: undefined as number | undefined,
+  mediaType: 'VIDEO' as 'VIDEO' | 'PHOTO',
+  photoCoverIndex: 0,
+  autoAddMusic: false,
   sourceType: 'GENERATED' as 'GENERATED' | 'UPLOADED',
   coverTimestampMs: 1000,
   accountIds: [] as number[],
@@ -866,6 +899,38 @@ const publishRules = {
   title: [{ required: true, message: '发布标题不能为空', trigger: 'blur' }],
   postMode: [{ required: true, message: '请选择发布模式', trigger: 'change' }]
 }
+const photoCreatorLoading = ref(false)
+const photoCreatorError = ref('')
+const photoCreators = ref<Record<string, { privacyLevelOptions: string[]; commentDisabled: boolean }>>({})
+let photoCreatorVersion = 0
+const publishPrivacyOptions = computed(() => {
+  if (publishForm.mediaType === 'VIDEO') return ['SELF_ONLY', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'PUBLIC_TO_EVERYONE']
+  const creators = Object.values(photoCreators.value)
+  return creators.length ? creators[0].privacyLevelOptions.filter((option) => creators.every((c) => c.privacyLevelOptions.includes(option))) : []
+})
+const photoCommentDisabled = computed(() => Object.values(photoCreators.value).some((c) => c.commentDisabled))
+const privacyOptionLabel = (value: string) => ({ SELF_ONLY: '仅自己', MUTUAL_FOLLOW_FRIENDS: '好友可见', FOLLOWER_OF_CREATOR: '粉丝可见', PUBLIC_TO_EVERYONE: '公开' }[value] || value)
+watch(() => [publishDrawerVisible.value, publishForm.mediaType, publishForm.postMode, publishForm.accountIds.join(','), publishForm.groupIds.join(',')], async () => {
+  const version = ++photoCreatorVersion
+  photoCreators.value = {}
+  photoCreatorError.value = ''
+  photoCreatorLoading.value = false
+  if (!publishDrawerVisible.value || publishForm.mediaType !== 'PHOTO' || publishForm.postMode !== 'DIRECT_POST') return
+  publishForm.privacyLevel = ''
+  if (!publishForm.accountIds.length && !publishForm.groupIds.length) return
+  photoCreatorLoading.value = true
+  try {
+    const creators = await TkTiktokPublishApi.queryCreators({ accountIds: publishForm.accountIds, groupIds: publishForm.groupIds })
+    if (version !== photoCreatorVersion) return
+    photoCreators.value = creators
+    if (photoCommentDisabled.value) publishForm.allowComment = false
+    if (!publishPrivacyOptions.value.length) photoCreatorError.value = '所选账号没有共同可用的隐私设置，请调整账号选择'
+  } catch (error: any) {
+    if (version === photoCreatorVersion) photoCreatorError.value = error?.message || '无法读取账号发布权限，请重新选择账号重试'
+  } finally {
+    if (version === photoCreatorVersion) photoCreatorLoading.value = false
+  }
+})
 const rescheduleDialogVisible = ref(false)
 const rescheduleSubmitting = ref(false)
 const rescheduleForm = reactive({
@@ -1128,6 +1193,8 @@ const resetDetailQuery = () => {
 }
 
 const openPublishDrawer = (row: TkGenerationTaskVO) => {
+  resetPublishSource()
+  publishForm.mediaType = 'VIDEO'
   selectedVideo.value = row
   publishForm.sourceType = 'GENERATED'
   publishForm.uploadedVideoId = undefined
@@ -1142,6 +1209,8 @@ const openPublishDrawer = (row: TkGenerationTaskVO) => {
 }
 
 const openUploadPublishDrawer = () => {
+  resetPublishSource()
+  publishForm.mediaType = 'VIDEO'
   selectedVideo.value = undefined
   publishForm.sourceType = 'UPLOADED'
   publishForm.generationTaskId = undefined
@@ -1193,9 +1262,63 @@ const handlePublishFileChange = async (event: Event) => {
 }
 
 const resetPublishSource = () => {
+  invalidatePhotoUpload()
+  photoMedia.value.forEach((photo) => URL.revokeObjectURL(photo.preview))
+  photoMedia.value = []
+  publishForm.photoCoverIndex = 0
+  publishForm.autoAddMusic = false
+  publishUploadLoading.value = false
   publishUploadPercent.value = 0
   publishUploadError.value = ''
   if (publishFileInput.value) publishFileInput.value.value = ''
+  if (photoFileInput.value) photoFileInput.value.value = ''
+}
+
+const invalidatePhotoUpload = () => { photoUploadVersion++ }
+
+const handlePhotoFilesChange = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  if (!files.length || publishUploadLoading.value) return
+  try { validatePhotoSelection(files, photoMedia.value.length) }
+  catch (error: any) { message.warning(error.message); return }
+  const version = ++photoUploadVersion
+  publishUploadLoading.value = true
+  publishUploadError.value = ''
+  publishUploadPercent.value = 0
+  try {
+    for (let index = 0; index < files.length; index++) {
+      const file = await prepareTikTokPhoto(files[index])
+      if (version !== photoUploadVersion) return
+      const data = new FormData()
+      data.append('file', file)
+      const media = await TkTiktokPublishApi.uploadPhoto(data)
+      if (version !== photoUploadVersion) return
+      photoMedia.value.push({ id: media.id, fileName: files[index].name, preview: URL.createObjectURL(file) })
+      publishUploadPercent.value = Math.round((index + 1) * 100 / files.length)
+    }
+    message.success('图片上传完成，可调整顺序和封面')
+  } catch (error: any) {
+    if (version !== photoUploadVersion) return
+    publishUploadError.value = error?.message || '图片上传失败，请重新选择未上传成功的图片'
+    message.error(publishUploadError.value)
+  } finally {
+    if (version === photoUploadVersion) publishUploadLoading.value = false
+  }
+}
+
+const movePublishPhoto = (index: number, offset: number) => {
+  const result = movePhoto(photoMedia.value, publishForm.photoCoverIndex, index, index + offset)
+  photoMedia.value = result.photos
+  publishForm.photoCoverIndex = result.coverIndex
+}
+
+const removePublishPhoto = (index: number) => {
+  URL.revokeObjectURL(photoMedia.value[index].preview)
+  const result = removePhoto(photoMedia.value, publishForm.photoCoverIndex, index)
+  photoMedia.value = result.photos
+  publishForm.photoCoverIndex = result.coverIndex
 }
 
 const handleScheduleModeChange = () => {
@@ -1210,12 +1333,22 @@ const handleScheduleModeChange = () => {
 const isFutureSchedule = (scheduledAt?: string) => Boolean(scheduledAt && Date.parse(scheduledAt) > Date.now())
 
 const submitPublish = async () => {
+  if (publishUploadLoading.value || publishLoading.value) return
   await publishFormRef.value?.validate()
   if (!publishForm.accountIds.length && !publishForm.groupIds.length) {
     message.warning('请选择至少一个账号或账号分组')
     return
   }
-  if (publishForm.sourceType === 'UPLOADED' && !publishForm.uploadedVideoId) {
+  if (publishForm.mediaType === 'PHOTO' && (!photoMedia.value.length || publishForm.title.length > 90 || publishForm.caption.length > 4000)) {
+    message.warning('请上传图片，并确保图文标题不超过 90 字、描述不超过 4000 字')
+    return
+  }
+  if (publishForm.mediaType === 'PHOTO' && publishForm.postMode === 'DIRECT_POST'
+      && (photoCreatorLoading.value || !publishPrivacyOptions.value.includes(publishForm.privacyLevel))) {
+    message.warning('请等账号权限读取完成，并选择可用的隐私设置')
+    return
+  }
+  if (publishForm.mediaType === 'VIDEO' && publishForm.sourceType === 'UPLOADED' && !publishForm.uploadedVideoId) {
     message.warning('请先上传视频')
     return
   }
@@ -1238,6 +1371,10 @@ const submitPublish = async () => {
     const { scheduleMode, ...payload } = publishForm
     await TkTiktokPublishApi.create({
       ...payload,
+      ...(publishForm.mediaType === 'PHOTO' ? photoPublishSource(photoMedia.value, publishForm.photoCoverIndex) : {
+        generationTaskId: publishForm.sourceType === 'GENERATED' ? publishForm.generationTaskId : undefined,
+        uploadedVideoId: publishForm.sourceType === 'UPLOADED' ? publishForm.uploadedVideoId : undefined
+      }),
       scheduledAt: scheduleMode === 'SCHEDULED' ? publishForm.scheduledAt : undefined
     })
     message.success(scheduleMode === 'SCHEDULED' ? '定时发布任务已创建' : '发布任务已加入队列')
@@ -1531,6 +1668,7 @@ const linkCaptureStatusLabel = (status?: string) => ({
   AVAILABLE: '链接已获取',
   PERMISSION_REQUIRED: '缺少 video.list',
   NO_LONGER_PUBLIC: '已不再公开',
+  NOT_SUPPORTED: '图文以发布状态为准',
   FAILED: '获取失败'
 }[status || ''] || (status ? status : '未同步'))
 const linkCaptureStatusType = (status?: string) => ({
@@ -1589,6 +1727,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  resetPublishSource()
   window.removeEventListener('message', handleRedirectAuthResult)
   stopQrPolling()
   stopPublishStatusPolling()
@@ -1601,6 +1740,12 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 12px;
 }
+
+.photo-publish-content { width: 100%; }
+.photo-publish-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.photo-publish-item { min-width: 0; padding: 8px; border: 1px solid var(--el-border-color); border-radius: 6px; }
+.photo-publish-item img { display: block; width: 100%; height: 140px; object-fit: contain; background: var(--el-fill-color-light); }
+.photo-publish-item .el-button + .el-button { margin-left: 5px; }
 
 .overview-grid {
   display: grid;
