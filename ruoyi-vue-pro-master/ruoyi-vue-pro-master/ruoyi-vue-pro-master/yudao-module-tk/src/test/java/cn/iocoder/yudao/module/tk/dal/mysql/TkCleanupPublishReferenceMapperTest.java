@@ -11,6 +11,15 @@ import java.time.LocalDateTime;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 class TkCleanupPublishReferenceMapperTest {
+ @Test void generationCandidateQueryHasDriverAndServerTimeLimits() throws Exception {
+  java.lang.reflect.Method method=TkGenerationTaskMapper.class.getMethod("selectExpiredTasksWithGenerationUrls",LocalDateTime.class,int.class);
+  org.apache.ibatis.annotations.Options options=method.getAnnotation(org.apache.ibatis.annotations.Options.class);
+  assertNotNull(options,"cleanup candidate query must have a driver timeout");assertEquals(15,options.timeout());
+  org.apache.ibatis.annotations.SelectProvider provider=method.getAnnotation(org.apache.ibatis.annotations.SelectProvider.class);
+  assertNotNull(provider);
+  String sql=(String)provider.type().getMethod(provider.method()).invoke(provider.type().getDeclaredConstructor().newInstance());
+  assertTrue(sql.contains("MAX_EXECUTION_TIME(15000)"));
+ }
  @Test void activePhotoVideoGenerationAndOpenRemoteReferencesBlockCandidatesAndFinalClaims()throws Exception {
   UnpooledDataSource ds=new UnpooledDataSource("org.h2.Driver","jdbc:h2:mem:"+UUID.randomUUID()+";MODE=MySQL;DB_CLOSE_DELAY=-1","sa","");
   try(Connection c=ds.getConnection();Statement q=c.createStatement()) {
@@ -28,6 +37,10 @@ class TkCleanupPublishReferenceMapperTest {
   }
   MybatisConfiguration config=new MybatisConfiguration(new Environment("test",new JdbcTransactionFactory(),ds));config.setMapUnderscoreToCamelCase(true);config.setLocalCacheScope(LocalCacheScope.STATEMENT);config.addMapper(TkTiktokPublishMediaMapper.class);config.addMapper(TkPublishFileReferenceMapper.class);config.addMapper(TkGenerationTaskMapper.class);config.addMapper(TkCleanupFileMapper.class);
   SqlSessionFactory db=new MybatisSqlSessionFactoryBuilder().build(config);
+  org.apache.ibatis.mapping.MappedStatement candidate=config.getMappedStatement(TkGenerationTaskMapper.class.getName()+".selectExpiredTasksWithGenerationUrls");
+  assertEquals(15,candidate.getTimeout());
+  Map<String,Object> queryParams=new HashMap<>();queryParams.put("deadline",LocalDateTime.now());queryParams.put("limit",10);
+  assertTrue(candidate.getBoundSql(queryParams).getSql().startsWith("SELECT /*+ MAX_EXECUTION_TIME(15000) */"));
   try(SqlSession session=db.openSession(true);Connection c=ds.getConnection();Statement q=c.createStatement()) {
    TkTiktokPublishMediaMapper media=session.getMapper(TkTiktokPublishMediaMapper.class);TkPublishFileReferenceMapper refs=session.getMapper(TkPublishFileReferenceMapper.class);
    for(String status:Arrays.asList("SCHEDULED","PENDING","PROCESSING")) {
@@ -55,6 +68,14 @@ class TkCleanupPublishReferenceMapperTest {
    q.execute("UPDATE tk_open_tiktok_publish_detail SET status='SUCCESS',tiktok_status='PUBLISH_COMPLETE'");assertEquals(0,refs.countActive(44L,urls));assertEquals(1,media.claimForCleanup(1L));
    assertEquals(1,generations.selectExpiredTasksWithGenerationUrls(LocalDateTime.now(),10).size());
    assertEquals(1,files.selectExpiredGenerationTaskCandidates(LocalDateTime.now(),10).size());
+   q.execute("UPDATE tk_open_tiktok_publish_task SET media_id='media',media_type='VIDEO',status='SCHEDULED'");
+   assertTrue(generations.selectExpiredTasksWithGenerationUrls(LocalDateTime.now(),10).isEmpty());
+   q.execute("UPDATE tk_open_tiktok_publish_task SET client_id='other-client'");
+   assertEquals(1,generations.selectExpiredTasksWithGenerationUrls(LocalDateTime.now(),10).size());
+   q.execute("UPDATE tk_open_tiktok_publish_task SET client_id='client',deleted=1");
+   assertEquals(1,generations.selectExpiredTasksWithGenerationUrls(LocalDateTime.now(),10).size());
+   q.execute("UPDATE tk_open_tiktok_publish_task SET deleted=0");q.execute("UPDATE tk_open_tiktok_media SET deleted=1");
+   assertEquals(1,generations.selectExpiredTasksWithGenerationUrls(LocalDateTime.now(),10).size());
   }
  }
 }

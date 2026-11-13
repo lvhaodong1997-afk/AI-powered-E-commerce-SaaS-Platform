@@ -49,11 +49,12 @@ public final class TkPublishReferenceSql {
                 + g + ".id OR " + clean("reft.video_url") + "=" + clean(g + ".output_url") + ") AND " + adminTaskActive("reft")
                 + " UNION ALL SELECT 1 FROM tk_tiktok_publish_detail refd WHERE refd.deleted=0 AND refd.generation_task_id="
                 + g + ".id AND " + detailActive("refd", true)
-                + " UNION ALL SELECT 1 FROM tk_open_tiktok_media refm JOIN tk_open_tiktok_publish_task refo"
-                + " ON refo.client_id=refm.client_id AND refo.deleted=0 AND (refo.media_id=refm.media_id"
+                + " UNION ALL SELECT 1 FROM tk_open_tiktok_media refm"
+                + " WHERE refm.deleted=0 AND " + clean("refm.file_url") + "=" + clean(g + ".output_url")
+                + " AND EXISTS (SELECT 1 FROM tk_open_tiktok_publish_task refo"
+                + " WHERE refo.client_id=refm.client_id AND refo.deleted=0 AND (refo.media_id=refm.media_id"
                 + " OR EXISTS (SELECT 1 FROM tk_open_tiktok_publish_task_media refpm WHERE refpm.deleted=0"
                 + " AND refpm.client_id=refo.client_id AND refpm.task_id=refo.task_id AND refpm.media_id=refm.media_id))"
-                + " WHERE refm.deleted=0 AND " + clean("refm.file_url") + "=" + clean(g + ".output_url")
-                + " AND " + openTaskActive("refo");
+                + " AND " + openTaskActive("refo") + ")";
     }
 }
