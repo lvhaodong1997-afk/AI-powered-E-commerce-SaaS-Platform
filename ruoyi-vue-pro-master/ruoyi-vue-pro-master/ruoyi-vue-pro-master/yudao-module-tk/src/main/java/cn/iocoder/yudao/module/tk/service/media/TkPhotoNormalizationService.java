@@ -43,12 +43,16 @@ public class TkPhotoNormalizationService {
             Files.writeString(work.resolve("policy.xml"), policy(), StandardCharsets.UTF_8);
             List<String> identify = new ArrayList<>(Arrays.asList(executable,"-limit","memory","128MiB","-limit","map","256MiB",
                     "-limit","disk","512MiB","-limit","thread","1","-ping",format+":"+source.toAbsolutePath()+"[0]",
-                    "-auto-orient","-format","%w %h %W %H","info:"));
+                    "-format","%w %h %W %H %[orientation]","info:"));
             String[] dimensions = run(identify,work).trim().split("\\s+");
-            if (dimensions.length != 4) throw new IllegalArgumentException("图片尺寸无法识别");
+            if (dimensions.length != 5) throw new IllegalArgumentException("图片尺寸无法识别");
             int width=Integer.parseInt(dimensions[0]),height=Integer.parseInt(dimensions[1]);
             if("GIF".equals(format) || "WEBP".equals(format)) {
                 width=Math.max(width,Integer.parseInt(dimensions[2]));height=Math.max(height,Integer.parseInt(dimensions[3]));
+            }
+            // A ping does not rotate pixels/geometry. Fit the dimensions that -auto-orient will produce.
+            if(Arrays.asList("LeftTop","RightTop","RightBottom","LeftBottom","5","6","7","8").contains(dimensions[4])) {
+                int originalWidth=width;width=height;height=originalWidth;
             }
             int[] fitted = fit(width,height);
             run(conversionCommand(source,target,format,fitted[0],fitted[1]),work);

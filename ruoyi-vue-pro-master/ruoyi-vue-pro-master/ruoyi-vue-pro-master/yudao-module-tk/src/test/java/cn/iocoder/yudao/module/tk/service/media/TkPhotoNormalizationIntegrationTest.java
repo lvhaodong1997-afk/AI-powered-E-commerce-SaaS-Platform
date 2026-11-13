@@ -32,7 +32,7 @@ class TkPhotoNormalizationIntegrationTest {
         }
         assertEquals(0xffffff,ImageIO.read(dir.resolve("transparent.png.jpg").toFile()).getRGB(0,0)&0xffffff);
         assertEquals(0xffffff,ImageIO.read(dir.resolve("animated.gif.jpg").toFile()).getRGB(0,0)&0xffffff);
-        Path offset=dir.resolve("offset.gif");command(binary,"-size","2x2","xc:red","-page","10x10+3+3",offset.toString());
+        Path offset=dir.resolve("offset.gif");command(binary,"-size","3x3","xc:none","-fill","red","-draw","rectangle 1,1 2,2","-page","10x10+3+3",offset.toString());
         Path result=dir.resolve("offset.jpg");TkPhotoNormalizationService.Result r=codec.normalize(offset,result);
         assertEquals(10,r.getWidth());assertEquals(10,r.getHeight());
         int pixel=ImageIO.read(result.toFile()).getRGB(0,0);assertTrue(((pixel>>16)&255)>220 && ((pixel>>8)&255)>220 && (pixel&255)>220);

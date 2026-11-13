@@ -58,6 +58,19 @@ class TkPhotoNormalizationServiceTest {
         Path png=dir.resolve("invalid.jpg"); ImageIO.write(new BufferedImage(10,5,BufferedImage.TYPE_INT_RGB),"png",png.toFile());
         assertThrows(IllegalArgumentException.class,()->TkPhotoNormalizationService.validateResult(png));
     }
+    @Test void fitsOrientedJpegBeforeResizeSoPortraitIsNotStretched() throws Exception {
+        Path source=dir.resolve("oriented.jpg"),target=dir.resolve("result.jpg");
+        ImageIO.write(new BufferedImage(120,80,BufferedImage.TYPE_INT_RGB),"jpeg",source.toFile());
+        TkPhotoNormalizationService service=new TkPhotoNormalizationService(){
+            @Override String run(List<String> command,Path work) throws Exception {
+                if(command.contains("-ping")) return "120 80 120 80 RightTop";
+                assertTrue(command.contains("80x120!"),"resize must follow EXIF orientation");
+                ImageIO.write(new BufferedImage(80,120,BufferedImage.TYPE_INT_RGB),"jpeg",target.toFile());return "";
+            }
+        };
+        TkPhotoNormalizationService.Result result=service.normalize(source,target);
+        assertEquals(80,result.getWidth());assertEquals(120,result.getHeight());
+    }
 
     @Test void killsConverterAtWallClockDeadline() throws Exception {
         TkPhotoNormalizationService service=new TkPhotoNormalizationService();
