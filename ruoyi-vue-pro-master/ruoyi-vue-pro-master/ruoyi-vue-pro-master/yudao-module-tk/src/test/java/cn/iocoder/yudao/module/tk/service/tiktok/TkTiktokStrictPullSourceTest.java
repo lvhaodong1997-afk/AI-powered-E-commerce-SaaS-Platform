@@ -73,4 +73,24 @@ class TkTiktokStrictPullSourceTest {
         when(connection.getHeaderField("Content-Range")).thenReturn("bytes 0-100/123456");
         assertEquals("INVALID_CONTENT_RANGE", resolver.resolveStrict(signed(), 7L, PROPERTY).getReasonCode());
     }
+    private TkTiktokPullSourceResolver.PullDecision photo(String url) throws Exception {
+        return (TkTiktokPullSourceResolver.PullDecision) TkTiktokPullSourceResolver.class
+                .getMethod("resolvePhotoStrict", String.class, Long.class, String.class).invoke(resolver, url, 7L, PROPERTY);
+    }
+    @Test void photoStrictAcceptsFinalJpegWithBoundedRangeAndVideoRemainsStrict() throws Exception {
+        when(connection.getContentType()).thenReturn("image/jpeg");
+        assertTrue(photo(signed()).isEligible());
+        assertEquals("INVALID_CONTENT_TYPE", resolver.resolveStrict(signed(),7L,PROPERTY).getReasonCode());
+        verify(connection,times(2)).setRequestMethod("GET");
+        verify(connection,times(2)).setRequestProperty("Range","bytes=0-0");
+    }
+    @Test void photoStrictRetainsSizeSignatureAndContentChecks() throws Exception {
+        when(connection.getContentType()).thenReturn("image/jpeg");
+        when(connection.getHeaderField("Content-Range")).thenReturn("bytes 0-0/20971521");
+        assertEquals("INVALID_FILE_SIZE",photo(signed()).getReasonCode());
+        when(connection.getHeaderField("Content-Range")).thenReturn("bytes 0-0/123456");
+        when(connection.getContentType()).thenReturn("video/mp4");
+        assertEquals("INVALID_CONTENT_TYPE",photo(signed()).getReasonCode());
+        assertEquals("PULL_URL_EXPIRED",photo(ORIGIN+"?OSSAccessKeyId=k&Expires=1&Signature=s").getReasonCode());
+    }
 }

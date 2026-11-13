@@ -98,16 +98,25 @@ public class TkTiktokPullSourceResolver {
     }
 
     public PullDecision resolveStrict(String raw, Long accountId, String property) {
+        return resolveStrict(raw, accountId, property, false);
+    }
+
+    /** Final normalized JPEGs retain the strict anonymous GET/Range and authorization gates. */
+    public PullDecision resolvePhotoStrict(String raw, Long accountId, String property) {
+        return resolveStrict(raw, accountId, property, true);
+    }
+
+    private PullDecision resolveStrict(String raw, Long accountId, String property, boolean photo) {
         PullDecision candidate = candidate(raw, accountId, property, true);
         if (!candidate.isEligible()) return candidate;
         String lifetimeFailure = lifetimeFailure(candidate.getPullUrl(), MIN_PULL_VALIDITY_SECONDS);
         if (lifetimeFailure != null) return PullDecision.fallback(lifetimeFailure);
         Long tenantId = TenantContextHolder.getTenantId();
         // Candidate/lifetime checks run even on hits. Full authorization is part of the key.
-        if (tenantId == null) return get(candidate.getPullUrl());
+        if (tenantId == null) return get(candidate.getPullUrl(), photo);
         try {
-            return metadataCache.get("GET|" + tenantId + "|" + candidate.getPullUrl(), () -> {
-                PullDecision result = get(candidate.getPullUrl());
+            return metadataCache.get((photo ? "GET_PHOTO|" : "GET|") + tenantId + "|" + candidate.getPullUrl(), () -> {
+                PullDecision result = get(candidate.getPullUrl(), photo);
                 if (!result.isEligible()) throw new HeadFailure(result);
                 return result;
             });
@@ -145,7 +154,7 @@ public class TkTiktokPullSourceResolver {
         }
     }
 
-    private PullDecision get(String pullUrl) {
+    private PullDecision get(String pullUrl, boolean photo) {
         HttpURLConnection connection = null;
         ScheduledFuture<?> deadline = null;
         try {
@@ -171,11 +180,13 @@ public class TkTiktokPullSourceResolver {
                 if (!range.matches()) return PullDecision.fallback("INVALID_CONTENT_RANGE");
                 size = Long.parseLong(range.group(1));
             } else size = connection.getContentLengthLong();
-            if (size <= 0 || size > MAX_SIZE) return PullDecision.fallback("INVALID_FILE_SIZE");
+            if (size <= 0 || size > (photo ? 20L * 1024 * 1024 : MAX_SIZE)) return PullDecision.fallback("INVALID_FILE_SIZE");
             String mime = connection.getContentType();
+            if (photo && (mime == null || !"image/jpeg".equalsIgnoreCase(mime.split(";", 2)[0].trim())))
+                return PullDecision.fallback("INVALID_CONTENT_TYPE");
             if (mime != null && !mime.trim().isEmpty()) {
                 mime = mime.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
-                if (!mime.startsWith("video/") && !"application/octet-stream".equals(mime))
+                if (!photo && !mime.startsWith("video/") && !"application/octet-stream".equals(mime))
                     return PullDecision.fallback("INVALID_CONTENT_TYPE");
             }
             try (InputStream input = connection.getInputStream()) {

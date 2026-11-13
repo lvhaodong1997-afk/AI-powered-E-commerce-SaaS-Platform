@@ -1,7 +1,7 @@
 export function validatePhotoSelection(files: ArrayLike<{ name: string; size: number }>, currentCount: number) {
   if (!files.length || currentCount + files.length > 35) throw new Error('每次图文发布需要 1-35 张图片')
   for (const file of Array.from(files)) {
-    if (!/\.(jpe?g|webp)$/i.test(file.name)) throw new Error('图片仅支持 JPEG 和 WebP')
+    if (!/\.(jpe?g|webp|png|gif|heic|heif)$/i.test(file.name)) throw new Error('图片仅支持 JPEG、WebP、PNG、GIF、HEIC 和 HEIF')
     if (file.size <= 0 || file.size > 20 * 1024 * 1024) throw new Error('单张图片不能超过 20MB')
   }
 }
@@ -21,16 +21,75 @@ export function removePhoto<T extends { id: number }>(photos: T[], coverIndex: n
   return { photos: result, coverIndex: Math.max(0, result.findIndex((p) => p.id === coverId)) }
 }
 
-export function photoPublishSource(photos: { id: number }[], coverIndex: number) {
+export function photoPublishSource(photos: { id: number; status?: string; mediaId?: number }[], coverIndex: number) {
   if (!photos.length || photos.length > 35 || !Number.isInteger(coverIndex) || coverIndex < 0 || coverIndex >= photos.length) {
     throw new Error('请上传 1-35 张图片并选择封面')
   }
+  const ids = photos.map((p) => {
+    if (p.status && p.status !== 'READY') throw new Error('请等待全部图片转换成功后再发布')
+    const id = p.status ? p.mediaId : p.id
+    if (!Number.isSafeInteger(id) || !id || id < 1) throw new Error('图片转换结果无效，请重试')
+    return id
+  })
   return {
     mediaType: 'PHOTO' as const,
-    uploadedPhotoIds: photos.map((p) => p.id),
+    uploadedPhotoIds: ids,
     photoCoverIndex: coverIndex,
     generationTaskId: undefined,
     uploadedVideoId: undefined
+  }
+}
+
+export interface PhotoUploadStatus {
+  uploadId: string
+  status: string
+  failReason?: string
+  mediaId?: number
+  fileUrl?: string
+  width?: number
+  height?: number
+}
+
+/** Poll durable server conversion; the browser never needs to decode the original. */
+export async function pollPhotoUpload(operations: {
+  start: () => Promise<PhotoUploadStatus>
+  status: (id: string) => Promise<PhotoUploadStatus>
+  cancel: (id: string) => Promise<unknown>
+}, options: {
+  alive: () => boolean
+  onUpdate?: (status: PhotoUploadStatus) => void
+  sleep?: (ms: number) => Promise<void>
+  maxPolls?: number
+}): Promise<PhotoUploadStatus> {
+  const sleep = options.sleep || ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  let state: PhotoUploadStatus | undefined
+  const checkAlive = async () => {
+    if (options.alive()) return
+    if (state?.uploadId && state.status !== 'READY') {
+      try { await operations.cancel(state.uploadId) } catch { /* session may already have completed */ }
+    }
+    throw new Error('图片上传已取消')
+  }
+  await checkAlive()
+  state = await operations.start()
+  for (let poll = 0; ; poll++) {
+    await checkAlive()
+    if (!state.uploadId) throw new Error('图片上传会话无效，请重新上传')
+    options.onUpdate?.(state)
+    if (state.status === 'READY') {
+      if (!Number.isSafeInteger(state.mediaId) || !state.mediaId || state.mediaId < 1 || !state.fileUrl) {
+        throw new Error('图片转换结果无效，请重试')
+      }
+      return state
+    }
+    if (['FAILED', 'CANCELLED', 'EXPIRED'].includes(state.status)) {
+      throw new Error(state.failReason || '图片转换失败，请重试或重新上传')
+    }
+    if (!['UPLOADING', 'PROCESSING'].includes(state.status)) throw new Error('图片上传状态异常，请重新上传')
+    if (poll >= (options.maxPolls ?? 120)) throw new Error('图片转换查询超时，可点击重试继续查询')
+    await sleep(Math.min(1000 + poll * 250, 5000))
+    await checkAlive()
+    state = await operations.status(state.uploadId)
   }
 }
 

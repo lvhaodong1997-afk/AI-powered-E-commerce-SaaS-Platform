@@ -74,6 +74,9 @@ class TkOpenTiktokPublishTerminalTransactionTest {
                         new ByteArrayResource(ddl.getBytes(StandardCharsets.UTF_8)));
             }
         }
+        jdbc.execute("ALTER TABLE tk_open_tiktok_publish_task ADD COLUMN media_type VARCHAR(16) DEFAULT 'VIDEO'");
+        jdbc.execute("ALTER TABLE tk_open_tiktok_publish_task ADD COLUMN photo_cover_index INT");
+        jdbc.execute("ALTER TABLE tk_open_tiktok_publish_task ADD COLUMN auto_add_music TINYINT");
         // Task 1 owns the additive attempt migration. This isolated fixture covers its agreed columns.
         jdbc.execute("CREATE TABLE tk_open_tiktok_publish_attempt (id BIGINT AUTO_INCREMENT PRIMARY KEY,"
                 + "detail_id VARCHAR(64) NOT NULL,task_id VARCHAR(64) NOT NULL,client_id VARCHAR(64) NOT NULL,"

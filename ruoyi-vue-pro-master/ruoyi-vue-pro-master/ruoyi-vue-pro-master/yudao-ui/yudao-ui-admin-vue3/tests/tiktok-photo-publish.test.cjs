@@ -14,6 +14,53 @@ function loadHelper(globals = {}) {
 }
 const context = { exports: loadHelper() }
 const photos = [{ id: 1 }, { id: 2 }, { id: 3 }]
+test('server upload accepts all six supported source formats', () => {
+  for (const ext of ['jpg', 'jpeg', 'webp', 'png', 'gif', 'heic', 'heif']) {
+    assert.doesNotThrow(() => context.exports.validatePhotoSelection([{ name: `image.${ext}`, size: 20 }], 0))
+  }
+})
+test('async conversion publishes the final server JPEG and numeric media ID', async () => {
+  let polls = 0
+  const states = []
+  const result = await context.exports.pollPhotoUpload({
+    start: async () => ({ uploadId: 'photo_1', status: 'PROCESSING' }),
+    status: async () => ++polls < 2 ? { uploadId: 'photo_1', status: 'PROCESSING' } :
+      { uploadId: 'photo_1', status: 'READY', mediaId: 123, fileUrl: 'https://publish/final.jpg' },
+    cancel: async () => assert.fail('must not cancel completed upload')
+  }, { alive: () => true, sleep: async () => {}, onUpdate: s => states.push(s.status) })
+  assert.equal(result.mediaId, 123)
+  assert.equal(result.fileUrl, 'https://publish/final.jpg')
+  assert.equal(polls, 2)
+  assert.equal(states.join(','), 'PROCESSING,PROCESSING,READY')
+})
+test('late upload response after removal is cancelled without exposing READY', async () => {
+  let alive = true
+  let cancelled
+  let updates = 0
+  await assert.rejects(() => context.exports.pollPhotoUpload({
+    start: async () => { alive = false; return { uploadId: 'late', status: 'PROCESSING' } },
+    status: async () => assert.fail('must not poll removed item'),
+    cancel: async id => { cancelled = id }
+  }, { alive: () => alive, sleep: async () => {}, onUpdate: () => updates++ }), /已取消/)
+  assert.equal(cancelled, 'late')
+  assert.equal(updates, 0)
+})
+test('failed and timed out conversion preserves the session for isolated retry', async () => {
+  let polls = 0
+  const operations = { start: async () => ({ uploadId: 'retained', status: 'PROCESSING' }),
+    status: async () => { polls++; return { uploadId: 'retained', status: 'PROCESSING' } }, cancel: async () => assert.fail() }
+  await assert.rejects(() => context.exports.pollPhotoUpload(operations, { alive: () => true, sleep: async () => {}, maxPolls: 2 }), /超时/)
+  assert.equal(polls, 2)
+  operations.start = async () => ({ uploadId: 'retained', status: 'FAILED', failReason: '格式损坏' })
+  await assert.rejects(() => context.exports.pollPhotoUpload(operations, { alive: () => true, sleep: async () => {} }), /格式损坏/)
+})
+test('pending and failed photos cannot publish, READY order uses server IDs', () => {
+  const source = context.exports.photoPublishSource([{ id: -2, status: 'READY', mediaId: 92 }, { id: -1, status: 'READY', mediaId: 91 }], 1)
+  assert.equal(source.uploadedPhotoIds.join(','), '92,91')
+  assert.throws(() => context.exports.photoPublishSource([{ id: -1, status: 'PROCESSING' }], 0), /转换/)
+  assert.throws(() => context.exports.photoPublishSource([{ id: -1, status: 'FAILED' }], 0), /转换/)
+  assert.throws(() => context.exports.photoPublishSource([{ id: -1, status: 'READY', mediaId: 0 }], 0))
+})
 test('moving and removing images preserves the chosen cover by identity', () => {
   const moved = context.exports.movePhoto(photos, 1, 1, 0)
   assert.equal(moved.coverIndex, 0)

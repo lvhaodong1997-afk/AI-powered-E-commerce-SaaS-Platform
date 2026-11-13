@@ -334,7 +334,18 @@ export const TkTiktokAccountGroupApi = {
   }
 }
 
+export interface TkPhotoUploadStatus {
+  uploadId: string; status: string; failReason?: string; mediaId?: number; fileUrl?: string; width?: number; height?: number
+}
+
 export const TkTiktokPublishApi = {
+  createPhotoUpload: async (data: FormData): Promise<TkPhotoUploadStatus> => {
+    const res = await request.upload<{ data: TkPhotoUploadStatus }>({ url: '/tk/tiktok-publish/media/photo/uploads', data, timeout: 90000 })
+    return res.data as TkPhotoUploadStatus
+  },
+  photoUploadStatus: (id: string): Promise<TkPhotoUploadStatus> => request.get({ url: `/tk/tiktok-publish/media/photo/uploads/${encodeURIComponent(id)}` }),
+  retryPhotoUpload: (id: string): Promise<TkPhotoUploadStatus> => request.post({ url: `/tk/tiktok-publish/media/photo/uploads/${encodeURIComponent(id)}/retry` }),
+  cancelPhotoUpload: (id: string) => request.delete({ url: `/tk/tiktok-publish/media/photo/uploads/${encodeURIComponent(id)}` }),
   queryCreators: async (data: { accountIds: number[]; groupIds: number[] }): Promise<Record<string, {
     privacyLevelOptions: string[]; commentDisabled: boolean
   }>> => request.post({ url: '/tk/tiktok-publish/creator-info', data }),

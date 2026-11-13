@@ -9,6 +9,7 @@ public final class TkOpenTiktokMediaVO {
 
     @Data
     public static class UploadCreateReq {
+        private String mediaType;
         private String fileName;
         private Long fileSize;
         private String contentType;
@@ -17,6 +18,8 @@ public final class TkOpenTiktokMediaVO {
 
     @Data
     public static class UploadSessionResp {
+        private String mediaType;
+        private String status;
         private String uploadId;
         private String uploadMode;
         private Integer chunkSize;
@@ -29,6 +32,13 @@ public final class TkOpenTiktokMediaVO {
 
     @Data
     public static class OssFields {
+        @com.fasterxml.jackson.annotation.JsonProperty("xOssObjectAcl")
+        private String xOssObjectAcl;
+        private String contentType;
+        @com.fasterxml.jackson.annotation.JsonProperty("xOssObjectAcl")
+        public String getXOssObjectAcl() {return xOssObjectAcl;}
+        @com.fasterxml.jackson.annotation.JsonProperty("xOssObjectAcl")
+        public void setXOssObjectAcl(String value) {xOssObjectAcl=value;}
         private final String policy;
         private final String ossAccessKeyId;
         private final String signature;
@@ -43,6 +53,10 @@ public final class TkOpenTiktokMediaVO {
 
     @Data
     public static class UploadStatusResp {
+        private String mediaType;
+        private String failReason;
+        private Integer width;
+        private Integer height;
         private String uploadId;
         private String mediaId;
         private String uploadMode;
@@ -60,6 +74,10 @@ public final class TkOpenTiktokMediaVO {
 
     @Data
     public static class MediaResp {
+        private String mediaType;
+        private String failReason;
+        private Integer width;
+        private Integer height;
         private String mediaId;
         private String uploadId;
         private String fileName;

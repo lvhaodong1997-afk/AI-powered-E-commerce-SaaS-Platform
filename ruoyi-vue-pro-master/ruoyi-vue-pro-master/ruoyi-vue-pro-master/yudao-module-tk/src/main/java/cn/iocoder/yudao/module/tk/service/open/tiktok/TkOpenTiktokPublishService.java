@@ -99,6 +99,7 @@ public class TkOpenTiktokPublishService {
     private int uploadUrlMaxRetries = 2;
     @Resource private TkOpenTiktokPublishAttemptService attemptService;
     @Resource private TkOpenTiktokPublishTerminalService terminalService;
+    @Resource private TkOpenTiktokPublishTaskMediaMapper taskMediaMapper;
     @Resource private TkOpenTiktokPublishResponseJournal responseJournal;
     @Resource private TkTiktokPullSourceResolver pullSourceResolver;
     @Resource private cn.iocoder.yudao.module.tk.service.upload.TkPublishFilePreparationService filePreparationService;
@@ -233,6 +234,7 @@ public class TkOpenTiktokPublishService {
     private TkOpenTiktokPublishVO.TaskResp createInternal(TkOpenTiktokPublishVO.TaskCreateReq request,
                                                            String idempotencyKey, String hash) {
         validateIdempotencyKey(idempotencyKey);
+        validatePublishRequest(request);
         String clientId = TkOpenApiContext.getRequiredPrincipal().getClientId();
         LocalDateTime now = LocalDateTime.now();
         TkOpenApiIdempotencyDO existing = idempotencyMapper.selectByClientAndKey(clientId, idempotencyKey);
@@ -248,9 +250,15 @@ public class TkOpenTiktokPublishService {
         int requestedAccountCount = request.getConnectionIds() == null ? 0
                 : new LinkedHashSet<>(request.getConnectionIds()).size();
         validateSchedule(request, scheduleTime, requestedAccountCount);
-        TkOpenTiktokMediaDO media = mediaMapper.selectByClientAndMediaId(clientId, request.getMediaId());
+        String mediaType = normalizeMediaType(request.getMediaType());
+        List<TkOpenTiktokMediaDO> photoMedia = "PHOTO".equals(mediaType)
+                ? requirePhotoMedia(clientId, request.getPhotoMediaIds()) : Collections.emptyList();
+        TkOpenTiktokMediaDO media = "VIDEO".equals(mediaType)
+                ? mediaMapper.selectByClientAndMediaId(clientId, request.getMediaId()) : photoMedia.get(0);
         if (media == null) throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "media does not exist");
         if (!"READY".equals(media.getStatus())) throw TkOpenApiException.badRequest("MEDIA_NOT_READY", "media is not ready");
+        if ("VIDEO".equals(mediaType) && "PHOTO".equalsIgnoreCase(media.getMediaType()))
+            throw TkOpenApiException.badRequest("VIDEO_MEDIA_TYPE_INVALID", "video publish requires VIDEO media");
         LinkedHashSet<String> requestedIds = new LinkedHashSet<>(request.getConnectionIds());
         List<TkOpenTiktokConnectionDO> connections = connectionMapper.selectListByClientAndIds(clientId, requestedIds);
         if (connections.size() != requestedIds.size()) {
@@ -259,6 +267,7 @@ public class TkOpenTiktokPublishService {
         for (TkOpenTiktokConnectionDO connection : connections) {
             if (!"AUTHORIZED".equals(connection.getAuthStatus()))
                 throw TkOpenApiException.badRequest("CONNECTION_NOT_AUTHORIZED", "connection is not authorized");
+            if ("PHOTO".equals(mediaType)) validatePhotoScope(connection.getScopes(), request.getPostMode());
         }
         boolean scheduled = scheduledAt != null;
         long strictAccounts = pullSourceResolver != null && pullSourceResolver.isStrictEnabled()
@@ -267,7 +276,9 @@ public class TkOpenTiktokPublishService {
         if (!dualBucketEnabled() && strictAccounts > 0 && strictAccounts != connections.size())
             throw TkOpenApiException.badRequest("PULL_ACCOUNT_POLICY_MIXED", "直拉白名单内外账号请分开创建发布任务");
         boolean strictPull = dualBucketEnabled() || strictAccounts > 0;
-        if (strictPull && scheduled) validatePullSchedule(media, scheduleTime);
+        if ("PHOTO".equals(mediaType) && scheduled) {
+            for (TkOpenTiktokMediaDO photo : photoMedia) validatePullSchedule(photo, scheduleTime);
+        } else if (strictPull && scheduled) validatePullSchedule(media, scheduleTime);
         boolean preferPull = strictPull || pullSourceResolver != null && connections.stream().anyMatch(connection ->
                 scheduled
                         ? pullSourceResolver.resolve(media.getFileUrl(), connection.getId(), platform().verifiedPullDomain()).isEligible()
@@ -294,8 +305,12 @@ public class TkOpenTiktokPublishService {
         TkOpenTiktokPublishTaskDO task = TkOpenTiktokPublishTaskDO.builder()
                 .taskId(taskId)
                 .clientId(clientId)
-                .mediaId(media.getMediaId())
-                .transferPolicy(strictPull ? "OSS_PULL_V2_STRICT" : preferPull ? "OSS_PULL_V1" : "FILE_UPLOAD")
+                .mediaType(mediaType)
+                .mediaId("VIDEO".equals(mediaType) ? media.getMediaId() : null)
+                .photoCoverIndex("PHOTO".equals(mediaType) ? request.getPhotoCoverIndex() : null)
+                .autoAddMusic("PHOTO".equals(mediaType) ? Boolean.TRUE.equals(request.getAutoAddMusic()) : null)
+                .transferPolicy("PHOTO".equals(mediaType) ? "OSS_PULL_V2_STRICT"
+                        : strictPull ? "OSS_PULL_V2_STRICT" : preferPull ? "OSS_PULL_V1" : "FILE_UPLOAD")
                 .externalRequestId(request.getExternalRequestId())
                 .title(request.getTitle())
                 .caption(request.getCaption())
@@ -320,6 +335,15 @@ public class TkOpenTiktokPublishService {
                 .scheduleVersion(0)
                 .build();
         taskMapper.insert(task);
+        if ("PHOTO".equals(mediaType)) {
+            if (taskMediaMapper == null) throw TkOpenApiException.unavailable(
+                    "PHOTO_ASSOCIATION_UNAVAILABLE", "photo association service is unavailable");
+            for (int index = 0; index < photoMedia.size(); index++) {
+                taskMediaMapper.insert(TkOpenTiktokPublishTaskMediaDO.builder()
+                        .clientId(clientId).taskId(taskId).mediaId(photoMedia.get(index).getMediaId())
+                        .sortIndex(index).build());
+            }
+        }
         for (TkOpenTiktokConnectionDO connection : connections) {
             detailMapper.insert(TkOpenTiktokPublishDetailDO.builder()
                     .detailId(TkOpenApiIds.next("detail"))
@@ -363,8 +387,15 @@ public class TkOpenTiktokPublishService {
         if (details.isEmpty() || details.stream().anyMatch(detail -> !"SCHEDULED".equals(detail.getStatus()))) {
             throw TkOpenApiException.conflict("SCHEDULE_ALREADY_RUNNING", "scheduled task execution has already started");
         }
-        if ("OSS_PULL_V2_STRICT".equals(task.getTransferPolicy()))
-            validatePullSchedule(mediaMapper.selectByClientAndMediaId(clientId, task.getMediaId()), nextSchedule);
+        if ("OSS_PULL_V2_STRICT".equals(task.getTransferPolicy())) {
+            if (isPhoto(task)) {
+                for (TkOpenTiktokMediaDO photo : loadTaskPhotoMedia(clientId, task.getTaskId())) {
+                    validatePullSchedule(photo, nextSchedule);
+                }
+            } else {
+                validatePullSchedule(mediaMapper.selectByClientAndMediaId(clientId, task.getMediaId()), nextSchedule);
+            }
+        }
         int version = task.getScheduleVersion() == null ? 0 : task.getScheduleVersion();
         int changed = taskMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
                 .eq(TkOpenTiktokPublishTaskDO::getId, task.getId())
@@ -431,7 +462,7 @@ public class TkOpenTiktokPublishService {
                     .setMetricsFailReason("publish task was cancelled before execution").setLastSyncTime(now);
             if (callbackService != null) publishEvent(detail, task, "publish.cancelled");
         }
-        cleanupScheduledMediaAfterCommit(clientId, task.getMediaId());
+        cleanupTaskMediaAfterCommit(task);
         return toTaskResp(task);
     }
 
@@ -456,7 +487,7 @@ public class TkOpenTiktokPublishService {
 
     public TkOpenTiktokPublishVO.MetricsResp getMetrics(String taskId) {
         String clientId = currentClient();
-        requireTask(clientId, taskId);
+        TkOpenTiktokPublishTaskDO metricsTask = requireTask(clientId, taskId);
         List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectListByClientAndTaskId(clientId, taskId);
         if (details.isEmpty()) {
             throw TkOpenApiException.notFound("PUBLISH_DETAIL_NOT_FOUND", "publish detail does not exist");
@@ -466,6 +497,7 @@ public class TkOpenTiktokPublishService {
                     "metrics query supports one published TikTok account per task");
         }
         TkOpenTiktokPublishDetailDO detail = details.get(0);
+        if (isPhoto(metricsTask)) return toMetricsResp(detail, "UNAVAILABLE", "Photo posts use platform publish status; video metrics are unavailable");
         if (StrUtil.isBlank(detail.getPublicPostId()) && StrUtil.isNotBlank(detail.getPublishId())) {
             syncDetail(detail, false);
             detail = detailMapper.selectByClientAndDetailId(clientId, detail.getDetailId());
@@ -551,6 +583,10 @@ public class TkOpenTiktokPublishService {
                     continue;
                 }
                 resolvedDetails.add(detail);
+                if (isPhoto(task)) {
+                    responseByDetail.put(detail.getDetailId(), toMetricsResp(detail, "UNAVAILABLE", "Photo video metrics are unavailable"));
+                    continue;
+                }
                 if (StrUtil.isBlank(detail.getPublicPostId())) {
                     responseByDetail.put(detail.getDetailId(),
                             toMetricsResp(detail, metricsStateBeforePublicPost(detail), detail.getMetricsFailReason()));
@@ -815,7 +851,7 @@ public class TkOpenTiktokPublishService {
             detail.setStatus("CANCELLED").setTiktokStatus("CANCELLED").setLastSyncTime(now);
             publishEvent(detail, task, "publish.cancelled");
         }
-        cleanupScheduledMediaAfterCommit(clientId, task.getMediaId());
+        cleanupTaskMediaAfterCommit(task);
         return true;
     }
 
@@ -977,30 +1013,57 @@ public class TkOpenTiktokPublishService {
             heartbeat = startHeartbeat(attempt);
             TkOpenTiktokPublishTaskDO task = taskMapper.selectByClientAndTaskId(detail.getClientId(), detail.getTaskId());
             TkOpenTiktokConnectionDO connection = connectionMapper.selectByClientAndConnectionId(detail.getClientId(), detail.getConnectionId());
-            TkOpenTiktokMediaDO media = task == null ? null : mediaMapper.selectByClientAndMediaId(detail.getClientId(), task.getMediaId());
+            List<TkOpenTiktokMediaDO> photos = task != null && isPhoto(task)
+                    ? loadTaskPhotoMedia(detail.getClientId(), task.getTaskId()) : Collections.emptyList();
+            TkOpenTiktokMediaDO media = task == null ? null : isPhoto(task)
+                    ? (photos.isEmpty() ? null : photos.get(0))
+                    : mediaMapper.selectByClientAndMediaId(detail.getClientId(), task.getMediaId());
             if (task == null || connection == null || media == null) throw new IllegalStateException("publish resource no longer exists");
+            if (isPhoto(task)) validatePhotoScope(connection.getScopes(), task.getPostMode());
             TkOpenPublishPlatformAdapter adapter = platform();
             String token = validAccessToken(connection, adapter, false);
-            TkOpenPublishPlatformAdapter.CreatorCapabilities creator = adapter.queryCreatorInfo(token);
-            if (creator.isAccessTokenInvalid()) {
-                token = validAccessToken(connection, adapter, true);
+            TkOpenPublishPlatformAdapter.CreatorCapabilities creator;
+            if ("UPLOAD_TO_INBOX".equals(task.getPostMode())) {
+                creator = new TkOpenPublishPlatformAdapter.CreatorCapabilities(true, null,
+                        Collections.emptyList(), false, false, false, null);
+            } else {
                 creator = adapter.queryCreatorInfo(token);
+                if (creator.isAccessTokenInvalid()) {
+                    token = validAccessToken(connection, adapter, true);
+                    creator = adapter.queryCreatorInfo(token);
+                }
+                if (!creator.isSuccess()) throw new IllegalStateException(creator.getFailReason());
             }
-            if (!creator.isSuccess()) throw new IllegalStateException(creator.getFailReason());
             if (dualBucketEnabled()) {
                 detail.setTiktokStatus("PREPARING_MEDIA");
                 detailMapper.update(null, processingUpdate(detail).isNull(TkOpenTiktokPublishDetailDO::getPublishId)
                         .set(TkOpenTiktokPublishDetailDO::getTiktokStatus, "PREPARING_MEDIA"));
             }
-            source = dualBucketEnabled()
-                    ? resolvePreparedSource(media, detail.getClientId(), adapter.verifiedPullDomain(), connection.getId())
-                    : "OSS_PULL_V2_STRICT".equals(task.getTransferPolicy())
-                    ? resolveStrictSource(media, adapter.verifiedPullDomain(), connection.getId())
-                    : "LEGACY".equals(task.getTransferPolicy()) || StrUtil.isBlank(task.getTransferPolicy())
-                    ? resolveSource(media, adapter.verifiedPullDomain())
-                    : resolveSource(media, adapter.verifiedPullDomain(), connection.getId(),
-                            "OSS_PULL_V1".equals(task.getTransferPolicy()));
-            Map<String, Object> payload = buildPayload(task, media, creator, source);
+            Map<String, Object> payload;
+            if (isPhoto(task)) {
+                List<String> photoUrls = new ArrayList<>();
+                long totalSize = 0L;
+                for (TkOpenTiktokMediaDO photo : photos) {
+                    UploadSource item = dualBucketEnabled()
+                            ? resolvePreparedSource(photo, detail.getClientId(), adapter.verifiedPullDomain(), connection.getId())
+                            : resolveStrictSource(photo, adapter.verifiedPullDomain(), connection.getId());
+                    if (!item.pullFromUrl) throw new IllegalStateException("photo publish requires PULL_FROM_URL");
+                    photoUrls.add(item.pullUrl);
+                    totalSize += item.size;
+                }
+                source = UploadSource.pull(photoUrls.get(0), totalSize);
+                payload = buildPhotoPayload(task, creator, photoUrls);
+            } else {
+                source = dualBucketEnabled()
+                        ? resolvePreparedSource(media, detail.getClientId(), adapter.verifiedPullDomain(), connection.getId())
+                        : "OSS_PULL_V2_STRICT".equals(task.getTransferPolicy())
+                        ? resolveStrictSource(media, adapter.verifiedPullDomain(), connection.getId())
+                        : "LEGACY".equals(task.getTransferPolicy()) || StrUtil.isBlank(task.getTransferPolicy())
+                        ? resolveSource(media, adapter.verifiedPullDomain())
+                        : resolveSource(media, adapter.verifiedPullDomain(), connection.getId(),
+                                "OSS_PULL_V1".equals(task.getTransferPolicy()));
+                payload = buildPayload(task, media, creator, source);
+            }
             attemptService.ready(attempt, source.pullFromUrl ? "PULL_FROM_URL" : "FILE_UPLOAD",
                     source.size, source.pullFromUrl ? null : fileSha256(source.file));
             if (source.pullFromUrl) {
@@ -1056,7 +1119,7 @@ public class TkOpenTiktokPublishService {
             // This fenced durable transition must succeed before contacting TikTok.
             attemptService.beginRemoteInit(attempt, LocalDateTime.now().minusMinutes(WORKER_LEASE_MINUTES));
             initSent = true;
-            TkOpenPublishPlatformAdapter.PublishInitResult initialized = adapter.initVideoPost(token, task.getPostMode(), payload);
+            TkOpenPublishPlatformAdapter.PublishInitResult initialized = initPost(adapter, token, task, payload);
             if (initialized.isAccessTokenInvalid()) {
                 // An explicit invalid-token rejection has no accepted publish; one refreshed request is safe.
                 token = validAccessToken(connection, adapter, true);
@@ -1066,7 +1129,7 @@ public class TkOpenTiktokPublishService {
                     failureSource = "INIT_REJECTED";
                     throw new IllegalStateException("TikTok initialization budget exhausted after explicit token rejection");
                 }
-                initialized = adapter.initVideoPost(token, task.getPostMode(), payload);
+                initialized = initPost(adapter, token, task, payload);
             }
             if (!initialized.isSuccess()) {
                 if (isDefinitiveInitRejection(initialized.getErrorCode())) {
@@ -1597,7 +1660,9 @@ public class TkOpenTiktokPublishService {
 
     private UploadSource resolvePreparedSource(TkOpenTiktokMediaDO media, String clientId, String verifiedDomain, Long accountId) {
         String url = filePreparationService.prepareOpen(media, clientId);
-        TkTiktokPullSourceResolver.PullDecision decision = pullSourceResolver.resolveStrict(url, accountId, verifiedDomain);
+        TkTiktokPullSourceResolver.PullDecision decision = "PHOTO".equals(media.getMediaType())
+                ? pullSourceResolver.resolvePhotoStrict(url, accountId, verifiedDomain)
+                : pullSourceResolver.resolveStrict(url, accountId, verifiedDomain);
         if (decision == null) throw new PullPreflightException("PULL_RESOLVER_UNAVAILABLE", false);
         if (!decision.isEligible()) throw new PullPreflightException(decision.getReasonCode(), "PULL_TEMPORARILY_UNAVAILABLE".equals(decision.getReasonCode()));
         if (media.getFileSize() != null && media.getFileSize() > 0 && media.getFileSize() != decision.getFileSize())
@@ -1609,7 +1674,9 @@ public class TkOpenTiktokPublishService {
         if (pullSourceResolver == null) throw new PullPreflightException("PULL_RESOLVER_UNAVAILABLE", false);
         String url = mediaService == null ? media.getFileUrl()
                 : mediaService.resolvePullReadUrl(media, pullSourceResolver.pullBaseUrl());
-        TkTiktokPullSourceResolver.PullDecision decision = pullSourceResolver.resolveStrict(url, accountId, verifiedDomain);
+        TkTiktokPullSourceResolver.PullDecision decision = "PHOTO".equals(media.getMediaType())
+                ? pullSourceResolver.resolvePhotoStrict(url, accountId, verifiedDomain)
+                : pullSourceResolver.resolveStrict(url, accountId, verifiedDomain);
         if (decision == null) throw new PullPreflightException("PULL_RESOLVER_UNAVAILABLE", false);
         if (!decision.isEligible()) throw new PullPreflightException(decision.getReasonCode(),
                 "PULL_TEMPORARILY_UNAVAILABLE".equals(decision.getReasonCode()));
@@ -1679,10 +1746,25 @@ public class TkOpenTiktokPublishService {
         }
     }
 
+    private void cleanupTaskMediaAfterCommit(TkOpenTiktokPublishTaskDO task) {
+        if (task == null) return;
+        if (isPhoto(task) && taskMediaMapper != null) {
+            for (TkOpenTiktokPublishTaskMediaDO association
+                    : taskMediaMapper.selectByClientAndTaskId(task.getClientId(), task.getTaskId())) {
+                cleanupScheduledMediaAfterCommit(task.getClientId(), association.getMediaId());
+            }
+        } else {
+            cleanupScheduledMediaAfterCommit(task.getClientId(), task.getMediaId());
+        }
+    }
+
     private Map<String, Object> buildPublishEventPayload(TkOpenTiktokPublishDetailDO detail,
                                                           TkOpenTiktokPublishTaskDO task) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("taskId", task.getTaskId()); payload.put("detailId", detail.getDetailId());
+        payload.put("mediaType", normalizeMediaType(task.getMediaType()));
+        payload.put("photoCount", isPhoto(task) && taskMediaMapper != null
+                ? taskMediaMapper.selectByClientAndTaskId(task.getClientId(), task.getTaskId()).size() : 0);
         payload.put("connectionId", detail.getConnectionId()); payload.put("externalRequestId", task.getExternalRequestId());
         payload.put("status", detail.getStatus()); payload.put("publishId", detail.getPublishId());
         payload.put("publicPostId", detail.getPublicPostId());
@@ -1702,7 +1784,157 @@ public class TkOpenTiktokPublishService {
         return toTaskResp(task);
     }
 
+    static void validatePublishRequest(TkOpenTiktokPublishVO.TaskCreateReq request) {
+        if (request == null) {
+            throw TkOpenApiException.badRequest("PUBLISH_REQUEST_REQUIRED", "publish request is required");
+        }
+        String mediaType = normalizeMediaType(request.getMediaType());
+        request.setMediaType(mediaType);
+        if ("VIDEO".equals(mediaType)) {
+            if (request.getCaption() != null && request.getCaption().length() > 2200)
+                throw TkOpenApiException.badRequest("VIDEO_CAPTION_TOO_LONG", "VIDEO caption exceeds 2200 UTF-16 code units");
+            if (StrUtil.isBlank(request.getMediaId())) {
+                throw TkOpenApiException.badRequest("VIDEO_MEDIA_REQUIRED", "VIDEO publish requires mediaId");
+            }
+            if (request.getPhotoMediaIds() != null && !request.getPhotoMediaIds().isEmpty()) {
+                throw TkOpenApiException.badRequest("VIDEO_PHOTO_MEDIA_CONFLICT",
+                        "VIDEO publish cannot include photoMediaIds");
+            }
+            if (request.getPhotoCoverIndex() != null || request.getAutoAddMusic() != null) {
+                throw TkOpenApiException.badRequest("VIDEO_PHOTO_OPTIONS_UNSUPPORTED",
+                        "photo options are not supported for VIDEO");
+            }
+            return;
+        }
+        if (!"PHOTO".equals(mediaType)) {
+            throw TkOpenApiException.badRequest("MEDIA_TYPE_INVALID", "mediaType must be VIDEO or PHOTO");
+        }
+        if (StrUtil.isNotBlank(request.getMediaId())) {
+            throw TkOpenApiException.badRequest("PHOTO_VIDEO_MEDIA_CONFLICT",
+                    "PHOTO publish cannot include mediaId");
+        }
+        List<String> mediaIds = request.getPhotoMediaIds();
+        if (mediaIds == null || mediaIds.isEmpty() || mediaIds.size() > 35
+                || mediaIds.stream().anyMatch(StrUtil::isBlank)) {
+            throw TkOpenApiException.badRequest("PHOTO_MEDIA_INVALID",
+                    "PHOTO publish requires 1-35 photoMediaIds");
+        }
+        int coverIndex = request.getPhotoCoverIndex() == null ? 0 : request.getPhotoCoverIndex();
+        request.setPhotoCoverIndex(coverIndex);
+        if (coverIndex < 0 || coverIndex >= mediaIds.size()) {
+            throw TkOpenApiException.badRequest("PHOTO_COVER_INVALID",
+                    "photoCoverIndex is outside photoMediaIds");
+        }
+        if (request.getTitle() != null && request.getTitle().length() > 90) {
+            throw TkOpenApiException.badRequest("PHOTO_TITLE_TOO_LONG",
+                    "PHOTO title exceeds 90 UTF-16 code units");
+        }
+        if (request.getCaption() != null && request.getCaption().length() > 4000) {
+            throw TkOpenApiException.badRequest("PHOTO_CAPTION_TOO_LONG",
+                    "PHOTO caption exceeds 4000 UTF-16 code units");
+        }
+        if (Boolean.TRUE.equals(request.getAllowDuet())) {
+            throw TkOpenApiException.badRequest("PHOTO_DUET_UNSUPPORTED", "PHOTO publish does not support duet");
+        }
+        if (Boolean.TRUE.equals(request.getAllowStitch())) {
+            throw TkOpenApiException.badRequest("PHOTO_STITCH_UNSUPPORTED", "PHOTO publish does not support stitch");
+        }
+        if (Boolean.TRUE.equals(request.getAutoAddMusic()) && !"DIRECT_POST".equals(request.getPostMode())) {
+            throw TkOpenApiException.badRequest("PHOTO_MUSIC_MODE_UNSUPPORTED",
+                    "autoAddMusic requires DIRECT_POST");
+        }
+    }
+
+    private List<TkOpenTiktokMediaDO> requirePhotoMedia(String clientId, List<String> mediaIds) {
+        List<TkOpenTiktokMediaDO> result = new ArrayList<>();
+        for (String mediaId : mediaIds) {
+            TkOpenTiktokMediaDO media = mediaMapper.selectByClientAndMediaId(clientId, mediaId);
+            if (media == null) {
+                throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "photo media does not exist");
+            }
+            if (!"READY".equals(media.getStatus())) {
+                throw TkOpenApiException.badRequest("MEDIA_NOT_READY", "photo media is not ready");
+            }
+            if (!"PHOTO".equalsIgnoreCase(media.getMediaType())
+                    || !"image/jpeg".equalsIgnoreCase(media.getContentType())) {
+                throw TkOpenApiException.badRequest("PHOTO_MEDIA_TYPE_INVALID",
+                        "photo media must be a READY final JPEG");
+            }
+            result.add(media);
+        }
+        return result;
+    }
+
+    private List<TkOpenTiktokMediaDO> loadTaskPhotoMedia(String clientId, String taskId) {
+        if (taskMediaMapper == null) return Collections.emptyList();
+        List<TkOpenTiktokMediaDO> result = new ArrayList<>();
+        for (TkOpenTiktokPublishTaskMediaDO association : taskMediaMapper.selectByClientAndTaskId(clientId, taskId)) {
+            TkOpenTiktokMediaDO media = mediaMapper.selectByClientAndMediaId(clientId, association.getMediaId());
+            if (media == null || !"READY".equals(media.getStatus())
+                    || !"PHOTO".equalsIgnoreCase(media.getMediaType())) {
+                throw new IllegalStateException("ordered photo media is unavailable");
+            }
+            result.add(media);
+        }
+        return result;
+    }
+
+    private Map<String, Object> buildPhotoPayload(TkOpenTiktokPublishTaskDO task,
+            TkOpenPublishPlatformAdapter.CreatorCapabilities creator, List<String> photoUrls) {
+        Map<String, Object> post = new LinkedHashMap<>();
+        post.put("title", StrUtil.blankToDefault(task.getTitle(), "TikTok photo post"));
+        post.put("description", StrUtil.nullToEmpty(task.getCaption()));
+        if (!"UPLOAD_TO_INBOX".equals(task.getPostMode())) {
+            if (creator.getPrivacyLevelOptions() == null || !creator.getPrivacyLevelOptions().contains(task.getPrivacyLevel()))
+                throw new IllegalArgumentException("Selected privacy level is unavailable for this TikTok account");
+            post.put("privacy_level", task.getPrivacyLevel());
+            post.put("disable_comment", creator.isCommentDisabled() || !Boolean.TRUE.equals(task.getAllowComment()));
+            post.put("auto_add_music", Boolean.TRUE.equals(task.getAutoAddMusic()));
+            post.put("brand_content_toggle", Boolean.TRUE.equals(task.getBrandContent()));
+            post.put("brand_organic_toggle", Boolean.TRUE.equals(task.getCommercialContent()));
+        }
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("source", "PULL_FROM_URL");
+        source.put("photo_images", photoUrls);
+        source.put("photo_cover_index", task.getPhotoCoverIndex() == null ? 0 : task.getPhotoCoverIndex());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("media_type", "PHOTO");
+        payload.put("is_aigc", Boolean.TRUE.equals(task.getAigcContent()));
+        payload.put("post_mode", "UPLOAD_TO_INBOX".equals(task.getPostMode())
+                ? "MEDIA_UPLOAD" : "DIRECT_POST");
+        payload.put("post_info", post);
+        payload.put("source_info", source);
+        return payload;
+    }
+
+    private TkOpenPublishPlatformAdapter.PublishInitResult initPost(TkOpenPublishPlatformAdapter adapter,
+            String token, TkOpenTiktokPublishTaskDO task, Map<String, Object> payload) {
+        return isPhoto(task) ? adapter.initPhotoPost(token, task.getPostMode(), payload)
+                : adapter.initVideoPost(token, task.getPostMode(), payload);
+    }
+
+    private static boolean isPhoto(TkOpenTiktokPublishTaskDO task) {
+        return task != null && "PHOTO".equalsIgnoreCase(task.getMediaType());
+    }
+
+    static void validatePhotoScope(String scopes, String postMode) {
+        String required = "UPLOAD_TO_INBOX".equals(postMode) ? "video.upload" : "video.publish";
+        if (scopes == null || !Arrays.asList(scopes.split("[,\\s]+" )).contains(required))
+            throw TkOpenApiException.badRequest("PHOTO_SCOPE_REQUIRED", "PHOTO publishing requires " + required);
+    }
+
+    private static String normalizeMediaType(String mediaType) {
+        return StrUtil.blankToDefault(mediaType, "VIDEO").trim().toUpperCase(Locale.ROOT);
+    }
+
     static String requestHash(TkOpenTiktokPublishVO.TaskCreateReq request) {
+        if (request != null && "VIDEO".equals(normalizeMediaType(request.getMediaType()))) {
+            // Preserve digests of seven-day idempotency records created before PHOTO fields existed.
+            Map<String, Object> legacy = JsonUtils.parseObject(JsonUtils.toJsonString(request), Map.class);
+            legacy.remove("mediaType"); legacy.remove("photoMediaIds");
+            legacy.remove("photoCoverIndex"); legacy.remove("autoAddMusic");
+            return TkOpenApiSigner.sha256Hex(JsonUtils.toJsonString(legacy).getBytes(StandardCharsets.UTF_8));
+        }
         return TkOpenApiSigner.sha256Hex(JsonUtils.toJsonString(request).getBytes(StandardCharsets.UTF_8));
     }
 
@@ -1796,7 +2028,18 @@ public class TkOpenTiktokPublishService {
 
     private TkOpenTiktokPublishVO.TaskResp toTaskResp(TkOpenTiktokPublishTaskDO task) {
         TkOpenTiktokPublishVO.TaskResp response = new TkOpenTiktokPublishVO.TaskResp();
-        response.setTaskId(task.getTaskId()); response.setMediaId(task.getMediaId()); response.setExternalRequestId(task.getExternalRequestId());
+        response.setTaskId(task.getTaskId());
+        response.setMediaType(normalizeMediaType(task.getMediaType()));
+        response.setMediaId(task.getMediaId());
+        if (isPhoto(task) && taskMediaMapper != null) {
+            List<String> mediaIds = taskMediaMapper.selectByClientAndTaskId(task.getClientId(), task.getTaskId())
+                    .stream().map(TkOpenTiktokPublishTaskMediaDO::getMediaId).collect(Collectors.toList());
+            response.setPhotoMediaIds(mediaIds);
+            response.setPhotoCount(mediaIds.size());
+            response.setPhotoCoverIndex(task.getPhotoCoverIndex());
+            response.setAutoAddMusic(task.getAutoAddMusic());
+        }
+        response.setExternalRequestId(task.getExternalRequestId());
         response.setStatus(task.getStatus()); response.setAccountCount(task.getAccountCount()); response.setSuccessCount(task.getSuccessCount());
         response.setFailedCount(task.getFailedCount()); response.setPendingCount(task.getPendingCount()); response.setFailReason(task.getFailReason());
         response.setScheduledAt(task.getScheduledAt());

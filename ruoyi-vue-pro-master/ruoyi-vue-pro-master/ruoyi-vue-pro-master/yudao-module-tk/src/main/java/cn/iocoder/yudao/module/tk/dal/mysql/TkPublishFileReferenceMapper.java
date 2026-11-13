@@ -29,7 +29,10 @@ public interface TkPublishFileReferenceMapper {
                     + " AND d.generation_task_id=#{generationId} AND " + TkPublishReferenceSql.detailActive("d", true) + ")"
                     + " + (SELECT COUNT(*) FROM tk_open_tiktok_media m WHERE m.deleted=0 AND " + openUrlMatch
                     + " AND EXISTS (SELECT 1 FROM tk_open_tiktok_publish_task t WHERE t.deleted=0"
-                    + " AND t.client_id=m.client_id AND t.media_id=m.media_id AND " + TkPublishReferenceSql.openTaskActive("t") + "))</script>";
+                    + " AND t.client_id=m.client_id AND (t.media_id=m.media_id OR EXISTS (SELECT 1"
+                    + " FROM tk_open_tiktok_publish_task_media tm WHERE tm.deleted=0 AND tm.client_id=t.client_id"
+                    + " AND tm.task_id=t.task_id AND tm.media_id=m.media_id)) AND "
+                    + TkPublishReferenceSql.openTaskActive("t") + "))</script>";
         }
     }
 }

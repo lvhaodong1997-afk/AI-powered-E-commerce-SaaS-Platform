@@ -20,7 +20,8 @@ class TkCleanupPublishReferenceMapperTest {
    q.execute("CREATE TABLE tk_tiktok_publish_task(id BIGINT PRIMARY KEY,generation_task_id BIGINT,uploaded_video_id BIGINT,video_url VARCHAR(2048),photo_urls VARCHAR(4096),media_type VARCHAR(16),status VARCHAR(32),deleted INT)");
    q.execute("CREATE TABLE tk_tiktok_publish_detail(id BIGINT PRIMARY KEY,publish_task_id BIGINT,generation_task_id BIGINT,uploaded_video_id BIGINT,status VARCHAR(32),tiktok_status VARCHAR(64),init_phase VARCHAR(64),deleted INT)");
    q.execute("CREATE TABLE tk_open_tiktok_media(client_id VARCHAR(64),media_id VARCHAR(64),file_url VARCHAR(2048),upload_mode VARCHAR(32),deleted INT)");
-   q.execute("CREATE TABLE tk_open_tiktok_publish_task(client_id VARCHAR(64),task_id VARCHAR(64),media_id VARCHAR(64),status VARCHAR(32),deleted INT)");
+   q.execute("CREATE TABLE tk_open_tiktok_publish_task(client_id VARCHAR(64),task_id VARCHAR(64),media_id VARCHAR(64),media_type VARCHAR(16),status VARCHAR(32),deleted INT)");
+   q.execute("CREATE TABLE tk_open_tiktok_publish_task_media(client_id VARCHAR(64),task_id VARCHAR(64),media_id VARCHAR(64),sort_index INT,deleted INT)");
    q.execute("CREATE TABLE tk_open_tiktok_publish_detail(client_id VARCHAR(64),task_id VARCHAR(64),status VARCHAR(32),tiktok_status VARCHAR(64),deleted INT)");
    q.execute("INSERT INTO tk_tiktok_publish_media VALUES(1,'https://tkpublish.fnn.net.cn/tk/1/2/tiktok-photo/a.jpg','READY',0,TIMESTAMP '2020-01-01 00:00:00',NULL,NULL)");
    q.execute("INSERT INTO tk_tiktok_publish_task VALUES(1,NULL,NULL,NULL,'[\"https://tkpublish.fnn.net.cn/tk/1/2/tiktok-photo/a.jpg?Signature=old\"]','PHOTO','SCHEDULED',0)");
@@ -44,7 +45,8 @@ class TkCleanupPublishReferenceMapperTest {
    assertTrue(generations.selectExpiredTasksWithGenerationUrls(LocalDateTime.now(),10).isEmpty());
    assertTrue(files.selectExpiredGenerationTaskCandidates(LocalDateTime.now(),10).isEmpty());
    assertTrue(refs.countActive(44L,urls)>0);assertTrue(refs.countActive(44L,Collections.emptyList())>0);assertEquals(0,refs.countActive(null,Collections.emptyList()));q.execute("UPDATE tk_tiktok_publish_task SET status='SUCCESS'");assertEquals(0,refs.countActive(44L,urls));
-   q.execute("INSERT INTO tk_open_tiktok_media VALUES('client','media','"+urls.get(1)+"?Signature=old','REMOTE',0)");q.execute("INSERT INTO tk_open_tiktok_publish_task VALUES('client','task','media','SCHEDULED',0)");
+   q.execute("INSERT INTO tk_open_tiktok_media VALUES('client','media','"+urls.get(1)+"?Signature=old','REMOTE',0)");q.execute("INSERT INTO tk_open_tiktok_publish_task VALUES('client','task',NULL,'PHOTO','SCHEDULED',0)");
+   q.execute("INSERT INTO tk_open_tiktok_publish_task_media VALUES('client','task','media',0,0)");
    assertEquals(1,refs.countActive(44L,urls));
    assertTrue(generations.selectExpiredTasksWithGenerationUrls(LocalDateTime.now(),10).isEmpty());
    assertTrue(files.selectExpiredGenerationTaskCandidates(LocalDateTime.now(),10).isEmpty());

@@ -1,6 +1,6 @@
 # TikTok 图文发布接入
 
-管理后台「视频发布中心 → 上传素材发布 → 发布类型：图文」可选择 1–35 张 JPEG / WebP 图片，预览、调整顺序、移除及选择封面。浏览器根据 EXIF 方向解码，统一转为 JPEG，按原比例缩放至最长边 1920、短边 1080 以内；单张原图不超过 20MB。支持直接发布、发送到 TikTok 收件箱、单账号定时直接发布及可选自动配乐。
+管理后台「视频发布中心 → 上传素材发布 → 发布类型：图文」可选择 1–35 张 JPEG / WebP / PNG / GIF / HEIC / HEIF 图片，预览、调整顺序、移除及选择封面。服务端根据 EXIF 方向解码，统一转为 JPEG，按原比例缩放至最长边 1920、短边 1080 以内；单张原图不超过 20MB。支持直接发布、发送到 TikTok 收件箱、单账号定时直接发布及可选自动配乐。
 
 ## 部署顺序
 
@@ -13,7 +13,7 @@
 
 ## 管理端接口
 
-- `POST /tk/tiktok-publish/media/photo/upload`：单张 JPEG multipart `file`，返回现有素材结构（`id`、`fileUrl` 等）。浏览器负责 WebP 转 JPEG；后端独立验证真实 JPEG 内容、1080p 分辨率和 20MB 大小，存入租户与公司目录下的 OSS。接口不接受任意远程图片 URL。
+- `POST /tk/tiktok-publish/media/photo/upload`：单张 JPEG multipart `file`，返回现有素材结构（`id`、`fileUrl` 等）。旧同步 JPEG 契约保留；新网页改用下述异步上传；后端独立验证真实 JPEG 内容、1080p 分辨率和 20MB 大小，存入租户与公司目录下的 OSS。接口不接受任意远程图片 URL。
 - `POST /tk/tiktok-publish/creator-info`：`{accountIds, groupIds}`，读取有权限账号的实时隐私选项和评论限制。图文直接发布时页面取共同选项，要求用户选择；执行前再校验当前权限。
 - `POST /tk/tiktok-publish/create`：复用原发布接口，图文传 `mediaType: "PHOTO"`、有序 `uploadedPhotoIds: number[]`、`photoCoverIndex`（从 0 起）、`autoAddMusic` 及现有标题/描述/账号/隐私/标识/定时字段。不得同时传视频来源或 `photoUrls`。省略媒体类型时仍按视频处理。
 
@@ -21,6 +21,10 @@
 
 任务复用现有初始化并发保护、账号令牌刷新、请求预算、状态查询及重试流程。初始化超时或结果不明时进入待核查状态，禁止自动重新发帖。收件箱模式不查询仅适用于直发权限的 creator-info；TikTok App 版本过低等明确拒绝初始化的错误保留失败原因，修复后可重试。图文以 TikTok 发布状态确认成功，不调用 Display API 视频详情来反复等待图文链接；详情页显示「图文以发布状态为准」。
 
-本次范围为管理后台发布链路；独立 Open API 的视频上传/发布协议维持现状。
+外部图文调用见[图文 OpenAPI](../openapi/tiktok-photo-open-api.md)。视频上传/发布保持兼容。
 
 参考：[Photo API](https://developers.tiktok.com/docs/en/content-posting-api-reference-photo-post)、[Media Transfer Guide](https://developers.tiktok.com/docs/en/content-posting-api-media-transfer-guide)。
+
+## 2026-11-13 异步多格式升级
+
+执行 tk_open_tiktok_photo_multiformat_upgrade_mysql.sql 后更新应用。服务器需要 ImageMagick/libheif，经实际 HEIC 样本验证后启用；tk.photo.private-root 应指向持久私有目录（生产 /data/Tk/photo-private，权限700）。新网页 POST `/tk/tiktok-publish/media/photo/uploads` multipart原图，GET `/{uploadId}` 查询 PROCESSING/READY/FAILED 与 mediaId/fileUrl，POST `/{uploadId}/retry` 重试，DELETE `/{uploadId}` 取消。转换成功才提交原 create 接口。预览展示最终 JPEG；透明填白，GIF/动画WebP/HEIF只取静态主图。视频和旧 JPEG 同步入口保留。素材库不迁移，最终文件使用发布桶 tk-video-create。

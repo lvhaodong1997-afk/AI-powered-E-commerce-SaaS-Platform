@@ -145,3 +145,71 @@ String currentTask = TikTokOpenApi.api("GET", "/publish/tasks/" + taskId, null, 
 ```
 
 For an OSS upload, completion HEAD-validates object length and SHA-256 metadata before it returns `READY` media. An `Idempotency-Key` is mandatory for publishing and must be reused only with identical request content.
+
+## Photo upload and publish (Java 17, Jackson)
+
+Use the existing `TikTokOpenApi.api` signing helper. The following methods use Jackson `ObjectMapper`/`JsonNode` (add your application's Jackson dependency), and JDK HTTP multipart; no secret is sent to OSS. Persist uploadId before upload and persist the publish key. [Photo contract](../openapi/tiktok-photo-open-api.md) describes conversion and retry semantics.
+
+```java
+final class PhotoExample {
+  static final com.fasterxml.jackson.databind.ObjectMapper JSON = new com.fasterxml.jackson.databind.ObjectMapper();
+  static com.fasterxml.jackson.databind.JsonNode call(String method, String path, Object body, String key) throws Exception {
+    var root = JSON.readTree(TikTokOpenApi.api(method, path,
+        body == null ? null : JSON.writeValueAsBytes(body), body == null ? null : "application/json", key));
+    if (root.path("code").asInt(-1) != 0) throw new IllegalStateException(root.path("msg").asText());
+    return root.path("data");
+  }
+  static String uploadPhoto(java.nio.file.Path path, String mime) throws Exception {
+    byte[] bytes = java.nio.file.Files.readAllBytes(path);
+    String digest = TikTokOpenApi.sha256(bytes);
+    var upload = call("POST", "/media/uploads", java.util.Map.of("mediaType", "PHOTO", "fileName", path.getFileName().toString(),
+        "fileSize", bytes.length, "contentType", mime, "sha256", digest), null);
+    String id = upload.path("uploadId").asText();
+    if ("LOCAL".equals(upload.path("uploadMode").asText())) {
+      int size = upload.path("chunkSize").asInt();
+      for (int i = 0; i < upload.path("totalChunks").asInt(); i++) {
+        TikTokOpenApi.api("PUT", "/media/uploads/" + id + "/chunks/" + i,
+            java.util.Arrays.copyOfRange(bytes, i * size, Math.min(bytes.length, (i + 1) * size)), "application/octet-stream", null);
+      }
+    } else {
+      String boundary = "photo" + java.util.UUID.randomUUID().toString().replace("-", "");
+      var fields = new java.util.LinkedHashMap<String, String>();
+      var f = upload.path("fields");
+      fields.put("key", upload.path("objectKey").asText()); fields.put("policy", f.path("policy").asText());
+      fields.put("OSSAccessKeyId", f.path("ossAccessKeyId").asText()); fields.put("Signature", f.path("signature").asText());
+      fields.put("x-oss-object-acl", f.path("xOssObjectAcl").asText()); fields.put("Content-Type", f.path("contentType").asText());
+      if (!f.path("xOssMetaSha256").isNull() && !f.path("xOssMetaSha256").asText().isEmpty()) fields.put("x-oss-meta-sha256", f.path("xOssMetaSha256").asText());
+      var out = new java.io.ByteArrayOutputStream();
+      for (var entry : fields.entrySet()) out.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + entry.getKey()
+          + "\"\r\n\r\n" + entry.getValue() + "\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      out.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"photo.bin\"\r\nContent-Type: "
+          + mime + "\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      out.write(bytes); out.write(("\r\n--" + boundary + "--\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(upload.path("uploadUrl").asText()))
+          .timeout(java.time.Duration.ofSeconds(90)).header("Content-Type", "multipart/form-data; boundary=" + boundary)
+          .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(out.toByteArray())).build();
+      var response = java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.discarding());
+      if (response.statusCode() / 100 != 2) throw new IllegalStateException("OSS upload " + response.statusCode());
+    }
+    call("POST", "/media/uploads/" + id + "/complete", java.util.Map.of("fileSize", bytes.length, "sha256", digest), null);
+    for (int i = 0; i < 150; i++) {
+      var state = call("GET", "/media/uploads/" + id, null, null);
+      if ("READY".equals(state.path("status").asText())) return state.path("mediaId").asText();
+      if (java.util.List.of("FAILED", "EXPIRED", "CANCELLED").contains(state.path("status").asText())) throw new IllegalStateException(state.path("failReason").asText());
+      Thread.sleep(2000);
+    }
+    throw new IllegalStateException("Resume querying uploadId " + id);
+  }
+  static void publish(String connectionId) throws Exception {
+    var ids = java.util.List.of(uploadPhoto(java.nio.file.Path.of("/images/a.heic"), "image/heic"),
+        uploadPhoto(java.nio.file.Path.of("/images/b.png"), "image/png"));
+    String key = java.util.UUID.randomUUID().toString(); // Save once for retries.
+    var task = call("POST", "/publish/tasks", java.util.Map.of("mediaType", "PHOTO", "connectionIds", java.util.List.of(connectionId),
+        "photoMediaIds", ids, "photoCoverIndex", 0, "title", "Product photos", "caption", "Details", "postMode", "DIRECT_POST",
+        "privacyLevel", "SELF_ONLY", "autoAddMusic", true), key);
+    String taskId = task.path("taskId").asText();
+    System.out.println(call("GET", "/publish/tasks/" + taskId, null, null));
+    System.out.println(call("GET", "/publish/tasks/" + taskId + "/details", null, null));
+  }
+}
+```

@@ -117,3 +117,46 @@ print(api("GET", f"/publish/tasks/{task['taskId']}")["status"])
 ```
 
 For an OSS upload, completion performs HEAD metadata validation of object length and SHA-256 before returning `READY` media. Reuse an `Idempotency-Key` only for the same publish request.
+
+## Photo upload and publish
+
+Reuse the helpers above; PHOTO complete returns PROCESSING and must be polled. [Photo contract](../openapi/tiktok-photo-open-api.md) describes format limits and retries. Persist uploadId and the publish idempotency key before retrying requests.
+
+```python
+def upload_photo(path, mime):
+    content = Path(path).read_bytes()
+    digest = sha256(content)
+    upload = api("POST", "/media/uploads", {"mediaType": "PHOTO", "fileName": Path(path).name,
+        "fileSize": len(content), "contentType": mime, "sha256": digest})
+    if upload["uploadMode"] == "LOCAL":
+        size = upload["chunkSize"]
+        for index in range(upload["totalChunks"]):
+            api("PUT", f"/media/uploads/{upload['uploadId']}/chunks/{index}", content[index*size:(index+1)*size])
+    else:
+        f = upload["fields"]
+        fields = {"key": upload["objectKey"], "policy": f["policy"], "OSSAccessKeyId": f["ossAccessKeyId"],
+                  "Signature": f["signature"], "x-oss-object-acl": f["xOssObjectAcl"], "Content-Type": f["contentType"]}
+        if f.get("xOssMetaSha256"):
+            fields["x-oss-meta-sha256"] = f["xOssMetaSha256"]
+        response = requests.post(upload["uploadUrl"], data=fields,
+            files={"file": (Path(path).name, content, mime)}, timeout=90)
+        response.raise_for_status()
+    api("POST", f"/media/uploads/{upload['uploadId']}/complete", {"fileSize": len(content), "sha256": digest})
+    for _ in range(150):
+        state = api("GET", f"/media/uploads/{upload['uploadId']}")
+        if state["status"] == "READY":
+            return state["mediaId"]
+        if state["status"] in ("FAILED", "EXPIRED", "CANCELLED"):
+            raise RuntimeError(state.get("failReason") or state["status"])
+        time.sleep(2)
+    raise TimeoutError(f"Resume querying uploadId {upload['uploadId']}")
+
+photos = [upload_photo("/images/a.heic", "image/heic"), upload_photo("/images/b.png", "image/png")]
+photo_request_key = uuid.uuid4().hex  # Save once; same request retries use the same key.
+photo_task = api("POST", "/publish/tasks", {"mediaType": "PHOTO", "connectionIds": [authorized["connectionId"]],
+    "photoMediaIds": photos, "photoCoverIndex": 0, "title": "Product photos", "caption": "Details",
+    "postMode": "DIRECT_POST", "privacyLevel": "SELF_ONLY", "autoAddMusic": True},
+    {"Idempotency-Key": photo_request_key})
+print(api("GET", f"/publish/tasks/{photo_task['taskId']}"))
+print(api("GET", f"/publish/tasks/{photo_task['taskId']}/details"))
+```

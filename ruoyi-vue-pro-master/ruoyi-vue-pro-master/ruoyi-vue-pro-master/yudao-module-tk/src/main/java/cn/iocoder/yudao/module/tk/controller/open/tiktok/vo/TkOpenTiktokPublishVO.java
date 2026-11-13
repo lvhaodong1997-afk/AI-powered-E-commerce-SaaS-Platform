@@ -14,14 +14,19 @@ public final class TkOpenTiktokPublishVO {
 
     @Data
     public static class TaskCreateReq {
+        @Pattern(regexp = "VIDEO|PHOTO")
+        private String mediaType = "VIDEO";
         @NotEmpty
         @Size(max = 20)
         private List<String> connectionIds;
-        @NotBlank
         private String mediaId;
+        @Size(max = 35)
+        private List<String> photoMediaIds;
+        private Integer photoCoverIndex;
+        private Boolean autoAddMusic;
         @Size(max = 512)
         private String title;
-        @Size(max = 2200)
+        @Size(max = 4000)
         private String caption;
         @NotBlank
         @Pattern(regexp = "DIRECT_POST|UPLOAD_TO_INBOX")
@@ -81,7 +86,12 @@ public final class TkOpenTiktokPublishVO {
     @Data
     public static class TaskResp {
         private String taskId;
+        private String mediaType;
         private String mediaId;
+        private List<String> photoMediaIds;
+        private Integer photoCount;
+        private Integer photoCoverIndex;
+        private Boolean autoAddMusic;
         private String externalRequestId;
         private String status;
         private Integer accountCount;

@@ -507,19 +507,22 @@
         </el-form-item>
         <el-form-item v-if="publishForm.mediaType === 'PHOTO'" label="上传图片">
           <div class="photo-publish-content">
-            <input ref="photoFileInput" type="file" accept="image/jpeg,image/webp,.jpg,.jpeg,.webp" multiple class="hidden" @change="handlePhotoFilesChange" />
+            <input ref="photoFileInput" type="file" accept="image/jpeg,image/webp,image/png,image/gif,image/heic,image/heif,.jpg,.jpeg,.webp,.png,.gif,.heic,.heif" multiple class="hidden" @change="handlePhotoFilesChange" />
             <el-button :loading="publishUploadLoading" :disabled="photoMedia.length >= 35 || publishLoading" @click="photoFileInput?.click()">添加图片（{{ photoMedia.length }}/35）</el-button>
-            <div class="sub-text">JPEG / WebP，单张不超过 20MB；自动转为 JPEG 并缩放至 1080p。按下方顺序发布。</div>
+            <div class="sub-text">支持 JPEG / WebP / PNG / GIF / HEIC / HEIF，单张不超过 20MB。服务端转为 JPEG，最长边 1920、短边 1080，不放大小图；透明区域填白，动画只取首个显示画面。按下方顺序发布。</div>
             <el-progress v-if="publishUploadLoading" :percentage="publishUploadPercent" />
             <div v-if="publishUploadError" class="upload-error">{{ publishUploadError }}</div>
             <div class="photo-publish-grid">
               <div v-for="(photo, index) in photoMedia" :key="photo.id" class="photo-publish-item">
-                <img :src="photo.preview" :alt="photo.fileName" />
-                <el-radio v-model="publishForm.photoCoverIndex" :value="index" :disabled="publishUploadLoading || publishLoading">{{ index + 1 }} · 封面</el-radio>
+                <img v-if="photo.preview" :src="photo.preview" :alt="photo.fileName" />
+                <div v-else class="sub-text">{{ photo.status === 'FAILED' ? '转换失败' : photo.status === 'UPLOADING' ? '正在上传' : '正在转换' }}：{{ photo.fileName }}</div>
+                <div v-if="photo.error" class="upload-error">{{ photo.error }}</div>
+                <el-radio v-model="publishForm.photoCoverIndex" :value="index" :disabled="publishLoading">{{ index + 1 }} · 封面</el-radio>
                 <div>
-                  <el-button size="small" :disabled="!index || publishUploadLoading || publishLoading" :aria-label="`前移第 ${index + 1} 张图片`" @click="movePublishPhoto(index, -1)">前移</el-button>
-                  <el-button size="small" :disabled="index === photoMedia.length - 1 || publishUploadLoading || publishLoading" :aria-label="`后移第 ${index + 1} 张图片`" @click="movePublishPhoto(index, 1)">后移</el-button>
-                  <el-button size="small" type="danger" link :disabled="publishUploadLoading || publishLoading" @click="removePublishPhoto(index)">移除</el-button>
+                  <el-button size="small" :disabled="!index || publishLoading" :aria-label="`前移第 ${index + 1} 张图片`" @click="movePublishPhoto(index, -1)">前移</el-button>
+                  <el-button size="small" :disabled="index === photoMedia.length - 1 || publishLoading" :aria-label="`后移第 ${index + 1} 张图片`" @click="movePublishPhoto(index, 1)">后移</el-button>
+                  <el-button v-if="photo.status === 'FAILED'" size="small" :disabled="publishUploadLoading || publishLoading" @click="retryPublishPhoto(photo.id)">重试</el-button>
+                  <el-button size="small" type="danger" link :disabled="publishLoading" @click="removePublishPhoto(index)">移除</el-button>
                 </div>
               </div>
             </div>
@@ -622,7 +625,7 @@
       </el-form>
       <template #footer>
         <el-button @click="publishDrawerVisible = false">取消</el-button>
-        <el-button type="primary" :loading="publishLoading" :disabled="publishUploadLoading" @click="submitPublish">开始发布</el-button>
+        <el-button type="primary" :loading="publishLoading" :disabled="publishUploadLoading || (publishForm.mediaType === 'PHOTO' && !photosReady)" @click="submitPublish">开始发布</el-button>
       </template>
     </el-drawer>
 
@@ -750,7 +753,7 @@ import {
   TkVideoPublishCenterApi
 } from '@/api/tk/videoPublishCenter'
 import { uploadTikTokMediaInChunks } from '@/utils/tiktokMediaUpload'
-import { validatePhotoSelection, movePhoto, removePhoto, photoPublishSource, prepareTikTokPhoto, photoCreatorErrorMessage } from '@/utils/tiktokPhotoPublish'
+import { validatePhotoSelection, movePhoto, removePhoto, photoPublishSource, pollPhotoUpload, photoCreatorErrorMessage } from '@/utils/tiktokPhotoPublish'
 import { publishTransferLabel, publishQueueStageLabel, publishCallbackLabel } from '@/utils/tiktokPublishDiagnostics'
 import { getTkUploadErrorMessage } from '@/utils/tkChunkUpload'
 import { formatDate, formatTimestamp } from '@/utils/formatTime'
@@ -889,7 +892,10 @@ const publishFormRef = ref()
 const selectedVideo = ref<TkGenerationTaskVO>()
 const publishFileInput = ref<HTMLInputElement>()
 const photoFileInput = ref<HTMLInputElement>()
-const photoMedia = ref<{ id: number; fileName: string; preview: string }[]>([])
+type PublishPhotoItem = { id: number; fileName: string; preview: string; original: File; status: string; uploadId?: string; mediaId?: number; error?: string; attempt: number }
+const photoMedia = ref<PublishPhotoItem[]>([])
+let nextPhotoId = 0
+const photosReady = computed(() => photoMedia.value.length > 0 && photoMedia.value.every((p) => p.status === 'READY' && !!p.mediaId))
 let photoUploadVersion = 0
 const publishUploadLoading = ref(false)
 const publishUploadPercent = ref(0)
@@ -1287,7 +1293,6 @@ const handlePublishFileChange = async (event: Event) => {
 
 const resetPublishSource = () => {
   invalidatePhotoUpload()
-  photoMedia.value.forEach((photo) => URL.revokeObjectURL(photo.preview))
   photoMedia.value = []
   publishForm.photoCoverIndex = 0
   publishForm.autoAddMusic = false
@@ -1298,7 +1303,55 @@ const resetPublishSource = () => {
   if (photoFileInput.value) photoFileInput.value.value = ''
 }
 
-const invalidatePhotoUpload = () => { photoUploadVersion++ }
+const invalidatePhotoUpload = () => {
+  photoUploadVersion++
+  photoMedia.value.forEach((photo) => {
+    if (photo.uploadId && photo.status !== 'READY') void TkTiktokPublishApi.cancelPhotoUpload(photo.uploadId).catch(() => {})
+  })
+}
+
+const uploadPublishPhoto = async (id: number, version: number, retry = false) => {
+  const photo = photoMedia.value.find((p) => p.id === id)
+  if (!photo || version !== photoUploadVersion) return
+  const attempt = ++photo.attempt
+  const alive = () => version === photoUploadVersion && photoMedia.value.some((p) => p.id === id && p.attempt === attempt)
+  photo.status = 'UPLOADING'
+  photo.error = undefined
+  try {
+    await pollPhotoUpload({
+      start: async () => {
+        if (retry && photo.uploadId) {
+          const current = await TkTiktokPublishApi.photoUploadStatus(photo.uploadId)
+          return current.status === 'FAILED' ? TkTiktokPublishApi.retryPhotoUpload(photo.uploadId) : current
+        }
+        const data = new FormData()
+        data.append('file', photo.original)
+        return TkTiktokPublishApi.createPhotoUpload(data)
+      },
+      status: TkTiktokPublishApi.photoUploadStatus,
+      cancel: TkTiktokPublishApi.cancelPhotoUpload
+    }, { alive, onUpdate: (state) => {
+      const row = photoMedia.value.find((p) => p.id === id)
+      if (!row || !alive()) return
+      row.uploadId = state.uploadId
+      row.status = state.status
+      if (state.status === 'READY') { row.mediaId = state.mediaId; row.preview = state.fileUrl || '' }
+      publishUploadPercent.value = Math.round(photoMedia.value.filter((p) => p.status === 'READY').length * 100 / Math.max(1, photoMedia.value.length))
+    } })
+  } catch (error: any) {
+    if (!alive()) return
+    photo.status = 'FAILED'
+    photo.error = error?.message || '图片转换失败，请重试'
+  }
+}
+
+const retryPublishPhoto = async (id: number) => {
+  if (publishUploadLoading.value || publishLoading.value) return
+  const version = photoUploadVersion
+  publishUploadLoading.value = true
+  try { await uploadPublishPhoto(id, version, true) }
+  finally { if (version === photoUploadVersion) publishUploadLoading.value = false }
+}
 
 const handlePhotoFilesChange = async (event: Event) => {
   const input = event.target as HTMLInputElement
@@ -1307,22 +1360,21 @@ const handlePhotoFilesChange = async (event: Event) => {
   if (!files.length || publishUploadLoading.value) return
   try { validatePhotoSelection(files, photoMedia.value.length) }
   catch (error: any) { message.warning(error.message); return }
-  const version = ++photoUploadVersion
+  const version = photoUploadVersion
   publishUploadLoading.value = true
   publishUploadError.value = ''
   publishUploadPercent.value = 0
+  const ids = files.map((file) => {
+    const id = --nextPhotoId
+    photoMedia.value.push({ id, fileName: file.name, original: file, preview: '', status: 'UPLOADING', attempt: 0 })
+    return id
+  })
   try {
-    for (let index = 0; index < files.length; index++) {
-      const file = await prepareTikTokPhoto(files[index])
+    for (const id of ids) {
       if (version !== photoUploadVersion) return
-      const data = new FormData()
-      data.append('file', file)
-      const media = await TkTiktokPublishApi.uploadPhoto(data)
-      if (version !== photoUploadVersion) return
-      photoMedia.value.push({ id: media.id, fileName: files[index].name, preview: URL.createObjectURL(file) })
-      publishUploadPercent.value = Math.round((index + 1) * 100 / files.length)
+      await uploadPublishPhoto(id, version)
     }
-    message.success('图片上传完成，可调整顺序和封面')
+    if (version === photoUploadVersion && photosReady.value) message.success('图片转换完成，可调整顺序和封面')
   } catch (error: any) {
     if (version !== photoUploadVersion) return
     publishUploadError.value = error?.message || '图片上传失败，请重新选择未上传成功的图片'
@@ -1339,7 +1391,8 @@ const movePublishPhoto = (index: number, offset: number) => {
 }
 
 const removePublishPhoto = (index: number) => {
-  URL.revokeObjectURL(photoMedia.value[index].preview)
+  const photo = photoMedia.value[index]
+  if (photo?.uploadId && photo.status !== 'READY') void TkTiktokPublishApi.cancelPhotoUpload(photo.uploadId).catch(() => {})
   const result = removePhoto(photoMedia.value, publishForm.photoCoverIndex, index)
   photoMedia.value = result.photos
   publishForm.photoCoverIndex = result.coverIndex
@@ -1363,8 +1416,8 @@ const submitPublish = async () => {
     message.warning('请选择至少一个账号或账号分组')
     return
   }
-  if (publishForm.mediaType === 'PHOTO' && (!photoMedia.value.length || publishForm.title.length > 90 || publishForm.caption.length > 4000)) {
-    message.warning('请上传图片，并确保图文标题不超过 90 字、描述不超过 4000 字')
+  if (publishForm.mediaType === 'PHOTO' && (!photosReady.value || publishForm.title.length > 90 || publishForm.caption.length > 4000)) {
+    message.warning('请等待全部图片转换成功，并确保图文标题不超过 90 字、描述不超过 4000 字')
     return
   }
   if (publishForm.mediaType === 'PHOTO' && publishForm.postMode === 'DIRECT_POST'

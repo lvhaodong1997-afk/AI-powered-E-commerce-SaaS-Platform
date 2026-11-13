@@ -24,7 +24,9 @@ class TkTiktokPhotoUploadTest {
         when(scope.getWritableCompanyId(null)).thenReturn(200L);
         TkOssObjectStorageService oss = mock(TkOssObjectStorageService.class);
         when(oss.isConfigured()).thenReturn(true);
-        when(oss.publicUrlForObjectKey(anyString())).thenAnswer(i -> "https://cdn.example/" + i.getArgument(0));
+        when(oss.publishStorage()).thenReturn(oss);
+        when(oss.publishConfig()).thenReturn(new TkGenerationProperties.Oss());
+        when(oss.unsignedUrl(anyString())).thenAnswer(i -> "https://cdn.example/" + i.getArgument(0));
         TkTiktokPublishMediaMapper mapper = mock(TkTiktokPublishMediaMapper.class);
         ReflectionTestUtils.setField(service, "dataScopeService", scope);
         ReflectionTestUtils.setField(service, "ossObjectStorageService", oss);

@@ -37,6 +37,30 @@ public class TkTiktokPublishController {
     private TkTiktokPublishMediaService mediaService;
     @Resource
     private TkTiktokPublishMediaUploadService mediaUploadService;
+    @Resource
+    private cn.iocoder.yudao.module.tk.service.media.TkAdminPhotoUploadService photoUploadService;
+
+    @PostMapping("/media/photo/uploads")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<cn.iocoder.yudao.module.tk.service.media.TkAdminPhotoUploadService.Status> createPhotoUpload(@RequestParam("file") MultipartFile file) {
+        return success(photoUploadService.create(file));
+    }
+
+    @GetMapping("/media/photo/uploads/{uploadId}")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<cn.iocoder.yudao.module.tk.service.media.TkAdminPhotoUploadService.Status> photoUploadStatus(@PathVariable String uploadId) {
+        return success(photoUploadService.status(uploadId));
+    }
+
+    @DeleteMapping("/media/photo/uploads/{uploadId}")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<Boolean> cancelPhotoUpload(@PathVariable String uploadId) {photoUploadService.cancel(uploadId);return success(true);}
+
+    @PostMapping("/media/photo/uploads/{uploadId}/retry")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<cn.iocoder.yudao.module.tk.service.media.TkAdminPhotoUploadService.Status> retryPhotoUpload(@PathVariable String uploadId) {
+        return success(photoUploadService.retry(uploadId));
+    }
 
     @PostMapping("/media/upload")
     @Operation(summary = "上传 TikTok 发布视频")

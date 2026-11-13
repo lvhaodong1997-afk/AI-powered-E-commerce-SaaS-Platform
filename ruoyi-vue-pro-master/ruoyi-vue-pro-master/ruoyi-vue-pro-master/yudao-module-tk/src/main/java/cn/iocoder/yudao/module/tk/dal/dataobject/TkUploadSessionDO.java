@@ -21,6 +21,20 @@ public class TkUploadSessionDO extends TenantBaseDO {
     private Long id;
 
     private String uploadId;
+    private String purpose;
+    private String sourceObjectKey;
+    private String sourceLocalPath;
+    private String sourceSha256;
+    private String sourceEtag;
+    private String sourceVersionId;
+    private String conversionClaimToken;
+    private LocalDateTime conversionLeaseUntil;
+    private Long resultMediaId;
+    private String failReason;
+    private Integer photoWidth;
+    private Integer photoHeight;
+    private String finalSha256;
+    private LocalDateTime sourceCleanedAt;
 
     private Long companyId;
 

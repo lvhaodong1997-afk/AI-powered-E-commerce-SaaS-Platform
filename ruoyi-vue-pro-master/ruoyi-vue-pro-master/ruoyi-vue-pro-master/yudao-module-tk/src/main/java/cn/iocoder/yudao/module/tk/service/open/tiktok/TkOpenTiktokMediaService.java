@@ -48,6 +48,8 @@ public class TkOpenTiktokMediaService {
     private final TkLocalUploadStorageService localStorageService;
     private final TkGenerationProperties properties;
     private final TkOssObjectStorageClient ossObjectStorageService;
+    @javax.annotation.Resource
+    private cn.iocoder.yudao.module.tk.service.media.TkOpenPhotoMediaService photoMediaService;
     private final Object[] scheduledPreparationLocks = createPreparationLocks();
     @org.springframework.beans.factory.annotation.Value("${tk.open-api.publish.pull-url-expire-seconds:86400}")
     private int pullUrlExpireSeconds = 86400;
@@ -97,6 +99,13 @@ public class TkOpenTiktokMediaService {
         }
         mediaMapper.insert(media);
         return toLocalResp(media);
+    }
+
+    public TkOpenTiktokMediaVO.UploadSessionResp create(String fileName,Long fileSize,String contentType,String sha256,String mediaType) {
+        String type=StrUtil.blankToDefault(mediaType,"VIDEO").toUpperCase(java.util.Locale.ROOT);
+        if("PHOTO".equals(type)) return photoMediaService.create(fileName,fileSize,contentType,sha256);
+        if(!"VIDEO".equals(type)) throw TkOpenApiException.badRequest("MEDIA_TYPE_INVALID","mediaType must be VIDEO or PHOTO");
+        return create(fileName,fileSize,contentType,sha256);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -287,11 +296,14 @@ public class TkOpenTiktokMediaService {
         response.setFileSize(media.getFileSize());
         response.setUploadedSize(media.getUploadedSize());
         response.setStatus(media.getStatus());
+        response.setMediaType(StrUtil.blankToDefault(media.getMediaType(),"VIDEO"));
+        response.setFailReason(media.getFailReason());response.setWidth(media.getWidth());response.setHeight(media.getHeight());
         return response;
     }
 
     public void uploadChunk(String uploadId, Integer chunkIndex, byte[] chunk) {
         TkOpenTiktokMediaDO media = requireUpload(uploadId);
+        if("PHOTO".equals(media.getMediaType())) { photoMediaService.uploadChunk(media,chunkIndex,chunk);return; }
         requireUploading(media);
         if (!"LOCAL".equals(media.getUploadMode())) {
             throw TkOpenApiException.badRequest("UPLOAD_MODE_INVALID", "this upload session uses OSS direct upload");
@@ -324,6 +336,7 @@ public class TkOpenTiktokMediaService {
     public TkOpenTiktokMediaVO.MediaResp complete(String uploadId, Long fileSize, String sha256,
                                                    Long coverTimestampMs) {
         TkOpenTiktokMediaDO media = requireUploadForUpdate(uploadId);
+        if("PHOTO".equals(media.getMediaType())) return photoMediaService.complete(media,fileSize,sha256);
         requireUploading(media);
         if (fileSize == null || !fileSize.equals(media.getFileSize()) || (StrUtil.isNotBlank(media.getSha256())
                 && !media.getSha256().equalsIgnoreCase(StrUtil.blankToDefault(sha256, "")))) {
@@ -387,6 +400,7 @@ public class TkOpenTiktokMediaService {
     @Transactional(rollbackFor = Exception.class)
     public void cancel(String uploadId) {
         TkOpenTiktokMediaDO media = requireUploadForUpdate(uploadId);
+        if("PHOTO".equals(media.getMediaType())) { photoMediaService.cancel(media);return; }
         requireUploading(media);
         if ("LOCAL".equals(media.getUploadMode())) FileUtil.del(localStorageService.getTmpDir(uploadId).toFile());
         else if (StrUtil.isNotBlank(media.getObjectKey()) && ossObjectStorageService.isConfigured())

@@ -5,9 +5,11 @@ import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishAttemptDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishDetailDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishTaskDO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenTiktokPublishTaskMediaDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokPublishAttemptMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokPublishDetailMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokPublishTaskMapper;
+import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenTiktokPublishTaskMediaMapper;
 import cn.iocoder.yudao.module.tk.service.open.api.TkOpenApiCallbackService;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -32,6 +34,8 @@ public class TkOpenTiktokPublishTerminalService {
     private final TkOpenTiktokPublishTaskMapper taskMapper;
     private final TkOpenApiCallbackService callbackService;
     private final TkOpenTiktokPublishAttemptMapper attemptMapper;
+    @Resource
+    private TkOpenTiktokPublishTaskMediaMapper taskMediaMapper;
     @Value("${tk.open-api.publish.upload-url-max-retries:2}")
     private int uploadUrlMaxRetries = 2;
     @Resource
@@ -138,7 +142,7 @@ public class TkOpenTiktokPublishTerminalService {
             }
             // Preserve already collected metrics when duplicate evidence arrives.
             if (!wasTerminal || changedPostId) {
-                detail.setMetricsStatus(StrUtil.isBlank(detail.getPublicPostId()) ? "WAITING_PUBLIC" : "SYNCING");
+                detail.setMetricsStatus(terminalMetricsStatus(task.getMediaType(), detail.getPublicPostId()));
                 update.set(TkOpenTiktokPublishDetailDO::getMetricsStatus, detail.getMetricsStatus())
                         .set(TkOpenTiktokPublishDetailDO::getMetricsFailReason, null);
             }
@@ -149,6 +153,11 @@ public class TkOpenTiktokPublishTerminalService {
         recordEvidence(detail, attempt, evidenceSource, now);
         aggregateAndEnqueue(detail, task);
         return true;
+    }
+
+    static String terminalMetricsStatus(String mediaType, String publicPostId) {
+        if ("PHOTO".equalsIgnoreCase(mediaType)) return "UNAVAILABLE";
+        return StrUtil.isBlank(publicPostId) ? "WAITING_PUBLIC" : "SYNCING";
     }
 
     /** Repair only verified legacy terminals; never infer authority or rewrite existing outbox history. */
@@ -304,7 +313,14 @@ public class TkOpenTiktokPublishTerminalService {
         if (mediaService == null || task == null) return;
         Runnable cleanup = () -> {
             try {
-                mediaService.cleanupScheduledPublishMedia(detail.getClientId(), task.getMediaId());
+                if ("PHOTO".equalsIgnoreCase(task.getMediaType()) && taskMediaMapper != null) {
+                    for (TkOpenTiktokPublishTaskMediaDO association
+                            : taskMediaMapper.selectByClientAndTaskId(detail.getClientId(), task.getTaskId())) {
+                        mediaService.cleanupScheduledPublishMedia(detail.getClientId(), association.getMediaId());
+                    }
+                } else {
+                    mediaService.cleanupScheduledPublishMedia(detail.getClientId(), task.getMediaId());
+                }
             } catch (Exception ex) {
                 // Terminal persistence is authoritative; media service records cleanup failure separately.
             }
@@ -323,6 +339,9 @@ public class TkOpenTiktokPublishTerminalService {
                                                         TkOpenTiktokPublishTaskDO task) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("taskId", task.getTaskId()); payload.put("detailId", detail.getDetailId());
+        payload.put("mediaType", StrUtil.blankToDefault(task.getMediaType(), "VIDEO"));
+        payload.put("photoCount", "PHOTO".equalsIgnoreCase(task.getMediaType()) && taskMediaMapper != null
+                ? taskMediaMapper.selectByClientAndTaskId(task.getClientId(), task.getTaskId()).size() : 0);
         payload.put("connectionId", detail.getConnectionId()); payload.put("externalRequestId", task.getExternalRequestId());
         payload.put("status", detail.getStatus()); payload.put("publishId", detail.getPublishId());
         payload.put("publicPostId", detail.getPublicPostId());
