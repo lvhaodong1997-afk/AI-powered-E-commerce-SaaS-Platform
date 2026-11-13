@@ -12,13 +12,16 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 class TkCleanupPublishReferenceMapperTest {
  @Test void generationCandidateQueryHasDriverAndServerTimeLimits() throws Exception {
-  java.lang.reflect.Method method=TkGenerationTaskMapper.class.getMethod("selectExpiredTasksWithGenerationUrls",LocalDateTime.class,int.class);
+  for (Class<?> mapper : Arrays.asList(TkGenerationTaskMapper.class,TkCleanupFileMapper.class)) {
+  String name=mapper==TkGenerationTaskMapper.class?"selectExpiredTasksWithGenerationUrls":"selectExpiredGenerationTaskCandidates";
+  java.lang.reflect.Method method=mapper.getMethod(name,LocalDateTime.class,int.class);
   org.apache.ibatis.annotations.Options options=method.getAnnotation(org.apache.ibatis.annotations.Options.class);
   assertNotNull(options,"cleanup candidate query must have a driver timeout");assertEquals(15,options.timeout());
   org.apache.ibatis.annotations.SelectProvider provider=method.getAnnotation(org.apache.ibatis.annotations.SelectProvider.class);
   assertNotNull(provider);
   String sql=(String)provider.type().getMethod(provider.method()).invoke(provider.type().getDeclaredConstructor().newInstance());
   assertTrue(sql.contains("MAX_EXECUTION_TIME(15000)"));
+  }
  }
  @Test void activePhotoVideoGenerationAndOpenRemoteReferencesBlockCandidatesAndFinalClaims()throws Exception {
   UnpooledDataSource ds=new UnpooledDataSource("org.h2.Driver","jdbc:h2:mem:"+UUID.randomUUID()+";MODE=MySQL;DB_CLOSE_DELAY=-1","sa","");
@@ -76,6 +79,12 @@ class TkCleanupPublishReferenceMapperTest {
    assertEquals(1,generations.selectExpiredTasksWithGenerationUrls(LocalDateTime.now(),10).size());
    q.execute("UPDATE tk_open_tiktok_publish_task SET deleted=0");q.execute("UPDATE tk_open_tiktok_media SET deleted=1");
    assertEquals(1,generations.selectExpiredTasksWithGenerationUrls(LocalDateTime.now(),10).size());
+   q.execute("UPDATE tk_open_tiktok_media SET deleted=0");
+   q.execute("INSERT INTO infra_file(id,path,create_time,deleted) VALUES(45,'tk/1/2/generation-tasks/44/nested/generation-tasks/444/video.mp4',TIMESTAMP '2020-01-01 00:00:00',0),(46,'tk/1/2/generation-tasks/444/video.mp4',TIMESTAMP '2020-01-01 00:00:00',0),(47,'tk/1/2/generation-tasks/0044/video.mp4',TIMESTAMP '2020-01-01 00:00:00',0),(48,'tk/1/2/generation-tasks/not-a-number/video.mp4',TIMESTAMP '2020-01-01 00:00:00',0)");
+   q.execute("INSERT INTO infra_file(id,path,create_time,deleted) VALUES(49,'tk/1/2/generation-tasks/9223372036854775808/video.mp4',TIMESTAMP '2020-01-01 00:00:00',0),(50,'tk/1/2/generation-tasks/generation-tasks/44/video.mp4',TIMESTAMP '2020-01-01 00:00:00',0),(51,'tk/1/2/generation-tasks/44',TIMESTAMP '2020-01-01 00:00:00',0),(52,'tk/1/2/generation-tasks/444/nested/generation-tasks/44/video.mp4',TIMESTAMP '2020-01-01 00:00:00',0)");
+   List<cn.iocoder.yudao.module.infra.dal.dataobject.file.FileDO> safeCandidates=files.selectExpiredGenerationTaskCandidates(LocalDateTime.now(),10);
+   assertEquals(1,safeCandidates.size(),"active task, ambiguous and malformed paths must be retained; adjacent ID must not match");
+   assertEquals(46L,safeCandidates.get(0).getId());
   }
  }
 }
