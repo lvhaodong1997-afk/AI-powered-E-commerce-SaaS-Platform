@@ -35,7 +35,7 @@ public class TkOpenPhotoMediaService {
         boolean useOss=Boolean.TRUE.equals(config.getEnabled());
         TkOpenTiktokMediaDO m=TkOpenTiktokMediaDO.builder().uploadId(id).clientId(client).mediaType("PHOTO")
                 .uploadMode(useOss?"OSS":"LOCAL").sourceFileName(name).sourceFileSize(size).sourceContentType(normalizedMime)
-                .sourceSha256(StrUtil.isBlank(sha)?null:sha.toLowerCase(Locale.ROOT)).fileName(name).fileSize(size)
+                .sourceSha256(StrUtil.isBlank(sha)?null:sha.toLowerCase(Locale.ROOT)).fileName(name).fileSize(size).contentType(normalizedMime)
                 .uploadedSize(0L).uploadedChunks("[]").status("UPLOADING")
                 .expireTime(LocalDateTime.now().plusHours(Math.max(1,properties.getUpload().getSessionExpireHours()==null?24:properties.getUpload().getSessionExpireHours()))).build();
         TkOpenTiktokMediaVO.UploadSessionResp r=new TkOpenTiktokMediaVO.UploadSessionResp();

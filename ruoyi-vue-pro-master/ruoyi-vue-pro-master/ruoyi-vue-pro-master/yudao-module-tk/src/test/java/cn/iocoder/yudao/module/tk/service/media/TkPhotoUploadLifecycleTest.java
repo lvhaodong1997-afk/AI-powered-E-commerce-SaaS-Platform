@@ -40,6 +40,7 @@ class TkPhotoUploadLifecycleTest {
         ArgumentCaptor<TkOpenTiktokMediaDO> capture=ArgumentCaptor.forClass(TkOpenTiktokMediaDO.class);
         verify(mapper).insert(capture.capture()); TkOpenTiktokMediaDO m=capture.getValue();
         assertEquals("UPLOADING",m.getStatus()); assertEquals(12L,m.getSourceFileSize());
+        assertEquals("image/png",m.getContentType(),"initial row must satisfy existing NOT NULL content_type");
         assertNull(m.getFileUrl()); assertNull(m.getMediaId()); assertNull(m.getObjectKey());
         assertTrue(m.getSourceObjectKey().startsWith("tk/open-api/client_a/photo-original/"));
     }
