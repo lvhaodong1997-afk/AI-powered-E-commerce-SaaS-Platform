@@ -308,6 +308,7 @@ const createQuote = async () => {
   storage(':draft', JSON.stringify(draft.value))
   try {
     const order = await PaymentApi.quote({ ...draft.value, quantity: draft.value.quantity ?? 1 })
+    loadError.value = ''
     selected.value = order
     rememberOrder(order)
     if (order.status !== 'created') {

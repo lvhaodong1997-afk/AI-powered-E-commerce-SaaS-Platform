@@ -79,6 +79,7 @@ test('known no-quote rejection unlocks selection and uses a new key for five uni
     [1, 5]
   )
   assert.notEqual(h.attempted[0].idempotencyKey, h.attempted[1].idempotencyKey)
+  assert.equal(h.context.loadError.value, '')
 })
 test('unknown outcome still retries the exact original quantity and request', async () => {
   const h = harness(new Error('network result unknown'))
