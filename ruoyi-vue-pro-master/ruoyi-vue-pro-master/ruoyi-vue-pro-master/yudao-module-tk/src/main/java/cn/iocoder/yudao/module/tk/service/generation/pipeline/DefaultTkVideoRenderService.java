@@ -105,8 +105,13 @@ public class DefaultTkVideoRenderService implements TkVideoRenderService {
                     () -> {
                         File output = new File(taskDir, "final-video.mp4");
                         File bgmFile = resolveBgmFile(taskDir, task);
+                        double renderDuration = TkNarrationDurationSupport.followsNarration(task)
+                                ? TkNarrationDurationSupport.renderDuration(task,
+                                    renderMedia.audioFile == null ? null : probeDuration(renderMedia.audioFile),
+                                    generationProperties.getFfmpeg().getMaxTargetDuration())
+                                : TkVideoDurationSupport.normalize(task.getTargetDuration());
                         List<String> renderCommand = buildFinalRenderCommand(ffmpeg(), mergedVideo, renderMedia.audioFile, bgmFile,
-                                task.getBgmVolume(), TkVideoDurationSupport.normalize(task.getTargetDuration()),
+                                task.getBgmVolume(), renderDuration,
                                 renderMedia.subtitleAssets.assFile, output, ffmpegPreset(), nativeOpeningDurationSeconds(task),
                                 subtitleFontsDir(), task.getAudioMixVersion());
                         runCommand(renderCommand);

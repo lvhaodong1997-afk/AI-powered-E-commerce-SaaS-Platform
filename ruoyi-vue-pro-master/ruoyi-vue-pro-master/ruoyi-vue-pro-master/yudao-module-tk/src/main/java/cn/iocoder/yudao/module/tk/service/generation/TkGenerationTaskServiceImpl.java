@@ -312,6 +312,7 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
         target.setOpeningClipStartSecond(source.getOpeningClipStartSecond());
         target.setOpeningClipEndSecond(source.getOpeningClipEndSecond());
         target.setReferenceDuration(source.getReferenceDuration());
+        target.setDurationMode(source.getDurationMode());
         target.setSegmentDurationConfig(source.getSegmentDurationConfig());
         target.setPromptText(source.getPromptText());
         target.setBgmEnabled(source.getBgmEnabled());
@@ -552,6 +553,13 @@ public class TkGenerationTaskServiceImpl implements TkGenerationTaskService {
             config = TkGenerationRouteConfigSupport.withManualTranslationConfig(config,
                     Boolean.TRUE.equals(createReqVO.getManualTranslationEnabled()),
                     createReqVO.getManualOriginalText(), TkLanguageSupport.normalize(createReqVO.getTargetLanguage()));
+        }
+        if ("FOLLOW_NARRATION".equals(createReqVO.getDurationMode())) {
+            com.fasterxml.jackson.databind.node.ObjectNode snapshot =
+                    (com.fasterxml.jackson.databind.node.ObjectNode) JsonUtils.parseTree(
+                            StrUtil.blankToDefault(config, "{}"));
+            snapshot.put("durationMode", "FOLLOW_NARRATION");
+            config = JsonUtils.toJsonString(snapshot);
         }
         return config;
     }

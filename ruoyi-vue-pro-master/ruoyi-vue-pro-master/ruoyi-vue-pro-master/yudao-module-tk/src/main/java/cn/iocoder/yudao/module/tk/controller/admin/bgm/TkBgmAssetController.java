@@ -54,6 +54,15 @@ public class TkBgmAssetController {
         return success(BeanUtils.toBean(bgmAssetService.getSystemList(), TkBgmAssetRespVO.class));
     }
 
+    @GetMapping("/user-list")
+    @Operation(summary = "获得当前账号上传的可用 BGM")
+    @PreAuthorize("@ss.hasPermission('tk:generation:query')")
+    public CommonResult<List<TkBgmAssetRespVO>> userList() {
+        return success(BeanUtils.toBean(bgmAssetService.getAvailableList().stream()
+                .filter(bgmAssetService::canDelete)
+                .collect(java.util.stream.Collectors.toList()), TkBgmAssetRespVO.class));
+    }
+
     @PostMapping("/upload")
     @Operation(summary = "上传用户 BGM")
     @PreAuthorize("@ss.hasPermission('tk:generation:create')")
