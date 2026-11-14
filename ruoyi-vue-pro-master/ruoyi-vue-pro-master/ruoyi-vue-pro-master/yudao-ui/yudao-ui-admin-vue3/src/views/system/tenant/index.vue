@@ -1,5 +1,4 @@
 ﻿<template>
-
   <!-- 搜索 -->
   <ContentWrap>
     <el-form
@@ -133,6 +132,7 @@
           <span>{{ scope.row.contactUsername || '-' }}</span>
         </template>
       </el-table-column>
+      <el-table-column :label="memberLimitLabel" align="center" prop="memberLimit" />
       <el-table-column label="积分额度" align="center" prop="accountCount">
         <template #default="scope">
           <span>{{ scope.row.accountCount ?? 0 }}</span>
@@ -217,6 +217,7 @@
   <TenantForm ref="formRef" @success="getList" />
 </template>
 <script lang="ts" setup>
+import { useLocaleStore } from '@/store/modules/locale'
 import { DICT_TYPE, getIntDictOptions } from '@/utils/dict'
 import { dateFormatter } from '@/utils/formatTime'
 import download from '@/utils/download'
@@ -227,6 +228,11 @@ import { TkCreditApi } from '@/api/tk/credit'
 import TenantForm from './TenantForm.vue'
 
 defineOptions({ name: 'SystemTenant' })
+
+const memberLimitLocale = useLocaleStore()
+const memberLimitLabel = computed(() =>
+  memberLimitLocale.getCurrentLocale.lang === 'en' ? 'Member limit' : '成员上限'
+)
 
 const message = useMessage() // 消息弹窗
 const { t } = useI18n() // 国际化

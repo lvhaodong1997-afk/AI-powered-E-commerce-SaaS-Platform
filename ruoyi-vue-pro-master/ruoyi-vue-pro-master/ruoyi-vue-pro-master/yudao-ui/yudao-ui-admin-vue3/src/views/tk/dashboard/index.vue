@@ -16,69 +16,14 @@
           {{ copy.creditsUnit }}</strong
         >
         <em v-if="creditBalance.lowBalance">{{ copy.lowCredit }}</em>
-        <el-button link type="primary" class="recharge-detail-link" @click="showRechargeDetail = true">
+        <el-button v-if="canManageTenantBilling" link type="primary" class="recharge-detail-link" @click="router.push('/tk/recharge')">
           {{ copy.rechargeDetail }}
         </el-button>
       </div>
+      <el-button v-if="canManageTenantBilling" link type="primary" @click="router.push('/tk/invite')">
+        {{ currentLocale === 'en' ? 'Invite and refer' : '邀请推荐' }}
+      </el-button>
     </header>
-
-    <el-dialog v-model="showRechargeDetail" :title="copy.rechargeDetail" width="720px">
-      <div class="recharge-detail">
-        <section>
-          <h3>{{ copy.rechargeTiers }}</h3>
-          <div class="recharge-table-wrap">
-            <table class="recharge-table">
-              <thead>
-                <tr>
-                  <th>{{ copy.rechargeAmount }}</th>
-                  <th>{{ copy.rechargeDiscount }}</th>
-                  <th>{{ copy.creditUnitPrice }}</th>
-                  <th>{{ copy.rechargeCredits }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in rechargeTierRows" :key="item.amount">
-                  <td>{{ item.amount }}</td>
-                  <td>{{ item.discount }}</td>
-                  <td>{{ item.unitPrice }}</td>
-                  <td>{{ item.credits }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section>
-          <div class="recharge-section-title">
-            <h3>{{ copy.fullProcessCost }}</h3>
-            <el-tag type="success" effect="light">{{ copy.fullProcessCreditRule }}</el-tag>
-          </div>
-          <div class="recharge-table-wrap">
-            <table class="recharge-table">
-              <thead>
-                <tr>
-                  <th>{{ copy.rechargeAmount }}</th>
-                  <th>{{ copy.singleVideoCost }}</th>
-                  <th>{{ copy.availableGenerationCount }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in rechargeCostRows" :key="item.amount">
-                  <td>{{ item.amount }}</td>
-                  <td>{{ item.cost }}</td>
-                  <td>{{ item.count }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section>
-          <h3>{{ copy.rechargeRules }}</h3>
-          <ul class="recharge-rule-list">
-            <li v-for="item in rechargeRuleRows" :key="item">{{ item }}</li>
-          </ul>
-        </section>
-      </div>
-    </el-dialog>
 
     <div class="home-layout">
       <main class="main-column">
@@ -1522,6 +1467,7 @@
 </template>
 
 <script setup lang="ts">
+import { useUserStore } from '@/store/modules/user'
 import { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay, subtitlePreviewFontSize, measureSubtitlePreview } from './subtitlePreview.mjs'
 import { TkDashboardApi } from '@/api/tk/dashboard'
 import { TkBgmAssetApi, type TkBgmAssetVO } from '@/api/tk/bgm'
@@ -1909,6 +1855,8 @@ const subtitlePositionOptions = [
 const message = useMessage()
 const { tt } = useTkI18n()
 const router = useRouter()
+const billingUser = useUserStore()
+const canManageTenantBilling = computed(() => billingUser.getUser.tkUserLevel === 'TENANT_ADMIN')
 const localeStore = useLocaleStore()
 const currentLocale = computed(() => localeStore.getCurrentLocale.lang)
 const isEn = computed(() => currentLocale.value === 'en')
@@ -1919,7 +1867,7 @@ const copy = computed(() =>
         heroSubtitle: 'From reference links to high-converting videos in one AI workflow',
         remainingCredits: 'Remaining',
         creditsUnit: 'credits',
-        lowCredit: 'Low balance. Contact support to recharge',
+        lowCredit: 'Low balance. Ask your tenant administrator to add credits',
         rechargeDetail: 'Recharge details',
         rechargeTiers: 'Recharge tiers',
         rechargeAmount: 'Amount',
@@ -2244,7 +2192,7 @@ const copy = computed(() =>
         heroSubtitle: '从对标链接到爆款视频，AI帮你一键生成高转化素材',
         remainingCredits: '剩余',
         creditsUnit: '积分',
-        lowCredit: '额度不足，请联系客服充值',
+        lowCredit: '积分不足，请租户管理员充值',
         rechargeDetail: '充值详情',
         rechargeTiers: '充值阶梯',
         rechargeAmount: '充值金额',
@@ -2723,36 +2671,6 @@ let openingUploadToken = 0
 const referenceAnalysis = ref<TkReferenceAnalysisVO>()
 const hydratingReplay = ref(false)
 const creditBalance = ref<TkCreditBalanceVO>({})
-const RECHARGE_POPUP_SESSION_KEY = 'tk-dashboard-recharge-popup-shown'
-const showRechargeDetail = ref(false)
-const rechargeTierRows = [
-  { amount: '¥1,000', discount: '8.0折', unitPrice: '¥4.00/积分', credits: '250积分' },
-  { amount: '¥5,000', discount: '7.5折', unitPrice: '¥3.75/积分', credits: '1,333积分' },
-  { amount: '¥10,000', discount: '6.5折', unitPrice: '¥3.25/积分', credits: '3,077积分' },
-  { amount: '¥50,000', discount: '6.0折', unitPrice: '¥3.00/积分', credits: '16,667积分' }
-]
-const rechargeCostRows = [
-  { amount: '¥1,000', cost: '¥8.00', count: '125条' },
-  { amount: '¥5,000', cost: '¥7.50', count: '666条' },
-  { amount: '¥10,000', cost: '¥6.50', count: '1,538条' },
-  { amount: '¥50,000', cost: '¥6.00', count: '8,333条' }
-]
-const rechargeRuleRows = [
-  '积分充值后即时到账',
-  '积分有效期自充值日起 6个月，到期未消耗部分自动清零',
-  '支持团队多人共用同一积分池',
-  '充值后 7天内 如未使用任何积分，可申请全额退款；超过7天视为认可服务，不再退费'
-]
-const maybeShowRechargeDetailPopup = () => {
-  if (!creditBalance.value.lowBalance) {
-    return
-  }
-  if (sessionStorage.getItem(RECHARGE_POPUP_SESSION_KEY)) {
-    return
-  }
-  showRechargeDetail.value = true
-  sessionStorage.setItem(RECHARGE_POPUP_SESSION_KEY, '1')
-}
 const currentGenerationTask = ref<TkGenerationTaskVO>()
 const currentGenerationOutputDisplayName = computed(() =>
   currentGenerationTask.value ? buildGenerationOutputDisplayName(currentGenerationTask.value) : ''
@@ -5013,7 +4931,7 @@ const getData = async () => {
 const refreshCreditBalance = async () => {
   try {
     creditBalance.value = await TkCreditApi.getBalance()
-    maybeShowRechargeDetailPopup()
+
   } catch (error) {
     creditBalance.value = {}
   }

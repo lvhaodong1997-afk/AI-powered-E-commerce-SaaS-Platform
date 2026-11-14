@@ -81,6 +81,7 @@
             </div>
             <div class="tk-login__panel-body">
               <LoginForm class="tk-login__form" />
+              <RegisterForm class="tk-login__form" />
               <SSOLoginVue class="tk-login__form tk-login__form--sso" />
               <ForgetPasswordForm class="tk-login__form" />
             </div>
@@ -90,7 +91,9 @@
             <div class="tk-login__legal-links">
               <a href="/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
               <i></i>
-              <a href="/terms-of-service" target="_blank" rel="noopener noreferrer">Terms of Service</a>
+              <a href="/terms-of-service" target="_blank" rel="noopener noreferrer"
+                >Terms of Service</a
+              >
             </div>
           </div>
         </Transition>
@@ -107,7 +110,7 @@ import { useLocaleStore } from '@/store/modules/locale'
 import { ThemeSwitch } from '@/layout/components/ThemeSwitch'
 import { LocaleDropdown } from '@/layout/components/LocaleDropdown'
 
-import { LoginForm, SSOLoginVue, ForgetPasswordForm } from './components'
+import { LoginForm, RegisterForm, SSOLoginVue, ForgetPasswordForm } from './components'
 
 defineOptions({ name: 'Login' })
 

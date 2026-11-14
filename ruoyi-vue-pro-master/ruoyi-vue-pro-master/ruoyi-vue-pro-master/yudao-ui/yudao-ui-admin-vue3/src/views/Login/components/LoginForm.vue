@@ -83,6 +83,13 @@
         @success="handleLogin"
       />
     </el-row>
+    <el-button
+      v-if="registrationEnabled"
+      class="w-full"
+      @click="setLoginState(LoginStateEnum.REGISTER)"
+    >
+      {{ registrationLabel }}
+    </el-button>
   </el-form>
 </template>
 <script lang="ts" setup>
@@ -95,11 +102,20 @@ import { useIcon } from '@/hooks/web/useIcon'
 import * as authUtil from '@/utils/auth'
 import { usePermissionStore } from '@/store/modules/permission'
 import * as LoginApi from '@/api/login'
+import { getTenantRegistrationConfig } from '@/api/login/tenantRegistration'
+import { useLocaleStore } from '@/store/modules/locale'
 import { LoginStateEnum, useFormValid, useLoginState } from './useLogin'
 
 defineOptions({ name: 'LoginForm' })
 
 const { t } = useI18n()
+const registrationEnabled = ref(false)
+const registrationLocale = useLocaleStore()
+const registrationLabel = computed(() =>
+  registrationLocale.getCurrentLocale.lang === 'en'
+    ? 'Create an independent workspace'
+    : '注册独立租户'
+)
 const iconHouse = useIcon({ icon: 'ep:house' })
 const iconAvatar = useIcon({ icon: 'ep:avatar' })
 const iconLock = useIcon({ icon: 'ep:lock' })
@@ -232,6 +248,18 @@ watch(
   }
 )
 onMounted(() => {
+  getTenantRegistrationConfig()
+    .then((config) => {
+      registrationEnabled.value = config.enabled
+      if (
+        config.enabled &&
+        (currentRoute.value.query.register === '1' || currentRoute.value.query.inviteCode)
+      )
+        setLoginState(LoginStateEnum.REGISTER)
+    })
+    .catch(() => {
+      registrationEnabled.value = false
+    })
   getLoginFormCache()
   getTenantByWebsite()
 })

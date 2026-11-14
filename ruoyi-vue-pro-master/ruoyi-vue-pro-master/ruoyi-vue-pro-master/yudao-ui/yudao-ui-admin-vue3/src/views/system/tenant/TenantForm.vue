@@ -37,6 +37,14 @@
           type="password"
         />
       </el-form-item>
+      <el-form-item :label="memberLimitLabel" prop="memberLimit">
+        <el-input-number
+          v-model="formData.memberLimit"
+          :min="1"
+          :precision="0"
+          controls-position="right"
+        />
+      </el-form-item>
       <el-form-item label="积分额度" prop="accountCount">
         <el-input-number
           v-model="formData.accountCount"
@@ -88,6 +96,7 @@
   </Dialog>
 </template>
 <script lang="ts" setup>
+import { useLocaleStore } from '@/store/modules/locale'
 import { DICT_TYPE, getIntDictOptions } from '@/utils/dict'
 import * as TenantApi from '@/api/system/tenant'
 import { CommonStatusEnum } from '@/utils/constants'
@@ -95,6 +104,11 @@ import * as TenantPackageApi from '@/api/system/tenantPackage'
 import { TkCreditApi } from '@/api/tk/credit'
 
 defineOptions({ name: 'SystemTenantForm' })
+
+const memberLimitLocale = useLocaleStore()
+const memberLimitLabel = computed(() =>
+  memberLimitLocale.getCurrentLocale.lang === 'en' ? 'Member limit' : '成员上限'
+)
 
 const { t } = useI18n() // 国际化
 const message = useMessage() // 消息弹窗
@@ -109,6 +123,7 @@ const formData = ref({
   contactName: undefined,
   contactMobile: undefined,
   accountCount: undefined,
+  memberLimit: 1,
   expireTime: undefined,
   websites: [],
   status: CommonStatusEnum.ENABLE,
@@ -122,6 +137,7 @@ const formRules = reactive({
   packageId: [{ required: true, message: '租户套餐不能为空', trigger: 'blur' }],
   contactName: [{ required: true, message: '联系人不能为空', trigger: 'blur' }],
   status: [{ required: true, message: '租户状态不能为空', trigger: 'blur' }],
+  memberLimit: [{ required: true, message: '成员上限不能为空', trigger: 'blur' }],
   accountCount: [{ required: true, message: '积分额度不能为空', trigger: 'blur' }],
   expireTime: [{ required: true, message: '过期时间不能为空', trigger: 'blur' }],
   username: [{ required: true, message: '用户名称不能为空', trigger: 'blur' }],
@@ -199,6 +215,7 @@ const resetForm = () => {
     contactName: undefined,
     contactMobile: undefined,
     accountCount: undefined,
+    memberLimit: 1,
     expireTime: undefined,
     websites: [],
     status: CommonStatusEnum.ENABLE,

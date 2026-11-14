@@ -1,284 +1,369 @@
 <template>
   <el-form
-    v-show="getShow"
-    ref="formLogin"
-    :model="registerData.registerForm"
-    :rules="registerRules"
+    v-show="visible"
+    ref="formRef"
+    :model="form"
+    :rules="rules"
     class="login-form"
     label-position="top"
-    label-width="120px"
     size="large"
   >
-    <el-row class="mx-[-10px]">
-      <el-col :span="24" class="px-10px">
-        <el-form-item>
-          <LoginFormTitle class="w-full" />
-        </el-form-item>
-      </el-col>
-      <el-col :span="24" class="px-10px">
-        <el-form-item v-if="registerData.tenantEnable === 'true'" prop="tenantName">
-          <el-input
-            v-model="registerData.registerForm.tenantName"
-            :placeholder="t('login.tenantname')"
-            :prefix-icon="iconHouse"
-            link
-            type="primary"
-            size="large"
-          />
-        </el-form-item>
-      </el-col>
-      <el-col :span="24" class="px-10px">
-        <el-form-item prop="username">
-          <el-input
-            v-model="registerData.registerForm.username"
-            :placeholder="t('login.username')"
-            size="large"
-            :prefix-icon="iconAvatar"
-          />
-        </el-form-item>
-      </el-col>
-      <el-col :span="24" class="px-10px">
-        <el-form-item prop="nickname">
-          <el-input
-            v-model="registerData.registerForm.nickname"
-            placeholder="昵称"
-            size="large"
-            :prefix-icon="iconAvatar"
-          />
-        </el-form-item>
-      </el-col>
-      <el-col :span="24" class="px-10px">
-        <el-form-item prop="password">
-          <el-input
-            v-model="registerData.registerForm.password"
-            type="password"
-            auto-complete="off"
-            :placeholder="t('login.password')"
-            size="large"
-            :prefix-icon="iconLock"
-            show-password
-          />
-        </el-form-item>
-      </el-col>
-      <el-col :span="24" class="px-10px">
-        <el-form-item prop="confirmPassword">
-          <el-input
-            v-model="registerData.registerForm.confirmPassword"
-            type="password"
-            size="large"
-            auto-complete="off"
-            :placeholder="t('login.checkPassword')"
-            :prefix-icon="iconLock"
-            show-password
-          />
-        </el-form-item>
-      </el-col>
-      <el-col :span="24" class="px-10px">
-        <el-form-item>
-          <el-button :loading="loginLoading" class="w-full" type="primary" @click="getCode()">
-            {{ t('login.register') }}
-          </el-button>
-        </el-form-item>
-      </el-col>
-      <Verify
-        v-if="registerData.captchaEnable === 'true'"
-        ref="verify"
-        :captchaType="captchaType"
-        :imgSize="{ width: '400px', height: '200px' }"
-        mode="pop"
-        @success="handleRegister"
+    <h3>{{ text('创建独立租户', 'Create your workspace') }}</h3>
+    <p class="registration-note">{{
+      text(
+        '注册后拥有独立账号与数据，初始付费积分为 0。邀请码仅用于推荐。',
+        'Your tenant has independent accounts and data, with zero initial paid credits. An invite is optional and records a referral only.'
+      )
+    }}</p>
+    <el-alert
+      v-if="!config?.enabled || !config?.smsAvailable"
+      :closable="false"
+      type="warning"
+      :title="
+        text(
+          '注册或短信服务暂未开放，请稍后重试。',
+          'Registration or SMS verification is currently unavailable.'
+        )
+      "
+    />
+    <el-form-item v-for="field in fields" :key="field.key" :label="field.label" :prop="field.key">
+      <el-input
+        v-model="form[field.key]"
+        :type="field.key === 'password' ? 'password' : 'text'"
+        :show-password="field.key === 'password'"
+        :maxlength="field.max"
+        :autocomplete="field.key === 'password' ? 'new-password' : 'off'"
       />
-    </el-row>
-    <el-button class="w-full" @click="handleBackLogin()">{{ t('login.hasUser') }}</el-button>
+    </el-form-item>
+    <el-form-item :label="text('手机号码', 'Mobile number')" prop="mobile">
+      <el-input v-model="form.mobile" maxlength="11" inputmode="tel" autocomplete="tel" />
+    </el-form-item>
+    <el-form-item :label="text('短信验证码', 'SMS code')" prop="smsCode">
+      <div class="sms-row">
+        <el-input
+          v-model="sms.code"
+          maxlength="6"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+        />
+        <el-button
+          :loading="smsLoading"
+          :disabled="!available || (remaining > 0 && sms.deliveryStatus !== 'PENDING')"
+          @click="begin('sms')"
+        >
+          {{
+            sms.deliveryStatus === 'PENDING'
+              ? text('确认发送状态', 'Check delivery')
+              : remaining > 0
+                ? remaining + 's'
+                : text('获取验证码', 'Send code')
+          }}
+        </el-button>
+      </div>
+    </el-form-item>
+    <p v-if="sms.deliveryStatus" class="registration-note" role="status">
+      {{
+        sms.deliveryStatus === 'SENT'
+          ? text('验证码已发送，5 分钟内有效。', 'Code sent. Valid for 5 minutes.')
+          : sms.deliveryStatus === 'PENDING'
+            ? text(
+                '发送处理中，请确认原请求状态。',
+                'Delivery is pending. Check the original request.'
+              )
+            : text(
+                '发送结果暂不确定，请勿重复发送；如已收到，可输入验证码。',
+                'Delivery is uncertain. Use the received code, or recover the original request before resending.'
+              )
+      }}
+    </p>
+    <el-form-item :label="text('邀请码（选填）', 'Invite code (optional)')" prop="inviteCode">
+      <el-input
+        v-model="form.inviteCode"
+        maxlength="10"
+        clearable
+        :placeholder="text('无效时可清空后继续', 'Clear an invalid code to continue')"
+      />
+    </el-form-item>
+    <p class="registration-note">{{
+      text(
+        '推荐关系不会加入对方团队，也不会产生奖励或佣金。',
+        'A referral does not join another team or create rewards or commission.'
+      )
+    }}</p>
+    <el-alert
+      v-if="registrationUncertain"
+      :closable="false"
+      type="info"
+      :title="
+        text(
+          '上次注册结果待确认。请优先重试原请求，避免重复创建。',
+          'The previous registration needs confirmation. Retry the original request first.'
+        )
+      "
+    />
+    <el-button
+      v-if="registrationUncertain"
+      class="w-full mb-12px"
+      :loading="registerLoading"
+      @click="begin('retry')"
+    >
+      {{ text('重试原注册请求', 'Retry original registration') }}
+    </el-button>
+    <el-button
+      class="w-full"
+      type="primary"
+      :loading="registerLoading"
+      :disabled="!available"
+      @click="begin('register')"
+    >
+      {{ text('验证并创建租户', 'Verify and create workspace') }}
+    </el-button>
+    <el-button class="w-full mt-12px" @click="handleBackLogin">{{
+      text('已有账号，返回登录', 'Already registered? Sign in')
+    }}</el-button>
+    <Verify
+      v-if="captchaEnabled"
+      ref="verify"
+      captchaType="blockPuzzle"
+      :imgSize="{ width: '400px', height: '200px' }"
+      mode="pop"
+      @success="perform"
+    />
   </el-form>
 </template>
-<script lang="ts" setup>
-import { ElLoading } from 'element-plus'
-import LoginFormTitle from './LoginFormTitle.vue'
-import type { RouteLocationNormalizedLoaded } from 'vue-router'
-import { useIcon } from '@/hooks/web/useIcon'
-import * as authUtil from '@/utils/auth'
-import { usePermissionStore } from '@/store/modules/permission'
-import * as LoginApi from '@/api/login'
-import { LoginStateEnum, useLoginState, useFormValid } from './useLogin'
+<script setup lang="ts">
+import { useLocaleStore } from '@/store/modules/locale'
+import { useUserStore } from '@/store/modules/user'
+import { deleteUserCache } from '@/hooks/web/useCache'
+import * as auth from '@/utils/auth'
+import {
+  changePhone,
+  applySmsChallenge,
+  prepareSmsSend,
+  registrationAttempt
+} from '@/utils/tenantOnboarding'
+import {
+  getTenantRegistrationConfig,
+  sendTenantRegistrationSms,
+  registerTenant
+} from '@/api/login/tenantRegistration'
+import type {
+  TenantRegistrationConfig,
+  TenantRegistrationBody
+} from '@/api/login/tenantRegistration'
+import { LoginStateEnum, useLoginState } from './useLogin'
 
 defineOptions({ name: 'RegisterForm' })
-
-const { t } = useI18n()
-const iconHouse = useIcon({ icon: 'ep:house' })
-const iconAvatar = useIcon({ icon: 'ep:avatar' })
-const iconLock = useIcon({ icon: 'ep:lock' })
-const formLogin = ref()
-const { validForm } = useFormValid(formLogin)
-const { handleBackLogin, getLoginState } = useLoginState()
-const { currentRoute, push } = useRouter()
-const permissionStore = usePermissionStore()
-const redirect = ref<string>('')
-const loginLoading = ref(false)
+const locale = useLocaleStore()
+const text = (zh: string, en: string) => (locale.getCurrentLocale.lang === 'en' ? en : zh)
+const { getLoginState, handleBackLogin } = useLoginState()
+const visible = computed(() => getLoginState.value === LoginStateEnum.REGISTER)
+const router = useRouter()
+const route = useRoute()
+const formRef = ref()
 const verify = ref()
-const captchaType = ref('blockPuzzle') // blockPuzzle 滑块 clickWord 点击文字 pictureWord 文字验证码
-
-const getShow = computed(() => unref(getLoginState) === LoginStateEnum.REGISTER)
-
-const equalToPassword = (_rule, value, callback) => {
-  if (registerData.registerForm.password !== value) {
-    callback(new Error('两次输入的密码不一致'))
-  } else {
-    callback()
+const captchaEnabled = import.meta.env.VITE_APP_CAPTCHA_ENABLE !== 'false'
+const config = ref<TenantRegistrationConfig>()
+const available = computed(() => config.value?.enabled && config.value?.smsAvailable)
+const form = reactive({
+  tenantName: '',
+  username: '',
+  nickname: '',
+  password: '',
+  mobile: '',
+  inviteCode: ''
+})
+const sms = ref(changePhone(undefined, ''))
+const now = ref(Date.now())
+const remaining = computed(() => Math.max(0, Math.ceil((sms.value.resendAt - now.value) / 1000)))
+const smsLoading = ref(false)
+const registerLoading = ref(false)
+const registrationUncertain = ref(false)
+let attempt: ReturnType<typeof registrationAttempt> | undefined
+let pendingAction: 'sms' | 'register' | 'retry' = 'register'
+const fields = computed(() => [
+  { key: 'tenantName' as const, label: text('租户名称', 'Workspace name'), max: 63 },
+  { key: 'username' as const, label: text('登录账号', 'Username'), max: 30 },
+  { key: 'nickname' as const, label: text('姓名 / 昵称', 'Name / nickname'), max: 30 },
+  {
+    key: 'password' as const,
+    label: text('密码（4–16 位）', 'Password (4–16 characters)'),
+    max: 16
+  }
+])
+const requiredRule = () => ({
+  required: true,
+  message: text('请填写此项', 'This field is required'),
+  trigger: 'blur'
+})
+const rules = computed(() => ({
+  tenantName: [requiredRule()],
+  username: [
+    requiredRule(),
+    {
+      pattern: /^[A-Za-z0-9]{4,30}$/,
+      message: text('请输入 4–30 位字母或数字', 'Use 4–30 letters or numbers'),
+      trigger: 'blur'
+    }
+  ],
+  nickname: [requiredRule()],
+  password: [
+    requiredRule(),
+    { min: 4, max: 16, message: text('密码长度为 4–16 位', 'Use 4–16 characters'), trigger: 'blur' }
+  ],
+  mobile: [
+    requiredRule(),
+    {
+      pattern: /^1[3-9][0-9]{9}$/,
+      message: text('请输入中国大陆手机号', 'Enter a mainland China mobile number'),
+      trigger: 'blur'
+    }
+  ],
+  inviteCode: [
+    {
+      pattern: /^$|^[A-Za-z0-9]{10}$/,
+      message: text(
+        '邀请码为 10 位字母数字，或清空继续',
+        'Use a 10-character code, or clear it to continue'
+      ),
+      trigger: 'blur'
+    }
+  ],
+  smsCode: [
+    {
+      validator: (_rule: unknown, _value: unknown, done: (error?: Error) => void) =>
+        done(
+          /^[0-9]{6}$/.test(sms.value.code) &&
+            sms.value.smsRequestId &&
+            sms.value.deliveryStatus !== 'PENDING' &&
+            sms.value.expiresAt > Date.now()
+            ? undefined
+            : new Error(text('请获取并输入有效验证码', 'Request and enter a valid code'))
+        ),
+      trigger: 'blur'
+    }
+  ]
+}))
+watch(
+  () => form.mobile,
+  (mobile) => {
+    sms.value = changePhone(sms.value, mobile.trim())
+  },
+  { flush: 'sync' }
+)
+watch(
+  () => route.query.inviteCode,
+  (value) => {
+    if (typeof value === 'string') form.inviteCode = value.slice(0, 10)
+  },
+  { immediate: true }
+)
+const begin = async (action: typeof pendingAction) => {
+  if (smsLoading.value || registerLoading.value || !available.value) return
+  try {
+    if (action === 'sms') await formRef.value.validateField('mobile')
+    else if (action === 'register') await formRef.value.validate()
+    pendingAction = action
+    if (captchaEnabled) verify.value?.show?.()
+    else await perform({})
+  } catch {
+    /* Validation is displayed beside the field. */
   }
 }
-
-const registerRules = {
-  tenantName: [
-    { required: true, trigger: 'blur', message: '请输入您所属的租户' },
-    { min: 2, max: 20, message: '租户账号长度必须介于 2 和 20 之间', trigger: 'blur' }
-  ],
-  username: [
-    { required: true, trigger: 'blur', message: '请输入您的账号' },
-    { min: 4, max: 30, message: '用户账号长度必须介于 4 和 30 之间', trigger: 'blur' }
-  ],
-  nickname: [
-    { required: true, trigger: 'blur', message: '请输入您的昵称' },
-    { min: 0, max: 30, message: '昵称长度必须介于 0 和 30 之间', trigger: 'blur' }
-  ],
-  password: [
-    { required: true, trigger: 'blur', message: '请输入您的密码' },
-    { min: 5, max: 20, message: '用户密码长度必须介于 5 和 20 之间', trigger: 'blur' },
-    { pattern: /^[^<>"'|\\]+$/, message: '不能包含非法字符：< > " \' \\\ |', trigger: 'blur' }
-  ],
-  confirmPassword: [
-    { required: true, trigger: 'blur', message: '请再次输入您的密码' },
-    { required: true, validator: equalToPassword, trigger: 'blur' }
-  ]
+const perform = async (captcha: { captchaVerification?: string }) => {
+  if (pendingAction === 'sms') {
+    smsLoading.value = true
+    sms.value = prepareSmsSend(sms.value)
+    const sent = { ...sms.value }
+    try {
+      const challenge = await sendTenantRegistrationSms({
+        mobile: sent.mobile,
+        requestId: sent.requestId,
+        captchaVerification: captcha.captchaVerification || ''
+      })
+      if (sms.value.requestId === sent.requestId)
+        sms.value = applySmsChallenge(sms.value, sent.mobile, challenge)
+    } catch {
+      /* Keep the original request ID on uncertain network results. */
+    } finally {
+      smsLoading.value = false
+    }
+    return
+  }
+  registerLoading.value = true
+  try {
+    if (pendingAction !== 'retry')
+      attempt = registrationAttempt(attempt, {
+        ...form,
+        tenantName: form.tenantName.trim(),
+        inviteCode: form.inviteCode.trim().toUpperCase(),
+        smsRequestId: sms.value.smsRequestId,
+        smsCode: sms.value.code
+      })
+    if (!attempt) return
+    const result = await registerTenant({
+      ...attempt.payload,
+      requestId: attempt.requestId,
+      captchaVerification: captcha.captchaVerification || ''
+    } as TenantRegistrationBody)
+    if (!result.tenantId) throw new Error('Missing tenant context')
+    deleteUserCache()
+    useUserStore().resetState()
+    auth.setTenantId(result.tenantId)
+    auth.removeLoginForm()
+    auth.setToken(result)
+    registrationUncertain.value = false
+    await router.replace('/tk/dashboard')
+  } catch {
+    registrationUncertain.value = true
+  } finally {
+    registerLoading.value = false
+  }
 }
-
-const registerData = reactive({
-  isShowPassword: false,
-  captchaEnable: import.meta.env.VITE_APP_CAPTCHA_ENABLE,
-  tenantEnable: import.meta.env.VITE_APP_TENANT_ENABLE,
-  registerForm: {
-    tenantName: import.meta.env.VITE_APP_DEFAULT_LOGIN_TENANT || '',
-    nickname: '',
-    tenantId: 0,
-    username: '',
-    password: '',
-    confirmPassword: '',
-    captchaVerification: ''
+let ticker: ReturnType<typeof setInterval> | undefined
+onMounted(async () => {
+  ticker = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+  try {
+    config.value = await getTenantRegistrationConfig()
+  } catch {
+    /* Fail closed. */
   }
 })
-
-const loading = ref() // ElLoading.service 返回的实例
-// 提交注册
-const handleRegister = async (params: any) => {
-  loading.value = true
-  try {
-    if (registerData.tenantEnable) {
-      await getTenantId()
-      registerData.registerForm.tenantId = authUtil.getTenantId()
-    }
-
-    if (registerData.captchaEnable) {
-      registerData.registerForm.captchaVerification = params.captchaVerification
-    }
-
-    const data = await validForm()
-    if (!data) {
-      return
-    }
-
-    const res = await LoginApi.register(registerData.registerForm)
-    if (!res) {
-      return
-    }
-    loading.value = ElLoading.service({
-      lock: true,
-      text: '正在加载系统中...',
-      background: 'rgba(0, 0, 0, 0.7)'
-    })
-
-    authUtil.removeLoginForm()
-
-    authUtil.setToken(res)
-    if (!redirect.value) {
-      redirect.value = '/'
-    }
-    // 判断是否为SSO登录
-    if (redirect.value.indexOf('sso') !== -1) {
-      window.location.href = window.location.href.replace('/login?redirect=', '')
-    } else {
-      push({ path: redirect.value || permissionStore.addRouters[0].path })
-    }
-  } finally {
-    loginLoading.value = false
-    loading.value.close()
-  }
-}
-
-// 获取验证码
-const getCode = async () => {
-  // 情况一，未开启：则直接注册
-  if (registerData.captchaEnable === 'false') {
-    await handleRegister({})
-  } else {
-    // 情况二，已开启：则展示验证码；只有完成验证码的情况，才进行注册
-    // 弹出验证码
-    verify.value.show()
-  }
-}
-
-// 获取租户 ID
-const getTenantId = async () => {
-  if (registerData.tenantEnable === 'true') {
-    const res = await LoginApi.getTenantIdByName(registerData.registerForm.tenantName)
-    authUtil.setTenantId(res)
-  }
-}
-
-// 根据域名，获得租户信息
-const getTenantByWebsite = async () => {
-  if (registerData.tenantEnable === 'true') {
-    const website = location.host
-    const res = await LoginApi.getTenantByWebsite(website)
-    if (res) {
-      registerData.registerForm.tenantName = res.name
-      authUtil.setTenantId(res.id)
-    }
-  }
-}
-
-watch(
-  () => currentRoute.value,
-  (route: RouteLocationNormalizedLoaded) => {
-    redirect.value = route?.query?.redirect as string
-  },
-  {
-    immediate: true
-  }
-)
-onMounted(() => {
-  // getCookie()
-  getTenantByWebsite()
+onBeforeUnmount(() => {
+  if (ticker) clearInterval(ticker)
 })
 </script>
-
-<style lang="scss" scoped>
-:deep(.anticon) {
-  &:hover {
-    color: var(--el-color-primary) !important;
-  }
+<style scoped>
+.registration-note {
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 1.65;
+  opacity: 0.8;
 }
 
-.login-code {
-  float: right;
+.sms-row {
+  display: flex;
   width: 100%;
-  height: 38px;
+  gap: 8px;
+}
 
-  img {
+.sms-row .el-input {
+  min-width: 0;
+}
+
+.login-form > .el-button + .el-button {
+  margin-left: 0;
+}
+
+@media (width <= 480px) {
+  .sms-row {
+    flex-wrap: wrap;
+  }
+
+  .sms-row .el-button {
     width: 100%;
-    height: auto;
-    max-width: 100px;
-    vertical-align: middle;
-    cursor: pointer;
   }
 }
 </style>

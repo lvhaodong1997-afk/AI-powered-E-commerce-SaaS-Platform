@@ -14,6 +14,7 @@ export interface TenantVO {
   password: string
   expireTime: Date
   accountCount: number
+  memberLimit: number
   creditWarningThreshold?: number
   websites: string[]
   createTime: Date

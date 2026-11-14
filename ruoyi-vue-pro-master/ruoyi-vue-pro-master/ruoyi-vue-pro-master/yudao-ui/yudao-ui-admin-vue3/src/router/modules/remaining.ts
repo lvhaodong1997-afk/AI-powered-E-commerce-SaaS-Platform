@@ -34,6 +34,40 @@ const { t } = useI18n()
  **/
 const remainingRouter: AppRouteRecordRaw[] = [
   {
+    path: '/register',
+    name: 'TenantRegistrationEntry',
+    redirect: (to) => ({ path: '/login', query: { ...to.query, register: '1' } }),
+    meta: { hidden: true }
+  },
+  {
+    path: '/tk/recharge',
+    component: Layout,
+    name: 'TkRechargeRoot',
+    meta: { hidden: true },
+    children: [
+      {
+        path: '',
+        name: 'TkRecharge',
+        component: () => import('@/views/tk/recharge/index.vue'),
+        meta: { title: '积分充值', hidden: true, noCache: true, activeMenu: '/tk/recharge' }
+      }
+    ]
+  },
+  {
+    path: '/tk/invite',
+    component: Layout,
+    name: 'TkInviteRoot',
+    meta: { hidden: true },
+    children: [
+      {
+        path: '',
+        name: 'TkInvite',
+        component: () => import('@/views/tk/invite/index.vue'),
+        meta: { title: '邀请推荐', hidden: true, noCache: true, activeMenu: '/tk/invite' }
+      }
+    ]
+  },
+  {
     path: '/redirect',
     component: Layout,
     name: 'RedirectRoot',
