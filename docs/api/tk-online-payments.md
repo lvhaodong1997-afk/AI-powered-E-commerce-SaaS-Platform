@@ -22,7 +22,7 @@ Bridge secrets match SaaS CLIPFORGE_GATEWAY_SECRET / CLIPFORGE_NOTIFY_SECRET. Ga
 
 ## API
 
-All routes use the existing `/admin-api` prefix and CommonResult wrapper.
+All routes use the existing `/admin-api` prefix. User and platform administration APIs use the existing CommonResult wrapper; the server-to-server notification acknowledgement below has its dedicated success code.
 
 - GET `/tk/recharge/packages`: authoritative catalog and enabled methods.
 - POST `/tk/payments/quote`: `{packageCode,quantity:1,paymentMethod,idempotencyKey}`. The key is 16–64 ASCII letters/digits/underscore/hyphen. It is unique within the tenant and freezes the original user/package/channel. Local order is durable before any gateway call. On uncertainty query the original order; never create another key to repeat payment.
@@ -32,7 +32,7 @@ All routes use the existing `/admin-api` prefix and CommonResult wrapper.
 - POST `/tk/payments/{orderNo}/cancel`: cancels the original channel order.
 - POST `/tk/payments/{orderNo}/refund`: platform-only full refund; reserves unused batch credits before contacting the channel. No partial refunds or self-service refund interface.
 - POST `/tk/payments/{orderNo}/refund/release-failed`: platform-only recovery. No request proof/body is accepted: the server fetches the canonical original payment/refund snapshot outside its DB transaction. Only a verified bound full refund with `refundStatus=failed` or `canceled` may release the reservation. A previously unknown local refund ID is adopted only from that canonical binding; an established refund/payment ID cannot change. Unknown, pending, generic review and timed-out results retain reserved credits. Replays are idempotent, expired reservations become expired credits, and the order stays in REVIEW so it cannot charge or refund again.
-- POST `/tk/payments/notify`: exact anonymous-login/tenant-filter exemption, mandatory raw-body HMAC, timestamp and nonce. Signed content only selects a known local order; TK retrieves the authoritative bridge state before making any credit change.
+- POST `/tk/payments/notify`: exact anonymous-login/tenant-filter exemption, mandatory raw-body HMAC, timestamp and nonce. Signed content only selects a known local order; TK retrieves the authoritative bridge state before making any credit change. Only successful processing returns HTTP 200 with `{"code":200,"data":true}`; this is intentionally distinct from browser API CommonResult success code 0. Failed processing must not acknowledge the delivery.
 
 Snapshots preserve order/tenant/user/package/quantity/catalogVersion/base amount/points/actual amount/currency/mode/channel/FX. Version and payment ID cannot move backward or rebind. SaaS versions every visible quote-to-pending transition: quoted 0, payment_pending 1, then paid 2 (or a later version after intervening transitions). The additive `refundStatus` is canonical provider proof, never a client flag. Payment date persists at millisecond precision; six calendar months are measured from this verified UTC payment instant, never callback arrival. Provider redirect/QR fields are display-only.
 
