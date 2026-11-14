@@ -390,6 +390,11 @@ public class DefaultTkGenerationPipelineService implements TkGenerationPipelineS
     }
 
     int resolveEffectiveTargetDuration(TkGenerationTaskDO task, Double bodyAudioDuration) {
+        if (TkNarrationDurationSupport.followsNarration(task)) {
+            double duration = TkNarrationDurationSupport.renderDuration(task, bodyAudioDuration,
+                    generationProperties.getFfmpeg().getMaxTargetDuration());
+            return Math.max(TkVideoDurationSupport.MIN_TARGET_DURATION, (int) Math.ceil(duration));
+        }
         validateNativeOpeningDuration(task);
         int targetDuration = TkVideoDurationSupport.normalize(task.getTargetDuration(),
                 generationProperties.getFfmpeg().getMaxTargetDuration());

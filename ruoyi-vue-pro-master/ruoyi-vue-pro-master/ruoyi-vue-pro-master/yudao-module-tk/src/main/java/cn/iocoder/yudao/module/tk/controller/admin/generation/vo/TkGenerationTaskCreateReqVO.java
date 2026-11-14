@@ -64,6 +64,9 @@ public class TkGenerationTaskCreateReqVO {
     private Integer openingClipStartSecond;
     private Integer openingClipEndSecond;
     private Integer referenceDuration;
+    @Schema(description = "时长模式；不传保留原行为，FOLLOW_NARRATION 跟随完整配音")
+    @javax.validation.constraints.Pattern(regexp = "FOLLOW_NARRATION", message = "不支持的时长模式")
+    private String durationMode;
     private String segmentDurationConfig;
     private String promptText;
     private Boolean bgmEnabled;
