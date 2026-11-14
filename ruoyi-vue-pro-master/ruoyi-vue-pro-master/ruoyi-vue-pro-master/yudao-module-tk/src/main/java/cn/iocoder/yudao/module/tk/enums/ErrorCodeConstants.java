@@ -57,5 +57,6 @@ public interface ErrorCodeConstants {
     ErrorCode TK_DASHSCOPE_VIDEO_CALL_FAILED = new ErrorCode(1_060_000_048, "百炼视频理解调用失败：{}");
     ErrorCode TK_OPEN_COPYWRITING_AI_FAILED = new ErrorCode(1_060_000_051, "文案生成服务暂不可用，请稍后重试");
     ErrorCode TK_OPEN_OCR_AI_FAILED = new ErrorCode(1_060_000_052, "图片文字识别服务暂不可用，请稍后重试");
+    ErrorCode TK_PAYMENT_QUOTE_REJECTED = new ErrorCode(1_060_000_053, "报价已被渠道拒绝，请重新选择套餐或购买数量");
 
 }

@@ -40,7 +40,7 @@ public class TkPaymentGateway {
                     timestamp, nonce, method, uri.getPath(), body));
             if (!body.isEmpty()) { connection.setDoOutput(true); try (java.io.OutputStream out = connection.getOutputStream()) { out.write(body.getBytes(StandardCharsets.UTF_8)); } }
             int status = connection.getResponseCode();
-            if (status != 200) throw new IllegalStateException("支付服务暂不可用，请查询原订单");
+            if (status != 200) throw failure(method,action,status,connection.getErrorStream());
             try (InputStream stream = connection.getInputStream()) {
                 ByteArrayOutputStream bytes = new ByteArrayOutputStream(); byte[] buffer = new byte[2048]; int n;
                 while ((n = stream.read(buffer)) >= 0) { if (bytes.size() + n > 65536) throw new IllegalStateException("支付响应过大"); bytes.write(buffer, 0, n); }
@@ -52,5 +52,25 @@ public class TkPaymentGateway {
         } catch (IllegalArgumentException | IllegalStateException e) { throw e; }
         catch (Exception e) { throw new IllegalStateException("支付请求结果未知，请查询原订单，勿重复付款"); }
         finally { if (connection != null) connection.disconnect(); }
+    }
+
+    /** Only this fixed gateway's explicit pre-quote rejection can unlock a new request. */
+    RuntimeException failure(String method,String action,int status,InputStream stream) {
+        IllegalStateException uncertain=new IllegalStateException("支付服务暂不可用，请查询原订单");
+        if(!"POST".equals(method)||!"quotes".equals(action)||status!=400||stream==null)return uncertain;
+        try(InputStream body=stream) {
+            ByteArrayOutputStream bytes=new ByteArrayOutputStream();byte[] buffer=new byte[1024];int size;
+            while((size=body.read(buffer))>=0){if(bytes.size()+size>4096)return uncertain;bytes.write(buffer,0,size);}
+            JsonNode error=json.readTree(bytes.toByteArray());
+            String message=error==null?"":error.path("error").asText();
+            if(error!=null&&"BELOW_MINIMUM".equals(error.path("code").asText())
+                    &&message.matches("该渠道最低付款金额为[0-9]{1,8}\\.[0-9]{2} (CNY|HKD|USD)，请重新选择购买数量"))
+                return new QuoteRejectedException(message);
+        } catch(Exception ignored) { /* Malformed/oversized/unknown failures remain uncertain. */ }
+        return uncertain;
+    }
+
+    static final class QuoteRejectedException extends IllegalStateException {
+        QuoteRejectedException(String message){super(message);}
     }
 }

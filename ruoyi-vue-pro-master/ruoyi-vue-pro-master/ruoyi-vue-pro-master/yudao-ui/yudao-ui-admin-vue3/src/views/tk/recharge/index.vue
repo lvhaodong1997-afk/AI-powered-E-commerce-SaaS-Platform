@@ -59,11 +59,33 @@
           :disabled="!catalog?.enabled || !!draft"
           @click="packageCode = item.code"
         >
-          <span>{{ item.code }}</span
+          <span>{{
+            item.code === 'VERIFY_1' ? text('临时支付测试', 'Temporary payment test') : item.code
+          }}</span
           ><strong>{{ money(item.amountCents, 'CNY', lang) }}</strong>
           <span>{{ item.points.toLocaleString() }} {{ text('积分', 'credits') }}</span>
         </button>
       </section>
+      <div v-if="packageCode === 'VERIFY_1'" class="verification-controls">
+        <strong>{{ text('测试数量', 'Test quantity') }}</strong>
+        <el-radio-group v-model="quantity" :disabled="!!draft || quoting">
+          <el-radio-button v-for="count in [1, 5, 10]" :key="count" :value="count">
+            {{ count }} {{ text('份', 'units') }}
+          </el-radio-button>
+        </el-radio-group>
+        <p>{{
+          text(
+            '每份 ¥1 / 1 积分。仅限指定账号临时验收，若低于渠道限额会明确提示，不会自动增加金额。',
+            'Each unit is CNY 1 / 1 credit. Available temporarily to approved accounts. Channel minimum errors are shown without automatically increasing the amount.'
+          )
+        }}</p>
+      </div>
+      <p v-if="chosenPackage">
+        {{ text('本次人民币基准金额', 'CNY base total') }}：{{
+          money(chosenPackage.amountCents * purchaseQuantity, 'CNY', lang)
+        }}
+        · {{ chosenPackage.points * purchaseQuantity }} {{ text('积分', 'credits') }}
+      </p>
       <div class="quote-controls">
         <el-radio-group v-model="paymentMethod" :disabled="!catalog?.enabled || !!draft">
           <el-radio-button v-for="method in methods" :key="method" :value="method">{{
@@ -191,7 +213,7 @@ import { ElMessageBox } from 'element-plus'
 import { useLocaleStore } from '@/store/modules/locale'
 import { useUserStore } from '@/store/modules/user'
 import { getCurrentUserId, getTenantId } from '@/utils/auth'
-import { PaymentApi } from '@/api/tk/payment'
+import { PaymentApi, PAYMENT_QUOTE_REJECTED_CODE } from '@/api/tk/payment'
 import type { PaymentOrder, RechargeCatalog } from '@/api/tk/payment'
 import {
   money,
@@ -214,6 +236,11 @@ const statusLabel = (status: string) => paymentStatusText(status, lang.value ===
 const creditLabel = (status: string) => creditStatusText(status, lang.value === 'en-US')
 const catalog = ref<RechargeCatalog>()
 const packageCode = ref('')
+const quantity = ref<1 | 5 | 10>(1)
+const purchaseQuantity = computed(() => (packageCode.value === 'VERIFY_1' ? quantity.value : 1))
+const chosenPackage = computed(() =>
+  catalog.value?.packages.find((item) => item.code === packageCode.value)
+)
 const paymentMethod = ref('')
 const methods = computed(() =>
   (catalog.value?.paymentMethods || []).filter((method) =>
@@ -275,11 +302,12 @@ const createQuote = async () => {
   quoting.value = true
   draft.value = quoteAttempt(draft.value, {
     packageCode: packageCode.value,
-    paymentMethod: paymentMethod.value
+    paymentMethod: paymentMethod.value,
+    quantity: purchaseQuantity.value
   })
   storage(':draft', JSON.stringify(draft.value))
   try {
-    const order = await PaymentApi.quote({ ...draft.value, quantity: 1 })
+    const order = await PaymentApi.quote({ ...draft.value, quantity: draft.value.quantity ?? 1 })
     selected.value = order
     rememberOrder(order)
     if (order.status !== 'created') {
@@ -287,14 +315,35 @@ const createQuote = async () => {
       storage(':draft', '')
     }
     await loadOrders()
-  } catch {
-    /* Retain the original choice and idempotency key for recovery. */
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      'businessCode' in error &&
+      error.businessCode === PAYMENT_QUOTE_REJECTED_CODE
+    ) {
+      // This code is returned only after the server has fenced the rejected no-quote order.
+      draft.value = undefined
+      storage(':draft', '')
+      loadError.value = error.message
+      await loadOrders()
+    }
+    /* Unknown outcomes retain the original choice and idempotency key for recovery. */
   } finally {
     quoting.value = false
   }
 }
 const restoreOrder = async (order: PaymentOrder) => {
   const current = await PaymentApi.get(order.orderNo)
+  if (current.quoteRejected) {
+    selected.value = undefined
+    dialogVisible.value = false
+    storage(':order', '')
+    loadError.value = text(
+      '此报价已被渠道拒绝，未发起付款。请重新选择套餐或购买数量。',
+      'This quote was rejected before payment. Select a package or quantity again.'
+    )
+    return
+  }
   selected.value = current
   rememberOrder(current)
   if (current.status === 'created') {
@@ -376,6 +425,7 @@ onMounted(async () => {
   if (draft.value) {
     packageCode.value = draft.value.packageCode
     paymentMethod.value = draft.value.paymentMethod
+    quantity.value = draft.value.quantity ?? 1
   }
   await load()
   const orderNo = storage(':order')
@@ -447,6 +497,18 @@ onBeforeUnmount(() => {
 .package-option:disabled {
   cursor: default;
   opacity: 0.7;
+}
+
+.verification-controls {
+  margin-bottom: 20px;
+}
+
+.verification-controls .el-radio-group {
+  margin-left: 16px;
+}
+
+.verification-controls p {
+  color: var(--el-text-color-secondary);
 }
 
 .quote-controls,

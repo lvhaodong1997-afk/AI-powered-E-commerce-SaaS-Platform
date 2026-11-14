@@ -39,6 +39,40 @@ class TkPaymentOrderStoreTest {
         assertThrows(IllegalArgumentException.class,()->tx.execute(s->store.create(9,10,"idempotency-key-0001",purchase.deepCopy().put("packageCode","P5000"))));
         assertThrows(IllegalArgumentException.class,()->store.get(order,8L));
     }
+    boolean rejectQuote() {
+        try { return (Boolean)TkPaymentOrderStore.class.getMethod("rejectQuote",String.class).invoke(store,order); }
+        catch(ReflectiveOperationException e){fail("definite rejection must durably fence the original no-quote order");return false;}
+    }
+    @Test void rejectedUnquotedOrderRemainsAuditableAndCannotBeRevivedByWorkerOrLateQuote(){
+        assertEquals(Boolean.TRUE,tx.execute(s->rejectQuote()));
+        ObjectNode rejected=store.get(order,9L);
+        assertEquals("canceled",rejected.path("status").asText());assertTrue(rejected.path("quoteRejected").asBoolean());
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM tk_payment_order WHERE order_no=?",Integer.class,order));
+        store.failed(order);db.update("UPDATE tk_payment_order SET next_check_at=CURRENT_TIMESTAMP WHERE order_no=?",order);
+        assertFalse(store.due().contains(order));
+        ObjectNode late=snapshot("quoted",0).putNull("paymentId");
+        assertEquals("canceled",tx.execute(s->store.apply(order,late)).path("status").asText());
+        assertEquals(0,db.queryForObject("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=9",Long.class));
+    }
+    @Test void knownRejectionCannotFenceAnAlreadyAcceptedOrBoundQuote(){
+        tx.execute(s->store.apply(order,snapshot("quoted",0).putNull("paymentId")));
+        assertEquals(Boolean.FALSE,tx.execute(s->rejectQuote()));assertEquals("quoted",store.get(order,9L).path("status").asText());
+        db.update("UPDATE tk_payment_order SET status='created',quote_json=NULL,payment_id='pi_bound' WHERE order_no=?",order);
+        assertEquals(Boolean.FALSE,tx.execute(s->rejectQuote()));
+    }
+    @Test void verificationQuantityPersistsAndCreditsExactlyOnceWithoutAcceptingTamperedQuantity(){
+        ObjectNode verification=purchase.deepCopy().put("packageCode","VERIFY_1").put("quantity",5);
+        order=tx.execute(s->store.create(9,10,"verification-key-0001",verification)).path("orderNo").asText();
+        assertEquals(5,store.request(order).path("quantity").asInt());
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->store.create(9,10,"verification-key-0001",verification.deepCopy().put("quantity",10))));
+        ObjectNode paid=snapshot("paid",2).put("packageCode","VERIFY_1").put("quantity",5).put("baseAmountCents",500).put("amountCents",500).put("points",5);
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->store.apply(order,paid.deepCopy().put("quantity",10))));
+        tx.execute(s->store.apply(order,paid));tx.execute(s->store.apply(order,paid));
+        assertEquals(5,db.queryForObject("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=9",Long.class));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM tk_credit_log WHERE biz_type='ONLINE_PAYMENT'",Long.class));
+        assertEquals(Instant.parse(paid.path("paidAt").asText()).atZone(java.time.ZoneOffset.UTC).plusMonths(6).toInstant().truncatedTo(java.time.temporal.ChronoUnit.MILLIS),
+                db.queryForObject("SELECT expires_at FROM tk_credit_batch WHERE source_key=?",java.sql.Timestamp.class,order).toInstant());
+    }
     @Test void paymentCreditAndRefundAreAtomicIdempotentAndCannotRegress(){
         ObjectNode paid=snapshot("paid",2);
         tx.execute(s->store.apply(order,paid));tx.execute(s->store.apply(order,paid));

@@ -65,6 +65,7 @@ export interface QuoteDraft {
   idempotencyKey: string
   packageCode: string
   paymentMethod: string
+  quantity?: 1 | 5 | 10
 }
 export function quoteAttempt(
   previous: QuoteDraft | undefined,
@@ -80,14 +81,17 @@ export function parsePaymentDraft(raw: string | null): QuoteDraft | undefined {
       !value ||
       typeof value.idempotencyKey !== 'string' ||
       !/^[a-f0-9-]{36}$/.test(value.idempotencyKey) ||
-      !/^P[0-9]{1,8}$/.test(value.packageCode) ||
-      !['alipay', 'wechat_pay'].includes(value.paymentMethod)
+      !/^(P[0-9]{1,8}|VERIFY_1)$/.test(value.packageCode) ||
+      !['alipay', 'wechat_pay'].includes(value.paymentMethod) ||
+      (value.quantity !== undefined &&
+        !(value.packageCode === 'VERIFY_1' ? [1, 5, 10] : [1]).includes(value.quantity))
     )
       return
     return {
       idempotencyKey: value.idempotencyKey,
       packageCode: value.packageCode,
-      paymentMethod: value.paymentMethod
+      paymentMethod: value.paymentMethod,
+      ...(value.quantity === undefined ? {} : { quantity: value.quantity })
     }
   } catch {
     return undefined

@@ -38,6 +38,22 @@ test('quote recovery freezes original selection and idempotency key', () => {
   assert.deepEqual(quoteAttempt(first,{packageCode:'P5000',paymentMethod:'wechat_pay'},()=> 'key2'), first)
   assert.equal(first.idempotencyKey,'key1')
 })
+
+test('temporary verification quote recovery preserves its original quantity', () => {
+  const selection={packageCode:'VERIFY_1',paymentMethod:'alipay',quantity:5}
+  const draft=quoteAttempt(undefined,selection,()=> '12345678-1234-1234-1234-123456789012')
+  const recovered=parsePaymentDraft(JSON.stringify(draft))
+  assert.deepEqual(recovered,draft)
+  assert.deepEqual(quoteAttempt(recovered,{...selection,quantity:10},()=> 'new-key'),draft)
+})
+
+test('recovery accepts only verification quantities 1/5/10 and regular quantity 1', () => {
+  const base={idempotencyKey:'12345678-1234-1234-1234-123456789012',packageCode:'VERIFY_1',paymentMethod:'wechat_pay'}
+  for(const quantity of [1,5,10]) assert.equal(parsePaymentDraft(JSON.stringify({...base,quantity}))?.quantity,quantity)
+  for(const quantity of [0,-1,2,1.5,'5',null,100]) assert.equal(parsePaymentDraft(JSON.stringify({...base,quantity})),undefined)
+  assert.equal(parsePaymentDraft(JSON.stringify({...base,packageCode:'P1000',quantity:5})),undefined)
+  assert.equal(parsePaymentDraft(JSON.stringify({...base,packageCode:'P1000',quantity:1}))?.quantity,1)
+})
 test('only HTTPS exact Stripe hosts and safe URL parameters are accepted', () => {
   assert.equal(safeProviderUrl('https://checkout.stripe.com/c/pay/cs_test_1','redirect'),'https://checkout.stripe.com/c/pay/cs_test_1')
   assert.equal(safeProviderUrl('https://qr.stripe.com/test.png','qr'),'https://qr.stripe.com/test.png')

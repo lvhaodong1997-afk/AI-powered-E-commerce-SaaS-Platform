@@ -1,4 +1,5 @@
 import request from '@/config/axios'
+export const PAYMENT_QUOTE_REJECTED_CODE = 1_060_000_053
 export interface RechargePackage {
   code: string
   amountCents: number
@@ -11,6 +12,7 @@ export interface RechargeCatalog {
   paymentMethods: string[]
 }
 export interface PaymentOrder {
+  quoteRejected?: boolean
   orderNo: string
   packageCode: string
   idempotencyKey?: string
@@ -34,7 +36,7 @@ export const PaymentApi = {
   catalog: () => request.get<RechargeCatalog>({ url: '/tk/recharge/packages' }),
   quote: (data: {
     packageCode: string
-    quantity: 1
+    quantity: 1 | 5 | 10
     paymentMethod: string
     idempotencyKey: string
   }) => request.post<PaymentOrder>({ url: '/tk/payments/quote', data, skipAuthReplay: true }),

@@ -46,6 +46,11 @@ public class TkPaymentOrderStore {
         return view(rows.get(0));
     }
     public ObjectNode request(String order) {return parse(db.queryForObject("SELECT request_json FROM tk_payment_order WHERE order_no=?",String.class,TkPaymentProtocol.orderNo(order)));}
+    /** Called only with a recognized gateway proof that quote creation was rejected. */
+    @Transactional(rollbackFor=Exception.class)
+    public boolean rejectQuote(String order) {
+        return db.update("UPDATE tk_payment_order SET status='canceled',version=version+1,force_check=0,lease_until=NULL,check_failures=0,update_time=CURRENT_TIMESTAMP WHERE order_no=? AND status='created' AND quote_json IS NULL AND snapshot_json IS NULL AND payment_id IS NULL",TkPaymentProtocol.orderNo(order))==1;
+    }
     public ObjectNode page(long tenant,int page,int size) {
         if(page<1 || size<1 || size>100 || page>10000)throw new IllegalArgumentException("分页无效");
         ObjectNode result=json.createObjectNode();
@@ -142,7 +147,7 @@ public class TkPaymentOrderStore {
         return db.update("UPDATE tk_payment_order SET lease_until=? WHERE order_no=? AND (lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP)",Timestamp.from(Instant.now().plusSeconds(60)),order)==1;
     }
     public void failed(String order) {
-        db.update("UPDATE tk_payment_order SET lease_until=NULL,force_check=1,next_check_at=?,check_failures=check_failures+1 WHERE order_no=?",Timestamp.from(Instant.now().plusSeconds(120)),order);
+        db.update("UPDATE tk_payment_order SET lease_until=NULL,force_check=1,next_check_at=?,check_failures=check_failures+1 WHERE order_no=? AND status<>'canceled'",Timestamp.from(Instant.now().plusSeconds(120)),order);
     }
     public void cleanupNonces() {db.update("DELETE FROM tk_payment_event WHERE expires_at<CURRENT_TIMESTAMP LIMIT 1000");}
 
@@ -164,6 +169,7 @@ public class TkPaymentOrderStore {
         result.put("orderNo",(String)row.get("order_no")).put("status",(String)row.get("status")).put("creditStatus",(String)row.get("credit_status"));
         result.put("createTime",String.valueOf(row.get("create_time")));
         result.put("idempotencyKey",(String)row.get("idempotency_key"));
+        if("canceled".equals(row.get("status"))&&row.get("quote_json")==null)result.put("quoteRejected",true);
         return result;
     }
     private ObjectNode parse(Object value) {try{return (ObjectNode)json.readTree(String.valueOf(value));}catch(Exception e){throw new IllegalStateException("订单快照损坏");}}

@@ -47,7 +47,7 @@ const remainingRouter: AppRouteRecordRaw[] = [
     children: [
       {
         path: '',
-        name: 'TkRecharge',
+        name: 'TkRechargeDirect',
         component: () => import('@/views/tk/recharge/index.vue'),
         meta: { title: '积分充值', hidden: true, noCache: true, activeMenu: '/tk/recharge' }
       }
@@ -61,7 +61,7 @@ const remainingRouter: AppRouteRecordRaw[] = [
     children: [
       {
         path: '',
-        name: 'TkInvite',
+        name: 'TkInviteDirect',
         component: () => import('@/views/tk/invite/index.vue'),
         meta: { title: '邀请推荐', hidden: true, noCache: true, activeMenu: '/tk/invite' }
       }
