@@ -15,6 +15,8 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Options;
+import org.apache.ibatis.annotations.SelectProvider;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -58,31 +60,23 @@ public interface TkGenerationTaskMapper extends BaseMapperX<TkGenerationTaskDO> 
     int resetForRetry(@Param("id") Long id, @Param("retryCount") Integer retryCount,
                       @Param("lastRetryTime") LocalDateTime lastRetryTime, @Param("clearAudio") boolean clearAudio);
 
-    default List<TkGenerationTaskDO> selectExpiredTasksWithGenerationUrls(LocalDateTime deadline, int limit) {
-        LambdaQueryWrapperX<TkGenerationTaskDO> wrapper = new LambdaQueryWrapperX<>();
-        wrapper.select(TkGenerationTaskDO::getId,
-                TkGenerationTaskDO::getStatus,
-                TkGenerationTaskDO::getOutputUrl,
-                TkGenerationTaskDO::getAudioUrl,
-                TkGenerationTaskDO::getSubtitleUrl,
-                TkGenerationTaskDO::getSubtitleTimelineUrl,
-                TkGenerationTaskDO::getSubtitleVisualAnalysisUrl,
-                TkGenerationTaskDO::getSubtitleLayoutUrl,
-                TkGenerationTaskDO::getSubtitleAssUrl,
-                TkGenerationTaskDO::getCreateTime);
-        return selectList(wrapper
-                .lt(TkGenerationTaskDO::getCreateTime, deadline)
-                .in(TkGenerationTaskDO::getStatus, TkGenerationStatusEnum.SUCCESS, TkGenerationStatusEnum.FAILED)
-                .and(item -> item
-                        .isNotNull(TkGenerationTaskDO::getOutputUrl).ne(TkGenerationTaskDO::getOutputUrl, "")
-                        .or().isNotNull(TkGenerationTaskDO::getAudioUrl).ne(TkGenerationTaskDO::getAudioUrl, "")
-                        .or().isNotNull(TkGenerationTaskDO::getSubtitleUrl).ne(TkGenerationTaskDO::getSubtitleUrl, "")
-                        .or().isNotNull(TkGenerationTaskDO::getSubtitleTimelineUrl).ne(TkGenerationTaskDO::getSubtitleTimelineUrl, "")
-                        .or().isNotNull(TkGenerationTaskDO::getSubtitleVisualAnalysisUrl).ne(TkGenerationTaskDO::getSubtitleVisualAnalysisUrl, "")
-                        .or().isNotNull(TkGenerationTaskDO::getSubtitleLayoutUrl).ne(TkGenerationTaskDO::getSubtitleLayoutUrl, "")
-                        .or().isNotNull(TkGenerationTaskDO::getSubtitleAssUrl).ne(TkGenerationTaskDO::getSubtitleAssUrl, ""))
-                .orderByAsc(TkGenerationTaskDO::getId)
-                .last("LIMIT " + limit));
+    @SelectProvider(type = CleanupSql.class, method = "expiredGenerationUrls")
+    @Options(timeout = 15)
+    List<TkGenerationTaskDO> selectExpiredTasksWithGenerationUrls(@Param("deadline") LocalDateTime deadline,
+                                                                @Param("limit") int limit);
+
+    class CleanupSql {
+        public String expiredGenerationUrls() {
+            String[] urls = {"output_url", "audio_url", "subtitle_url", "subtitle_timeline_url",
+                    "subtitle_visual_analysis_url", "subtitle_layout_url", "subtitle_ass_url"};
+            String present = Arrays.stream(urls).map(column -> "(" + column + " IS NOT NULL AND " + column + " &lt;&gt; '')")
+                    .collect(Collectors.joining(" OR "));
+            return "<script>SELECT /*+ MAX_EXECUTION_TIME(15000) */ id,status," + String.join(",", urls)
+                    + ",create_time FROM tk_generation_task WHERE deleted=0 AND create_time &lt; #{deadline}"
+                    + " AND status IN ('SUCCESS','FAILED') AND (" + present + ") AND NOT EXISTS ("
+                    + TkPublishReferenceSql.generationReferences("tk_generation_task")
+                    + ") ORDER BY id ASC LIMIT #{limit}</script>";
+        }
     }
 
     default List<TkGenerationTaskDO> selectTasksWithOpeningVideoUrls() {

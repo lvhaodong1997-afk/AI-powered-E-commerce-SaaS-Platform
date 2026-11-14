@@ -103,6 +103,10 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
                         .or().eq(TkOpenTiktokPublishDetailDO::getPublishId, ""))
                 .and(wrapper -> wrapper.isNull(TkOpenTiktokPublishDetailDO::getTiktokStatus)
                         .or().ne(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED"))
+                .apply("NOT EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt a"
+                        + " WHERE a.detail_id = tk_open_tiktok_publish_detail.detail_id"
+                        + " AND a.attempt_no = COALESCE(tk_open_tiktok_publish_detail.retry_count, 0)"
+                        + " AND a.deleted = 0 AND a.next_reconcile_time > {0})", deadline)
                 .le(TkOpenTiktokPublishDetailDO::getUpdateTime, deadline)
                 .orderByAsc(TkOpenTiktokPublishDetailDO::getCreateTime)
                 .orderByAsc(TkOpenTiktokPublishDetailDO::getId)
@@ -126,7 +130,6 @@ public interface TkOpenTiktokPublishDetailMapper extends BaseMapperX<TkOpenTikto
     default List<TkOpenTiktokPublishDetailDO> selectRecoveryRequired(LocalDateTime workerDeadline, int limit) {
         return selectList(new LambdaQueryWrapperX<TkOpenTiktokPublishDetailDO>()
                 .eq(TkOpenTiktokPublishDetailDO::getStatus, "PROCESSING")
-                .isNull(TkOpenTiktokPublishDetailDO::getPublishId)
                 .eq(TkOpenTiktokPublishDetailDO::getTiktokStatus, "RECOVERY_REQUIRED")
                 .apply("(NOT EXISTS (SELECT 1 FROM tk_open_tiktok_publish_attempt a"
                         + " WHERE a.detail_id = tk_open_tiktok_publish_detail.detail_id"

@@ -99,6 +99,7 @@ class TkTiktokScheduledMediaServiceTest {
         byte[] content = "private-oss-video".getBytes(StandardCharsets.UTF_8);
         ObjectMetadata identity = new ObjectMetadata(content.length, null, "etag-1", "version-1");
         when(ossStorage.isOwnedObjectUrl(url)).thenReturn(true);
+        when(ossStorage.storageForUrl(url)).thenReturn(ossStorage);
         when(ossStorage.requireOwnedObjectKey(url, 8L, 20L)).thenReturn(objectKey);
         when(ossStorage.headObject(objectKey)).thenReturn(identity, identity);
         doAnswer(invocation -> {

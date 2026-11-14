@@ -145,23 +145,7 @@ public class TkTiktokPublishMediaUploadServiceImpl implements TkTiktokPublishMed
 
     @Override
     public String refreshReadUrl(String fileUrl) {
-        if (!hasOssCredentials() || StrUtil.isBlank(getOss().getPublicBaseUrl()) || StrUtil.isBlank(fileUrl)) {
-            return fileUrl;
-        }
-        String publicBaseUrl = StrUtil.removeSuffix(getOss().getPublicBaseUrl(), "/");
-        String prefix = publicBaseUrl + "/";
-        if (!StrUtil.startWithIgnoreCase(fileUrl, prefix)) {
-            return fileUrl;
-        }
-        String objectKey = fileUrl.substring(prefix.length());
-        int queryIndex = objectKey.indexOf('?');
-        if (queryIndex >= 0) {
-            objectKey = objectKey.substring(0, queryIndex);
-        }
-        if (StrUtil.isBlank(objectKey) || objectKey.contains("..") || objectKey.startsWith("/")) {
-            return fileUrl;
-        }
-        return toReadUrl(objectKey);
+        return ossObjectStorageService == null ? fileUrl : ossObjectStorageService.resolveReadUrl(fileUrl);
     }
 
     @Override
@@ -260,13 +244,21 @@ public class TkTiktokPublishMediaUploadServiceImpl implements TkTiktokPublishMed
         } catch (IOException ex) {
             throw new IllegalStateException("合并 TikTok 上传视频失败：" + ex.getMessage(), ex);
         }
+        String completedUrl = storageService.toPublicUrl(relativePath);
+        String normalizedMime = TkPublishVideoMime.normalize(fileName, manifest.getProperty("contentType"));
+        if (ossObjectStorageService != null && ossObjectStorageService.isPublishEnabled()) {
+            TkOssObjectStorageService target = ossObjectStorageService.publishStorage();
+            target.uploadFile(relativePath, finalPath, getMaxFileSize(), normalizedMime);
+            completedUrl = target.unsignedUrl(relativePath);
+            try { Files.deleteIfExists(finalPath); } catch (IOException ignored) { }
+        }
         TkTiktokPublishMediaDO media = TkTiktokPublishMediaDO.builder()
                 .companyId(scope.getCompanyId())
                 .fileName(fileName)
-                .fileUrl(storageService.toPublicUrl(relativePath))
+                .fileUrl(completedUrl)
                 .coverUrl(coverUrl)
                 .fileSize(fileSize)
-                .mimeType(manifest.getProperty("contentType"))
+                .mimeType(normalizedMime)
                 .status("READY")
                 .build();
         media.setTenantId(scope.getTenantId());
@@ -287,13 +279,14 @@ public class TkTiktokPublishMediaUploadServiceImpl implements TkTiktokPublishMed
         if (fileSize == null || fileSize <= 0) {
             throw new IllegalArgumentException("上传会话文件信息无效");
         }
-        validateOssConfig();
-        String objectKey = objectKey(scope, uploadId, fileName);
-        assertOssObjectReady(objectKey, fileSize);
+        TkOssObjectStorageService owner = ossObjectStorageService.storageForSession(session);
+        String objectKey = session.getStorageUrl() == null ? owner.buildTiktokObjectKey(session) : owner.objectKeyForUrl(session.getStorageUrl());
+        owner.validateOwnedKey(objectKey, scope.getTenantId(), scope.getCompanyId());
+        if (owner.headObject(objectKey).getContentLength() != fileSize) throw new IllegalArgumentException("上传文件大小不匹配");
         TkTiktokPublishMediaDO media = TkTiktokPublishMediaDO.builder()
                 .companyId(scope.getCompanyId())
                 .fileName(fileName)
-                .fileUrl(toPublicUrl(objectKey))
+                .fileUrl(owner.unsignedUrl(objectKey))
                 .coverUrl(coverUrl)
                 .fileSize(fileSize)
                 .mimeType(StrUtil.blankToDefault(session.getContentType(), "video/" + extension(fileName)))
@@ -319,7 +312,8 @@ public class TkTiktokPublishMediaUploadServiceImpl implements TkTiktokPublishMed
                 validatePersistedSessionScope(scope, session);
                 if (hasOssCredentials() && ossObjectStorageService != null) {
                     try {
-                        ossObjectStorageService.deleteObject(objectKey(scope, uploadId, session.getFileName()));
+                        TkOssObjectStorageService owner = ossObjectStorageService.storageForSession(session);
+                        owner.deleteObject(session.getStorageUrl() == null ? owner.buildTiktokObjectKey(session) : owner.objectKeyForUrl(session.getStorageUrl()));
                     } catch (Exception ex) {
                         log.warn("[cancel][failed to delete TikTok OSS object, uploadId({})]", uploadId, ex);
                     }
@@ -524,7 +518,8 @@ public class TkTiktokPublishMediaUploadServiceImpl implements TkTiktokPublishMed
 
     private boolean isOssUploadEnabled() {
         TkGenerationProperties.Upload upload = generationProperties == null ? null : generationProperties.getUpload();
-        TkGenerationProperties.Oss oss = upload == null ? null : upload.getOss();
+        TkGenerationProperties.Oss oss = getOss();
+        if (upload != null && Boolean.TRUE.equals(upload.getPublishOss().getEnabled())) return true;
         return upload != null
                 && "oss".equalsIgnoreCase(StrUtil.blankToDefault(upload.getStorageType(), "local"))
                 && oss != null
@@ -619,8 +614,13 @@ public class TkTiktokPublishMediaUploadServiceImpl implements TkTiktokPublishMed
     }
 
     private TkGenerationProperties.Oss getOss() {
-        return generationProperties == null || generationProperties.getUpload() == null
-                ? null : generationProperties.getUpload().getOss();
+        if (generationProperties == null || generationProperties.getUpload() == null) return null;
+        TkGenerationProperties.Oss publish = generationProperties.getUpload().getPublishOss();
+        if (Boolean.TRUE.equals(publish.getEnabled())) {
+            TkOssObjectStorageService.validatePublishConfig(publish, generationProperties.getUpload().getOss());
+            return publish;
+        }
+        return generationProperties.getUpload().getOss();
     }
 
     private String gmtDate() {

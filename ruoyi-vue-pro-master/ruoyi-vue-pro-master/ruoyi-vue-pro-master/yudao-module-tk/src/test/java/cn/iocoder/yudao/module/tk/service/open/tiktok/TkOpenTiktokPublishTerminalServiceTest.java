@@ -71,7 +71,7 @@ class TkOpenTiktokPublishTerminalServiceTest {
         verify(callbacks).enqueueOnce(eq("c"), eq("publish.success"), eq("PUBLISH_DETAIL"),
                 eq("d"), payload.capture(), eq(0));
         Map<String, Object> body = payload.getValue();
-        assertEquals(new java.util.LinkedHashSet<>(Arrays.asList("taskId", "detailId", "connectionId",
+        assertEquals(new java.util.LinkedHashSet<>(Arrays.asList("taskId", "detailId", "mediaType", "photoCount", "connectionId",
                 "externalRequestId", "status", "publishId", "publicPostId", "publishUrl", "failReason")),
                 body.keySet());
         assertEquals("t", body.get("taskId"));

@@ -59,6 +59,11 @@ public class TkGenerationOutputStorageServiceImpl implements TkGenerationOutputS
             throw new IllegalArgumentException("生成文件内容不能为空");
         }
         TkGenerationProperties.Oss oss = requireGenerationOss();
+        if (("video/mp4".equals(contentType) || "image/jpeg".equals(contentType))
+                && Boolean.TRUE.equals(generationProperties.getUpload().getPublishOss().getEnabled())) {
+            TkOssObjectStorageService.validatePublishConfig(generationProperties.getUpload().getPublishOss(), oss);
+            oss = generationProperties.getUpload().getPublishOss();
+        }
         String normalizedContentType = StrUtil.blankToDefault(contentType, "application/octet-stream");
         String objectKey = buildGeneratedAssetObjectKey(oss.getUploadPathPrefix(), task, LocalDate.now(), fileName);
         ossObjectUploader.upload(oss, objectKey, content, normalizedContentType);
@@ -77,6 +82,8 @@ public class TkGenerationOutputStorageServiceImpl implements TkGenerationOutputS
             return outputUrl;
         }
         TkGenerationProperties.Oss oss = currentGenerationOss();
+        TkGenerationProperties.Oss publish = generationProperties.getUpload().getPublishOss();
+        if (StrUtil.isNotBlank(publish.getPublicBaseUrl()) && extractObjectKeyFromPublicUrl(publish, outputUrl) != null) oss = publish;
         if (oss == null || oss.getReadUrlExpireSeconds() == null || oss.getReadUrlExpireSeconds() <= 0) {
             return outputUrl;
         }

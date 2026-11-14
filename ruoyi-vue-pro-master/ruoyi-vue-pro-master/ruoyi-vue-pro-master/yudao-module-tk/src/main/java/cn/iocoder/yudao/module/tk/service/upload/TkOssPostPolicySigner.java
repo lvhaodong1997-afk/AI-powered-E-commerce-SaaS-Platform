@@ -52,6 +52,19 @@ public final class TkOssPostPolicySigner {
         return new Policy(accessKeyId, policy, signature(policy, accessKeySecret), expirationText);
     }
 
+    /** Exact private original; the ACL is a multipart form field constrained by this policy. */
+    public static Policy signPrivatePhoto(String id,String secret,String key,long size,int seconds,
+                                          String contentType,String sha256,Clock clock) {
+        if(size<1 || size>20L*1024*1024) throw new IllegalArgumentException("photo size invalid");
+        String expiration=OSS_EXPIRATION_FORMATTER.format(Instant.now(clock).plusSeconds(Math.max(1,Math.min(1800,seconds))));
+        String meta=sha256==null || sha256.isBlank()?"":",[\"eq\",\"$x-oss-meta-sha256\",\""+escapeJson(sha256.toLowerCase())+"\"]";
+        String json="{\"expiration\":\""+expiration+"\",\"conditions\":[[\"eq\",\"$key\",\""+escapeJson(key)+"\"],"
+                +"[\"content-length-range\","+size+","+size+"],[\"eq\",\"$x-oss-object-acl\",\"private\"],"
+                +"[\"eq\",\"$Content-Type\",\""+escapeJson(contentType)+"\"]"+meta+"]}";
+        String encoded=Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+        return new Policy(id,encoded,signature(encoded,secret),expiration);
+    }
+
     private static String signature(String policy, String accessKeySecret) {
         try {
             Mac mac = Mac.getInstance(HMAC_SHA1);

@@ -24,7 +24,10 @@ public class TkOpenTiktokPublishTaskDO extends BaseDO {
     private Long id;
     private String taskId;
     private String clientId;
+    private String mediaType;
     private String mediaId;
+    private Integer photoCoverIndex;
+    private Boolean autoAddMusic;
     private String externalRequestId;
     private String title;
     private String caption;

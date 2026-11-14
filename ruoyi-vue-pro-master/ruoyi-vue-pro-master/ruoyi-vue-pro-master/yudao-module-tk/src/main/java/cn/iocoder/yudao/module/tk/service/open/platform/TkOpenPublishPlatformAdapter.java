@@ -25,6 +25,9 @@ public interface TkOpenPublishPlatformAdapter {
     OAuthTokenResult refreshAccessToken(String refreshToken);
     CreatorCapabilities queryCreatorInfo(String accessToken);
     PublishInitResult initVideoPost(String accessToken, String postMode, Map<String, Object> payload);
+    default PublishInitResult initPhotoPost(String accessToken, String postMode, Map<String, Object> payload) {
+        return initVideoPost(accessToken, postMode, payload);
+    }
     void uploadVideo(String uploadUrl, Path videoFile, String contentType);
     default void uploadVideo(String uploadUrl, Path videoFile, String contentType, Runnable beforeChunk) {
         beforeChunk.run();

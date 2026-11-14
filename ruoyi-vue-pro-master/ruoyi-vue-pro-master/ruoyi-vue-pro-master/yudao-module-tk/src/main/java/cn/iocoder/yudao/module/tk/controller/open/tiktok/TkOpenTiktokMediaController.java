@@ -18,7 +18,7 @@ public class TkOpenTiktokMediaController {
 
     @PostMapping("/uploads")
     public TkOpenApiResponse<TkOpenTiktokMediaVO.UploadSessionResp> create(@Valid @RequestBody TkOpenTiktokMediaVO.UploadCreateReq request) {
-        return TkOpenApiResponse.success(mediaService.create(request.getFileName(), request.getFileSize(), request.getContentType(), request.getSha256()));
+        return TkOpenApiResponse.success(mediaService.create(request.getFileName(), request.getFileSize(), request.getContentType(), request.getSha256(), request.getMediaType()));
     }
 
     @GetMapping("/uploads/{uploadId}")

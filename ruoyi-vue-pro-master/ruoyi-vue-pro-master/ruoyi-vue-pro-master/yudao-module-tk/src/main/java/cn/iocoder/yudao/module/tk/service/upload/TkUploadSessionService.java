@@ -80,6 +80,10 @@ public class TkUploadSessionService {
                 .setExpiresAt(LocalDateTime.now().plusHours(expireHours));
         session.setTenantId(scope.getTenantId());
         session.setCreator(scope.getUserIdString());
+        if ("oss".equalsIgnoreCase(storageMode) && ossObjectStorageService != null) {
+            TkOssObjectStorageService target = ossObjectStorageService.publishStorage();
+            session.setStorageUrl(target.unsignedUrl(target.buildTiktokObjectKey(session)));
+        }
         sessionMapper.insert(session);
     }
 
@@ -215,7 +219,8 @@ public class TkUploadSessionService {
             } else if ("oss".equalsIgnoreCase(session.getStorageMode()) && session.getLibraryId() == null
                     && ossObjectStorageService != null && ossObjectStorageService.isConfigured()) {
                 try {
-                    ossObjectStorageService.deleteObject(ossObjectStorageService.buildTiktokObjectKey(session));
+                    if (session.getStorageUrl() != null) ossObjectStorageService.deleteByUrl(session.getStorageUrl());
+                    else ossObjectStorageService.deleteObject(ossObjectStorageService.buildTiktokObjectKey(session));
                 } catch (Exception ex) {
                     log.warn("[expireSessions][failed to delete expired TikTok OSS object, uploadId({})]",
                             session.getUploadId(), ex);

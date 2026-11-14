@@ -37,6 +37,30 @@ public class TkTiktokPublishController {
     private TkTiktokPublishMediaService mediaService;
     @Resource
     private TkTiktokPublishMediaUploadService mediaUploadService;
+    @Resource
+    private cn.iocoder.yudao.module.tk.service.media.TkAdminPhotoUploadService photoUploadService;
+
+    @PostMapping("/media/photo/uploads")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<cn.iocoder.yudao.module.tk.service.media.TkAdminPhotoUploadService.Status> createPhotoUpload(@RequestParam("file") MultipartFile file) {
+        return success(photoUploadService.create(file));
+    }
+
+    @GetMapping("/media/photo/uploads/{uploadId}")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<cn.iocoder.yudao.module.tk.service.media.TkAdminPhotoUploadService.Status> photoUploadStatus(@PathVariable String uploadId) {
+        return success(photoUploadService.status(uploadId));
+    }
+
+    @DeleteMapping("/media/photo/uploads/{uploadId}")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<Boolean> cancelPhotoUpload(@PathVariable String uploadId) {photoUploadService.cancel(uploadId);return success(true);}
+
+    @PostMapping("/media/photo/uploads/{uploadId}/retry")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<cn.iocoder.yudao.module.tk.service.media.TkAdminPhotoUploadService.Status> retryPhotoUpload(@PathVariable String uploadId) {
+        return success(photoUploadService.retry(uploadId));
+    }
 
     @PostMapping("/media/upload")
     @Operation(summary = "上传 TikTok 发布视频")
@@ -44,6 +68,13 @@ public class TkTiktokPublishController {
     public CommonResult<TkTiktokPublishMediaRespVO> uploadMedia(@RequestParam("file") MultipartFile file) {
         TkTiktokPublishMediaDO media = mediaService.uploadVideo(file);
         return success(BeanUtils.toBean(media, TkTiktokPublishMediaRespVO.class));
+    }
+
+    @PostMapping("/media/photo/upload")
+    @Operation(summary = "上传 TikTok 图文图片（JPEG，前端负责转换及缩放）")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<TkTiktokPublishMediaRespVO> uploadPhoto(@RequestParam("file") MultipartFile file) {
+        return success(BeanUtils.toBean(mediaService.uploadPhoto(file), TkTiktokPublishMediaRespVO.class));
     }
 
     @PostMapping("/media/session/create")
@@ -96,6 +127,14 @@ public class TkTiktokPublishController {
     @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
     public CommonResult<Long> create(@Valid @RequestBody TkTiktokPublishCreateReqVO reqVO) {
         return success(publishService.createPublishTask(reqVO));
+    }
+
+    @PostMapping("/creator-info")
+    @Operation(summary = "查询所选发布账号当前隐私选项和互动限制")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-publish:create')")
+    public CommonResult<java.util.Map<Long, cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokApiClient.CreatorInfo>> queryCreators(
+            @RequestBody TkTiktokPublishCreateReqVO reqVO) {
+        return success(publishService.queryPublishCreators(reqVO));
     }
 
     @PostMapping("/reschedule")

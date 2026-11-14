@@ -109,6 +109,13 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
     }
 
     @Override
+    public PublishInitResult initPhotoPost(String accessToken, String postMode, Map<String, Object> payload) {
+        TkTiktokApiClient.PublishResult result = apiClient.initPhotoPost(accessToken, payload);
+        return new PublishInitResult(result.isSuccess(), result.getPublishId(), result.getUploadUrl(),
+                result.getFailReason(), result.getErrorCode());
+    }
+
+    @Override
     public void uploadVideo(String uploadUrl, Path videoFile, String contentType) {
         apiClient.uploadVideoChunks(uploadUrl, videoFile, contentType);
     }

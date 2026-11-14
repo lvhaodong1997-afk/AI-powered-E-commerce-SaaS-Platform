@@ -75,6 +75,21 @@ public class TkFileCleanupService {
     private TkLocalUploadStorageService localUploadStorageService;
     @Resource
     private TkMaterialOssUploadService ossUploadService;
+    @Resource private cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService objectStorageService;
+    @Resource private cn.iocoder.yudao.module.tk.dal.mysql.TkPublishFileReferenceMapper publishReferenceMapper;
+
+    private boolean isPublishReferenced(Long generationId, String url) {
+        if (publishReferenceMapper == null) {
+            throw new IllegalStateException("publish reference protection is unavailable");
+        }
+        Set<String> aliases = new LinkedHashSet<>();
+        if (StrUtil.isNotBlank(url)) aliases.add(StrUtil.subBefore(url, "?", false));
+        if (objectStorageService != null && StrUtil.isNotBlank(url)) {
+            try { aliases.addAll(objectStorageService.objectUrlAliases(url)); }
+            catch (IllegalArgumentException ignored) { /* Local legacy paths still match their exact persisted URL. */ }
+        }
+        return publishReferenceMapper.countActive(generationId, new ArrayList<>(aliases)) > 0;
+    }
 
     public CleanupResult cleanupExpiredFiles() {
         TkGenerationProperties.Cleanup cleanup = generationProperties.getCleanup();
@@ -98,7 +113,8 @@ public class TkFileCleanupService {
         LocalDateTime successDeadline = now.minusHours(normalizeHours(cleanup.getPublishMediaRetentionHours()));
         LocalDateTime failedDeadline = now.minusHours(normalizeHours(cleanup.getPublishMediaFailedRetentionHours()));
         List<TkTiktokPublishMediaDO> candidates = publishMediaMapper.selectExpiredCleanupCandidates(
-                successDeadline, failedDeadline, normalizeBatchSize(cleanup.getBatchSize()));
+                successDeadline, failedDeadline, normalizeBatchSize(cleanup.getBatchSize())).stream()
+                .filter(media -> !isPublishReferenced(null, media.getFileUrl())).collect(Collectors.toList());
         if (Boolean.TRUE.equals(cleanup.getDryRun())) {
             log.info("[cleanupExpiredPublishMedia][dryRun mediaCount({})]", candidates.size());
             return candidates.size();
@@ -111,6 +127,9 @@ public class TkFileCleanupService {
                 continue;
             }
             try {
+                if (isPublishReferenced(null, media.getFileUrl())) {
+                    publishMediaMapper.restoreReadyAfterCleanupFailure(media.getId()); continue;
+                }
                 deletePublishMediaFile(media);
                 publishMediaMapper.deleteById(media.getId());
                 cleanedCount++;
@@ -196,6 +215,10 @@ public class TkFileCleanupService {
         if (StrUtil.isBlank(fileUrl)) {
             throw new IllegalStateException("发布上传视频 URL 为空");
         }
+        if (objectStorageService != null && objectStorageService.isOwnedObjectUrl(fileUrl)) {
+            if (!isManagedPublishMediaUrl(fileUrl)) throw new IllegalStateException("发布媒体不属于受管路径");
+            objectStorageService.deleteByUrl(fileUrl); return;
+        }
         if (ossUploadService != null && ossUploadService.isEnabled()) {
             if (!isManagedPublishMediaUrl(fileUrl) || !ossUploadService.isManagedUrl(fileUrl)) {
                 throw new IllegalStateException("发布上传视频 URL 不属于受管 OSS 路径");
@@ -222,7 +245,7 @@ public class TkFileCleanupService {
 
     private boolean isManagedPublishMediaUrl(String url) {
         String cleanUrl = StrUtil.subBefore(StrUtil.blankToDefault(url, ""), "?", false);
-        return StrUtil.contains(cleanUrl, "/tiktok-publish-media/");
+        return StrUtil.contains(cleanUrl, "/tiktok-publish-media/") || StrUtil.contains(cleanUrl, "/tiktok-photo/");
     }
 
     private int cleanupExpiredGeneratedTaskFiles(LocalDateTime now, TkGenerationProperties.Cleanup cleanup) {
@@ -239,6 +262,7 @@ public class TkFileCleanupService {
                 .collect(Collectors.toMap(TkGenerationTaskDO::getId, task -> task, (left, right) -> left));
         List<FileDO> expiredFiles = filesByTaskId.entrySet().stream()
                 .filter(entry -> isCleanableGenerationTask(tasksById.get(entry.getKey())))
+                .filter(entry -> !isPublishReferenced(entry.getKey(), tasksById.get(entry.getKey()) == null ? null : tasksById.get(entry.getKey()).getOutputUrl()))
                 .flatMap(entry -> entry.getValue().stream())
                 .collect(Collectors.toList());
         if (CollUtil.isEmpty(expiredFiles)) {
@@ -293,6 +317,7 @@ public class TkFileCleanupService {
         }
         int cleanedCount = 0;
         for (TkGenerationTaskDO task : tasks) {
+            if (isPublishReferenced(task.getId(), task.getOutputUrl())) continue;
             Set<String> generationUrls = collectGenerationUrls(task);
             if (generationUrls.isEmpty()) {
                 continue;
@@ -303,7 +328,7 @@ public class TkFileCleanupService {
                 cleanedCount++;
                 continue;
             }
-            Set<String> deletedUrls = deleteManagedOssGenerationUrls(generationUrls);
+            Set<String> deletedUrls = deleteManagedOssGenerationUrls(task.getId(), generationUrls);
             if (clearGenerationTaskColumnsByPaths(task.getId(), deletedUrls)) {
                 cleanedCount++;
             }
@@ -351,6 +376,8 @@ public class TkFileCleanupService {
         List<FileDO> deletedFiles = new ArrayList<>();
         for (FileDO file : files) {
             try {
+                OptionalLong generationId = TkFileCleanupPathPolicy.extractGenerationTaskId(file.getPath());
+                if (generationId.isPresent() && isPublishReferenced(generationId.getAsLong(), file.getUrl())) continue;
                 fileService.deleteFile(file.getId());
                 deletedFiles.add(file);
             } catch (Exception ex) {
@@ -416,17 +443,20 @@ public class TkFileCleanupService {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
-    private Set<String> deleteManagedOssGenerationUrls(Set<String> urls) {
+    private Set<String> deleteManagedOssGenerationUrls(Long generationId, Set<String> urls) {
         Set<String> deletedUrls = new LinkedHashSet<>();
-        if (ossUploadService == null || !ossUploadService.isEnabled()) {
+        if (objectStorageService == null && (ossUploadService == null || !ossUploadService.isEnabled())) {
             return deletedUrls;
         }
         for (String url : urls) {
-            if (!ossUploadService.isManagedUrl(url)) {
+            if (isPublishReferenced(generationId, url)) continue;
+            boolean owned = objectStorageService != null && objectStorageService.isOwnedObjectUrl(url);
+            if (!owned && (ossUploadService == null || !ossUploadService.isEnabled() || !ossUploadService.isManagedUrl(url))) {
                 continue;
             }
             try {
-                ossUploadService.deleteByUrl(url);
+                if (owned) objectStorageService.deleteByUrl(url);
+                else ossUploadService.deleteByUrl(url);
                 deletedUrls.add(url);
             } catch (Exception ex) {
                 log.warn("[deleteManagedOssGenerationUrls][url({}) TK 过期生成文件 OSS 删除失败]",

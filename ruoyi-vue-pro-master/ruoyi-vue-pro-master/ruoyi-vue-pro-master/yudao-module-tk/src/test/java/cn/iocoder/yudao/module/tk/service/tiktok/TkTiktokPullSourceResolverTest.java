@@ -41,6 +41,22 @@ class TkTiktokPullSourceResolverTest {
         verify(connection).disconnect();
         assertEquals(1, validations);
     }
+    @Test void photoPreflightAcceptsJpegButRejectsVideoRedirectAndOversize() throws Exception {
+        when(connection.getContentType()).thenReturn("image/jpeg");
+        TkTiktokPullSourceResolver.PullDecision photo = org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+                resolver, "resolvePhoto", SOURCE.replace(".mp4", ".jpg"), 7L, "tkpublish.fnn.net.cn");
+        assertTrue(photo.isEligible());
+        when(connection.getContentType()).thenReturn("video/mp4");
+        photo = org.springframework.test.util.ReflectionTestUtils.invokeMethod(resolver, "resolvePhoto", SOURCE, 7L, "tkpublish.fnn.net.cn");
+        assertFalse(photo.isEligible());
+        when(connection.getContentType()).thenReturn("image/jpeg");
+        when(connection.getContentLengthLong()).thenReturn(20L * 1024 * 1024 + 1);
+        photo = org.springframework.test.util.ReflectionTestUtils.invokeMethod(resolver, "resolvePhoto", SOURCE, 7L, "tkpublish.fnn.net.cn");
+        assertFalse(photo.isEligible());
+        when(connection.getResponseCode()).thenReturn(302);
+        photo = org.springframework.test.util.ReflectionTestUtils.invokeMethod(resolver, "resolvePhoto", SOURCE, 7L, "tkpublish.fnn.net.cn");
+        assertFalse(photo.isEligible());
+    }
     @Test void candidateHasNoNetworkIo() {
         assertTrue(resolver.isCandidate(SOURCE, 7L, "https://tkpublish.fnn.net.cn/video/"));
         assertEquals(0, validations); assertEquals(0, opens);

@@ -694,6 +694,7 @@ class TkTiktokPublishServiceImplTest {
         ReflectionTestUtils.setField(service, "accountMapper", accountMapper);
         ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
         ReflectionTestUtils.setField(service, "businessLogService", businessLogService);
+        ReflectionTestUtils.setField(service, "publishTaskMapper", mock(TkTiktokPublishTaskMapper.class));
 
         TkTiktokAccountDO account = TkTiktokAccountDO.builder()
                 .id(1L)
@@ -811,6 +812,7 @@ class TkTiktokPublishServiceImplTest {
         ReflectionTestUtils.setField(service, "accountMapper", accountMapper);
         ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
         ReflectionTestUtils.setField(service, "businessLogService", businessLogService);
+        ReflectionTestUtils.setField(service, "publishTaskMapper", mock(TkTiktokPublishTaskMapper.class));
 
         TkTiktokAccountDO account = TkTiktokAccountDO.builder()
                 .id(1L)
@@ -858,6 +860,7 @@ class TkTiktokPublishServiceImplTest {
         ReflectionTestUtils.setField(service, "publishDetailMapper", detailMapper);
         ReflectionTestUtils.setField(service, "publishPostMapper", postMapper);
         ReflectionTestUtils.setField(service, "businessLogService", businessLogService);
+        ReflectionTestUtils.setField(service, "publishTaskMapper", mock(TkTiktokPublishTaskMapper.class));
 
         TkTiktokAccountDO account = TkTiktokAccountDO.builder()
                 .id(1L)

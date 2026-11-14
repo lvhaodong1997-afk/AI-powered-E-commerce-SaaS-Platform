@@ -38,6 +38,11 @@ public final class TkOpenTiktokPublishQueueVO {
         private String status;
         private String tiktokStatus;
         private String phase;
+        private String transferPolicy;
+        private String uploadSource;
+        private LocalDateTime nextReconcileTime;
+        private String callbackStatus;
+        private Integer callbackHttpStatus;
         private String publishId;
         private String failReason;
         private String lastError;

@@ -88,10 +88,48 @@ public final class TkTiktokMediaTransfer {
     }
 
     public void downloadToFile(String url, Path target, long maxBytes) throws IOException {
+        downloadToFile(url, target, maxBytes, downloadClient);
+    }
+
+    /** Public REMOTE staging has a separate network policy from existing trusted transfers. */
+    public static void downloadPublic(String url, Path target, long maxBytes) throws IOException {
+        new TkTiktokMediaTransfer().downloadPublicToFile(url, target, maxBytes, okhttp3.Dns.SYSTEM, client -> client);
+    }
+
+    void downloadPublicToFile(String url, Path target, long maxBytes, okhttp3.Dns dns,
+                              java.util.function.Function<OkHttpClient, Call.Factory> transport) throws IOException {
+        java.net.URI uri;
+        try { uri = java.net.URI.create(url); } catch (RuntimeException ex) { throw new IOException("invalid public media URL"); }
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
+                || uri.getFragment() != null || uri.getPort() != -1 && uri.getPort() != 443)
+            throw new IOException("public media URL must use HTTPS");
+        OkHttpClient client = downloadClient.newBuilder().followRedirects(false).followSslRedirects(false)
+                .proxy(java.net.Proxy.NO_PROXY).dns(publicDns(dns)).connectionPool(new okhttp3.ConnectionPool()).build();
+        downloadToFile(url, target, maxBytes, transport.apply(client));
+    }
+
+    static okhttp3.Dns publicDns(okhttp3.Dns resolver) {
+        return host -> {
+            java.util.List<java.net.InetAddress> addresses = resolver.lookup(host);
+            if (addresses.isEmpty()) throw new java.net.UnknownHostException("public media host has no address");
+            for (java.net.InetAddress address : addresses) {
+                byte[] bytes = address.getAddress(); int first = bytes[0] & 255, second = bytes.length > 1 ? bytes[1] & 255 : 0;
+                if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+                        || address.isSiteLocalAddress() || address.isMulticastAddress()
+                        || bytes.length == 4 && (first == 0 || first == 100 && second >= 64 && second <= 127 || first >= 224)
+                        || bytes.length == 16 && ((first & 254) == 252 || first == 0))
+                    throw new java.net.UnknownHostException("public media host resolves to a protected address");
+            }
+            // OkHttp connects to these exact checked addresses, without another DNS lookup or proxy.
+            return java.util.Collections.unmodifiableList(new java.util.ArrayList<>(addresses));
+        };
+    }
+
+    private void downloadToFile(String url, Path target, long maxBytes, Call.Factory client) throws IOException {
         if (maxBytes <= 0) throw new IllegalArgumentException("media byte limit must be positive");
         long limit = Math.min(maxBytes, MAX_VIDEO_BYTES);
         checkInterrupted();
-        Call call = downloadClient.newCall(request(url).get().build());
+        Call call = client.newCall(request(url).get().build());
         boolean opened = false;
         try (InterruptGuard ignored = new InterruptGuard(call); Response response = call.execute()) {
             if (!response.isSuccessful()) throw new IOException("cannot download media, HTTP " + response.code());

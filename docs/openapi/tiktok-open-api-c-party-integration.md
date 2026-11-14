@@ -1,5 +1,7 @@
 # A 方 TikTok Open API
 
+> 2026-11-13：新增[图文上传与发布完整契约](tiktok-photo-open-api.md)。本页原有视频示例继续有效；图文使用 mediaType=PHOTO、异步转换和有序 photoMediaIds，不能套用单视频 mediaId 流程。
+
 ## C 方授权发布最终联调文档
 
 **文档版本：** v1.4

@@ -116,3 +116,53 @@ console.log(current.status);
 ```
 
 For OSS mode, `POST /media/uploads/{uploadId}/complete` HEAD-validates object length and SHA-256 metadata. Do not create a publish task until it returns `status: READY`.
+
+## Photo upload and publish (Node 20+)
+
+Reuse the `api`, `sha256`, `fs`, and `crypto` helpers above. The result of PHOTO complete is asynchronous. See [photo contract](../openapi/tiktok-photo-open-api.md) for limits, retry and callbacks. Preserve each uploadId and the publish idempotency key in your database.
+
+```js
+async function uploadPhoto(path, fileName, contentType) {
+  const bytes = await fs.readFile(path);
+  const digest = sha256(bytes);
+  const upload = await api('POST', '/media/uploads', {
+    mediaType: 'PHOTO', fileName, fileSize: bytes.length, contentType, sha256: digest
+  });
+  if (upload.uploadMode === 'LOCAL') {
+    for (let i = 0; i < upload.totalChunks; i++) {
+      await api('PUT', `/media/uploads/${upload.uploadId}/chunks/${i}`,
+        bytes.subarray(i * upload.chunkSize, (i + 1) * upload.chunkSize));
+    }
+  } else {
+    const form = new FormData();
+    for (const [key, value] of Object.entries({
+      key: upload.objectKey, policy: upload.fields.policy,
+      OSSAccessKeyId: upload.fields.ossAccessKeyId, Signature: upload.fields.signature,
+      'x-oss-object-acl': upload.fields.xOssObjectAcl,
+      'Content-Type': upload.fields.contentType,
+      'x-oss-meta-sha256': upload.fields.xOssMetaSha256
+    })) if (value) form.append(key, value);
+    form.append('file', new Blob([bytes], {type: contentType}), fileName);
+    const response = await fetch(upload.uploadUrl, {method: 'POST', body: form});
+    if (!response.ok) throw new Error(`OSS photo upload: ${response.status}`);
+  }
+  await api('POST', `/media/uploads/${upload.uploadId}/complete`, {fileSize: bytes.length, sha256: digest});
+  for (let i = 0; i < 150; i++) {
+    const state = await api('GET', `/media/uploads/${upload.uploadId}`);
+    if (state.status === 'READY') return state.mediaId;
+    if (['FAILED', 'EXPIRED', 'CANCELLED'].includes(state.status)) throw new Error(state.failReason || state.status);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  throw new Error(`Conversion polling timed out; resume uploadId ${upload.uploadId}`);
+}
+const photoMediaIds = [await uploadPhoto('/images/a.heic', 'a.heic', 'image/heic'),
+  await uploadPhoto('/images/b.png', 'b.png', 'image/png')];
+const photoRequestKey = crypto.randomUUID(); // Persist once and reuse only with identical request bytes.
+const photoTask = await api('POST', '/publish/tasks', {
+  mediaType: 'PHOTO', connectionIds: [authorized.connectionId], photoMediaIds,
+  photoCoverIndex: 0, title: 'Product photos', caption: 'Details', postMode: 'DIRECT_POST',
+  privacyLevel: 'SELF_ONLY', autoAddMusic: true
+}, {'Idempotency-Key': photoRequestKey});
+console.log(await api('GET', `/publish/tasks/${photoTask.taskId}`));
+console.log(await api('GET', `/publish/tasks/${photoTask.taskId}/details`));
+```

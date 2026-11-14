@@ -62,6 +62,10 @@ class TkTiktokPublishMediaUploadServiceImplTest {
         ReflectionTestUtils.setField(service, "dataScopeService", dataScopeService);
         ReflectionTestUtils.setField(service, "generationProperties", properties);
 
+        cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService oss = new cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService();
+        ReflectionTestUtils.setField(oss, "generationProperties", properties);
+        ReflectionTestUtils.setField(service, "ossObjectStorageService", oss);
+
         TkUploadSessionRespVO session = service.createSession("demo.mp4", 8L, "video/mp4");
 
         assertEquals("oss", session.getUploadMode());

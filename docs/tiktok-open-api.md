@@ -1,5 +1,7 @@
 # TikTok 视频发布开放 API（多调用方通用版）
 
+> 2026-11-13：新增[图文上传与发布完整契约](openapi/tiktok-photo-open-api.md)。本页原有视频示例继续有效；图文使用 mediaType=PHOTO、异步转换和有序 photoMediaIds，不能套用单视频 mediaId 流程。
+
 > 文档状态：按当前控制器、VO 和服务实现整理的调用方接口说明。
 >
 > 版本：v1.2

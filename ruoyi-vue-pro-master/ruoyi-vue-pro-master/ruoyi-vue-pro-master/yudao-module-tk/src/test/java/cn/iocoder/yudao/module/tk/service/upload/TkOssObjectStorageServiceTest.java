@@ -14,6 +14,24 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TkOssObjectStorageServiceTest {
+    @Test void createsFreshGetAuthorizationOnFinalPullHostWithoutChangingPath() {
+        TkOssObjectStorageService service = new TkOssObjectStorageService();
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getUpload().getOss().setBucket("bucket");
+        properties.getUpload().getOss().setEndpoint("oss-cn-beijing.aliyuncs.com");
+        properties.getUpload().getOss().setAccessKeyId("key");
+        properties.getUpload().getOss().setAccessKeySecret("secret");
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        String url = service.createPullReadUrl("tk/open-api/c/a b.mp4", "https://pull.example.com", 86400);
+        assertTrue(url.startsWith("https://pull.example.com/tk/open-api/c/a%20b.mp4?OSSAccessKeyId=key&Expires="));
+        assertTrue(url.contains("&Signature="));
+        assertTrue(Long.parseLong(java.net.URLDecoder.decode(url.split("Expires=")[1].split("&")[0],
+                java.nio.charset.StandardCharsets.UTF_8)) > java.time.Instant.now().getEpochSecond() + 86390);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.createPullReadUrl("../other.mp4", "https://pull.example.com", 86400));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.createPullReadUrl("tk/a.mp4", "https://user@pull.example.com", 86400));
+    }
     @Test void identityChecksRejectSameSizeReplacementAndVersionChanges() {
         TkOssObjectStorageClient.ObjectMetadata original = new TkOssObjectStorageClient.ObjectMetadata(1024, null, "etag1", "v1");
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> TkOssObjectStorageService.requireIdentity(original, original));

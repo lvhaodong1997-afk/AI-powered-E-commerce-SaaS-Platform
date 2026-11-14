@@ -13,6 +13,14 @@ public class TkTiktokPublishCreateReqVO {
 
     private Long uploadedVideoId;
 
+    private String mediaType;
+    @Schema(description = "有序图片素材 ID，图文发布时使用，最多 35 张")
+    private List<Long> uploadedPhotoIds;
+    // Internal snapshot populated from authorized media records; client URLs are rejected.
+    private String photoUrls;
+    private Integer photoCoverIndex;
+    private Boolean autoAddMusic;
+
     private Long coverTimestampMs;
 
     private List<Long> accountIds;

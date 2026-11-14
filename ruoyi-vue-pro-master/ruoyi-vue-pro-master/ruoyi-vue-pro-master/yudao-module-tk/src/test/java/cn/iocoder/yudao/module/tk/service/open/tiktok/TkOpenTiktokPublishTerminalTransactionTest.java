@@ -74,6 +74,9 @@ class TkOpenTiktokPublishTerminalTransactionTest {
                         new ByteArrayResource(ddl.getBytes(StandardCharsets.UTF_8)));
             }
         }
+        jdbc.execute("ALTER TABLE tk_open_tiktok_publish_task ADD COLUMN media_type VARCHAR(16) DEFAULT 'VIDEO'");
+        jdbc.execute("ALTER TABLE tk_open_tiktok_publish_task ADD COLUMN photo_cover_index INT");
+        jdbc.execute("ALTER TABLE tk_open_tiktok_publish_task ADD COLUMN auto_add_music TINYINT");
         // Task 1 owns the additive attempt migration. This isolated fixture covers its agreed columns.
         jdbc.execute("CREATE TABLE tk_open_tiktok_publish_attempt (id BIGINT AUTO_INCREMENT PRIMARY KEY,"
                 + "detail_id VARCHAR(64) NOT NULL,task_id VARCHAR(64) NOT NULL,client_id VARCHAR(64) NOT NULL,"
@@ -81,10 +84,13 @@ class TkOpenTiktokPublishTerminalTransactionTest {
                 + "terminal_source VARCHAR(64),terminal_time TIMESTAMP,last_error VARCHAR(1024),"
                 + "next_reconcile_time TIMESTAMP,reconcile_count INT DEFAULT 0,upload_url_cipher VARCHAR(4096),"
                 + "upload_source VARCHAR(64),started_time TIMESTAMP,owner_token VARCHAR(128),"
-                + "file_sha256 VARCHAR(128),file_size BIGINT,"
+                + "file_sha256 VARCHAR(128),file_size BIGINT,pull_url_cipher VARCHAR(4096),"
                 + "creator VARCHAR(64) DEFAULT '',updater VARCHAR(64) DEFAULT '',"
                 + "create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
                 + "deleted TINYINT DEFAULT 0,UNIQUE(detail_id,attempt_no))");
+        jdbc.execute("ALTER TABLE tk_open_tiktok_publish_detail ADD COLUMN IF NOT EXISTS next_poll_time TIMESTAMP");
+        jdbc.execute("ALTER TABLE tk_open_tiktok_publish_detail ADD COLUMN IF NOT EXISTS downloaded_bytes BIGINT DEFAULT 0");
+        jdbc.execute("ALTER TABLE tk_open_tiktok_publish_task ADD COLUMN IF NOT EXISTS transfer_policy VARCHAR(32) DEFAULT 'LEGACY'");
 
         MybatisConfiguration configuration = new MybatisConfiguration();
         configuration.setMapUnderscoreToCamelCase(true);

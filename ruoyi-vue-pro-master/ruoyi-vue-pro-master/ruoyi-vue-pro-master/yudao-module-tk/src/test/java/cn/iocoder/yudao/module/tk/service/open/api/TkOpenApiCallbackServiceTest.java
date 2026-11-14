@@ -29,6 +29,49 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class TkOpenApiCallbackServiceTest {
+    @Test void diagnosticsSelectOnlyCurrentTerminalAttemptAndUseOneBatchQuery() {
+        TkOpenApiEventMapper mapper = mock(TkOpenApiEventMapper.class);
+        TkOpenApiEventDO event = publishEvent("publish.success", "d", "pub", 4);
+        event.setDedupeKey("c|publish.success|PUBLISH_DETAIL|d|1");
+        event.setStatus("RETRYING");
+        event.setLastHttpStatus(503);
+        when(mapper.selectList(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class)))
+                .thenReturn(Collections.singletonList(event));
+        TkOpenApiCallbackService service = new TkOpenApiCallbackService(mapper,
+                mock(TkOpenApiClientMapper.class), mock(TkOpenApiSecretCipher.class), null);
+        try {
+            Map<String, TkOpenApiEventDO> state = service.currentPublishCallbacks(Collections.singletonList(
+                    TkOpenTiktokPublishDetailDO.builder().clientId("c").detailId("d").status("SUCCESS").retryCount(1).build()));
+            assertEquals(503, state.get("c|d").getLastHttpStatus());
+            ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper> query =
+                    ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
+            verify(mapper).selectList(query.capture());
+            query.getValue().getSqlSegment();
+            org.junit.jupiter.api.Assertions.assertTrue(query.getValue().getParamNameValuePairs()
+                    .containsValue("c|publish.success|PUBLISH_DETAIL|d|1"));
+            org.junit.jupiter.api.Assertions.assertFalse(query.getValue().getParamNameValuePairs()
+                    .containsValue("c|publish.success|PUBLISH_DETAIL|d|0"));
+        } finally { service.destroy(); }
+    }
+    @Test void oldTerminalCallbackCannotOverwriteLaterSuccessfulAttempt() {
+        TkOpenApiEventMapper mapper = mock(TkOpenApiEventMapper.class);
+        TkOpenApiCallbackHttpClient http = mock(TkOpenApiCallbackHttpClient.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenApiEventDO event = publishEvent("publish.failed", "old-failed", "old-publish", 0);
+        event.setEventId("old-failed");
+        when(mapper.selectByEventId("old-failed")).thenReturn(event);
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        when(details.selectByClientAndDetailId(any(), any())).thenReturn(
+                TkOpenTiktokPublishDetailDO.builder().status("SUCCESS").publishId("new-publish").retryCount(1).build());
+        TkOpenApiCallbackService service = new TkOpenApiCallbackService(mapper,
+                mock(TkOpenApiClientMapper.class), mock(TkOpenApiSecretCipher.class), http);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "publishDetailMapper", details);
+        try {
+            service.deliver("old-failed");
+            org.junit.jupiter.api.Assertions.assertTrue(lastUpdateValues(mapper).containsValue("SKIPPED"));
+            verifyNoInteractions(http);
+        } finally { service.destroy(); }
+    }
 
     @org.junit.jupiter.api.BeforeEach
     void initMybatisLambdaMetadata() {
