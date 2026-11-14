@@ -30,4 +30,30 @@ class PhoneVerificationClientTest {
         TenantRegistrationProperties p=new TenantRegistrationProperties();p.setEnabled(true);p.setDefaultPackageId(111L);p.setValidityDays(0);p.setValidityYears(10);
         assertTrue(p.tenantAvailable());p.setValidityYears(101);assertFalse(p.tenantAvailable());
     }
+
+    @Test void recoveredSentChallengeAllowsZeroCooldownAndExpiredOriginal() throws Exception {
+        ObjectMapper json=new ObjectMapper();
+        for(int remaining:new int[]{240,1,0}) {
+            String body="{\"smsRequestId\":\"challenge-original\",\"deliveryStatus\":\"SENT\",\"expiresInSeconds\":"+remaining+",\"resendAfterSeconds\":0}";
+            cn.iocoder.yudao.module.system.controller.admin.auth.vo.TenantRegistrationSmsRespVO result=PhoneVerificationClient.parseSendResponse(json.readTree(body));
+            assertEquals(remaining,result.getExpiresInSeconds());assertEquals(0,result.getResendAfterSeconds());
+        }
+    }
+    @Test void malformedAndUnknownChallengeFieldsFailClosed() throws Exception {
+        ObjectMapper json=new ObjectMapper();
+        com.fasterxml.jackson.databind.node.ObjectNode valid=json.createObjectNode().put("smsRequestId","challenge-original").put("deliveryStatus","SENT").put("expiresInSeconds",200).put("resendAfterSeconds",30);
+        for(String field:new String[]{"expiresInSeconds","resendAfterSeconds"}) {
+            for(com.fasterxml.jackson.databind.JsonNode invalid:new com.fasterxml.jackson.databind.JsonNode[]{json.nullNode(),json.getNodeFactory().numberNode(-1),json.getNodeFactory().numberNode(0.5),json.getNodeFactory().textNode("30"),json.getNodeFactory().numberNode(301)}) {
+                com.fasterxml.jackson.databind.node.ObjectNode body=valid.deepCopy();body.set(field,invalid);
+                assertThrows(RuntimeException.class,()->PhoneVerificationClient.parseSendResponse(body));
+            }
+            com.fasterxml.jackson.databind.node.ObjectNode missing=valid.deepCopy();missing.remove(field);
+            assertThrows(RuntimeException.class,()->PhoneVerificationClient.parseSendResponse(missing));
+        }
+        for(String state:new String[]{"SENT","PENDING","UNKNOWN"}) {
+            com.fasterxml.jackson.databind.node.ObjectNode body=valid.deepCopy().put("deliveryStatus",state);
+            assertEquals(state,PhoneVerificationClient.parseSendResponse(body).getDeliveryStatus());
+        }
+        assertThrows(RuntimeException.class,()->PhoneVerificationClient.parseSendResponse(valid.deepCopy().put("deliveryStatus","FAILED")));
+    }
 }

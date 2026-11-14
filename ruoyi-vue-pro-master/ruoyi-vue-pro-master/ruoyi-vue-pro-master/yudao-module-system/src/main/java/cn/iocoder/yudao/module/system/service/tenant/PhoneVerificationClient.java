@@ -28,13 +28,23 @@ public class PhoneVerificationClient {
         Map<String,Object> body = new LinkedHashMap<>();
         body.put("mobile", mobile); body.put("requestId", requestId); body.put("purpose", "REGISTER"); body.put("clientIp", clientIp);
         JsonNode data = post("/internal/phone-verification/send", body);
-        if (!data.path("smsRequestId").isTextual() || data.path("smsRequestId").asText().isEmpty()
-                || data.path("expiresInSeconds").asInt() <= 0 || data.path("resendAfterSeconds").asInt() <= 0) {
+        return parseSendResponse(data);
+    }
+
+    static TenantRegistrationSmsRespVO parseSendResponse(JsonNode data) {
+        if (data == null || !data.isObject() || !data.path("smsRequestId").isTextual()
+                || data.path("smsRequestId").asText().trim().isEmpty() || data.path("smsRequestId").asText().length()>128
+                || !("SENT".equals(data.path("deliveryStatus").asText()) || "PENDING".equals(data.path("deliveryStatus").asText()) || "UNKNOWN".equals(data.path("deliveryStatus").asText()))
+                || !validRemaining(data.path("expiresInSeconds"),300) || !validRemaining(data.path("resendAfterSeconds"),60)) {
             throw unavailable();
         }
         return new TenantRegistrationSmsRespVO().setSmsRequestId(data.path("smsRequestId").asText())
                 .setDeliveryStatus(data.path("deliveryStatus").asText()).setExpiresInSeconds(data.path("expiresInSeconds").asInt())
                 .setResendAfterSeconds(data.path("resendAfterSeconds").asInt());
+    }
+
+    private static boolean validRemaining(JsonNode value,int maximum) {
+        return value.isIntegralNumber() && value.canConvertToInt() && value.intValue()>=0 && value.intValue()<=maximum;
     }
 
     public void consume(TenantRegistrationReqVO request) {
