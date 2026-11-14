@@ -108,6 +108,9 @@ public class TenantServiceImpl implements TenantService {
 
         // 创建租户
         TenantDO tenant = BeanUtils.toBean(createReqVO, TenantDO.class);
+        if (tenant.getMemberLimit() == null) {
+            tenant.setMemberLimit(Math.max(1, tenant.getAccountCount() == null ? 1 : tenant.getAccountCount()));
+        }
         tenantMapper.insert(tenant);
         // 创建租户的管理员
         TenantUtils.execute(tenant.getId(), () -> {

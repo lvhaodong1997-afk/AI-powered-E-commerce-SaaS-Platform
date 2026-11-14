@@ -50,6 +50,9 @@ public class TenantSaveReqVO {
     @NotNull(message = "账号数量不能为空")
     private Integer accountCount;
 
+    @javax.validation.constraints.Min(1)
+    private Integer memberLimit;
+
     // ========== 仅【创建】时，需要传递的字段 ==========
 
     @Schema(description = "用户账号", requiredMode = Schema.RequiredMode.REQUIRED, example = "yudao")

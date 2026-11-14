@@ -86,4 +86,14 @@ public class TenantDO extends BaseDO {
      */
     private Integer accountCount;
 
+    /** Member seats, independent of the TK credit balance in accountCount. */
+    private Integer memberLimit;
+
+    public int resolveMemberLimit(long actualMemberCount) {
+        if (memberLimit != null) {
+            return Math.max(1, memberLimit);
+        }
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(Math.max(1, accountCount == null ? 0 : accountCount), actualMemberCount));
+    }
+
 }
