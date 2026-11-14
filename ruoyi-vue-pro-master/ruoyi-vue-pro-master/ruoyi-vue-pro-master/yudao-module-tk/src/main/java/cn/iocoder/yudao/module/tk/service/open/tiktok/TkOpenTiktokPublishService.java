@@ -259,7 +259,14 @@ public class TkOpenTiktokPublishService {
                 throw TkOpenApiException.badRequest("CONNECTION_NOT_AUTHORIZED", "connection is not authorized");
         }
         boolean scheduled = scheduledAt != null;
-        boolean preferPull = pullSourceResolver != null && connections.stream().anyMatch(connection ->
+        long strictAccounts = pullSourceResolver != null && pullSourceResolver.isStrictEnabled()
+                ? connections.stream().filter(connection -> pullSourceResolver.isStrictCandidate(
+                        media.getFileUrl(), connection.getId(), platform().verifiedPullDomain())).count() : 0;
+        if (strictAccounts > 0 && strictAccounts != connections.size())
+            throw TkOpenApiException.badRequest("PULL_ACCOUNT_POLICY_MIXED", "直拉白名单内外账号请分开创建发布任务");
+        boolean strictPull = strictAccounts > 0;
+        if (strictPull && scheduled) validatePullSchedule(media, scheduleTime);
+        boolean preferPull = strictPull || pullSourceResolver != null && connections.stream().anyMatch(connection ->
                 scheduled
                         ? pullSourceResolver.resolve(media.getFileUrl(), connection.getId(), platform().verifiedPullDomain()).isEligible()
                         : pullSourceResolver.isCandidate(media.getFileUrl(), connection.getId(), platform().verifiedPullDomain()));
@@ -286,7 +293,7 @@ public class TkOpenTiktokPublishService {
                 .taskId(taskId)
                 .clientId(clientId)
                 .mediaId(media.getMediaId())
-                .transferPolicy(preferPull ? "OSS_PULL_V1" : "FILE_UPLOAD")
+                .transferPolicy(strictPull ? "OSS_PULL_V2_STRICT" : preferPull ? "OSS_PULL_V1" : "FILE_UPLOAD")
                 .externalRequestId(request.getExternalRequestId())
                 .title(request.getTitle())
                 .caption(request.getCaption())
@@ -354,6 +361,8 @@ public class TkOpenTiktokPublishService {
         if (details.isEmpty() || details.stream().anyMatch(detail -> !"SCHEDULED".equals(detail.getStatus()))) {
             throw TkOpenApiException.conflict("SCHEDULE_ALREADY_RUNNING", "scheduled task execution has already started");
         }
+        if ("OSS_PULL_V2_STRICT".equals(task.getTransferPolicy()))
+            validatePullSchedule(mediaMapper.selectByClientAndMediaId(clientId, task.getMediaId()), nextSchedule);
         int version = task.getScheduleVersion() == null ? 0 : task.getScheduleVersion();
         int changed = taskMapper.update(null, Wrappers.lambdaUpdate(TkOpenTiktokPublishTaskDO.class)
                 .eq(TkOpenTiktokPublishTaskDO::getId, task.getId())
@@ -427,8 +436,20 @@ public class TkOpenTiktokPublishService {
     public List<TkOpenTiktokPublishVO.DetailResp> getDetails(String taskId) {
         String clientId = currentClient();
         requireTask(clientId, taskId);
-        return detailMapper.selectListByClientAndTaskId(clientId, taskId).stream()
-                .map(this::toDetailResp).collect(Collectors.toList());
+        List<TkOpenTiktokPublishDetailDO> details = detailMapper.selectListByClientAndTaskId(clientId, taskId);
+        Map<String, TkOpenApiEventDO> callbacks = callbackService == null ? Collections.emptyMap()
+                : callbackService.currentPublishCallbacks(details);
+        return details.stream().map(detail -> {
+            TkOpenTiktokPublishVO.DetailResp response = toDetailResp(detail);
+            TkOpenTiktokPublishAttemptDO attempt = attemptService == null ? null : attemptService.current(detail);
+            if (attempt != null) {
+                response.setPhase(attempt.getPhase()); response.setUploadSource(attempt.getUploadSource());
+                response.setLastError(attempt.getLastError()); response.setNextReconcileTime(attempt.getNextReconcileTime());
+            }
+            TkOpenApiEventDO event = callbacks.get(detail.getClientId() + "|" + detail.getDetailId());
+            if (event != null) { response.setCallbackStatus(event.getStatus()); response.setCallbackHttpStatus(event.getLastHttpStatus()); }
+            return response;
+        }).collect(Collectors.toList());
     }
 
     public TkOpenTiktokPublishVO.MetricsResp getMetrics(String taskId) {
@@ -444,7 +465,7 @@ public class TkOpenTiktokPublishService {
         }
         TkOpenTiktokPublishDetailDO detail = details.get(0);
         if (StrUtil.isBlank(detail.getPublicPostId()) && StrUtil.isNotBlank(detail.getPublishId())) {
-            syncDetail(detail);
+            syncDetail(detail, false);
             detail = detailMapper.selectByClientAndDetailId(clientId, detail.getDetailId());
         }
         if (detail == null) {
@@ -521,7 +542,7 @@ public class TkOpenTiktokPublishService {
             List<TkOpenTiktokPublishDetailDO> resolvedDetails = new ArrayList<>();
             for (TkOpenTiktokPublishDetailDO detail : details) {
                 if (StrUtil.isBlank(detail.getPublicPostId()) && StrUtil.isNotBlank(detail.getPublishId())) {
-                    syncDetail(detail);
+                    syncDetail(detail, false);
                     detail = detailMapper.selectByClientAndDetailId(clientId, detail.getDetailId());
                 }
                 if (detail == null) {
@@ -711,6 +732,8 @@ public class TkOpenTiktokPublishService {
             }
         }
         LocalDateTime now = LocalDateTime.now(BEIJING_ZONE);
+        Map<String, TkOpenApiEventDO> callbacks = callbackService == null ? Collections.emptyMap()
+                : callbackService.currentPublishCallbacks(rows);
         List<TkOpenTiktokPublishQueueVO.Detail> result = new ArrayList<>();
         for (TkOpenTiktokPublishDetailDO row : rows) {
             TkOpenTiktokPublishAttemptDO attempt = null;
@@ -734,6 +757,11 @@ public class TkOpenTiktokPublishService {
             item.setTaskStatus(task == null ? null : task.getStatus());
             item.setStatus(row.getStatus()); item.setTiktokStatus(row.getTiktokStatus());
             item.setPhase(attempt == null ? row.getTiktokStatus() : attempt.getPhase());
+            item.setTransferPolicy(task == null ? null : task.getTransferPolicy());
+            item.setUploadSource(attempt == null ? null : attempt.getUploadSource());
+            item.setNextReconcileTime(attempt == null ? null : attempt.getNextReconcileTime());
+            TkOpenApiEventDO event = callbacks.get(row.getClientId() + "|" + row.getDetailId());
+            if (event != null) { item.setCallbackStatus(event.getStatus()); item.setCallbackHttpStatus(event.getLastHttpStatus()); }
             item.setPublishId(row.getPublishId()); item.setFailReason(row.getFailReason());
             item.setLastError(attempt == null ? null : attempt.getLastError());
             item.setRetryCount(row.getRetryCount()); item.setHeartbeatTime(heartbeat);
@@ -957,7 +985,9 @@ public class TkOpenTiktokPublishService {
                 creator = adapter.queryCreatorInfo(token);
             }
             if (!creator.isSuccess()) throw new IllegalStateException(creator.getFailReason());
-            source = "LEGACY".equals(task.getTransferPolicy()) || StrUtil.isBlank(task.getTransferPolicy())
+            source = "OSS_PULL_V2_STRICT".equals(task.getTransferPolicy())
+                    ? resolveStrictSource(media, adapter.verifiedPullDomain(), connection.getId())
+                    : "LEGACY".equals(task.getTransferPolicy()) || StrUtil.isBlank(task.getTransferPolicy())
                     ? resolveSource(media, adapter.verifiedPullDomain())
                     : resolveSource(media, adapter.verifiedPullDomain(), connection.getId(),
                             "OSS_PULL_V1".equals(task.getTransferPolicy()));
@@ -989,6 +1019,8 @@ public class TkOpenTiktokPublishService {
                 attemptService.deferUnsent(detail, attempt);
             }
         } catch (Exception ex) {
+            if (ex instanceof PullPreflightException && ((PullPreflightException) ex).retryable
+                    && attempt != null && attemptService.deferPullPreflight(detail, attempt, ex.getMessage())) return;
             handleExecutionFailure(detail, attempt, ex, false, "PRE_INIT_FAILURE");
         } finally {
             if (!handedOff) {
@@ -1190,6 +1222,10 @@ public class TkOpenTiktokPublishService {
     }
 
     private void syncDetail(TkOpenTiktokPublishDetailDO detail) {
+        syncDetail(detail, true);
+    }
+
+    private void syncDetail(TkOpenTiktokPublishDetailDO detail, boolean allowRecovery) {
         TkOpenTiktokPublishAttemptDO attempt = null;
         try {
             attempt = attemptService.current(detail);
@@ -1212,7 +1248,8 @@ public class TkOpenTiktokPublishService {
             if (isSuccess(status.getStatus()) || isFailed(status.getStatus())) {
                 terminalService.confirm(detail, status.getStatus(), postId, status.getFailReason(), "STATUS_API");
             } else if (attempt != null && "UPLOAD_URL_EXPIRED".equals(attempt.getPhase())) {
-                applyExpiredUploadStatus(detail, attempt, status);
+                if (allowRecovery) applyExpiredUploadStatus(detail, attempt, status);
+                else markRecoveryRequired(detail, attempt, "Upload URL expired; queued for background reconciliation");
             } else {
                 attemptService.clearReconcileBackoff(attempt);
                 detailMapper.update(null, processingUpdate(detail)
@@ -1222,7 +1259,8 @@ public class TkOpenTiktokPublishService {
                         .set(TkOpenTiktokPublishDetailDO::getFailReason, null)
                         .set(TkOpenTiktokPublishDetailDO::getLastSyncTime, LocalDateTime.now()));
                 if ("PROCESSING_UPLOAD".equals(status.getStatus()) && status.getUploadedBytes() != null) {
-                    resumeUpload(detail);
+                    if (allowRecovery) resumeUpload(detail);
+                    else markRecoveryRequired(detail, attempt, "Upload recovery queued for background reconciliation");
                 }
             }
         } catch (Exception ex) {
@@ -1546,6 +1584,37 @@ public class TkOpenTiktokPublishService {
                 media.getMediaId(), decision.getReasonCode());
         // A failed pull preflight must not re-enter the legacy verified-URL shortcut.
         return resolveSource(media, null);
+    }
+
+    private UploadSource resolveStrictSource(TkOpenTiktokMediaDO media, String verifiedDomain, Long accountId) {
+        if (pullSourceResolver == null) throw new PullPreflightException("PULL_RESOLVER_UNAVAILABLE", false);
+        String url = mediaService == null ? media.getFileUrl()
+                : mediaService.resolvePullReadUrl(media, pullSourceResolver.pullBaseUrl());
+        TkTiktokPullSourceResolver.PullDecision decision = pullSourceResolver.resolveStrict(url, accountId, verifiedDomain);
+        if (decision == null) throw new PullPreflightException("PULL_RESOLVER_UNAVAILABLE", false);
+        if (!decision.isEligible()) throw new PullPreflightException(decision.getReasonCode(),
+                "PULL_TEMPORARILY_UNAVAILABLE".equals(decision.getReasonCode()));
+        if (media.getFileSize() != null && media.getFileSize() > 0 && media.getFileSize() != decision.getFileSize())
+            throw new PullPreflightException("PULL_FILE_SIZE_CHANGED", false);
+        return UploadSource.pull(decision.getPullUrl(), decision.getFileSize());
+    }
+
+    private void validatePullSchedule(TkOpenTiktokMediaDO media, TkOpenTiktokScheduleTimeService.ScheduleTime schedule) {
+        if (media == null) throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "media does not exist");
+        if (mediaService != null && mediaService.canRefreshPullAuthorization(media)) return;
+        long minimumValidity = Math.max(0L, schedule.instant().getEpochSecond() - Instant.now().getEpochSecond())
+                + TkTiktokPullSourceResolver.MIN_PULL_VALIDITY_SECONDS;
+        String failure = TkTiktokPullSourceResolver.lifetimeFailure(media.getFileUrl(), minimumValidity);
+        if (failure != null) throw TkOpenApiException.badRequest(failure,
+                "视频链接无法覆盖计划发布时间，请提供有效期更长的链接或上传受控 OSS 素材");
+    }
+
+    private static class PullPreflightException extends IllegalStateException {
+        private final boolean retryable;
+        PullPreflightException(String code, boolean retryable) {
+            super("OSS 直拉预检失败 [" + code + "]，未切换为本地上传");
+            this.retryable = retryable;
+        }
     }
 
     private void refreshSummary(String clientId, String taskId) {

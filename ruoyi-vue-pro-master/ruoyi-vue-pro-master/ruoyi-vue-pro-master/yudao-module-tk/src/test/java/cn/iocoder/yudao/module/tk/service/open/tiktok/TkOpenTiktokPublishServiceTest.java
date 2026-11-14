@@ -166,6 +166,61 @@ class TkOpenTiktokPublishServiceTest {
         verifyScheduledSourcePolicy(preferPull, preferPull);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void strictScheduledTaskDoesNotProbeOrDowngradeMixedAccounts(boolean mixed) {
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokMediaMapper mediaMapper = mock(TkOpenTiktokMediaMapper.class);
+        TkOpenTiktokConnectionMapper connections = mock(TkOpenTiktokConnectionMapper.class);
+        TkOpenTiktokMediaService mediaService = mock(TkOpenTiktokMediaService.class);
+        TkOpenTiktokMediaDO media = TkOpenTiktokMediaDO.builder().mediaId("media_1").clientId("client_b")
+                .status("READY").fileUrl("https://tkpublish.fnn.net.cn/a.mp4").build();
+        when(mediaMapper.selectByClientAndMediaId("client_b", "media_1")).thenReturn(media);
+        when(mediaService.canRefreshPullAuthorization(media)).thenReturn(true);
+        when(connections.selectListByClientAndIds(eq("client_b"), any())).thenReturn(Collections.singletonList(
+                TkOpenTiktokConnectionDO.builder().id(2L).connectionId("conn_1").authStatus("AUTHORIZED").build()));
+        TkOpenTiktokPublishService service = newQuickService(tasks, details, mediaMapper, connections,
+                mock(TkOpenApiIdempotencyMapper.class), mediaService);
+        cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokPullSourceResolver resolver =
+                mock(cn.iocoder.yudao.module.tk.service.tiktok.TkTiktokPullSourceResolver.class);
+        when(resolver.isStrictEnabled()).thenReturn(true);
+        when(resolver.isStrictCandidate(any(), any(), any())).thenReturn(true);
+        if (mixed) {
+            when(connections.selectListByClientAndIds(eq("client_b"), any())).thenReturn(Arrays.asList(
+                    TkOpenTiktokConnectionDO.builder().id(2L).connectionId("conn_1").authStatus("AUTHORIZED").build(),
+                    TkOpenTiktokConnectionDO.builder().id(3L).connectionId("conn_2").authStatus("AUTHORIZED").build()));
+            when(resolver.isStrictCandidate(any(), eq(3L), any())).thenReturn(false);
+        }
+        TkOpenPublishPlatformRegistry registry = mock(TkOpenPublishPlatformRegistry.class);
+        TkOpenPublishPlatformAdapter adapter = mock(TkOpenPublishPlatformAdapter.class);
+        when(registry.getRequired("TIKTOK")).thenReturn(adapter);
+        when(adapter.verifiedPullDomain()).thenReturn("tkpublish.fnn.net.cn");
+        ReflectionTestUtils.setField(service, "pullSourceResolver", resolver);
+        ReflectionTestUtils.setField(service, "platformRegistry", registry);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "strict-scheduled");
+        TkOpenTiktokPublishVO.TaskCreateReq request = request();
+        request.setScheduledAt(mixed ? null : "2099-09-26T18:00:00");
+        request.setRegionCode("US");
+        if (mixed) request.setConnectionIds(Arrays.asList("conn_1", "conn_2"));
+        try {
+            if (mixed) {
+                TkOpenApiException error = assertThrows(TkOpenApiException.class, () -> service.create(request, "strict-scheduled"));
+                assertEquals("PULL_ACCOUNT_POLICY_MIXED", error.getCode());
+                verify(tasks, never()).insert(any(TkOpenTiktokPublishTaskDO.class));
+                verify(mediaService, never()).prepareForScheduledPublish(any());
+                return;
+            }
+            assertEquals("SCHEDULED", service.create(request, "strict-scheduled").getStatus());
+            ArgumentCaptor<TkOpenTiktokPublishTaskDO> captured = ArgumentCaptor.forClass(TkOpenTiktokPublishTaskDO.class);
+            verify(tasks).insert(captured.capture());
+            assertEquals("OSS_PULL_V2_STRICT", captured.getValue().getTransferPolicy());
+            verify(mediaService, never()).prepareForScheduledPublish(any());
+            verify(resolver, never()).resolve(any(), any(), any());
+            verify(resolver, never()).resolveStrict(any(), any(), any());
+        } finally { service.destroy(); }
+    }
+
     private void verifyScheduledSourcePolicy(boolean candidate, boolean anonymousAccessible) {
         boolean preferPull = candidate && anonymousAccessible;
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
@@ -259,6 +314,31 @@ class TkOpenTiktokPublishServiceTest {
         assertEquals(TkOpenTiktokPublishService.parseScheduledAt("2099-09-26T19:00:00+08:00"),
                 response.getScheduledAt());
         service.destroy();
+    }
+
+    @Test void strictExternalSignedTaskCannotBeRescheduledBeyondAuthorization() {
+        TkOpenTiktokPublishTaskMapper tasks = mock(TkOpenTiktokPublishTaskMapper.class);
+        TkOpenTiktokPublishDetailMapper details = mock(TkOpenTiktokPublishDetailMapper.class);
+        TkOpenTiktokMediaMapper media = mock(TkOpenTiktokMediaMapper.class);
+        when(tasks.selectByClientAndTaskIdForUpdate("client_b", "task_schedule")).thenReturn(
+                TkOpenTiktokPublishTaskDO.builder().taskId("task_schedule").mediaId("m")
+                        .status("SCHEDULED").scheduledAt(LocalDateTime.now().plusHours(1))
+                        .transferPolicy("OSS_PULL_V2_STRICT").build());
+        when(details.selectListByClientAndTaskIdForUpdate("client_b", "task_schedule")).thenReturn(
+                Collections.singletonList(TkOpenTiktokPublishDetailDO.builder().status("SCHEDULED").build()));
+        when(media.selectByClientAndMediaId("client_b", "m")).thenReturn(TkOpenTiktokMediaDO.builder()
+                .uploadMode("REMOTE").fileUrl("https://tkpublish.fnn.net.cn/a.mp4?OSSAccessKeyId=k&Expires="
+                        + (java.time.Instant.now().getEpochSecond() + 7200) + "&Signature=s").build());
+        TkOpenTiktokPublishService service = newService(tasks, mock(TkOpenApiIdempotencyMapper.class));
+        ReflectionTestUtils.setField(service, "detailMapper", details);
+        ReflectionTestUtils.setField(service, "mediaMapper", media);
+        TkOpenApiContext.set(new TkOpenApiPrincipal("client_b", "B", "publish"), "strict-reschedule");
+        try {
+            TkOpenApiException error = assertThrows(TkOpenApiException.class,
+                    () -> service.reschedule("task_schedule", "2099-09-26T19:00:00+08:00", "strict-reschedule"));
+            assertEquals("PULL_URL_EXPIRED", error.getCode());
+            verify(tasks, never()).update(any(), any());
+        } finally { service.destroy(); }
     }
 
     @Test

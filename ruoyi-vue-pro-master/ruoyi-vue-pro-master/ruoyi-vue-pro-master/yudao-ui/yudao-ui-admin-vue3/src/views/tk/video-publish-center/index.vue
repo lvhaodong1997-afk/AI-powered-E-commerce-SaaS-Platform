@@ -19,6 +19,12 @@
           <span class="sub-text">最近刷新：{{ formatTimestamp(queueSummary.refreshedAt) }}</span>
         </div>
         <div class="toolbar-actions">
+          <el-date-picker v-model="queueDate" type="date" value-format="YYYY-MM-DD" size="small" placeholder="查询日期" @change="loadQueue" />
+          <el-select v-model="queueStatus" size="small" class="!w-140px" @change="loadQueue">
+            <el-option label="待处理与失败" value="" />
+            <el-option label="发布成功" value="SUCCESS" />
+            <el-option label="已取消" value="CANCELLED" />
+          </el-select>
           <el-button size="small" @click="loadQueue"><Icon icon="ep:refresh" class="mr-5px" />刷新队列</el-button>
           <el-button size="small" type="primary" plain @click="resumeQueue" v-hasPermi="['tk:open-tiktok-publish:queue-resume']">恢复待执行</el-button>
           <el-button size="small" type="warning" plain @click="syncQueue" v-hasPermi="['tk:open-tiktok-publish:queue-sync']">同步状态</el-button>
@@ -40,10 +46,21 @@
             <div class="sub-text">{{ scope.row.detailId }} · {{ scope.row.accountName || scope.row.clientId }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="阶段" width="150">
-          <template #default="scope"><el-tag :type="scope.row.stale ? 'warning' : 'info'">{{ scope.row.phase || scope.row.status }}</el-tag></template>
+        <el-table-column label="发布方式" min-width="165">
+          <template #default="scope">{{ publishTransferLabel(scope.row) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="140" prop="tiktokStatus" />
+        <el-table-column label="阶段" min-width="180">
+          <template #default="scope"><el-tag :type="scope.row.stale ? 'warning' : 'info'">{{ publishQueueStageLabel(scope.row) }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="通知状态" min-width="190">
+          <template #default="scope">{{ publishCallbackLabel(scope.row) }}</template>
+        </el-table-column>
+        <el-table-column label="诊断信息" min-width="260">
+          <template #default="scope">
+            <div>{{ scope.row.lastError || scope.row.failReason || '—' }}</div>
+            <div v-if="scope.row.nextReconcileTime" class="sub-text">下次核验：{{ formatTimestamp(scope.row.nextReconcileTime) }}</div>
+          </template>
+        </el-table-column>
         <el-table-column label="年龄" width="100">
           <template #default="scope">{{ formatAge(scope.row.ageSeconds) }}</template>
         </el-table-column>
@@ -733,6 +750,7 @@ import {
   TkVideoPublishCenterApi
 } from '@/api/tk/videoPublishCenter'
 import { uploadTikTokMediaInChunks } from '@/utils/tiktokMediaUpload'
+import { publishTransferLabel, publishQueueStageLabel, publishCallbackLabel } from '@/utils/tiktokPublishDiagnostics'
 import { validatePhotoSelection, movePhoto, removePhoto, photoPublishSource, prepareTikTokPhoto, photoCreatorErrorMessage } from '@/utils/tiktokPhotoPublish'
 import { getTkUploadErrorMessage } from '@/utils/tkChunkUpload'
 import { formatDate, formatTimestamp } from '@/utils/formatTime'
@@ -791,6 +809,8 @@ const overviewCards = computed(() => [
 const queueLoading = ref(false)
 const queueActionLoading = ref(false)
 const queueDetails = ref<TkOpenTiktokPublishQueueDetailVO[]>([])
+const queueStatus = ref('')
+const queueDate = ref<string>()
 const queueSummary = reactive<TkOpenTiktokPublishQueueSummaryVO>({
   date: '',
   pendingCount: 0,
@@ -990,8 +1010,8 @@ const loadQueue = async () => {
   queueLoading.value = true
   try {
     const [summary, details] = await Promise.all([
-      TkOpenTiktokPublishQueueApi.getSummary(),
-      TkOpenTiktokPublishQueueApi.getDetails({ limit: 200 })
+      TkOpenTiktokPublishQueueApi.getSummary(queueDate.value),
+      TkOpenTiktokPublishQueueApi.getDetails({ limit: 200, date: queueDate.value, status: queueStatus.value || undefined })
     ])
     Object.assign(queueSummary, summary)
     queueDetails.value = details || []

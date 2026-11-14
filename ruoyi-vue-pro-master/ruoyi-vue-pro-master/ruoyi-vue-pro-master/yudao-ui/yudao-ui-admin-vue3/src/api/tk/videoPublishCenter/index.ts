@@ -206,6 +206,11 @@ export interface TkTiktokPublishUrlVO {
 }
 
 export interface TkOpenTiktokPublishQueueDetailVO {
+  transferPolicy?: string
+  uploadSource?: string
+  nextReconcileTime?: string
+  callbackStatus?: string
+  callbackHttpStatus?: number
   id?: number
   clientId: string
   taskId: string

@@ -116,6 +116,12 @@ public final class TkOpenTiktokPublishVO {
 
     @Data
     public static class DetailResp {
+        private String phase;
+        private String uploadSource;
+        private String lastError;
+        private LocalDateTime nextReconcileTime;
+        private String callbackStatus;
+        private Integer callbackHttpStatus;
         private String detailId;
         private String taskId;
         private String connectionId;

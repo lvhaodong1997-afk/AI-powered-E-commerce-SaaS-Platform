@@ -29,6 +29,29 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class TkOpenTiktokMediaServiceTest {
+    @Test void onlyRegisteredClientScopedOssObjectsCanRefreshPullAuthorization() {
+        TkOpenTiktokMediaMapper mapper = mock(TkOpenTiktokMediaMapper.class);
+        cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService oss =
+                mock(cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService.class);
+        TkGenerationProperties properties = new TkGenerationProperties();
+        properties.getUpload().getOss().setBucket("bucket");
+        properties.getUpload().getOss().setEndpoint("oss-cn-beijing.aliyuncs.com");
+        TkOpenTiktokMediaService service = new TkOpenTiktokMediaService(mapper, null, properties, oss);
+        TkOpenTiktokMediaDO owned = TkOpenTiktokMediaDO.builder().clientId("c").mediaId("m")
+                .uploadMode("OSS").objectKey("tk/open-api/c/20261104/a.mp4")
+                .fileUrl("https://bucket.oss-cn-beijing.aliyuncs.com/tk/open-api/c/20261104/a.mp4").build();
+        when(mapper.selectByClientAndMediaId("c", "m")).thenReturn(owned);
+        when(oss.createPullReadUrl(owned.getObjectKey(), "https://pull.example.com", 86400))
+                .thenReturn("https://pull.example.com/signed");
+        assertEquals("https://pull.example.com/signed", service.resolvePullReadUrl(owned, "https://pull.example.com"));
+        TkOpenTiktokMediaDO foreign = TkOpenTiktokMediaDO.builder().clientId("c").mediaId("foreign")
+                .uploadMode("OSS").objectKey("tk/open-api/other/a.mp4").fileUrl("https://external.example/video.mp4").build();
+        assertThrows(IllegalArgumentException.class, () -> service.resolvePullReadUrl(foreign, "https://pull.example.com"));
+        TkOpenTiktokMediaDO remote = TkOpenTiktokMediaDO.builder().uploadMode("REMOTE")
+                .fileUrl("https://external.example/video.mp4?Signature=existing").build();
+        assertEquals(remote.getFileUrl(), service.resolvePullReadUrl(remote, "https://pull.example.com"));
+        verify(oss, times(1)).createPullReadUrl(any(), any(), anyInt());
+    }
 
     @AfterEach
     void clearContext() {
