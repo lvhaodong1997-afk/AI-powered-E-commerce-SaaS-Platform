@@ -384,6 +384,7 @@ export const tkZhCN: Record<string, string> = {
   'openApi.title': '开放 API 管理',
   'openApi.subtitle': '调用方、调用统计与回调事件',
   'openApi.refresh': '刷新',
+  'openApi.apiDocs': 'API 文档',
   'openApi.search': '搜索',
   'openApi.reset': '重置',
   'openApi.confirm': '确定',

@@ -10,6 +10,7 @@
         <a href="#integration">TikTok Integration</a>
         <a href="#controls">Controls</a>
         <a href="#support">Support</a>
+        <RouterLink to="/api-docs">API Docs</RouterLink>
         <RouterLink to="/privacy-policy">Privacy</RouterLink>
         <RouterLink to="/terms-of-service">Terms</RouterLink>
         <RouterLink to="/data-deletion">Data Deletion</RouterLink>

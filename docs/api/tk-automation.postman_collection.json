@@ -1,0 +1,594 @@
+{
+  "info": {
+    "name": "ClipForge 自动出片 API v1",
+    "description": "按00–09顺序接入。所有值均为占位符。导入环境模板并在本机填写凭证。07创建会使用积分，默认跳过，显式开启仅发送一次。集合不自动重试或轮询，不包含千川接口；TikTok发布使用独立HMAC凭证。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "00 查询租户 ID",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/admin-api/system/tenant/get-id-by-name?name={{tenantNameEncoded}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "admin-api",
+            "system",
+            "tenant",
+            "get-id-by-name"
+          ],
+          "query": [
+            {
+              "key": "name",
+              "value": "{{tenantNameEncoded}}"
+            }
+          ]
+        },
+        "description": "先填写 tenantName；data=null 时联系管理员，不要猜测其他租户。",
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.set(\"tenantNameEncoded\", encodeURIComponent(pm.environment.get(\"tenantName\") || \"\"));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const result = pm.response.json();",
+              "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));",
+              "if (result.code === 0 && result.data != null) {",
+              "  pm.environment.set(\"tenantId\", String(result.data));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "01 账号登录",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "tenant-id",
+            "value": "{{tenantId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/admin-api/system/auth/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "admin-api",
+            "system",
+            "auth",
+            "login"
+          ]
+        },
+        "description": "用户名为真实登录账号，不是昵称。启用验证码的环境需先按原登录流程获取 captchaVerification；此集合不绕过验证码。令牌保存到当前本机环境，导出前清空。",
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const login = {username: pm.environment.get(\"username\"), password: pm.environment.get(\"password\")};",
+              "const captcha = pm.environment.get(\"captchaVerification\");",
+              "if (captcha) login.captchaVerification = captcha;",
+              "pm.request.body.update(JSON.stringify(login));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const result = pm.response.json();",
+              "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));",
+              "if (result.code === 0 && result.data != null) {",
+              "  pm.environment.set(\"accessToken\", result.data.accessToken);",
+              "  pm.environment.set(\"refreshToken\", result.data.refreshToken);",
+              "  pm.environment.set(\"expiresTime\", String(result.data.expiresTime));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "02 刷新令牌",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "tenant-id",
+            "value": "{{tenantId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/admin-api/system/auth/refresh-token?refreshToken={{refreshTokenEncoded}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "admin-api",
+            "system",
+            "auth",
+            "refresh-token"
+          ],
+          "query": [
+            {
+              "key": "refreshToken",
+              "value": "{{refreshTokenEncoded}}"
+            }
+          ]
+        },
+        "description": "刷新成功自动替换两种令牌。刷新失效重新登录；不要将带刷新令牌的 URL 共享或写入日志。",
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.set(\"refreshTokenEncoded\", encodeURIComponent(pm.environment.get(\"refreshToken\") || \"\"));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const result = pm.response.json();",
+              "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));",
+              "if (result.code === 0 && result.data != null) {",
+              "  pm.environment.set(\"accessToken\", result.data.accessToken);",
+              "  pm.environment.set(\"refreshToken\", result.data.refreshToken);",
+              "  pm.environment.set(\"expiresTime\", String(result.data.expiresTime));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "03 查询积分",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "tenant-id",
+            "value": "{{tenantId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/admin-api/tk/automation/v1/credits",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "admin-api",
+            "tk",
+            "automation",
+            "v1",
+            "credits"
+          ]
+        },
+        "description": "余额为快照，提交任务时仍会校验并冻结/结算积分。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const result = pm.response.json();",
+              "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "04 查询素材库",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "tenant-id",
+            "value": "{{tenantId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/admin-api/tk/automation/v1/material-libraries?name={{libraryNameEncoded}}&pageNo={{pageNo}}&pageSize={{pageSize}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "admin-api",
+            "tk",
+            "automation",
+            "v1",
+            "material-libraries"
+          ],
+          "query": [
+            {
+              "key": "name",
+              "value": "{{libraryNameEncoded}}"
+            },
+            {
+              "key": "pageNo",
+              "value": "{{pageNo}}"
+            },
+            {
+              "key": "pageSize",
+              "value": "{{pageSize}}"
+            }
+          ]
+        },
+        "description": "默认每页10条，最大200。遍历 list/total，明确选定资源后将真实 ID 写入 libraryId，同名时不要直接用第一项。"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.set(\"libraryNameEncoded\", encodeURIComponent(pm.environment.get(\"libraryName\") || \"\"));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const result = pm.response.json();",
+              "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "05 查询音色",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "tenant-id",
+            "value": "{{tenantId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/admin-api/tk/automation/v1/voices",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "admin-api",
+            "tk",
+            "automation",
+            "v1",
+            "voices"
+          ]
+        },
+        "description": "选择真实可用音色，填写对应 ttsProvider，并将 voiceCode 或 voiceProfileId 其中之一写入环境；未使用项留空。MiMo必须使用voiceProfileId。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const result = pm.response.json();",
+              "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "06 查询我的上传 BGM",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "tenant-id",
+            "value": "{{tenantId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/admin-api/tk/automation/v1/bgms",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "admin-api",
+            "tk",
+            "automation",
+            "v1",
+            "bgms"
+          ]
+        },
+        "description": "从当前账号自己上传的同人群曲目中选择，将真实ID写入bgmAssetId，不自动跨人群补选。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const result = pm.response.json();",
+              "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "07 创建生成任务（使用积分，默认禁用）",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "tenant-id",
+            "value": "{{tenantId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/admin-api/tk/automation/v1/tasks",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "admin-api",
+            "tk",
+            "automation",
+            "v1",
+            "tasks"
+          ]
+        },
+        "description": "可能产生积分冻结/消耗。本集合不支持自动创建重试。响应丢失先按标题与时间核对网页生成记录；不可盲重发。首次填真实资源ID、完整正文、音色，然后将allowPaidCreate改为true。每次发送前自动恢复false。创建成功捕获taskId。",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"libraryId\": {{libraryId}},\n  \"title\": \"{{title}}\",\n  \"scriptText\": \"{{scriptText}}\",\n  \"ttsProvider\": \"{{ttsProvider}}\",\n  \"voiceCode\": \"{{voiceCode}}\",\n  \"bgmAssetId\": {{bgmAssetId}},\n  \"bgmVolume\": 0.4,\n  \"translationEnabled\": false,\n  \"targetRegion\": \"CN\",\n  \"durationMode\": \"FOLLOW_NARRATION\",\n  \"width\": 1080,\n  \"height\": 1920,\n  \"fps\": 30,\n  \"subtitleEnabled\": true,\n  \"subtitleFontSize\": \"extra_large\",\n  \"subtitleStyle\": \"classic_white\",\n  \"subtitlePositionMode\": \"smart_safe\",\n  \"subtitleKeywordEnabled\": true,\n  \"subtitleKaraokeEnabled\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+              "if (pm.environment.get(\"allowPaidCreate\") !== \"true\") stop(\"默认禁止收费创建。核对参数后将当前本机环境 allowPaidCreate 设为 true，仅允许一次。\");",
+              "pm.environment.set(\"allowPaidCreate\", \"false\");",
+              "if (pm.environment.get(\"taskId\")) stop(\"已有taskId：请先查询/核对该任务。确需新建时先清空taskId，再重新开启一次创建。\");",
+              "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+              "const positiveId = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须为真实正整数ID\"); return value; };",
+              "const library = positiveId(\"libraryId\"); const bgm = positiveId(\"bgmAssetId\");",
+              "const profile = read(\"voiceProfileId\"); const code = read(\"voiceCode\");",
+              "if (Boolean(profile) === Boolean(code)) stop(\"voiceProfileId与voiceCode必须二选一\");",
+              "const provider = read(\"ttsProvider\");",
+              "if (![\"MINIMAX\", \"DASHSCOPE\", \"MIMO\"].includes(provider)) stop(\"ttsProvider无效\");",
+              "if (provider === \"MIMO\" && !profile) stop(\"MiMo必须使用voiceProfileId\");",
+              "const script = String(pm.environment.get(\"scriptText\") || \"\");",
+              "if (!script.trim() || script.length > 3000) stop(\"scriptText必须为1–3000字符的完整口播正文\");",
+              "const title = String(pm.environment.get(\"title\") || \"\");",
+              "if (title.length > 128) stop(\"title最长128字符\");",
+              "const payload = {libraryId: \"__LIBRARY_NUMERIC__\", title, scriptText: script, ttsProvider: provider,",
+              "  bgmAssetId: \"__BGM_NUMERIC__\", bgmVolume: 0.4, translationEnabled: false, targetRegion: \"CN\",",
+              "  durationMode: \"FOLLOW_NARRATION\", width: 1080, height: 1920, fps: 30, subtitleEnabled: true,",
+              "  subtitleFontSize: \"extra_large\", subtitleStyle: \"classic_white\", subtitlePositionMode: \"smart_safe\",",
+              "  subtitleKeywordEnabled: true, subtitleKaraokeEnabled: true};",
+              "if (profile) { positiveId(\"voiceProfileId\"); payload.voiceProfileId = \"__PROFILE_NUMERIC__\"; } else { payload.voiceCode = code; }",
+              "// 保留int64 ID原始十进制文本，避免JS Number精度丢失；正文由JSON.stringify正确转义。",
+              "let raw = JSON.stringify(payload, null, 2).replace(/\"libraryId\": \"__LIBRARY_NUMERIC__\"/, \"\\\"libraryId\\\": \" + library)",
+              "  .replace(/\"bgmAssetId\": \"__BGM_NUMERIC__\"/, \"\\\"bgmAssetId\\\": \" + bgm);",
+              "if (profile) raw = raw.replace(/\"voiceProfileId\": \"__PROFILE_NUMERIC__\"/, \"\\\"voiceProfileId\\\": \" + profile);",
+              "pm.request.body.update(raw);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const result = pm.response.json();",
+              "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));",
+              "if (result.code === 0 && result.data != null) {",
+              "  pm.environment.set(\"taskId\", String(result.data.taskId));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "08 查询任务进度",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "tenant-id",
+            "value": "{{tenantId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/admin-api/tk/automation/v1/tasks/{{taskId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "admin-api",
+            "tk",
+            "automation",
+            "v1",
+            "tasks",
+            "{{taskId}}"
+          ]
+        },
+        "description": "手动或按3–5秒间隔查询，设置整体等待上限。completed=true才成功；failed=true读取failCode/failReason并停止。检查subtitleKaraokeStatus/Reason。集合不自动无限轮询。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const result = pm.response.json();",
+              "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "09 获取成片下载地址",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "tenant-id",
+            "value": "{{tenantId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/admin-api/tk/automation/v1/tasks/{{taskId}}/download?fileName={{fileNameEncoded}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "admin-api",
+            "tk",
+            "automation",
+            "v1",
+            "tasks",
+            "{{taskId}}",
+            "download"
+          ],
+          "query": [
+            {
+              "key": "fileName",
+              "value": "{{fileNameEncoded}}"
+            }
+          ]
+        },
+        "description": "返回JSON，不返回MP4文件流。成功后访问downloadUrl按fileName保存；不要向存储链接发送平台Token。链接失效重新获取。"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.set(\"fileNameEncoded\", encodeURIComponent(pm.environment.get(\"fileName\") || \"output.mp4\"));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const result = pm.response.json();",
+              "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));",
+              "if (result.code === 0 && result.data != null) {",
+              "  pm.environment.set(\"downloadUrl\", result.data.downloadUrl);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "response": []
+    }
+  ]
+}

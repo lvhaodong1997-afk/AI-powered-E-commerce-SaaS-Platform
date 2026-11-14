@@ -2,16 +2,20 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TK 自动混剪 SaaS 开放 API",
-    "version": "2.0.0",
-    "description": "基于当前源码整理的开放 API 契约。包含 HMAC 签名的 TikTok 授权/上传/发布接口（22 个）与免登录工具接口。\n\n签名规则：canonical = METHOD\\nREQUEST_TARGET\\nTIMESTAMP\\nNONCE\\nSHA256_HEX(BODY)，signature = Base64(HMAC-SHA256(clientSecret, canonical))。REQUEST_TARGET 必须包含 /admin-api 前缀与原始查询串。\n\n注意：本文件描述源码已实现的契约，不代表已完成部署或生产验收。自动混剪生成、素材库等能力当前仅提供需登录的后台 API，尚未开放。",
+    "version": "2.1.0",
+    "description": "ClipForge Studio API 契约。自动出片使用账号 Bearer Token + tenant-id，TikTok 授权/上传/发布使用 clientId + clientSecret 的 HMAC 签名，两套鉴权不可混用。出片创建为异步任务，不支持 Idempotency-Key 去重；HTTP 200 不保证业务成功，必须判断 code=0。支持能力以目标环境为准；尚未实现的 HMAC 出片扩展不在 paths 中。签名原文为 METHOD\nREQUEST_TARGET\nTIMESTAMP\nNONCE\nSHA256_HEX(BODY)，使用 LF 分隔且末尾不换行；最终 Base64(HMAC-SHA256(secret,canonical))；REQUEST_TARGET 包含 /admin-api 与原始查询串。 TikTok现支持PHOTO：私有原图上传/异步转JPEG/有序图文发布；VIDEO仍为默认，图片不支持远程URL quick-publish。",
     "contact": {
       "name": "TK Team"
     }
   },
   "servers": [
     {
+      "url": "https://clipforgestudio.fnn.net.cn",
+      "description": "产品站点；出片接入默认地址"
+    },
+    {
       "url": "https://tkassetplant.fnn.net.cn",
-      "description": "约定生产地址（所有 paths 均含 /admin-api 前缀）"
+      "description": "既有 TikTok 开放接口约定域名；按开通环境选择"
     }
   ],
   "tags": [
@@ -21,11 +25,11 @@
     },
     {
       "name": "视频上传",
-      "description": "OSS 直传 / LOCAL 分片上传"
+      "description": "视频/图片 OSS直传或LOCAL分片；PHOTO异步转换"
     },
     {
       "name": "发布任务",
-      "description": "异步发布、定时发布、状态与指标"
+      "description": "视频/图文异步发布、定时发布、状态与指标"
     },
     {
       "name": "免登录工具",
@@ -34,19 +38,21 @@
     {
       "name": "需后台权限",
       "description": "需要后台 Bearer Token 与菜单权限"
+    },
+    {
+      "name": "接入与鉴权",
+      "description": "租户查询、登录和令牌刷新"
+    },
+    {
+      "name": "自动出片",
+      "description": "账号 Token + tenant-id，异步生成并获取成片"
     }
   ],
   "security": [
     {
-      "TkClientId": []
-    },
-    {
-      "TkTimestamp": []
-    },
-    {
-      "TkNonce": []
-    },
-    {
+      "TkClientId": [],
+      "TkTimestamp": [],
+      "TkNonce": [],
       "TkSignature": []
     }
   ],
@@ -71,15 +77,9 @@
         },
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -150,15 +150,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -408,15 +402,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -490,15 +478,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -569,15 +551,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -632,8 +608,8 @@
         "tags": [
           "视频上传"
         ],
-        "summary": "创建上传会话",
-        "description": "创建视频上传会话。服务端决定 OSS 直传或 LOCAL 分片模式，调用方不能指定。会话默认有效期 24 小时，文件上限 1,000,000,000 bytes。",
+        "summary": "创建视频或图片上传会话",
+        "description": "创建视频上传会话。服务端决定 OSS 直传或 LOCAL 分片模式，调用方不能指定。会话默认有效期 24 小时，文件上限 1,000,000,000 bytes。 PHOTO沿用同一路由：原图私有上传，complete异步返回PROCESSING，轮询READY后才可发布；FAILED可在会话有效期内按原文件再次complete重试。",
         "operationId": "postTiktokMediaUploads",
         "requestBody": {
           "required": true,
@@ -641,21 +617,33 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UploadCreateReq"
+              },
+              "examples": {
+                "video": {
+                  "summary": "视频上传",
+                  "value": {
+                    "fileName": "demo.mp4",
+                    "fileSize": 1048576
+                  }
+                },
+                "photo": {
+                  "summary": "私有原图上传",
+                  "value": {
+                    "mediaType": "PHOTO",
+                    "fileName": "product.heic",
+                    "fileSize": 718114,
+                    "contentType": "image/heic"
+                  }
+                }
               }
             }
           }
         },
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -711,7 +699,7 @@
           "视频上传"
         ],
         "summary": "查询上传进度",
-        "description": "返回 uploadId / mediaId / uploadMode / fileSize / uploadedSize / status；不返回分片编号列表。",
+        "description": "返回 uploadId / mediaId / uploadMode / fileSize / uploadedSize / status；不返回分片编号列表。 PHOTO沿用同一路由：原图私有上传，complete异步返回PROCESSING，轮询READY后才可发布；FAILED可在会话有效期内按原文件再次complete重试。",
         "operationId": "getTiktokMediaUploadsUploadid",
         "parameters": [
           {
@@ -726,15 +714,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -788,7 +770,7 @@
           "视频上传"
         ],
         "summary": "取消上传",
-        "description": "仅 UPLOADING 状态可取消。LOCAL 删除临时分片，OSS 在配置完整时删除对象。",
+        "description": "仅 UPLOADING 状态可取消。LOCAL 删除临时分片，OSS 在配置完整时删除对象。 PHOTO沿用同一路由：原图私有上传，complete异步返回PROCESSING，轮询READY后才可发布；FAILED可在会话有效期内按原文件再次complete重试。",
         "operationId": "deleteTiktokMediaUploadsUploadid",
         "parameters": [
           {
@@ -803,15 +785,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -867,19 +843,13 @@
           "视频上传"
         ],
         "summary": "上传本地分片",
-        "description": "仅 LOCAL 模式。chunkIndex 从 0 开始；除最后一片外每片必须严格等于 chunkSize；请求体为原始分片字节；每片独立签名，body hash 基于该片字节。",
+        "description": "仅 LOCAL 模式。chunkIndex 从 0 开始；除最后一片外每片必须严格等于 chunkSize；请求体为原始分片字节；每片独立签名，body hash 基于该片字节。 PHOTO沿用同一路由：原图私有上传，complete异步返回PROCESSING，轮询READY后才可发布；FAILED可在会话有效期内按原文件再次complete重试。",
         "operationId": "putTiktokMediaUploadsUploadidChunksChunkindex",
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -966,7 +936,7 @@
           "视频上传"
         ],
         "summary": "完成上传",
-        "description": "校验分片完整性 / OSS 对象元数据与 SHA-256，成功后生成 mediaId 且 status=READY。只有 READY 的媒体才能发布。",
+        "description": "校验分片完整性 / OSS 对象元数据与 SHA-256，成功后生成 mediaId 且 status=READY。只有 READY 的媒体才能发布。 PHOTO沿用同一路由：原图私有上传，complete异步返回PROCESSING，轮询READY后才可发布；FAILED可在会话有效期内按原文件再次complete重试。",
         "operationId": "postTiktokMediaUploadsUploadidComplete",
         "parameters": [
           {
@@ -991,15 +961,9 @@
         },
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -1054,8 +1018,8 @@
         "tags": [
           "发布任务"
         ],
-        "summary": "创建发布任务",
-        "description": "使用已 READY 的 mediaId 与 1-20 个已授权连接创建异步发布任务。定时任务要求恰好 1 个账号且 postMode=DIRECT_POST。",
+        "summary": "创建视频或图文发布任务",
+        "description": "使用已 READY 的 mediaId 与 1-20 个已授权连接创建异步发布任务。定时任务要求恰好 1 个账号且 postMode=DIRECT_POST。 mediaType省略为VIDEO；PHOTO传1–35个有序READY图片photoMediaIds，不能同时传视频mediaId；标题90/描述4000个UTF-16代码单元；不支持duet/stitch。",
         "operationId": "postTiktokPublishTasks",
         "parameters": [
           {
@@ -1074,21 +1038,50 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/TaskCreateReq"
+              },
+              "examples": {
+                "video": {
+                  "summary": "视频发布（默认VIDEO）",
+                  "value": {
+                    "connectionIds": [
+                      "conn_example"
+                    ],
+                    "mediaId": "media_video_example",
+                    "postMode": "DIRECT_POST",
+                    "privacyLevel": "SELF_ONLY"
+                  }
+                },
+                "photo": {
+                  "summary": "有序图文发布；ID来自当前客户端READY图片",
+                  "value": {
+                    "mediaType": "PHOTO",
+                    "connectionIds": [
+                      "conn_example"
+                    ],
+                    "photoMediaIds": [
+                      "media_first",
+                      "media_second"
+                    ],
+                    "photoCoverIndex": 0,
+                    "postMode": "DIRECT_POST",
+                    "privacyLevel": "SELF_ONLY",
+                    "title": "商品展示",
+                    "caption": "商品细节与使用场景",
+                    "autoAddMusic": true,
+                    "allowComment": true,
+                    "allowDuet": false,
+                    "allowStitch": false
+                  }
+                }
               }
             }
           }
         },
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -1144,7 +1137,7 @@
           "发布任务"
         ],
         "summary": "快速发布（公网 HTTPS 视频地址）",
-        "description": "一次调用完成创建媒体 + 准备媒体 + 创建发布任务，跳过上传流程。videoUrl 必须是平台可访问的公网 HTTPS 地址。仍为异步。",
+        "description": "一次调用完成创建媒体 + 准备媒体 + 创建发布任务，跳过上传流程。videoUrl 必须是平台可访问的公网 HTTPS 地址。仍为异步。 仅视频；不接收远程图片URL。",
         "operationId": "postTiktokPublishQuickTasks",
         "parameters": [
           {
@@ -1169,15 +1162,9 @@
         },
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -1248,15 +1235,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -1346,15 +1327,9 @@
         },
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -1425,15 +1400,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -1504,15 +1473,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -1586,15 +1549,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -1664,15 +1621,9 @@
         },
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -1743,15 +1694,9 @@
         ],
         "security": [
           {
-            "TkClientId": []
-          },
-          {
-            "TkTimestamp": []
-          },
-          {
-            "TkNonce": []
-          },
-          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
             "TkSignature": []
           }
         ],
@@ -2186,6 +2131,1083 @@
           }
         }
       }
+    },
+    "/admin-api/tk/automation/v1/credits": {
+      "get": {
+        "tags": [
+          "自动出片"
+        ],
+        "operationId": "getAutomationCredits",
+        "summary": "查询当前租户积分",
+        "description": "需 tk:generation:query；只查询余额，不产生生成任务。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "读取 JSON code；HTTP 200 也可能包含非零业务错误。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "0 表示本次接口调用成功",
+                          "example": 0,
+                          "enum": [
+                            0
+                          ]
+                        },
+                        "msg": {
+                          "type": "string",
+                          "description": "接口消息",
+                          "example": ""
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/AutomationCreditBalance"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "msg",
+                        "data"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "tenantId": 1,
+                        "totalCredits": 1000,
+                        "remainingCredits": 800,
+                        "frozenCredits": 20,
+                        "warningThreshold": 100,
+                        "lowBalance": false
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 401,
+                      "msg": "账号未登录",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式或参数无效"
+          },
+          "401": {
+            "description": "未登录或令牌失效；部分环境以 HTTP 200 + code=401 返回"
+          },
+          "403": {
+            "description": "无接口权限或资源访问权限；部分环境以 HTTP 200 + code=403 返回"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/automation/v1/material-libraries": {
+      "get": {
+        "tags": [
+          "自动出片"
+        ],
+        "operationId": "getAutomationMaterialLibraries",
+        "summary": "分页查询可用素材库",
+        "description": "需 tk:material-library:query；遍历分页获得全部匹配资源，名称不是 ID。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "读取 JSON code；HTTP 200 也可能包含非零业务错误。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "0 表示本次接口调用成功",
+                          "example": 0,
+                          "enum": [
+                            0
+                          ]
+                        },
+                        "msg": {
+                          "type": "string",
+                          "description": "接口消息",
+                          "example": ""
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/AutomationMaterialLibraryPage"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "msg",
+                        "data"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "list": [
+                          {
+                            "id": 123,
+                            "name": "示例素材库",
+                            "materialPurpose": "ECOMMERCE",
+                            "videoCount": 24
+                          }
+                        ],
+                        "total": 1
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 401,
+                      "msg": "账号未登录",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式或参数无效"
+          },
+          "401": {
+            "description": "未登录或令牌失效；部分环境以 HTTP 200 + code=401 返回"
+          },
+          "403": {
+            "description": "无接口权限或资源访问权限；部分环境以 HTTP 200 + code=403 返回"
+          }
+        },
+        "parameters": [
+          {
+            "name": "pageNo",
+            "in": "query",
+            "required": false,
+            "description": "页码，从 1 开始",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "description": "每页 1–200 条；默认 10",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 10
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "按素材库名称搜索；同名结果需选择正确 ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "companyId",
+            "in": "query",
+            "required": false,
+            "description": "公司筛选；仍受当前账号数据权限限制",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "description": "分类",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "materialPurpose",
+            "in": "query",
+            "required": false,
+            "description": "用途筛选，例如 ECOMMERCE",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "状态筛选",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/tk/automation/v1/voices": {
+      "get": {
+        "tags": [
+          "自动出片"
+        ],
+        "operationId": "getAutomationVoices",
+        "summary": "查询可用音色",
+        "description": "需 tk:generation:query；返回启用且 READY 的租户音色和可用 MiniMax 系统音色。按 name 选择后提交对应供应商与一个音色标识。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "读取 JSON code；HTTP 200 也可能包含非零业务错误。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "0 表示本次接口调用成功",
+                          "example": 0,
+                          "enum": [
+                            0
+                          ]
+                        },
+                        "msg": {
+                          "type": "string",
+                          "description": "接口消息",
+                          "example": ""
+                        },
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/AutomationVoice"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "msg",
+                        "data"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": [
+                        {
+                          "name": "示例系统音色",
+                          "ttsProvider": "MINIMAX",
+                          "voiceCode": "VOICE_CODE_FROM_LIST",
+                          "voiceProfileId": null,
+                          "language": "zh-cn"
+                        }
+                      ]
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 401,
+                      "msg": "账号未登录",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式或参数无效"
+          },
+          "401": {
+            "description": "未登录或令牌失效；部分环境以 HTTP 200 + code=401 返回"
+          },
+          "403": {
+            "description": "无接口权限或资源访问权限；部分环境以 HTTP 200 + code=403 返回"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/automation/v1/bgms": {
+      "get": {
+        "tags": [
+          "自动出片"
+        ],
+        "operationId": "getAutomationBgms",
+        "summary": "查询我的上传 BGM",
+        "description": "需 tk:generation:query；仅当前账号自有且可用的上传，不跨人群曲库补选。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "读取 JSON code；HTTP 200 也可能包含非零业务错误。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "0 表示本次接口调用成功",
+                          "example": 0,
+                          "enum": [
+                            0
+                          ]
+                        },
+                        "msg": {
+                          "type": "string",
+                          "description": "接口消息",
+                          "example": ""
+                        },
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/AutomationBgm"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "msg",
+                        "data"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": [
+                        {
+                          "id": 456,
+                          "name": "同人群曲目01",
+                          "fileName": "同人群曲目01.mp3",
+                          "sourceType": "USER"
+                        }
+                      ]
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 401,
+                      "msg": "账号未登录",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式或参数无效"
+          },
+          "401": {
+            "description": "未登录或令牌失效；部分环境以 HTTP 200 + code=401 返回"
+          },
+          "403": {
+            "description": "无接口权限或资源访问权限；部分环境以 HTTP 200 + code=403 返回"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/automation/v1/tasks": {
+      "post": {
+        "tags": [
+          "自动出片"
+        ],
+        "operationId": "createAutomationTask",
+        "summary": "提交完整口播生成任务",
+        "description": "需 tk:generation:create；可能冻结并消耗积分。code=0 只代表任务已提交。保存 taskId 后轮询；本接口不支持 Idempotency-Key，超时后先核对生成记录，不自动再次 POST。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "读取 JSON code；HTTP 200 也可能包含非零业务错误。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "0 表示本次接口调用成功",
+                          "example": 0,
+                          "enum": [
+                            0
+                          ]
+                        },
+                        "msg": {
+                          "type": "string",
+                          "description": "接口消息",
+                          "example": ""
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/AutomationTaskResp"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "msg",
+                        "data"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "taskId": 789,
+                        "status": "PENDING",
+                        "progress": 0,
+                        "currentStep": "PENDING",
+                        "currentStepCode": "PENDING",
+                        "completed": false,
+                        "failed": false
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000029,
+                      "msg": "租户积分余额不足",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式或参数无效"
+          },
+          "401": {
+            "description": "未登录或令牌失效；部分环境以 HTTP 200 + code=401 返回"
+          },
+          "403": {
+            "description": "无接口权限或资源访问权限；部分环境以 HTTP 200 + code=403 返回"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationCreateReq"
+              },
+              "examples": {
+                "systemVoice": {
+                  "summary": "系统音色；将 ID 与音色编码替换为列表返回值",
+                  "value": {
+                    "libraryId": 123,
+                    "title": "示例出片任务",
+                    "scriptText": "这里是完整、可直接朗读的口播正文。",
+                    "ttsProvider": "MINIMAX",
+                    "voiceCode": "VOICE_CODE_FROM_LIST",
+                    "bgmAssetId": 456,
+                    "bgmVolume": 0.4,
+                    "translationEnabled": false,
+                    "targetRegion": "CN",
+                    "durationMode": "FOLLOW_NARRATION",
+                    "width": 1080,
+                    "height": 1920,
+                    "fps": 30,
+                    "subtitleEnabled": true,
+                    "subtitleFontSize": "extra_large",
+                    "subtitleStyle": "classic_white",
+                    "subtitlePositionMode": "smart_safe",
+                    "subtitleKeywordEnabled": true,
+                    "subtitleKaraokeEnabled": true
+                  }
+                },
+                "profileVoice": {
+                  "summary": "租户音色（MiMo 必须使用此形式）",
+                  "value": {
+                    "libraryId": 123,
+                    "scriptText": "这里是完整、可直接朗读的口播正文。",
+                    "ttsProvider": "MIMO",
+                    "voiceProfileId": 321,
+                    "bgmAssetId": 456
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/automation/v1/tasks/{taskId}": {
+      "get": {
+        "tags": [
+          "自动出片"
+        ],
+        "operationId": "getAutomationTask",
+        "summary": "查询生成进度与失败原因",
+        "description": "需 tk:generation:query；建议间隔 3–5 秒查询，网络错误退避并设置总超时；completed/failed 为最终判断。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "读取 JSON code；HTTP 200 也可能包含非零业务错误。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "0 表示本次接口调用成功",
+                          "example": 0,
+                          "enum": [
+                            0
+                          ]
+                        },
+                        "msg": {
+                          "type": "string",
+                          "description": "接口消息",
+                          "example": ""
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/AutomationTaskResp"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "msg",
+                        "data"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "taskId": 789,
+                        "status": "SUCCESS",
+                        "progress": 100,
+                        "currentStep": "生成完成",
+                        "currentStepCode": "SUCCESS",
+                        "completed": true,
+                        "failed": false
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 401,
+                      "msg": "账号未登录",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式或参数无效"
+          },
+          "401": {
+            "description": "未登录或令牌失效；部分环境以 HTTP 200 + code=401 返回"
+          },
+          "403": {
+            "description": "无接口权限或资源访问权限；部分环境以 HTTP 200 + code=403 返回"
+          }
+        },
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "创建返回的正整数任务 ID；非业务流水号",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/tk/automation/v1/tasks/{taskId}/download": {
+      "get": {
+        "tags": [
+          "自动出片"
+        ],
+        "operationId": "getAutomationDownload",
+        "summary": "获取成片下载地址",
+        "description": "需 tk:generation:query；任务 SUCCESS 且有成片时可取。未完成返回业务 code=409。此接口返回 JSON 地址，不直接返回视频字节。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "读取 JSON code；HTTP 200 也可能包含非零业务错误。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "0 表示本次接口调用成功",
+                          "example": 0,
+                          "enum": [
+                            0
+                          ]
+                        },
+                        "msg": {
+                          "type": "string",
+                          "description": "接口消息",
+                          "example": ""
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/AutomationDownloadResp"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "msg",
+                        "data"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "taskId": 789,
+                        "fileName": "video-789.mp4",
+                        "downloadUrl": "https://storage.example.invalid/video-789.mp4?signature=EXAMPLE"
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 409,
+                      "msg": "任务尚未完成或暂无成片",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式或参数无效"
+          },
+          "401": {
+            "description": "未登录或令牌失效；部分环境以 HTTP 200 + code=401 返回"
+          },
+          "403": {
+            "description": "无接口权限或资源访问权限；部分环境以 HTTP 200 + code=403 返回"
+          }
+        },
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "创建返回的正整数任务 ID；非业务流水号",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "fileName",
+            "in": "query",
+            "required": false,
+            "description": "可选 MP4 文件名，最长 128 字符，不含路径、控制字符或 / \\ : \" < > | ? *；URL 编码",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/system/tenant/get-id-by-name": {
+      "get": {
+        "tags": [
+          "接入与鉴权"
+        ],
+        "operationId": "getTenantIdByName",
+        "summary": "通过租户名称查询租户 ID",
+        "description": "无需 Token。使用实际租户名称；data=null 表示未找到。找不到时联系管理员，不尝试其他租户。",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "读取 JSON code；HTTP 200 也可能包含非零业务错误。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "0 表示本次接口调用成功",
+                          "example": 0,
+                          "enum": [
+                            0
+                          ]
+                        },
+                        "msg": {
+                          "type": "string",
+                          "description": "接口消息",
+                          "example": ""
+                        },
+                        "data": {
+                          "type": "integer",
+                          "format": "int64",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "msg",
+                        "data"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": 1
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 400,
+                      "msg": "请求参数不正确",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式或参数无效"
+          },
+          "401": {
+            "description": "未登录或令牌失效；部分环境以 HTTP 200 + code=401 返回"
+          },
+          "403": {
+            "description": "无接口权限或资源访问权限；部分环境以 HTTP 200 + code=403 返回"
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "description": "已开通租户名称",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/system/auth/login": {
+      "post": {
+        "tags": [
+          "接入与鉴权"
+        ],
+        "operationId": "loginAccount",
+        "summary": "账号密码登录",
+        "description": "需 tenant-id，无需已有 Token。用户名不是昵称。环境开启验证码时必须先按原登录流程取得 captchaVerification，不能保证首次无交互登录；不提供绕过验证码。",
+        "security": [
+          {
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "读取 JSON code；HTTP 200 也可能包含非零业务错误。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "0 表示本次接口调用成功",
+                          "example": 0,
+                          "enum": [
+                            0
+                          ]
+                        },
+                        "msg": {
+                          "type": "string",
+                          "description": "接口消息",
+                          "example": ""
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/AccountLoginResp"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "msg",
+                        "data"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "userId": 123,
+                        "accessToken": "ACCESS_TOKEN_PLACEHOLDER",
+                        "refreshToken": "REFRESH_TOKEN_PLACEHOLDER",
+                        "expiresTime": 1794621600000
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 400,
+                      "msg": "请求参数不正确",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式或参数无效"
+          },
+          "401": {
+            "description": "未登录或令牌失效；部分环境以 HTTP 200 + code=401 返回"
+          },
+          "403": {
+            "description": "无接口权限或资源访问权限；部分环境以 HTTP 200 + code=403 返回"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountLoginReq"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/system/auth/refresh-token": {
+      "post": {
+        "tags": [
+          "接入与鉴权"
+        ],
+        "operationId": "refreshAccountToken",
+        "summary": "刷新账号令牌",
+        "description": "需 tenant-id 和 query 中的 refreshToken。刷新成功后替换两种令牌和到期时间；刷新失效时重新登录。刷新令牌属于密钥，不记录 URL 到共享日志。",
+        "security": [
+          {
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "读取 JSON code；HTTP 200 也可能包含非零业务错误。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "0 表示本次接口调用成功",
+                          "example": 0,
+                          "enum": [
+                            0
+                          ]
+                        },
+                        "msg": {
+                          "type": "string",
+                          "description": "接口消息",
+                          "example": ""
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/AccountLoginResp"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "msg",
+                        "data"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "userId": 123,
+                        "accessToken": "NEW_ACCESS_TOKEN_PLACEHOLDER",
+                        "refreshToken": "NEW_REFRESH_TOKEN_PLACEHOLDER",
+                        "expiresTime": 1794625200000
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 400,
+                      "msg": "请求参数不正确",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式或参数无效"
+          },
+          "401": {
+            "description": "未登录或令牌失效；部分环境以 HTTP 200 + code=401 返回"
+          },
+          "403": {
+            "description": "无接口权限或资源访问权限；部分环境以 HTTP 200 + code=403 返回"
+          }
+        },
+        "parameters": [
+          {
+            "name": "refreshToken",
+            "in": "query",
+            "required": true,
+            "description": "刷新令牌，须 URL 编码",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -2224,6 +3246,12 @@
         "type": "http",
         "scheme": "bearer",
         "description": "后台 accessToken，配合 tenant-id 头"
+      },
+      "TenantId": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "tenant-id",
+        "description": "已开通账号所属租户 ID；不能使用其它租户 ID 扩大权限"
       }
     },
     "schemas": {
@@ -2239,10 +3267,12 @@
                 "type": "string"
               }
             ],
-            "description": "成功为 0，失败为字符串错误码或数字错误码"
+            "description": "成功为数字 0，失败为字符串错误码或数字错误码",
+            "example": 0
           },
           "msg": {
-            "type": "string"
+            "type": "string",
+            "example": "OK"
           },
           "data": {
             "description": "业务数据，失败时为 null"
@@ -2462,18 +3492,66 @@
           },
           "fileSize": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 1000000000
           },
           "contentType": {
             "type": "string"
           },
           "sha256": {
-            "type": "string"
+            "type": "string",
+            "description": "Optional full-file SHA-256 value. When supplied, complete must use the same value and storage metadata/file content is validated."
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "VIDEO",
+              "PHOTO"
+            ],
+            "default": "VIDEO"
           }
         },
         "required": [
           "fileName",
           "fileSize"
+        ],
+        "description": "VIDEO: mp4/mov/webm <=1000000000 bytes. PHOTO: jpg/jpeg/webp/png/gif/heic/heif <=20971520 bytes. MIME must match original extension; server verifies actual content.",
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "properties": {
+                  "mediaType": {
+                    "enum": [
+                      "VIDEO"
+                    ]
+                  },
+                  "fileName": {
+                    "pattern": "^.+\\.([mM][pP]4|[mM][oO][vV]|[wW][eE][bB][mM])$"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "mediaType"
+                ],
+                "properties": {
+                  "mediaType": {
+                    "enum": [
+                      "PHOTO"
+                    ]
+                  },
+                  "fileName": {
+                    "pattern": "^.+\\.([jJ][pP][eE]?[gG]|[wW][eE][bB][pP]|[pP][nN][gG]|[gG][iI][fF]|[hH][eE][iI][cCfF])$"
+                  },
+                  "fileSize": {
+                    "maximum": 20971520
+                  }
+                }
+              }
+            ]
+          }
         ]
       },
       "UploadSessionResp": {
@@ -2499,6 +3577,7 @@
           },
           "uploadUrl": {
             "type": "string",
+            "format": "uri",
             "nullable": true
           },
           "objectKey": {
@@ -2506,13 +3585,36 @@
             "nullable": true
           },
           "fields": {
-            "type": "object",
             "nullable": true,
-            "description": "OSS 短期表单字段：policy / ossAccessKeyId / signature / xOssMetaSha256"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OssFields"
+              }
+            ],
+            "description": "OSS短期表单字段。PHOTO还需将xOssObjectAcl映射为x-oss-object-acl=private，contentType映射为Content-Type表单字段。"
           },
           "expireTime": {
             "type": "string",
             "format": "date-time"
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "VIDEO",
+              "PHOTO"
+            ],
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "UPLOADING",
+              "PROCESSING",
+              "READY",
+              "FAILED",
+              "CANCELLED",
+              "EXPIRED"
+            ]
           }
         }
       },
@@ -2527,7 +3629,11 @@
             "nullable": true
           },
           "uploadMode": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "OSS",
+              "LOCAL"
+            ]
           },
           "fileSize": {
             "type": "integer",
@@ -2541,9 +3647,32 @@
             "type": "string",
             "enum": [
               "UPLOADING",
+              "PROCESSING",
               "READY",
-              "CANCELLED"
+              "FAILED",
+              "CANCELLED",
+              "EXPIRED"
             ]
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "VIDEO",
+              "PHOTO"
+            ],
+            "nullable": true
+          },
+          "failReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "width": {
+            "type": "integer",
+            "nullable": true
+          },
+          "height": {
+            "type": "integer",
+            "nullable": true
           }
         }
       },
@@ -2552,7 +3681,8 @@
         "properties": {
           "fileSize": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 1
           },
           "sha256": {
             "type": "string"
@@ -2570,7 +3700,8 @@
         "type": "object",
         "properties": {
           "mediaId": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "uploadId": {
             "type": "string"
@@ -2586,15 +3717,45 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "UPLOADING",
+              "PROCESSING",
+              "READY",
+              "FAILED",
+              "CANCELLED",
+              "EXPIRED"
+            ]
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "VIDEO",
+              "PHOTO"
+            ],
+            "nullable": true
+          },
+          "failReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "width": {
+            "type": "integer",
+            "nullable": true
+          },
+          "height": {
+            "type": "integer",
+            "nullable": true
           }
-        }
+        },
+        "description": "PHOTO complete returns PROCESSING quickly; mediaId is only available after READY. Retry FAILED by complete during the session retry window, preserving original bytes/size/hash. Query upload status after transient polling failure."
       },
       "TaskCreateReq": {
         "type": "object",
         "properties": {
           "connectionIds": {
             "type": "array",
+            "minItems": 1,
             "maxItems": 20,
             "items": {
               "type": "string"
@@ -2609,7 +3770,7 @@
           },
           "caption": {
             "type": "string",
-            "maxLength": 2200
+            "maxLength": 4000
           },
           "postMode": {
             "type": "string",
@@ -2622,22 +3783,28 @@
             "type": "string"
           },
           "allowComment": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": true
           },
           "allowDuet": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           },
           "allowStitch": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           },
           "commercialContent": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           },
           "brandContent": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           },
           "aigcContent": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": true
           },
           "externalRequestId": {
             "type": "string",
@@ -2648,13 +3815,97 @@
           },
           "regionCode": {
             "type": "string"
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "VIDEO",
+              "PHOTO"
+            ],
+            "default": "VIDEO"
+          },
+          "photoMediaIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 35,
+            "items": {
+              "type": "string"
+            },
+            "description": "PHOTO only; ordered current-client READY JPEG media IDs."
+          },
+          "photoCoverIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 34,
+            "default": 0
+          },
+          "autoAddMusic": {
+            "type": "boolean",
+            "description": "PHOTO DIRECT_POST only. TikTok recommended music; not custom audio upload."
           }
         },
         "required": [
           "connectionIds",
-          "mediaId",
           "postMode",
           "privacyLevel"
+        ],
+        "description": "Lengths are UTF-16 code units: VIDEO title512/caption2200; PHOTO title90/caption4000. PHOTO rejects enabled duet/stitch. photoCoverIndex must be within the list. Inbox requires video.upload, DIRECT_POST requires video.publish. Idempotency-Key digest includes order, cover and music. No remote photo URL quick-publish.",
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "mediaId"
+                ],
+                "not": {
+                  "required": [
+                    "photoMediaIds"
+                  ]
+                },
+                "properties": {
+                  "mediaType": {
+                    "enum": [
+                      "VIDEO"
+                    ]
+                  },
+                  "caption": {
+                    "maxLength": 2200
+                  }
+                }
+              },
+              {
+                "required": [
+                  "mediaType",
+                  "photoMediaIds"
+                ],
+                "not": {
+                  "required": [
+                    "mediaId"
+                  ]
+                },
+                "properties": {
+                  "mediaType": {
+                    "enum": [
+                      "PHOTO"
+                    ]
+                  },
+                  "title": {
+                    "maxLength": 90
+                  },
+                  "allowDuet": {
+                    "enum": [
+                      false
+                    ]
+                  },
+                  "allowStitch": {
+                    "enum": [
+                      false
+                    ]
+                  }
+                }
+              }
+            ]
+          }
         ]
       },
       "QuickTaskCreateReq": {
@@ -2721,7 +3972,8 @@
         "required": [
           "externalAccountId",
           "videoUrl"
-        ]
+        ],
+        "description": "仅支持公网HTTPS视频；PHOTO必须先上传转换，再使用publish/tasks提交有序photoMediaIds，不支持远程图片URL快速发布。"
       },
       "ScheduleReq": {
         "type": "object",
@@ -2744,13 +3996,24 @@
             "type": "string"
           },
           "mediaId": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "externalRequestId": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "PROCESSING",
+              "SUCCESS",
+              "FAILED",
+              "PARTIAL_SUCCESS",
+              "SCHEDULED",
+              "CANCELLED"
+            ]
           },
           "accountCount": {
             "type": "integer"
@@ -2813,6 +4076,38 @@
           "updateTime": {
             "type": "string",
             "format": "date-time"
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "VIDEO",
+              "PHOTO"
+            ],
+            "default": "VIDEO"
+          },
+          "photoMediaIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 35,
+            "items": {
+              "type": "string"
+            },
+            "description": "PHOTO only; ordered current-client READY JPEG media IDs."
+          },
+          "photoCoverIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 34,
+            "default": 0
+          },
+          "autoAddMusic": {
+            "type": "boolean",
+            "description": "PHOTO DIRECT_POST only. TikTok recommended music; not custom audio upload."
+          },
+          "photoCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 35
           }
         }
       },
@@ -3045,6 +4340,596 @@
         "required": [
           "sourceUrl"
         ]
+      },
+      "AccountLoginReq": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "实际登录账号，不能使用昵称",
+            "minLength": 4,
+            "maxLength": 30,
+            "pattern": "^[a-zA-Z0-9]{4,30}$"
+          },
+          "password": {
+            "type": "string",
+            "description": "账号密码",
+            "minLength": 4,
+            "maxLength": 16,
+            "format": "password"
+          },
+          "captchaVerification": {
+            "type": "string",
+            "description": "环境启用验证码时，提交原登录流程取得的有效校验值；不可绕过验证码"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
+      "AccountLoginResp": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "description": "账号 ID",
+            "format": "int64",
+            "minimum": 1
+          },
+          "accessToken": {
+            "type": "string",
+            "description": "访问令牌；作为 Bearer 使用"
+          },
+          "refreshToken": {
+            "type": "string",
+            "description": "刷新令牌；不得记录到日志或共享链接"
+          },
+          "expiresTime": {
+            "type": "integer",
+            "description": "访问令牌到期时间，Unix 毫秒时间戳（平台默认序列化）",
+            "format": "int64"
+          }
+        }
+      },
+      "AutomationCreditBalance": {
+        "type": "object",
+        "properties": {
+          "tenantId": {
+            "type": "integer",
+            "description": "当前租户 ID",
+            "format": "int64"
+          },
+          "totalCredits": {
+            "type": "integer",
+            "description": "总积分额度",
+            "format": "int64"
+          },
+          "remainingCredits": {
+            "type": "integer",
+            "description": "剩余积分",
+            "format": "int64"
+          },
+          "frozenCredits": {
+            "type": "integer",
+            "description": "生成任务在途冻结积分",
+            "format": "int64"
+          },
+          "warningThreshold": {
+            "type": "integer",
+            "description": "低余额提醒阈值",
+            "format": "int64"
+          },
+          "lowBalance": {
+            "type": "boolean",
+            "description": "是否低于提醒阈值；积分查询为快照，以创建时校验为准"
+          }
+        }
+      },
+      "AutomationMaterialLibrary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "素材库 ID",
+            "format": "int64",
+            "minimum": 1
+          },
+          "tenantId": {
+            "type": "integer",
+            "description": "所属租户",
+            "format": "int64"
+          },
+          "companyId": {
+            "type": "integer",
+            "description": "所属公司",
+            "nullable": true,
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "description": "素材库名称"
+          },
+          "category": {
+            "type": "string",
+            "description": "分类",
+            "nullable": true
+          },
+          "scene": {
+            "type": "string",
+            "description": "场景说明",
+            "nullable": true
+          },
+          "materialPurpose": {
+            "type": "string",
+            "description": "素材用途，例如 ECOMMERCE",
+            "nullable": true
+          },
+          "tags": {
+            "type": "string",
+            "description": "素材标签文本；不代表支持按标签抽画面",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "description": "说明",
+            "nullable": true
+          },
+          "coverUrl": {
+            "type": "string",
+            "description": "封面地址",
+            "nullable": true
+          },
+          "previewVideoUrl": {
+            "type": "string",
+            "description": "预览视频地址",
+            "nullable": true
+          },
+          "videoCount": {
+            "type": "integer",
+            "description": "素材视频数量",
+            "nullable": true
+          },
+          "totalSize": {
+            "type": "integer",
+            "description": "素材总字节数",
+            "nullable": true,
+            "format": "int64"
+          },
+          "defaulted": {
+            "type": "boolean",
+            "description": "是否默认",
+            "nullable": true
+          },
+          "status": {
+            "type": "integer",
+            "description": "状态",
+            "nullable": true
+          },
+          "createTime": {
+            "type": "integer",
+            "description": "创建时间，Unix 毫秒时间戳",
+            "nullable": true,
+            "format": "int64"
+          }
+        }
+      },
+      "AutomationMaterialLibraryPage": {
+        "type": "object",
+        "properties": {
+          "list": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationMaterialLibrary"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "符合条件的总条数",
+            "format": "int64"
+          }
+        }
+      },
+      "AutomationVoice": {
+        "type": "object",
+        "properties": {
+          "voiceProfileId": {
+            "type": "integer",
+            "description": "租户音色 ID；与 voiceCode 二选一使用",
+            "nullable": true,
+            "format": "int64"
+          },
+          "voiceCode": {
+            "type": "string",
+            "description": "系统音色编码；与 voiceProfileId 二选一使用",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "description": "显示名称",
+            "nullable": true
+          },
+          "ttsProvider": {
+            "type": "string",
+            "description": "与选定音色一并提交的供应商"
+          },
+          "language": {
+            "type": "string",
+            "description": "音色语言",
+            "nullable": true
+          }
+        }
+      },
+      "AutomationBgm": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "当前账号自己上传的 BGM ID",
+            "format": "int64",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "description": "显示名称",
+            "nullable": true
+          },
+          "fileName": {
+            "type": "string",
+            "description": "文件名",
+            "nullable": true
+          },
+          "sourceType": {
+            "type": "string",
+            "description": "上传来源；本接口只返回当前账号可用上传",
+            "example": "USER"
+          }
+        }
+      },
+      "AutomationCreateReq": {
+        "type": "object",
+        "properties": {
+          "libraryId": {
+            "type": "integer",
+            "description": "通过素材库查询得到的真实 ID",
+            "format": "int64",
+            "minimum": 1
+          },
+          "scriptText": {
+            "type": "string",
+            "description": "完整口播正文；不填画像、结构说明或待执行指令；直接用于配音",
+            "minLength": 1,
+            "maxLength": 3000,
+            "pattern": "\\S"
+          },
+          "title": {
+            "type": "string",
+            "description": "任务标题，不进入口播",
+            "nullable": true,
+            "maxLength": 128
+          },
+          "ttsProvider": {
+            "type": "string",
+            "description": "必须与列表中的所选音色供应商一致",
+            "enum": [
+              "MINIMAX",
+              "DASHSCOPE",
+              "MIMO"
+            ]
+          },
+          "voiceProfileId": {
+            "type": "integer",
+            "description": "租户音色 ID；与 voiceCode 二选一，MiMo 必须用此字段",
+            "format": "int64",
+            "minimum": 1
+          },
+          "voiceCode": {
+            "type": "string",
+            "description": "系统音色编码；与 voiceProfileId 二选一；未选用的标识应省略",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "bgmAssetId": {
+            "type": "integer",
+            "description": "当前账号自己上传且可用的 BGM ID",
+            "format": "int64",
+            "minimum": 1
+          },
+          "bgmVolume": {
+            "type": "number",
+            "description": "0–1，0.4 表示 40%；省略使用 0.4，显式 null 无效",
+            "format": "double",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.4
+          },
+          "translationEnabled": {
+            "type": "boolean",
+            "description": "当前仅允许关闭翻译",
+            "enum": [
+              false
+            ],
+            "default": false
+          },
+          "targetRegion": {
+            "type": "string",
+            "description": "当前仅中国大陆",
+            "enum": [
+              "CN"
+            ],
+            "default": "CN"
+          },
+          "durationMode": {
+            "type": "string",
+            "description": "按完整口播实际时长结束；系统时长上限依配置，不保证可生成 500 秒",
+            "enum": [
+              "FOLLOW_NARRATION"
+            ],
+            "default": "FOLLOW_NARRATION"
+          },
+          "width": {
+            "type": "integer",
+            "description": "输出宽度",
+            "enum": [
+              1080
+            ],
+            "default": 1080
+          },
+          "height": {
+            "type": "integer",
+            "description": "输出高度",
+            "enum": [
+              1920
+            ],
+            "default": 1920
+          },
+          "fps": {
+            "type": "integer",
+            "description": "输出帧率",
+            "enum": [
+              30
+            ],
+            "default": 30
+          },
+          "subtitleFontSize": {
+            "type": "string",
+            "description": "特大字幕字号",
+            "enum": [
+              "extra_large"
+            ],
+            "default": "extra_large"
+          },
+          "subtitleStyle": {
+            "type": "string",
+            "description": "标准白字黑边",
+            "enum": [
+              "classic_white"
+            ],
+            "default": "classic_white"
+          },
+          "subtitlePositionMode": {
+            "type": "string",
+            "description": "智能避让",
+            "enum": [
+              "smart_safe"
+            ],
+            "default": "smart_safe"
+          },
+          "subtitleEnabled": {
+            "type": "boolean",
+            "description": "开启字幕",
+            "default": true
+          },
+          "subtitleKeywordEnabled": {
+            "type": "boolean",
+            "description": "关键词高亮",
+            "default": true
+          },
+          "subtitleKaraokeEnabled": {
+            "type": "boolean",
+            "description": "请求逐字卡点；是否降级需查询字幕诊断",
+            "default": true
+          }
+        },
+        "description": "省略可选字段时使用默认值。音色标识仅提供一个非空值；MiMo 只能使用 voiceProfileId。含空白的正文及 voiceCode 会被后端拒绝。创建不支持幂等去重，响应超时不可盲重试。",
+        "oneOf": [
+          {
+            "required": [
+              "voiceProfileId"
+            ],
+            "not": {
+              "required": [
+                "voiceCode"
+              ]
+            }
+          },
+          {
+            "required": [
+              "voiceCode"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "voiceProfileId"
+                  ]
+                },
+                {
+                  "properties": {
+                    "ttsProvider": {
+                      "enum": [
+                        "MIMO"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ttsProvider"
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "required": [
+          "libraryId",
+          "scriptText",
+          "ttsProvider",
+          "bgmAssetId"
+        ]
+      },
+      "AutomationTaskResp": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "integer",
+            "description": "任务 ID；保存用于查询，不能用列表流水号代替",
+            "format": "int64",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "description": "PENDING/处理中阶段继续查询；SUCCESS 成功，FAILED 失败",
+            "example": "PENDING"
+          },
+          "progress": {
+            "type": "integer",
+            "description": "阶段进度；不能仅凭 100 判断成功",
+            "nullable": true
+          },
+          "currentStep": {
+            "type": "string",
+            "description": "当前步骤可读说明",
+            "nullable": true
+          },
+          "currentStepCode": {
+            "type": "string",
+            "description": "当前步骤代码",
+            "nullable": true
+          },
+          "completed": {
+            "type": "boolean",
+            "description": "仅任务 SUCCESS 时为 true"
+          },
+          "failed": {
+            "type": "boolean",
+            "description": "仅任务 FAILED 时为 true"
+          },
+          "failCode": {
+            "type": "string",
+            "description": "失败代码",
+            "nullable": true
+          },
+          "failReason": {
+            "type": "string",
+            "description": "可读失败原因",
+            "nullable": true
+          },
+          "subtitleKaraokeStatus": {
+            "type": "string",
+            "description": "逐字字幕质量状态；诊断不可用时可为空",
+            "nullable": true
+          },
+          "subtitleKaraokeReason": {
+            "type": "string",
+            "description": "逐字字幕降级或不可用原因",
+            "nullable": true
+          },
+          "downloadUrl": {
+            "type": "string",
+            "description": "成功时可能返回临时下载地址；过期后重新获取",
+            "nullable": true
+          }
+        }
+      },
+      "AutomationDownloadResp": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "integer",
+            "description": "任务 ID",
+            "format": "int64",
+            "minimum": 1
+          },
+          "fileName": {
+            "type": "string",
+            "description": "建议保存名，默认 video-{taskId}.mp4"
+          },
+          "downloadUrl": {
+            "type": "string",
+            "description": "临时下载地址；按实际配置过期，下载时不转发平台 Token"
+          }
+        }
+      },
+      "AccountApiError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "description": "非零业务错误码",
+            "example": 400,
+            "not": {
+              "enum": [
+                0
+              ]
+            }
+          },
+          "msg": {
+            "type": "string",
+            "description": "可读错误信息",
+            "example": "请求参数不正确"
+          },
+          "data": {}
+        },
+        "required": [
+          "code",
+          "msg"
+        ]
+      },
+      "OssFields": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "type": "string"
+          },
+          "ossAccessKeyId": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "xOssMetaSha256": {
+            "type": "string",
+            "nullable": true
+          },
+          "xOssObjectAcl": {
+            "type": "string",
+            "nullable": true,
+            "description": "PHOTO: append multipart form field x-oss-object-acl=private. Not an HTTP header."
+          },
+          "contentType": {
+            "type": "string",
+            "nullable": true,
+            "description": "PHOTO: append multipart form field Content-Type with this original MIME."
+          }
+        }
+      },
+      "PublishEventPayload": {
+        "type": "object",
+        "description": "Existing callback eventId/signature/deduplication contract retained. Payload adds mediaType and photoCount; VIDEO photoCount=0. PHOTO succeeds from platform publish status, share URL may be empty.",
+        "properties": {
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "VIDEO",
+              "PHOTO"
+            ]
+          },
+          "photoCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 35
+          }
+        }
       }
     },
     "responses": {

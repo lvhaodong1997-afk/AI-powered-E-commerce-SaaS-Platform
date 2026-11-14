@@ -95,6 +95,16 @@ const remainingRouter: AppRouteRecordRaw[] = [
     }
   },
   {
+    path: '/api-docs',
+    component: () => import('@/views/Public/ApiDocs.vue'),
+    name: 'PublicApiDocs',
+    meta: {
+      hidden: true,
+      title: 'API Docs | ClipForge Studio',
+      noTagsView: true
+    }
+  },
+  {
     path: '/index',
     redirect: '/tk/dashboard',
     name: 'Index',
