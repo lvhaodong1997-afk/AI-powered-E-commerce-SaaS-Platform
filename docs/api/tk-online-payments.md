@@ -1,0 +1,44 @@
+# TK online tenant payments
+
+The SaaS ClipForge bridge owns the authoritative catalog, quote and channel payment. TK owns tenant authorization, local order identity and credit accounting. Browser returns never credit an account. All user-facing endpoints require the current tenant administrator; platform refund requires the platform administrator. Request tenant/user/credits are never accepted from the browser.
+
+## Configuration and deployment
+
+Apply `yudao-module-tk/src/main/resources/sql/tk_online_payment_upgrade_mysql.sql` before starting this version. Its preflight query must return no frozen-account/log mismatches. Existing credits are adopted into a non-expiring legacy batch under the account lock; active work allocations are preserved. Do not force a migration over unbalanced legacy data.
+
+Server-only Spring properties (standard environment binding supported):
+
+```
+tk.payment.enabled=false
+tk.payment.worker-enabled=true
+tk.payment.live-mode=true
+tk.payment.gateway-url=https://tokdeploy.com
+tk.payment.gateway-secret=<independent server-only >=32 characters>
+tk.payment.notify-secret=<different independent >=32 characters>
+tk.payment.notify-path=/admin-api/tk/payments/notify
+```
+
+Bridge secrets match SaaS CLIPFORGE_GATEWAY_SECRET / CLIPFORGE_NOTIFY_SECRET. Gateway origin must be HTTPS without credentials/query/hash, port443. New purchases default off. Worker recovery is independent of that switch. Configure webhook, actual merchant mode and supported channels before enabling purchases. Never show a test merchant as real payment availability.
+
+## API
+
+All routes use the existing `/admin-api` prefix and CommonResult wrapper.
+
+- GET `/tk/recharge/packages`: authoritative catalog and enabled methods.
+- POST `/tk/payments/quote`: `{packageCode,quantity:1,paymentMethod,idempotencyKey}`. The key is 16–64 ASCII letters/digits/underscore/hyphen. It is unique within the tenant and freezes the original user/package/channel. Local order is durable before any gateway call. On uncertainty query the original order; never create another key to repeat payment.
+- POST `/tk/payments/{orderNo}/pay`: `{amountCents,currency}` explicitly confirms the frozen actual payment amount. Currency is uppercase CNY/HKD/USD.
+- GET `/tk/payments/{orderNo}`: current local snapshot with bounded reconciliation when pending. `created` means quote creation is still being recovered. Additional `creditStatus` distinguishes PENDING, CREDITED, REFUND_PENDING, REFUNDED and REVIEW. Only CREDITED indicates usable credit issuance.
+- GET `/tk/payments?pageNo=1&pageSize=10`: tenant-scoped PageResult.
+- POST `/tk/payments/{orderNo}/cancel`: cancels the original channel order.
+- POST `/tk/payments/{orderNo}/refund`: platform-only full refund; reserves unused batch credits before contacting the channel. No partial refunds or self-service refund interface.
+- POST `/tk/payments/notify`: exact anonymous-login/tenant-filter exemption, mandatory raw-body HMAC, timestamp and nonce. Signed content only selects a known local order; TK retrieves the authoritative bridge state before making any credit change.
+
+Snapshots preserve order/tenant/user/package/quantity/catalogVersion/base amount/points/actual amount/currency/mode/channel/FX. Version and payment ID cannot move backward or rebind. Payment date persists at millisecond precision; six calendar months are measured from this verified UTC payment instant, never callback arrival. Provider redirect/QR fields are display-only.
+
+## Ledger and recovery
+
+Payment order row locks plus unique source keys provide one credit grant per payment. The aggregate account row serializes all batch mutations, normal task freeze/settle/failure release, manual adjustments, expiry and refund. Credits allocate by earliest expiry with legacy non-expiring credits last. Expired frozen credits remain settleable; failed work returns them to expired balance rather than available balance. Grants, expiry and completed refunds write audit logs in the same transaction.
+
+Confirmed external refunds of used/frozen credits enter REVIEW and preserve balances for manual reconciliation. Unknown refund requests retain reserved credits and recover the original refund. Do not clear order/batch/provider bindings to retry. Stop new purchases through the switch, retaining compatible workers/webhooks/tables for existing orders. Completed paid orders stop routine polling; failed notification reconciliation explicitly schedules recovery, including later refunds.
+
+Deployment must preserve the actual production baseline and existing source overlays. Back up schema/data and release/configuration before migration. Roll back application pointers and purchase switches as needed, retaining all additive payment tables and pending history. Never drop payment data as a rollback.

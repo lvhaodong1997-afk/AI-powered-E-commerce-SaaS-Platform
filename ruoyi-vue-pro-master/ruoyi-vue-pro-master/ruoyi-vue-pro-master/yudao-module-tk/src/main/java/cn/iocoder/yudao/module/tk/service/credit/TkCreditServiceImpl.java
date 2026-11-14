@@ -55,8 +55,11 @@ public class TkCreditServiceImpl implements TkCreditService {
     private TenantMapper tenantMapper;
     @Resource
     private TkBusinessLogService businessLogService;
+    @Resource
+    private TkCreditBatchService batchService;
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TkCreditBalanceRespVO getCurrentTenantBalance() {
         Long tenantId = getVisitTenantId();
         if (tenantId == null) {
@@ -74,6 +77,7 @@ public class TkCreditServiceImpl implements TkCreditService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TkCreditBalanceRespVO getTenantBalance(Long tenantId) {
         tenantId = requireValidTenantId(tenantId);
         return buildBalance(ensureAccount(tenantId));
@@ -87,7 +91,8 @@ public class TkCreditServiceImpl implements TkCreditService {
         long totalCredits = Math.min(Integer.MAX_VALUE, Math.max(0L, reqVO.getTotalCredits()));
         long oldTotal = account.getTotalCredits() == null ? 0L : account.getTotalCredits();
         long delta = totalCredits - oldTotal;
-        long remaining = Math.max(0L, nullToZero(account.getRemainingCredits()) + delta);
+        batchService.adjust(reqVO.getTenantId(), delta);
+        long remaining = nullToZero(account.getRemainingCredits()) + delta;
         account.setTotalCredits(totalCredits);
         account.setRemainingCredits(remaining);
         account.setWarningThreshold(reqVO.getWarningThreshold() == null ? DEFAULT_WARNING_THRESHOLD : reqVO.getWarningThreshold());
@@ -110,6 +115,7 @@ public class TkCreditServiceImpl implements TkCreditService {
         if (credits > Integer.MAX_VALUE - beforeTotal) {
             throw new IllegalArgumentException("充值后积分总额度不能超过 " + Integer.MAX_VALUE);
         }
+        batchService.adjust(reqVO.getTenantId(), credits);
         if (creditAccountMapper.rechargeCredits(reqVO.getTenantId(), credits, (long) Integer.MAX_VALUE) <= 0) {
             throw new IllegalArgumentException("积分充值失败，请刷新后重试");
         }
@@ -197,8 +203,11 @@ public class TkCreditServiceImpl implements TkCreditService {
 
     private void settleLog(TkCreditLogDO log) {
         TenantUtils.execute(log.getTenantId(), () -> {
+            ensureAccount(log.getTenantId());
+            if (creditLogMapper.selectInProgressById(log.getId()) == null) return;
+            batchService.complete(log.getTenantId(), log.getId(), true);
             if (creditAccountMapper.settleFrozenCredits(log.getTenantId(), log.getCredits()) <= 0) {
-                return;
+                throw new IllegalStateException("冻结积分结算失败");
             }
             TkTenantCreditAccountDO account = creditAccountMapper.selectByTenantId(log.getTenantId());
             creditLogMapper.updateById(new TkCreditLogDO()
@@ -223,8 +232,11 @@ public class TkCreditServiceImpl implements TkCreditService {
 
     private void refundLog(TkCreditLogDO log, String reason) {
         TenantUtils.execute(log.getTenantId(), () -> {
-            if (creditAccountMapper.refundFrozenCredits(log.getTenantId(), log.getCredits()) <= 0) {
-                return;
+            ensureAccount(log.getTenantId());
+            if (creditLogMapper.selectInProgressById(log.getId()) == null) return;
+            long restored = batchService.complete(log.getTenantId(), log.getId(), false);
+            if (creditAccountMapper.releaseFrozenCredits(log.getTenantId(), log.getCredits(), restored) <= 0) {
+                throw new IllegalStateException("冻结积分返还失败");
             }
             TkTenantCreditAccountDO account = creditAccountMapper.selectByTenantId(log.getTenantId());
             creditLogMapper.updateById(new TkCreditLogDO()
@@ -258,6 +270,7 @@ public class TkCreditServiceImpl implements TkCreditService {
                 .build();
         log.setTenantId(tenantId);
         creditLogMapper.insert(log);
+        batchService.allocate(tenantId, log.getId(), credits);
         businessLogService.info("CREDIT", log.getId(), "FREEZE", IN_PROGRESS,
                 StrUtil.format("冻结积分：{} 积分", credits), log);
         return log.getId();
@@ -270,8 +283,8 @@ public class TkCreditServiceImpl implements TkCreditService {
         long tenantAccountCredits = resolveTenantAccountCredits(tenantId, 0L);
         TkTenantCreditAccountDO account = creditAccountMapper.selectByTenantId(tenantId);
         if (account != null) {
-            syncAccountTotal(account, tenantAccountCredits);
-            return account;
+            batchService.prepare(tenantId);
+            return creditAccountMapper.selectByTenantId(tenantId);
         }
         account = TkTenantCreditAccountDO.builder()
                 .totalCredits(tenantAccountCredits)
@@ -285,12 +298,13 @@ public class TkCreditServiceImpl implements TkCreditService {
         } catch (RuntimeException ignored) {
             account = creditAccountMapper.selectByTenantId(tenantId);
             if (account != null) {
-                syncAccountTotal(account, tenantAccountCredits);
-                return account;
+                batchService.prepare(tenantId);
+                return creditAccountMapper.selectByTenantId(tenantId);
             }
             throw ignored;
         }
-        return account;
+        batchService.prepare(tenantId);
+        return creditAccountMapper.selectByTenantId(tenantId);
     }
 
     private Long getVisitTenantId() {
@@ -308,17 +322,6 @@ public class TkCreditServiceImpl implements TkCreditService {
             throw new IllegalStateException("当前租户编号无效，无法读取积分余额");
         }
         return tenantId;
-    }
-
-    private void syncAccountTotal(TkTenantCreditAccountDO account, long totalCredits) {
-        long oldTotal = nullToZero(account.getTotalCredits());
-        if (oldTotal == totalCredits) {
-            return;
-        }
-        long remaining = Math.max(0L, nullToZero(account.getRemainingCredits()) + totalCredits - oldTotal);
-        account.setTotalCredits(totalCredits);
-        account.setRemainingCredits(remaining);
-        creditAccountMapper.updateById(account);
     }
 
     private long resolveTenantAccountCredits(Long tenantId, Long fallback) {

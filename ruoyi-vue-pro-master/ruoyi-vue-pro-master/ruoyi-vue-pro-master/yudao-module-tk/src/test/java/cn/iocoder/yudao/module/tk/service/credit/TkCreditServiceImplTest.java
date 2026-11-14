@@ -64,6 +64,7 @@ class TkCreditServiceImplTest {
         when(creditAccountMapper.selectByTenantId(8L)).thenReturn(account);
         when(creditAccountMapper.freezeCredits(any(), any())).thenReturn(1);
 
+        ReflectionTestUtils.setField(service, "batchService", mock(TkCreditBatchService.class));
         ReflectionTestUtils.setField(service, "creditAccountMapper", creditAccountMapper);
         ReflectionTestUtils.setField(service, "creditLogMapper", creditLogMapper);
         ReflectionTestUtils.setField(service, "apiKeyConfigService", apiKeyConfigService);

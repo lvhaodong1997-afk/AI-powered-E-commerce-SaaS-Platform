@@ -29,6 +29,12 @@ public interface TkTenantCreditAccountMapper extends BaseMapperX<TkTenantCreditA
             + "WHERE tenant_id = #{tenantId} AND deleted = 0 AND frozen_credits >= #{credits}")
     int refundFrozenCredits(@Param("tenantId") Long tenantId, @Param("credits") Long credits);
 
+    @Update("UPDATE tk_tenant_credit_account SET remaining_credits = remaining_credits + #{restored}, "
+            + "frozen_credits = frozen_credits - #{credits}, update_time = NOW() "
+            + "WHERE tenant_id = #{tenantId} AND deleted = 0 AND frozen_credits >= #{credits}")
+    int releaseFrozenCredits(@Param("tenantId") Long tenantId, @Param("credits") Long credits,
+                             @Param("restored") Long restored);
+
     @Update("UPDATE tk_tenant_credit_account SET total_credits = total_credits + #{credits}, "
             + "remaining_credits = remaining_credits + #{credits}, update_time = NOW() "
             + "WHERE tenant_id = #{tenantId} AND deleted = 0 AND total_credits <= #{maxTotal} - #{credits}")
