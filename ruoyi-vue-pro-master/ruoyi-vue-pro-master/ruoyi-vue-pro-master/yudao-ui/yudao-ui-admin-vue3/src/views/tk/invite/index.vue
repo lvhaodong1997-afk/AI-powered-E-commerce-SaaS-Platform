@@ -67,6 +67,7 @@
   </ContentWrap>
 </template>
 <script setup lang="ts">
+import { isTenantAdministrator } from '@/utils/tenantOnboarding'
 import { useLocaleStore } from '@/store/modules/locale'
 import { useUserStore } from '@/store/modules/user'
 import { getMyTenantInvite, getTenantInviteRecords } from '@/api/system/tenantInvite'
@@ -74,7 +75,7 @@ import type { MyTenantInvite, TenantInviteRecord } from '@/api/system/tenantInvi
 defineOptions({ name: 'TkInvite' })
 const locale = useLocaleStore()
 const text = (zh: string, en: string) => (locale.getCurrentLocale.lang === 'en' ? en : zh)
-const tenantAdmin = computed(() => useUserStore().getUser.tkUserLevel === 'TENANT_ADMIN')
+const tenantAdmin = computed(() => isTenantAdministrator(useUserStore().getUser.tkUserLevel))
 const message = useMessage()
 const invite = ref<MyTenantInvite>()
 const records = ref<TenantInviteRecord[]>([])

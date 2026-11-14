@@ -1467,6 +1467,7 @@
 </template>
 
 <script setup lang="ts">
+import { isTenantAdministrator } from '@/utils/tenantOnboarding'
 import { useUserStore } from '@/store/modules/user'
 import { subtitlePreviewWords, karaokeResultMessage, restoreSubtitleReplay, subtitlePreviewFontSize, measureSubtitlePreview } from './subtitlePreview.mjs'
 import { TkDashboardApi } from '@/api/tk/dashboard'
@@ -1856,7 +1857,7 @@ const message = useMessage()
 const { tt } = useTkI18n()
 const router = useRouter()
 const billingUser = useUserStore()
-const canManageTenantBilling = computed(() => billingUser.getUser.tkUserLevel === 'TENANT_ADMIN')
+const canManageTenantBilling = computed(() => isTenantAdministrator(billingUser.getUser.tkUserLevel))
 const localeStore = useLocaleStore()
 const currentLocale = computed(() => localeStore.getCurrentLocale.lang)
 const isEn = computed(() => currentLocale.value === 'en')

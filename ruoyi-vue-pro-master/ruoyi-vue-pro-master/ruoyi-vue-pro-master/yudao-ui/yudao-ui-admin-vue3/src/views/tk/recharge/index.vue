@@ -186,6 +186,7 @@
   </ContentWrap>
 </template>
 <script setup lang="ts">
+import { isTenantAdministrator } from '@/utils/tenantOnboarding'
 import { ElMessageBox } from 'element-plus'
 import { useLocaleStore } from '@/store/modules/locale'
 import { useUserStore } from '@/store/modules/user'
@@ -205,7 +206,7 @@ import { paymentStatusText, creditStatusText } from './statusText'
 
 defineOptions({ name: 'TkRecharge' })
 const user = useUserStore()
-const tenantAdmin = computed(() => user.getUser.tkUserLevel === 'TENANT_ADMIN')
+const tenantAdmin = computed(() => isTenantAdministrator(user.getUser.tkUserLevel))
 const locale = useLocaleStore()
 const lang = computed(() => (locale.getCurrentLocale.lang === 'en' ? 'en-US' : 'zh-CN'))
 const text = (zh: string, en: string) => (lang.value === 'en-US' ? en : zh)

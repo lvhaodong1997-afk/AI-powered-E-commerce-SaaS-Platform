@@ -64,3 +64,17 @@ test('local recovery draft excludes secrets and provider URLs and rejects hostil
   assert.deepEqual(parsePaymentDraft(raw),{idempotencyKey:'12345678-1234-1234-1234-123456789012',packageCode:'P1000',paymentMethod:'alipay'})
   for(const invalid of ['null','{','{}',JSON.stringify({idempotencyKey:'x',packageCode:'P1000',paymentMethod:'alipay'})]) assert.equal(parsePaymentDraft(invalid),undefined)
 })
+
+test('tenant administrator predicate preserves legacy alias and excludes member/platform identities', () => {
+  for (const level of ['TENANT_ADMIN', 'COMPANY_ADMIN']) assert.equal(moduleObject.exports.isTenantAdministrator(level), true)
+  for (const level of ['MEMBER', 'COMPANY_MEMBER', 'PLATFORM_ADMIN', '', undefined, null]) assert.equal(moduleObject.exports.isTenantAdministrator(level), false)
+})
+test('zero-second recovered and expired challenges permit a fresh explicit send', () => {
+  const original = changePhone(undefined, '13800000001', () => 'original')
+  for (const expiresInSeconds of [240, 0]) {
+    const recovered = applySmsChallenge(original, original.mobile, {smsRequestId:'sms1',deliveryStatus:'SENT',resendAfterSeconds:0,expiresInSeconds}, 1000)
+    assert.equal(recovered.resendAt, 1000)
+    assert.equal(recovered.expiresAt, 1000 + expiresInSeconds * 1000)
+    assert.equal(prepareSmsSend(recovered, 1000, () => 'fresh').requestId, 'fresh')
+  }
+})

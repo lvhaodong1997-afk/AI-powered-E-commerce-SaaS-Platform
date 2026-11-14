@@ -110,8 +110,10 @@ const error = ref('')
 let timer: ReturnType<typeof setTimeout> | undefined
 let attempts = 0
 let generation = 0
+let refreshingGeneration: number | undefined
 const stop = () => {
   generation++
+  refreshing.value = false
   if (timer) clearTimeout(timer)
   timer = undefined
 }
@@ -124,9 +126,10 @@ const schedule = () => {
   timer = setTimeout(() => refresh(), Math.min(15000, 2000 * 1.5 ** attempts))
 }
 const refresh = async () => {
-  if (!props.order || refreshing.value || !props.modelValue) return
+  if (!props.order || refreshingGeneration === generation || !props.modelValue) return
   const orderNo = props.order.orderNo
   const token = generation
+  refreshingGeneration = token
   refreshing.value = true
   attempts++
   try {
@@ -142,7 +145,10 @@ const refresh = async () => {
         'Unable to check now. Refresh this order later.'
       )
   } finally {
-    refreshing.value = false
+    if (refreshingGeneration === token) {
+      refreshingGeneration = undefined
+      refreshing.value = false
+    }
     if (token === generation) schedule()
   }
 }

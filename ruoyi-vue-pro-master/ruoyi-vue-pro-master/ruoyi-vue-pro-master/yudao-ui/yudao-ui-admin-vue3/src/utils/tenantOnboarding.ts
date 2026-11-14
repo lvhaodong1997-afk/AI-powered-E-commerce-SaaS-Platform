@@ -142,3 +142,7 @@ export function money(amount: number, currency: string, locale = 'zh-CN') {
 export function expiryMillis(value: string | number) {
   return typeof value === 'number' ? (value < 1e12 ? value * 1000 : value) : Date.parse(value)
 }
+
+// Keep the established backend alias for existing tenant administrators.
+export const isTenantAdministrator = (level: unknown) =>
+  level === 'TENANT_ADMIN' || level === 'COMPANY_ADMIN'
