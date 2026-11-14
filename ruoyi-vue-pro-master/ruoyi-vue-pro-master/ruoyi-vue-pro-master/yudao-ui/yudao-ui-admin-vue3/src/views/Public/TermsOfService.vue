@@ -3,9 +3,10 @@
     <section class="legal-shell">
       <p class="eyebrow">ClipForge Studio</p>
       <h1>Terms of Service</h1>
-      <p class="updated">Last updated: July 2, 2026</p>
+      <p class="updated">Last updated: November 12, 2026</p>
 
       <article>
+        <p>ClipForge Studio is operated by 山西闻智科技有限公司. The company is the service provider under these Terms of Service.</p>
         <h2>1. Service Description</h2>
         <p>
           ClipForge Studio provides tools for short-form video analysis, script generation, video

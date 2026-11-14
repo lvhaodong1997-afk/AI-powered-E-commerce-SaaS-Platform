@@ -164,6 +164,21 @@ assert.match(
 )
 assert.match(
   indexHtmlSource,
+  /data-app-loading-retry/,
+  'static app fallback must expose a retry action when the Vue bundle cannot load'
+)
+assert.match(
+  indexHtmlSource,
+  /href="\/login\?redirect=\/tk\/video-publish-center"/,
+  'static app fallback must expose the direct application entry'
+)
+assert.match(
+  indexHtmlSource,
+  /app-loading-error/,
+  'static app fallback must surface an app-loading failure state'
+)
+assert.match(
+  indexHtmlSource,
   /Create, review, and prepare short-form videos/,
   'static fallback must explain the public website'
 )
