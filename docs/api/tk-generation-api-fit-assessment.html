@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPT 剪辑工具出片需求 — API 适配评估与对接清单</title>
+<style>
+:root { --radius: 10px; }
+html[data-theme="dark"] {
+  --bg:#0f1420; --panel:#151c2b; --panel2:#1b2436; --text:#e6edf7; --muted:#93a3bd;
+  --border:#2a3650; --accent:#5ea8ff; --accent2:#7ee0c0; --code:#0b101a; --mark:#ffd166;
+}
+html[data-theme="light"] {
+  --bg:#f6f8fc; --panel:#ffffff; --panel2:#f0f4fa; --text:#1a2436; --muted:#5b6b84;
+  --border:#dce4f0; --accent:#1668d6; --accent2:#087f6a; --code:#f2f5fa; --mark:#fff0a8;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text);
+  font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.layout { display:flex; min-height:100vh; }
+.sidebar { width:290px; flex:0 0 290px; background:var(--panel); border-right:1px solid var(--border);
+  height:100vh; position:sticky; top:0; display:flex; flex-direction:column; }
+.brand { padding:20px 20px 14px; border-bottom:1px solid var(--border); }
+.brand b { display:block; font-size:16px; letter-spacing:.3px; }
+.brand span { color:var(--muted); font-size:12px; }
+.tools { padding:12px 14px; border-bottom:1px solid var(--border); display:flex; gap:8px; }
+#search { flex:1; min-width:0; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+  border-radius:8px; padding:7px 10px; font-size:13px; outline:none; }
+#search:focus { border-color:var(--accent); }
+#theme { background:var(--panel2); border:1px solid var(--border); color:var(--muted);
+  border-radius:8px; width:34px; cursor:pointer; font-size:14px; }
+.toc { overflow-y:auto; padding:10px 10px 40px; flex:1; }
+.toc-item { display:block; padding:5px 10px; border-radius:7px; color:var(--muted); font-size:13px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.toc-item:hover { background:var(--panel2); color:var(--text); text-decoration:none; }
+.toc-item.active { background:var(--panel2); color:var(--accent); font-weight:600; }
+.toc-item.lvl3 { padding-left:24px; font-size:12.5px; opacity:.88; }
+.toc-item.hidden { display:none; }
+.main { flex:1; min-width:0; }
+.content { max-width:960px; margin:0 auto; padding:36px 44px 120px; }
+h1 { font-size:30px; line-height:1.35; margin:0 0 24px; padding-bottom:18px; border-bottom:2px solid var(--accent); }
+h2 { font-size:22px; margin:52px 0 18px; padding-top:10px; border-top:1px solid var(--border); }
+h3 { font-size:18px; margin:32px 0 12px; color:var(--accent2); }
+h4 { font-size:15px; margin:24px 0 10px; }
+p { margin:12px 0; }
+hr { border:0; border-top:1px solid var(--border); margin:28px 0; }
+code { background:var(--panel2); border:1px solid var(--border); border-radius:5px;
+  padding:1px 5px; font-size:.88em; font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace; }
+pre.code { position:relative; background:var(--code); border:1px solid var(--border);
+  border-radius:var(--radius); padding:16px 18px; overflow-x:auto; margin:16px 0; }
+pre.code code { background:none; border:0; padding:0; font-size:13px; line-height:1.65; color:var(--text); }
+pre.code[data-lang]:not([data-lang=""])::before { content:attr(data-lang); position:absolute; top:8px; right:12px;
+  color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.6px; }
+.table-wrap { overflow-x:auto; margin:16px 0; border:1px solid var(--border); border-radius:var(--radius); }
+table { border-collapse:collapse; width:100%; font-size:13.5px; }
+th, td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--border); vertical-align:top; }
+th { background:var(--panel2); font-weight:600; white-space:nowrap; }
+tr:last-child td { border-bottom:0; }
+tbody tr:hover { background:var(--panel2); }
+blockquote { margin:16px 0; padding:10px 16px; background:var(--panel2);
+  border-left:3px solid var(--accent); border-radius:0 var(--radius) var(--radius) 0; color:var(--muted); }
+blockquote strong { color:var(--text); }
+ul, ol { padding-left:24px; margin:12px 0; }
+li { margin:5px 0; }
+.checkbox { color:var(--accent2); }
+@media (max-width: 900px) {
+  .sidebar { display:none; } .content { padding:24px 18px 80px; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><b>TK 自动混剪 SaaS</b><span>出片需求适配评估 · 2026-11-11</span></div>
+    <div class="tools">
+      <input id="search" type="search" placeholder="筛选目录… (Ctrl+K)" autocomplete="off">
+      <button id="theme" title="切换深色 / 浅色">◐</button>
+    </div>
+    <nav class="toc" id="toc"><a class="toc-item lvl2" href="#sec-2" data-id="sec-2">0. 一句话结论</a><a class="toc-item lvl2" href="#sec-3" data-id="sec-3">1. 九项需求逐条判定</a><a class="toc-item lvl2" href="#sec-4" data-id="sec-4">2. 逐项证据与参数落点</a><a class="toc-item lvl3" href="#sec-5" data-id="sec-5">2.1 登录与会话</a><a class="toc-item lvl3" href="#sec-6" data-id="sec-6">2.2 积分与失败语义</a><a class="toc-item lvl3" href="#sec-7" data-id="sec-7">2.3 素材库与「芒果干」</a><a class="toc-item lvl3" href="#sec-8" data-id="sec-8">2.4 音色</a><a class="toc-item lvl3" href="#sec-9" data-id="sec-9">2.5 已上传 BGM 与人群池</a><a class="toc-item lvl3" href="#sec-10" data-id="sec-10">2.6 生成任务的完整参数落点</a><a class="toc-item lvl3" href="#sec-11" data-id="sec-11">2.7 进度与失败</a><a class="toc-item lvl3" href="#sec-12" data-id="sec-12">2.8 成片下载</a><a class="toc-item lvl2" href="#sec-13" data-id="sec-13">3. 四个必须提前钉死的坑</a><a class="toc-item lvl3" href="#sec-14" data-id="sec-14">3.1 BGM 40% 会被静默降到 30%（最危险）</a><a class="toc-item lvl3" href="#sec-15" data-id="sec-15">3.2 「时长跟随口播结束即停」目前是「取较大值」，不是严格相等</a><a class="toc-item lvl3" href="#sec-16" data-id="sec-16">3.3 「目标地区中国大陆」没有独立字段</a><a class="toc-item lvl3" href="#sec-17" data-id="sec-17">3.4 逐字卡点可能降级</a><a class="toc-item lvl3" href="#sec-18" data-id="sec-18">3.5（加分项）按标签抽画面确实没有</a><a class="toc-item lvl2" href="#sec-19" data-id="sec-19">4. 后台直连版：可直接落地的请求示例</a><a class="toc-item lvl2" href="#sec-20" data-id="sec-20">5. 建议提给官方的开放 API 清单（正式对接版）</a><a class="toc-item lvl2" href="#sec-21" data-id="sec-21">6. 对接时直接问官方的 6 个问题</a><a class="toc-item lvl2" href="#sec-22" data-id="sec-22">7. 最终判定</a></nav>
+  </aside>
+  <main class="main"><article class="content" id="content"><h1 id="sec-1">GPT 剪辑工具出片需求 — API 适配评估与对接清单</h1>
+<blockquote>评估对象：GPT 提出的 8 项必需能力 + 1 项加分能力 评估基准：当前仓库源码（2026-11-11）与 <code>docs/api/tk-platform-api.md</code> v2.0 结论性质：源码事实核对，非推测；<strong>未修改任何业务代码</strong></blockquote>
+<hr>
+<h2 id="sec-2">0. 一句话结论</h2>
+<p><strong>可以点头，但不能只带着这 9 条去点头。</strong></p>
+<p>我上一份文档里的 22 个 HMAC 开放端点，管的是「TikTok 授权 → 视频上传 → 发布 → 指标」，<strong>这 9 项一项都不覆盖</strong>。这 9 项能力在源码里几乎全部已经实现，但全部挂在 <code>/admin-api/tk/**</code> 的<strong>后台管理 API</strong> 下，需要后台账号、租户、菜单权限，且受 API 加密影响。</p>
+<p>所以准确的说法是：</p>
+<div class="table-wrap"><table><thead><tr><th>场景</th><th>结论</th></tr></thead><tbody><tr><td>官方只肯给现有开放 API（我文档里那套）</td><td><strong>不满足，不能点头</strong></td></tr><tr><td>允许工具用赵倩的后台账号直连 <code>/admin-api/tk/**</code></td><td><strong>现在就能跑通 7 项</strong>，2 项需绕、1 项（加分）做不了；仅适合内部自动化</td></tr><tr><td>官方愿意把后台生成能力包成 HMAC 开放接口（第 5 节清单）</td><td><strong>推荐，可点头</strong>，工作量是「包装 + 鉴权改造」，不是重做业务</td></tr></tbody></table></div>
+<p>对接时务必把「<strong>开放混剪生成接口</strong>」写成明确要求，否则默认交付的就是那套只管发布的开放 API。</p>
+<hr>
+<h2 id="sec-3">1. 九项需求逐条判定</h2>
+<p>图例：✅ 现成可用 · ⚠️ 有条件可用（需指定参数或自行绕过） · ❌ 当前不具备</p>
+<div class="table-wrap"><table><thead><tr><th>#</th><th>需求</th><th>现有后台端点</th><th>判定</th><th>关键说明</th></tr></thead><tbody><tr><td>1</td><td>登录与账号（赵倩）、保持会话</td><td><code>POST /admin-api/system/auth/login</code>、<code>POST /admin-api/system/auth/refresh-token</code>、<code>GET /admin-api/system/tenant/get-id-by-name</code></td><td>⚠️</td><td>返回 <code>accessToken</code>、<code>refreshToken</code>、<code>expiresTime</code>；后续带 <code>Authorization: Bearer</code> 与 <code>tenant-id</code>。绑定个人账号 + 菜单权限 + AES 加密，不适合外部工具</td></tr><tr><td>2</td><td>查积分、不足明确报错</td><td><code>GET /admin-api/tk/credit/balance</code></td><td>✅</td><td>返回 <code>remainingCredits</code>、<code>frozenCredits</code>、<code>lowBalance</code>；创建任务前 <code>freezeForGenerationTask</code> 抛 <code>TK_CREDIT_NOT_ENOUGH</code>（1-060-000-029），<strong>不会静默失败</strong></td></tr><tr><td>3</td><td>列出素材库、指定「芒果干」</td><td><code>GET /admin-api/tk/material-library/page?name=芒果干</code></td><td>✅</td><td>返回 <code>id</code>、<code>name</code>、<code>scene</code>、<code>tags</code>、<code>videoCount</code>；把 <code>id</code> 作为 <code>libraryId</code> 传给生成接口</td></tr><tr><td>4</td><td>列出可用音色</td><td><code>GET /admin-api/tk/voice/minimax/options</code>、<code>GET /admin-api/tk/voice-profile/list</code></td><td>✅</td><td>返回 <code>value</code>／<code>label</code>／<code>voiceId</code>／<code>unavailable</code>；三个指定音色均在种子数据里。人群→音色优先级由工具侧判定，需过滤 <code>unavailable=true</code></td></tr><tr><td>5</td><td>列出「我的上传」BGM</td><td><code>GET /admin-api/tk/bgm/list</code>（筛 <code>sourceType="USER"</code>）、<code>GET /system-list</code></td><td>⚠️</td><td>返回 <code>name</code>、<code>sourceType</code>、<code>style</code>、<code>fileUrl</code>，<strong>没有独立 <code>fileName</code> 字段</strong>，也没有「我的上传」专用端点；曲名池 01–12 靠 <code>name</code> 前缀匹配</td></tr><tr><td>6</td><td>一次传入全部生成参数</td><td><code>POST /admin-api/tk/generation/create</code>（配 <code>POST /precheck</code>）</td><td>⚠️</td><td>口播、关翻译、音色、BGM、字幕五项、画幅帧率<strong>全部有字段</strong>；但「目标地区」无独立字段、「时长严格跟随口播」无开关、「40% 音量」需显式指定混音版本，详见第 3 节</td></tr><tr><td>7</td><td>查进度、步骤、成败与失败原因</td><td><code>GET /admin-api/tk/generation/get?id=</code>、<code>GET /admin-api/tk/generation/status-batch?ids=</code></td><td>✅</td><td>返回 <code>id</code>、<code>status</code>、<code>progress</code>、<code>currentStep</code>、<code>currentStepCode</code>、<code>currentStepCompleted</code>／<code>currentStepTotal</code>、<code>failCode</code>、<code>failReason</code>；批量最多 50 个</td></tr><tr><td>8</td><td>下载成片</td><td><code>GET /admin-api/tk/generation/get?id=</code> 的 <code>outputUrl</code></td><td>✅</td><td>返回带 <code>Expires</code> 与 <code>OSSAccessKeyId</code> 的 OSS 签名地址，<code>response-content-disposition</code> 已带建议文件名 <code>YYYYMMDD-创建人-序号.mp4</code>；工具也可自行按约定命名保存</td></tr><tr><td>9（加分）</td><td>按标签抽画面（场景／产地／口感）</td><td>无</td><td>❌</td><td>素材视频有 <code>tags</code> 自由文本，但混剪规划器只按 <code>segmentType</code>（S1–S7）和 <code>usagePhase</code> 选片，<code>/material-video/page</code> 也不支持 <code>tags</code> 筛选；只能走 <code>clipPlanMode="FULL_POOL_RANDOM"</code> 全库随机混剪</td></tr></tbody></table></div>
+<p><strong>合计：5 项 ✅、3 项 ⚠️、1 项 ❌。</strong></p>
+<hr>
+<h2 id="sec-4">2. 逐项证据与参数落点</h2>
+<h3 id="sec-5">2.1 登录与会话</h3>
+<p><code>POST /admin-api/system/auth/login</code> 请求体 <code>{ "username": "...", "password": "..." }</code>（明文，开启验证码时补 <code>captchaVerification</code>），响应 <code>data</code> 含 <code>accessToken</code>、<code>refreshToken</code>、<code>userId</code>、<code>expiresTime</code>。租户 ID 由 <code>GET /admin-api/system/tenant/get-id-by-name?name=&lt;租户名&gt;</code> 换取。会话续期用 <code>POST /admin-api/system/auth/refresh-token?refreshToken=...</code>。</p>
+<p>赵倩账号需具备：<code>tk:generation:create</code>、<code>tk:generation:query</code>、<code>tk:material-library:query</code>、<code>tk:credit:balance</code> 所需的 <code>tk:dashboard:query</code>（三者之一即可）。</p>
+<blockquote>源码位置：<code>TkCreditController.java</code> 第 34 行；<code>TkGenerationTaskController.java</code> 第 103／112／119 行。</blockquote>
+<h3 id="sec-6">2.2 积分与失败语义</h3>
+<p><code>TkCreditBalanceRespVO</code> 字段：<code>tenantId</code>、<code>totalCredits</code>、<code>remainingCredits</code>、<code>frozenCredits</code>、<code>warningThreshold</code>、<code>lowBalance</code>。 创建任务时 <code>TkGenerationTaskServiceImpl.createGenerationTask</code> 先跑预检，再调用 <code>creditService.freezeForGenerationTask(tenantId)</code>；积分不足抛 <code>TK_CREDIT_NOT_ENOUGH = 1_060_000_029</code>「租户积分余额不足，本次操作需要 {} 积分，请联系客服充值」，任务不会落库。异常时会 <code>refundByLogId</code> 回滚冻结。</p>
+<h3 id="sec-7">2.3 素材库与「芒果干」</h3>
+<p><code>TkMaterialLibraryPageReqVO</code> 支持 <code>companyId</code>、<code>name</code>、<code>category</code>、<code>materialPurpose</code>、<code>status</code> 过滤；<code>TkMaterialLibraryRespVO</code> 返回 <code>id</code>、<code>name</code>、<code>category</code>、<code>scene</code>、<code>tags</code>、<code>videoCount</code>、<code>totalSize</code>、<code>coverUrl</code>。指定「芒果干」= 按 <code>name</code> 查出 <code>id</code>，再作为必填 <code>libraryId</code> 提交。</p>
+<h3 id="sec-8">2.4 音色</h3>
+<p><code>TkMiniMaxVoiceOptionRespVO</code> 字段：<code>value</code>、<code>label</code>、<code>voiceId</code>、<code>model</code>、<code>language</code>、<code>country</code>、<code>gender</code>、<code>previewUrl</code>、<code>favorite</code>、<code>isDefault</code>、<code>unavailable</code>。指定音色在 <code>yudao-module-tk/src/main/resources/sql/tk_minimax_voice_catalog_upgrade_mysql.sql</code>：</p>
+<div class="table-wrap"><table><thead><tr><th>前端名称</th><th>voiceId</th></tr></thead><tbody><tr><td>温柔学姐</td><td><code>Chinese (Mandarin)_Gentle_Senior</code></td></tr><tr><td>沉稳高管</td><td><code>Chinese (Mandarin)_Reliable_Executive</code></td></tr><tr><td>霸道青年音色-beta</td><td><code>male-qn-badao-jingpin</code></td></tr></tbody></table></div>
+<p>提交时传 <code>voiceCode</code>（取 <code>value</code> 或 <code>voiceId</code>，按后台实际映射）或自定义音色的 <code>voiceProfileId</code>。</p>
+<h3 id="sec-9">2.5 已上传 BGM 与人群池</h3>
+<p><code>TkBgmAssetRespVO</code> 字段：<code>id</code>、<code>name</code>、<code>sourceType</code>、<code>style</code>、<code>fileUrl</code>、<code>duration</code>、<code>format</code>、<code>status</code>、<code>canDelete</code>、<code>referencedPresetCount</code>。<code>TkBgmAssetServiceImpl.uploadUserBgm</code> 写入 <code>sourceType="USER"</code>，系统曲为 <code>"SYSTEM"</code>。</p>
+<p>⚠️ 两个必须提前说清的点：</p>
+<ol><li><strong>没有 <code>fileName</code> 字段</strong>。上传接口的 <code>name</code> 是调用方自定义名称，<code>fileUrl</code> 里含对象文件名。若工具要求「至少返回文件名」，需官方补字段，或约定用 <code>name</code>。</li><li><strong>人群池不是接口能力</strong>。「温馨居家 01–12」「品质感 01–11」「办公室下午茶 01–12」「活泼日常 01–11」是运行时数据命名，官方不保证已按此命名入库；工具侧按 <code>name</code> 前缀匹配并限定同池随机，属于客户端规则。</li></ol>
+<h3 id="sec-10">2.6 生成任务的完整参数落点</h3>
+<p><code>TkGenerationTaskCreateReqVO</code>（<code>POST /admin-api/tk/generation/create</code>）与需求的对应关系：</p>
+<div class="table-wrap"><table><thead><tr><th>需求</th><th>字段</th><th>取值</th></tr></thead><tbody><tr><td>完整口播正文</td><td><code>promptText</code></td><td>原文；配 <code>scriptMode="MANUAL"</code></td></tr><tr><td>关闭翻译</td><td><code>manualTranslationEnabled</code></td><td><code>false</code></td></tr><tr><td>目标地区中国大陆</td><td><code>targetLanguage</code></td><td><code>"zh-cn"</code>（映射国家 <code>CN</code>）；<strong>无独立 <code>regionCode</code></strong></td></tr><tr><td>指定素材库</td><td><code>libraryId</code></td><td>第 3 项查到的 ID，必填</td></tr><tr><td>音色</td><td><code>voiceCode</code> 或 <code>voiceProfileId</code></td><td>第 4 项选定值</td></tr><tr><td>BGM</td><td><code>bgmEnabled</code>、<code>bgmAssetId</code></td><td><code>true</code> + 第 5 项选定 ID</td></tr><tr><td>BGM 音量 40%</td><td><code>bgmVolume</code>、<code>audioMixVersion</code></td><td><code>0.4</code> <strong>且必须</strong> <code>audioMixVersion=2</code></td></tr><tr><td>智能字幕开关</td><td><code>subtitleEnabled</code></td><td><code>true</code></td></tr><tr><td>特大字号</td><td><code>subtitleFontSize</code></td><td><code>"extra_large"</code></td></tr><tr><td>标准白字黑边</td><td><code>subtitleStyle</code></td><td><code>"classic_white"</code>（也是默认值）</td></tr><tr><td>智能避让</td><td><code>subtitlePositionMode</code></td><td><code>"smart_safe"</code>（也是默认值）</td></tr><tr><td>关键词高亮</td><td><code>subtitleKeywordEnabled</code></td><td><code>true</code></td></tr><tr><td>逐字卡点</td><td><code>subtitleKaraokeEnabled</code></td><td><code>true</code></td></tr><tr><td>时长</td><td><code>referenceDuration</code></td><td>8–500 秒任意整数，默认 15</td></tr><tr><td>画面方向</td><td><code>clipPlanMode</code></td><td><code>"FULL_POOL_RANDOM"</code>（全库随机）或 <code>"SEGMENTED"</code>（按 S1–S7 结构）</td></tr><tr><td>竖屏 1080×1920</td><td>无需传参</td><td>渲染服务固定 <code>scale=1080:1920</code></td></tr><tr><td>30 帧</td><td>无需传参</td><td>渲染服务固定 <code>-r 30</code></td></tr></tbody></table></div>
+<p>源码依据：<code>DefaultTkVideoRenderService.java</code> 第 38–39 行与第 175／194／210 行；<code>TkGenerationTaskServiceImpl.java</code> 第 487–497 行；<code>TkVideoDurationSupport.java</code> 第 5–7 行；<code>DefaultTkAssSubtitleRenderService.java</code> 第 450 行（<code>extra_large</code>）、<code>DefaultTkSubtitleLayoutService.java</code> 第 25 行（<code>smart_safe</code>）。</p>
+<p><strong>口播正文不会被污染</strong>：<code>DefaultTkScriptGenerationService.generateScript</code> 在手动电商模式下直接 <code>return new TkGeneratedScript(标题, task.getPromptText().trim(), ...)</code>，不拼画像、结构说明、素材库标签。但注意 <code>manualOriginalText</code> 有 <code>@Size(max=3000)</code> 校验，正文只放 <code>promptText</code>，不要同时塞 <code>manualOriginalText</code>。</p>
+<h3 id="sec-11">2.7 进度与失败</h3>
+<p><code>TkGenerationTaskStatusRespVO</code>：<code>id</code>、<code>title</code>、<code>status</code>、<code>progress</code>、<code>outputUrl</code>、<code>failReason</code>、<code>failCode</code>、<code>currentStep</code>、<code>currentStepCode</code>、<code>currentStepCompleted</code>／<code>currentStepTotal</code>、<code>heartbeatTime</code>、<code>stepStartedAt</code>／<code>stepFinishedAt</code>。状态枚举含 <code>PENDING</code>、<code>PRECHECKED</code>、<code>ANALYZING</code>、<code>SCRIPT_READY</code>、<code>VOICE_READY</code>、<code>MATERIAL_MATCHING</code>、<code>MATERIAL_MATCHED</code>、<code>SUBTITLE_TIMELINE_READY</code>、<code>VISUAL_ANALYZED</code>、<code>CLIP_PLANNED</code>、<code>RENDERING</code>、<code>EXPORTING</code>、<code>SUCCESS</code>、<code>FAILED</code>。</p>
+<h3 id="sec-12">2.8 成片下载</h3>
+<p><code>TkGenerationTaskController.refreshOutputUrls</code> 调用 <code>TkGenerationOutputStorageServiceImpl.refreshGeneratedAssetReadUrl</code> 重新签发：URL 带 <code>OSSAccessKeyId</code>、<code>Expires</code>、<code>Signature</code>、<code>response-content-disposition</code>（已含建议文件名）。若未配置 <code>readUrlExpireSeconds</code>，返回不带签名的公开地址 —— 这点要向官方确认，避免拿到会过期或长期公开的地址。</p>
+<hr>
+<h2 id="sec-13">3. 四个必须提前钉死的坑</h2>
+<h3 id="sec-14">3.1 BGM 40% 会被静默降到 30%（最危险）</h3>
+<p><code>TkAudioMixSupport.normalizeVolume(volume, version)</code>：</p>
+<ul><li><code>audioMixVersion</code> 为 <code>null</code> 或 <code>1</code>（默认）→ <code>Math.max(0.01, Math.min(0.30, volume))</code>，<strong>0.4 被截成 0.30，无报错</strong>；</li><li><code>audioMixVersion=2</code> → <code>Math.max(0, Math.min(1, volume))</code>，0.4 生效。</li></ul>
+<p>前端 <code>audioSettings.mjs</code> 保存预设时固定发 <code>audioMixVersion: 2</code>，但直接调 API 若漏传就会静默降级。<strong>对接清单里必须写死「创建任务必须传 <code>audioMixVersion=2</code>」</strong>，并要求官方在响应里回显实际生效音量。</p>
+<h3 id="sec-15">3.2 「时长跟随口播结束即停」目前是「取较大值」，不是严格相等</h3>
+<p><code>DefaultTkGenerationPipelineService.resolveEffectiveTargetDuration</code> 计算 <code>effectiveDuration = Math.max(targetDuration, ceil(bodyAudioDuration))</code>，即配音比设定时长长时会自动延长（8–500 秒范围内），<strong>不会强制 15／29／35 秒</strong>；但若口播短于 <code>referenceDuration</code>（默认 15 秒），视频仍会被补到设定时长。后端另有下限 8 秒、上限 500 秒的钳制。</p>
+<p>要严格「口播结束即停」，二选一：</p>
+<ul><li>工具侧把 <code>referenceDuration</code> 设为下限 <code>8</code>，让口播时长几乎总是胜出（近似满足）；</li><li>要求官方新增 <code>durationMode="FOLLOW_AUDIO"</code>，渲染时不再按 <code>targetDuration</code> 补齐。</li></ul>
+<h3 id="sec-16">3.3 「目标地区中国大陆」没有独立字段</h3>
+<p><code>TkGenerationTaskCreateReqVO</code> 只有 <code>targetLanguage</code>（<code>zh-cn</code> → 国家 <code>CN</code>），没有 <code>regionCode</code>。且 <code>TkGenerationRouteConfigSupport.withManualTranslationConfig</code> 在<strong>关闭翻译时会移除</strong> <code>manualTranslationTargetLanguage</code> 与 <code>manualTranslationTargetCountry</code>，地区信息不落库。若「目标地区」是硬性要求，需要官方新增 <code>targetRegion</code> 字段并在任务详情里回显。</p>
+<h3 id="sec-17">3.4 逐字卡点可能降级</h3>
+<p><code>subtitleKaraokeEnabled=true</code> 只是开关，实际效果受 ASR 时间轴质量影响，任务上有 <code>subtitleKaraokeStatus</code>、<code>subtitleKaraokeReason</code> 两个回读字段。工具应在任务完成后检查这两个字段，不能只看开关。</p>
+<h3 id="sec-18">3.5（加分项）按标签抽画面确实没有</h3>
+<p>素材视频 <code>tags</code> 字段在上传时可写入，<code>TkMaterialVideoRespVO</code> 也会返回，但：</p>
+<ul><li><code>TkMaterialVideoPageReqVO</code> 只有 <code>libraryId</code>、<code>fileName</code>、<code>status</code>、<code>usagePhase</code>、<code>segmentType</code>，<strong>没有 <code>tags</code> 筛选</strong>；</li><li><code>TkGenerationTaskCreateReqVO</code> <strong>没有任何标签筛选参数</strong>；</li><li><code>DefaultTkClipPlannerService</code> 只按 <code>TkMaterialSegmentTypeEnum</code>（<code>S1_HOOK</code> 黄金3秒、<code>S2_PAIN</code> 痛点场景、<code>S3_REVEAL</code> 产品亮相、<code>S4_DEMO</code> 使用演示、<code>S5_PROOF</code> 效果证明、<code>S6_DETAIL</code> 细节特写、<code>S7_LIFESTYLE</code> 场景融入、<code>GENERAL</code>）与 <code>usagePhase</code>（<code>ATTENTION</code>／<code>PRODUCT_SHOW</code>／<code>RESULT_EFFECT</code>／<code>GENERAL</code>）选片。</li></ul>
+<p>结论：<strong>「场景／产地／口感」这类业务标签目前无法控制画面方向</strong>，只能退回到「从芒果干库里自行混剪」。要补，需官方加 <code>materialTags</code> 入参 + 规划器按标签过滤 + 素材分页按标签检索。</p>
+<hr>
+<h2 id="sec-19">4. 后台直连版：可直接落地的请求示例</h2>
+<blockquote>仅用于内部验证，不代表对外交付契约。所有 <code>id</code> 需由前置查询取得。</blockquote>
+<pre class="code" data-lang="http"><code>POST /admin-api/tk/generation/create
+Authorization: Bearer &lt;accessToken&gt;
+tenant-id: &lt;租户ID&gt;
+Content-Type: application/json</code></pre>
+<pre class="code" data-lang="json"><code>{
+  "libraryId": 12,
+  "title": "芒果干-精致妈妈-01",
+  "scriptMode": "MANUAL",
+  "promptText": "这里放完整口播正文，不要写人群画像和结构说明",
+  "manualTranslationEnabled": false,
+  "targetLanguage": "zh-cn",
+  "materialPurpose": "ECOMMERCE",
+  "voiceEnabled": true,
+  "voiceCode": "Chinese (Mandarin)_Gentle_Senior",
+  "bgmEnabled": true,
+  "bgmAssetId": 34,
+  "bgmVolume": 0.4,
+  "audioMixVersion": 2,
+  "referenceDuration": 8,
+  "clipPlanMode": "FULL_POOL_RANDOM",
+  "subtitleEnabled": true,
+  "subtitleStyle": "classic_white",
+  "subtitleFontSize": "extra_large",
+  "subtitlePositionMode": "smart_safe",
+  "subtitleKeywordEnabled": true,
+  "subtitleKaraokeEnabled": true
+}</code></pre>
+<p>响应 <code>data</code> 为 <code>Long</code> 类型任务号。随后轮询 <code>GET /admin-api/tk/generation/get?id=&lt;taskId&gt;</code>，待 <code>status="SUCCESS"</code> 后取 <code>outputUrl</code> 下载，并按约定文件名保存；同时检查 <code>subtitleKaraokeStatus</code>／<code>subtitleKaraokeReason</code>。</p>
+<blockquote>建议先调 <code>POST /admin-api/tk/generation/precheck</code> 传同一份 body，读 <code>errors[]</code> 与 <code>warnings[]</code>（含素材时长不足、分段素材不足等提示），避免生成到一半才失败。</blockquote>
+<hr>
+<h2 id="sec-20">5. 建议提给官方的开放 API 清单（正式对接版）</h2>
+<p>沿用现有 HMAC 签名、<code>Idempotency-Key</code>、回调与 <code>clientId</code> 隔离模型，新增 <code>/admin-api/tk/open/v1/generation</code> 接口族：</p>
+<div class="table-wrap"><table><thead><tr><th>方法</th><th>建议路径</th><th>对应需求</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/credits/balance</code></td><td>2 查积分</td></tr><tr><td><code>GET</code></td><td><code>/material-libraries</code></td><td>3 列出素材库（含 <code>name</code>、<code>tags</code>、视频数）</td></tr><tr><td><code>GET</code></td><td><code>/material-libraries/{id}/tags</code></td><td>9 列出可用画面标签（加分项）</td></tr><tr><td><code>GET</code></td><td><code>/voices</code></td><td>4 列出音色（含 <code>unavailable</code>）</td></tr><tr><td><code>GET</code></td><td><code>/bgm?sourceType=USER</code></td><td>5 只列「我的上传」，<strong>必须返回 <code>fileName</code></strong></td></tr><tr><td><code>POST</code></td><td><code>/tasks/precheck</code></td><td>6 提交前预检（积分、素材时长、字幕可行性）</td></tr><tr><td><code>POST</code></td><td><code>/tasks</code></td><td>6 一次传入全部生成参数（新增 <code>targetRegion</code>、<code>durationMode</code>、<code>materialTags</code>）</td></tr><tr><td><code>GET</code></td><td><code>/tasks/{taskId}</code></td><td>7 任务号、状态、当前步骤、失败原因</td></tr><tr><td><code>GET</code></td><td><code>/tasks/{taskId}/result</code></td><td>8 成片签名下载地址 + 建议文件名 + 字幕降级原因</td></tr><tr><td><code>POST</code></td><td><code>/tasks/{taskId}/retry</code></td><td>7 失败重试</td></tr><tr><td><code>POST</code></td><td><code>/tasks/{taskId}/cancel</code></td><td>7 取消排队任务</td></tr><tr><td><code>POST</code></td><td><code>/tasks/{taskId}/publish</code></td><td>打通现有第 6 节发布 API（成片直发）</td></tr></tbody></table></div>
+<p>配套硬要求（写进对接清单，避免静默降级）：</p>
+<ol><li><code>bgmVolume</code> 原样生效并在详情里回显，不得钳到 0.30；</li><li>新增 <code>durationMode="FOLLOW_AUDIO"</code>，成片时长严格等于口播音频时长；</li><li>新增 <code>targetRegion</code>（如 <code>CN</code>），并在任务详情里回显；</li><li>BGM 列表返回 <code>fileName</code> 字段；</li><li>积分不足返回独立错误码与所需积分数，不得静默失败；</li><li>新增 <code>materialTags</code> 入参与标签检索，让「场景／产地／口感」能控制画面方向；</li><li>任务完成回调 <code>generation.success</code> 携带成片地址，<code>generation.failed</code> 携带 <code>failCode</code>／<code>failReason</code>；</li><li>生成按 <code>clientId</code> 隔离与计费，任务号用 opaque ID，成片地址为带过期时间的签名 URL。</li></ol>
+<hr>
+<h2 id="sec-21">6. 对接时直接问官方的 6 个问题</h2>
+<ol><li>这 9 项是走<strong>现有开放 API</strong>、走<strong>后台账号直连</strong>，还是愿意<strong>新增生成类开放接口</strong>？</li><li>若走后台直连：赵倩账号的菜单权限、租户 ID、AES 加密开关与加密头名由谁提供？Token 过期后是否允许工具自动 refresh？</li><li><code>bgmVolume=0.4</code> 能否原样生效？是否默认 <code>audioMixVersion=2</code>？</li><li>能否保证「成片时长 = 完整口播结束」，口播短于设定时长时不补画面？</li><li>BGM「我的上传」列表是否返回原始文件名？人群池曲目当前是否已按 01–12 命名入库？</li><li>是否提供按业务标签（场景／产地／口感）抽画面的能力？若没有，是否接受工具侧全库随机混剪作为兜底？</li></ol>
+<hr>
+<h2 id="sec-22">7. 最终判定</h2>
+<ul><li><strong>清单本身没问题</strong>，按实际出片顺序组织，可以直接作为对接基线；</li><li><strong>但按现状「直接点头」会踩坑</strong>：现有开放 API 覆盖率为 0，9 项全在后台 API 下；</li><li><strong>推荐动作</strong>：带着第 5 节的开放接口清单 + 第 6 节的 6 个问题去对接，把「包装开放接口」作为前提条件。若官方只接受内部直连，则先用第 4 节做一次端到端验证，再谈长期方案。</li></ul>
+<hr>
+<blockquote>本文是 <code>docs/api/tk-platform-api.md</code> 第 11 节「能力缺口与 API 化建议」的实测补充：第 11 节提出的是设计草案，本文给出了每一项需求对应的<strong>已实现后台端点、字段落点与剩余缺口</strong>。</blockquote>
+<blockquote><strong>对外发送提示</strong>：本文含源码路径、内部端点、账号权限与内部研判，仅供内部使用。发给对接方请改用 <a href="tk-generation-api-requirements.html"><code>tk-generation-api-requirements.html</code></a>（或同名 <code>.md</code>）——纯净需求规格版，不含内部信息。若对方是要接入现有 TikTok 发布能力，则发 <code>tk-platform-api.html</code> + <code>tk-platform-openapi.json</code>。</blockquote></article></main>
+</div>
+<script>
+document.getElementById('theme').addEventListener('click', function () {
+  var h = document.documentElement;
+  h.setAttribute('data-theme', h.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+});
+var search = document.getElementById('search');
+var items = Array.prototype.slice.call(document.querySelectorAll('.toc-item'));
+search.addEventListener('input', function () {
+  var q = this.value.trim().toLowerCase();
+  items.forEach(function (a) {
+    a.classList.toggle('hidden', q !== '' && a.textContent.toLowerCase().indexOf(q) === -1);
+  });
+});
+document.addEventListener('keydown', function (e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); search.focus(); }
+});
+var links = Array.prototype.slice.call(document.querySelectorAll('.toc-item'));
+if ('IntersectionObserver' in window) {
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      links.forEach(function (a) { a.classList.toggle('active', a.dataset.id === en.target.id); });
+      var active = document.querySelector('.toc-item.active');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    });
+  }, { rootMargin: '-10% 0px -80% 0px' });
+  links.forEach(function (a) {
+    var t = document.getElementById(a.dataset.id);
+    if (t) obs.observe(t);
+  });
+}
+</script>
+</body>
+</html>

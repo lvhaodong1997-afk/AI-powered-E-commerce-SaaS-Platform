@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TK 自动混剪 SaaS — API 参考文档</title>
+<style>
+:root { --radius: 10px; }
+html[data-theme="dark"] {
+  --bg:#0f1420; --panel:#151c2b; --panel2:#1b2436; --text:#e6edf7; --muted:#93a3bd;
+  --border:#2a3650; --accent:#5ea8ff; --accent2:#7ee0c0; --code:#0b101a; --mark:#ffd166;
+}
+html[data-theme="light"] {
+  --bg:#f6f8fc; --panel:#ffffff; --panel2:#f0f4fa; --text:#1a2436; --muted:#5b6b84;
+  --border:#dce4f0; --accent:#1668d6; --accent2:#087f6a; --code:#f2f5fa; --mark:#fff0a8;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text);
+  font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.layout { display:flex; min-height:100vh; }
+.sidebar { width:290px; flex:0 0 290px; background:var(--panel); border-right:1px solid var(--border);
+  height:100vh; position:sticky; top:0; display:flex; flex-direction:column; }
+.brand { padding:20px 20px 14px; border-bottom:1px solid var(--border); }
+.brand b { display:block; font-size:16px; letter-spacing:.3px; }
+.brand span { color:var(--muted); font-size:12px; }
+.tools { padding:12px 14px; border-bottom:1px solid var(--border); display:flex; gap:8px; }
+#search { flex:1; min-width:0; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+  border-radius:8px; padding:7px 10px; font-size:13px; outline:none; }
+#search:focus { border-color:var(--accent); }
+#theme { background:var(--panel2); border:1px solid var(--border); color:var(--muted);
+  border-radius:8px; width:34px; cursor:pointer; font-size:14px; }
+.toc { overflow-y:auto; padding:10px 10px 40px; flex:1; }
+.toc-item { display:block; padding:5px 10px; border-radius:7px; color:var(--muted); font-size:13px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.toc-item:hover { background:var(--panel2); color:var(--text); text-decoration:none; }
+.toc-item.active { background:var(--panel2); color:var(--accent); font-weight:600; }
+.toc-item.lvl3 { padding-left:24px; font-size:12.5px; opacity:.88; }
+.toc-item.hidden { display:none; }
+.main { flex:1; min-width:0; }
+.content { max-width:960px; margin:0 auto; padding:36px 44px 120px; }
+h1 { font-size:30px; line-height:1.35; margin:0 0 24px; padding-bottom:18px; border-bottom:2px solid var(--accent); }
+h2 { font-size:22px; margin:52px 0 18px; padding-top:10px; border-top:1px solid var(--border); }
+h3 { font-size:18px; margin:32px 0 12px; color:var(--accent2); }
+h4 { font-size:15px; margin:24px 0 10px; }
+p { margin:12px 0; }
+hr { border:0; border-top:1px solid var(--border); margin:28px 0; }
+code { background:var(--panel2); border:1px solid var(--border); border-radius:5px;
+  padding:1px 5px; font-size:.88em; font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace; }
+pre.code { position:relative; background:var(--code); border:1px solid var(--border);
+  border-radius:var(--radius); padding:16px 18px; overflow-x:auto; margin:16px 0; }
+pre.code code { background:none; border:0; padding:0; font-size:13px; line-height:1.65; color:var(--text); }
+pre.code[data-lang]:not([data-lang=""])::before { content:attr(data-lang); position:absolute; top:8px; right:12px;
+  color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.6px; }
+.table-wrap { overflow-x:auto; margin:16px 0; border:1px solid var(--border); border-radius:var(--radius); }
+table { border-collapse:collapse; width:100%; font-size:13.5px; }
+th, td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--border); vertical-align:top; }
+th { background:var(--panel2); font-weight:600; white-space:nowrap; }
+tr:last-child td { border-bottom:0; }
+tbody tr:hover { background:var(--panel2); }
+blockquote { margin:16px 0; padding:10px 16px; background:var(--panel2);
+  border-left:3px solid var(--accent); border-radius:0 var(--radius) var(--radius) 0; color:var(--muted); }
+blockquote strong { color:var(--text); }
+ul, ol { padding-left:24px; margin:12px 0; }
+li { margin:5px 0; }
+.checkbox { color:var(--accent2); }
+@media (max-width: 900px) {
+  .sidebar { display:none; } .content { padding:24px 18px 80px; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><b>TK 自动混剪 SaaS</b><span>API 参考文档 · v2.0 · 2026-11-11</span></div>
+    <div class="tools">
+      <input id="search" type="search" placeholder="筛选目录… (Ctrl+K)" autocomplete="off">
+      <button id="theme" title="切换深色 / 浅色">◐</button>
+    </div>
+    <nav class="toc" id="toc"><a class="toc-item lvl2" href="#sec-2" data-id="sec-2">0. 一分钟读懂：用 API 能操作什么</a><a class="toc-item lvl3" href="#sec-3" data-id="sec-3">0.1 能力矩阵</a><a class="toc-item lvl3" href="#sec-4" data-id="sec-4">0.2 必须先明确的边界</a><a class="toc-item lvl2" href="#sec-5" data-id="sec-5">1. 基础信息</a><a class="toc-item lvl3" href="#sec-6" data-id="sec-6">1.1 服务地址</a><a class="toc-item lvl3" href="#sec-7" data-id="sec-7">1.2 双路径注册与实际可达性</a><a class="toc-item lvl3" href="#sec-8" data-id="sec-8">1.3 通用约定</a><a class="toc-item lvl3" href="#sec-9" data-id="sec-9">1.4 资源编号（opaque ID）</a><a class="toc-item lvl2" href="#sec-10" data-id="sec-10">2. 鉴权</a><a class="toc-item lvl3" href="#sec-11" data-id="sec-11">2.1 三套体系对照</a><a class="toc-item lvl3" href="#sec-12" data-id="sec-12">2.2 A. 开放 API HMAC 签名</a><a class="toc-item lvl3" href="#sec-18" data-id="sec-18">2.3 B. 免登录工具接口</a><a class="toc-item lvl3" href="#sec-19" data-id="sec-19">2.4 C. 后台会话 API（仅供内部集成）</a><a class="toc-item lvl3" href="#sec-23" data-id="sec-23">2.5 客户端开通（平台侧）</a><a class="toc-item lvl2" href="#sec-24" data-id="sec-24">3. 通用响应与错误码</a><a class="toc-item lvl3" href="#sec-25" data-id="sec-25">3.1 响应结构</a><a class="toc-item lvl3" href="#sec-26" data-id="sec-26">3.2 HTTP 状态</a><a class="toc-item lvl3" href="#sec-27" data-id="sec-27">3.3 幂等与重试</a><a class="toc-item lvl3" href="#sec-28" data-id="sec-28">3.4 完整错误码（源码提取，共 47 项）</a><a class="toc-item lvl2" href="#sec-34" data-id="sec-34">4. 授权与连接 API</a><a class="toc-item lvl3" href="#sec-35" data-id="sec-35">4.1 创建授权会话</a><a class="toc-item lvl3" href="#sec-36" data-id="sec-36">4.2 托管授权页（公开，无需签名）</a><a class="toc-item lvl3" href="#sec-37" data-id="sec-37">4.3 TikTok OAuth 回调（平台内部）</a><a class="toc-item lvl3" href="#sec-38" data-id="sec-38">4.4 查询授权会话</a><a class="toc-item lvl3" href="#sec-39" data-id="sec-39">4.5 查询账号连接</a><a class="toc-item lvl3" href="#sec-40" data-id="sec-40">4.6 刷新账号资料</a><a class="toc-item lvl3" href="#sec-41" data-id="sec-41">4.7 解绑账号</a><a class="toc-item lvl2" href="#sec-42" data-id="sec-42">5. 视频上传 API</a><a class="toc-item lvl3" href="#sec-43" data-id="sec-43">5.1 创建上传会话</a><a class="toc-item lvl3" href="#sec-44" data-id="sec-44">5.2 上传本地分片</a><a class="toc-item lvl3" href="#sec-45" data-id="sec-45">5.3 查询上传进度</a><a class="toc-item lvl3" href="#sec-46" data-id="sec-46">5.4 完成上传</a><a class="toc-item lvl3" href="#sec-47" data-id="sec-47">5.5 取消上传</a><a class="toc-item lvl2" href="#sec-48" data-id="sec-48">6. 发布任务 API</a><a class="toc-item lvl3" href="#sec-49" data-id="sec-49">6.1 快速发布（推荐，视频已有公网 HTTPS 地址）</a><a class="toc-item lvl3" href="#sec-50" data-id="sec-50">6.2 创建发布任务</a><a class="toc-item lvl3" href="#sec-51" data-id="sec-51">6.3 查询任务</a><a class="toc-item lvl3" href="#sec-52" data-id="sec-52">6.4 查询发布明细</a><a class="toc-item lvl3" href="#sec-53" data-id="sec-53">6.5 改期定时发布</a><a class="toc-item lvl3" href="#sec-54" data-id="sec-54">6.6 取消发布任务</a><a class="toc-item lvl3" href="#sec-55" data-id="sec-55">6.7 查询视频指标</a><a class="toc-item lvl3" href="#sec-56" data-id="sec-56">6.8 批量查询视频指标</a><a class="toc-item lvl3" href="#sec-57" data-id="sec-57">6.9 重试失败明细</a><a class="toc-item lvl2" href="#sec-58" data-id="sec-58">7. 定时发布规则</a><a class="toc-item lvl2" href="#sec-59" data-id="sec-59">8. 状态回调</a><a class="toc-item lvl3" href="#sec-60" data-id="sec-60">8.1 事件类型</a><a class="toc-item lvl3" href="#sec-61" data-id="sec-61">8.2 回调签名</a><a class="toc-item lvl3" href="#sec-62" data-id="sec-62">8.3 事件体示例</a><a class="toc-item lvl3" href="#sec-63" data-id="sec-63">8.4 投递策略</a><a class="toc-item lvl2" href="#sec-64" data-id="sec-64">9. 免登录工具接口</a><a class="toc-item lvl3" href="#sec-65" data-id="sec-65">9.1 图片转文字（OCR）</a><a class="toc-item lvl3" href="#sec-66" data-id="sec-66">9.2 文案改写</a><a class="toc-item lvl3" href="#sec-67" data-id="sec-67">9.3 对标视频下载 / 解析</a><a class="toc-item lvl3" href="#sec-68" data-id="sec-68">9.4 视频文案时间轴提取</a><a class="toc-item lvl3" href="#sec-69" data-id="sec-69">9.5 TikTok Webhook（平台侧）</a><a class="toc-item lvl2" href="#sec-70" data-id="sec-70">10. 后台管理 API 索引（需登录）</a><a class="toc-item lvl2" href="#sec-71" data-id="sec-71">11. 能力缺口与 API 化建议（规划中，尚未实现）</a><a class="toc-item lvl3" href="#sec-72" data-id="sec-72">11.1 现状差距</a><a class="toc-item lvl3" href="#sec-73" data-id="sec-73">11.2 建议补齐的开放 API（设计草案）</a><a class="toc-item lvl2" href="#sec-74" data-id="sec-74">12. 端到端调用示例</a><a class="toc-item lvl3" href="#sec-75" data-id="sec-75">12.1 最简流程（推荐，视频已有公网 HTTPS 地址）</a><a class="toc-item lvl3" href="#sec-76" data-id="sec-76">12.2 完整上传流程（视频在调用方本地）</a><a class="toc-item lvl3" href="#sec-77" data-id="sec-77">12.3 curl 示例（占位值需替换）</a><a class="toc-item lvl2" href="#sec-78" data-id="sec-78">13. 接入检查清单与排错</a><a class="toc-item lvl3" href="#sec-79" data-id="sec-79">13.1 上线前检查</a><a class="toc-item lvl3" href="#sec-80" data-id="sec-80">13.2 `OPEN_API_SIGNATURE_INVALID` 排查顺序</a><a class="toc-item lvl3" href="#sec-81" data-id="sec-81">13.3 重试策略</a><a class="toc-item lvl2" href="#sec-82" data-id="sec-82">14. 附录</a><a class="toc-item lvl3" href="#sec-83" data-id="sec-83">14.1 开放 API 端点总表（源码已实现，共 22 个）</a><a class="toc-item lvl3" href="#sec-84" data-id="sec-84">14.2 仓库内相关文档</a><a class="toc-item lvl3" href="#sec-85" data-id="sec-85">14.3 源码核对索引</a></nav>
+  </aside>
+  <main class="main"><article class="content" id="content"><h1 id="sec-1">TK 自动混剪 SaaS — API 参考文档</h1>
+<div class="table-wrap"><table><thead><tr><th>项目</th><th>内容</th></tr></thead><tbody><tr><td>文档版本</td><td>v2.0</td></tr><tr><td>整理日期</td><td>2026-11-11</td></tr><tr><td>适用对象</td><td>需要通过 API 集成本平台的合作方 / 客户后端、本平台开发与运维</td></tr><tr><td>依据</td><td>仓库当前源码（<code>yudao-module-tk</code> 控制器、VO、鉴权过滤器、错误码常量）与 <code>docs/</code> 既有交付文档</td></tr><tr><td>交付物</td><td>本文（人读）、<a href="tk-platform-openapi.json"><code>tk-platform-openapi.json</code></a>（机读）、<a href="tk-platform-api.html"><code>tk-platform-api.html</code></a>（单页阅读版）、<code>build_html.py</code>（HTML 构建脚本）</td></tr></tbody></table></div>
+<blockquote><strong>重要声明</strong>：本文描述的是<strong>当前源码已实现</strong>的接口契约，不代表这些接口已完成部署、联调或通过生产验收。调用前须由双方确认目标环境连通性、客户端配置与权限开通状态。凡标记「规划中」的章节均<strong>尚未实现</strong>，不可作为联调依据。</blockquote>
+<hr>
+<h2 id="sec-2">0. 一分钟读懂：用 API 能操作什么</h2>
+<h3 id="sec-3">0.1 能力矩阵</h3>
+<div class="table-wrap"><table><thead><tr><th>能力</th><th>接口族</th><th>鉴权方式</th><th>当前状态</th></tr></thead><tbody><tr><td>TikTok 账号授权（浏览器 / 二维码 / 托管页）</td><td><code>/tk/open/v1/tiktok/auth/**</code></td><td>HMAC 签名</td><td>已实现</td></tr><tr><td>TikTok 账号连接查询、资料刷新、解绑</td><td><code>/tk/open/v1/tiktok/connections/**</code></td><td>HMAC 签名</td><td>已实现</td></tr><tr><td>视频上传（OSS 直传 / 分片）</td><td><code>/tk/open/v1/tiktok/media/**</code></td><td>HMAC 签名</td><td>已实现</td></tr><tr><td>视频发布、定时发布、取消、重试、状态查询</td><td><code>/tk/open/v1/tiktok/publish/**</code></td><td>HMAC 签名</td><td>已实现</td></tr><tr><td>发布后视频指标（播放/点赞/评论/分享）</td><td><code>/publish/tasks/{taskId}/metrics</code></td><td>HMAC 签名</td><td>已实现</td></tr><tr><td>图片转文字（OCR）</td><td><code>/tk/open/v1/ocr/**</code></td><td><strong>免鉴权</strong></td><td>已实现</td></tr><tr><td>文案改写、对标视频下载、视频文案时间轴提取</td><td><code>/admin-api/tk/open/**</code></td><td><strong>免鉴权</strong>（个别子接口需后台权限）</td><td>已实现</td></tr><tr><td>自动混剪生成任务、素材库、配音、BGM、参考分析</td><td><code>/admin-api/tk/generation/**</code> 等</td><td><strong>后台登录 Token + 菜单权限</strong></td><td>仅后台可用，<strong>无对外开放接口</strong></td></tr><tr><td>TikTok Shop、Facebook / Instagram 发布、账号统计</td><td><code>/admin-api/tk/tiktok-shop/**</code>、<code>/admin-api/tk/social-*</code></td><td><strong>后台登录 Token + 菜单权限</strong></td><td>仅后台可用，<strong>无对外开放接口</strong></td></tr></tbody></table></div>
+<h3 id="sec-4">0.2 必须先明确的边界</h3>
+<p>本项目目前<strong>没有 C 端用户自助 API（<code>/app-api/**</code>）</strong>。源码中 <code>yudao-module-tk</code> 不存在 <code>controller/app</code> 包，Nginx 也未转发 <code>/app-api/</code>。</p>
+<p>因此「用户通过 API 操作本项目」在现阶段有两种可行路径：</p>
+<ol><li><strong>走开放 API（推荐给外部合作方）</strong>：使用 <code>clientId</code> + <code>clientSecret</code> 做 HMAC 签名，可完成 TikTok 授权 → 视频上传 → 发布 → 查询 → 指标全链路。这是唯一面向第三方正式设计的接口族。</li><li><strong>走后台 API（仅建议内部系统集成）</strong>：先调用 <code>/admin-api/system/auth/login</code> 换取 <code>accessToken</code>，再带 <code>Authorization: Bearer ...</code> 与 <code>tenant-id</code> 调用 <code>/admin-api/tk/**</code>。它绑定后台账号、租户和菜单权限，且启用了 API 加密，<strong>不适合直接发给外部客户</strong>。</li></ol>
+<blockquote><strong>结论</strong>：如果业务诉求是「客户用 API 触发自动混剪并拿到成片」，当前开放 API <strong>尚不覆盖</strong>该能力，需要按第 11 节补齐。本文第 11 节给出可直接落地的接口设计草案。</blockquote>
+<hr>
+<h2 id="sec-5">1. 基础信息</h2>
+<h3 id="sec-6">1.1 服务地址</h3>
+<p>约定生产基地址（<code>docs/tiktok-open-api.md</code>、<code>docs/openapi/tiktok-open-api-c-party-integration.md</code> 中固定）：</p>
+<pre class="code" data-lang="text"><code>https://tkassetplant.fnn.net.cn</code></pre>
+<p>开放 API 推荐基地址：</p>
+<pre class="code" data-lang="text"><code>https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok</code></pre>
+<p>例如创建授权会话：</p>
+<pre class="code" data-lang="text"><code>POST https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions</code></pre>
+<h3 id="sec-7">1.2 双路径注册与实际可达性</h3>
+<p><code>tiktok</code> 与 <code>ocr</code> 两组开放控制器在源码中同时注册了两个路径：</p>
+<pre class="code" data-lang="text"><code>/admin-api/tk/open/v1/tiktok/**     &lt;- 推荐，生产对外使用
+/tk/open/v1/tiktok/**               &lt;- 兼容路径
+/admin-api/tk/open/v1/ocr/**        &lt;- 推荐
+/tk/open/v1/ocr/**                  &lt;- 兼容路径</code></pre>
+<p><strong>注意</strong>：<code>deploy/nginx/tk-auto-mix.conf</code> 只配置了 <code>location /admin-api/</code> 转发到后端 <code>127.0.0.1:48080</code>，<strong>没有转发无 <code>/admin-api</code> 前缀的路径</strong>。因此：</p>
+<ul><li>对外正式请求一律使用 <code>/admin-api/...</code> 前缀；</li><li>无前缀路径仅在直连后端服务或内部网关额外放通时可用，不要写进交付给第三方的正式文档；</li><li>签名原文中的 <code>REQUEST_TARGET</code> 必须包含实际使用的完整路径（含 <code>/admin-api</code>）。</li></ul>
+<h3 id="sec-8">1.3 通用约定</h3>
+<div class="table-wrap"><table><thead><tr><th>项目</th><th>约定</th></tr></thead><tbody><tr><td>协议</td><td>HTTPS、UTF-8</td></tr><tr><td>常规 Content-Type</td><td><code>application/json</code></td></tr><tr><td>分片上传 Content-Type</td><td><code>application/octet-stream</code></td></tr><tr><td>OCR / 表单上传</td><td><code>multipart/form-data</code></td></tr><tr><td>API 版本</td><td>路径中的 <code>v1</code>；不兼容变更须升版本路径，不得静默改变 v1 字段语义</td></tr><tr><td>时间格式</td><td>ISO-8601，如 <code>2026-09-01T17:35:00</code>；带时区时如 <code>2026-09-26T18:00:00+08:00</code></td></tr></tbody></table></div>
+<h3 id="sec-9">1.4 资源编号（opaque ID）</h3>
+<p>以下编号由平台生成，调用方应视为不透明字符串，<strong>不代表数据库主键</strong>：</p>
+<div class="table-wrap"><table><thead><tr><th>编号</th><th>用途</th></tr></thead><tbody><tr><td><code>authSessionId</code></td><td>TikTok 授权会话</td></tr><tr><td><code>connectionId</code></td><td>TikTok 账号连接</td></tr><tr><td><code>uploadId</code></td><td>视频上传会话</td></tr><tr><td><code>mediaId</code></td><td>已完成上传的视频</td></tr><tr><td><code>taskId</code></td><td>发布任务</td></tr><tr><td><code>detailId</code></td><td>单账号发布明细</td></tr><tr><td><code>eventId</code></td><td>回调事件</td></tr></tbody></table></div>
+<p>调用方自己的业务编号通过 <code>externalAccountId</code>、<code>externalRequestId</code>、<code>clientState</code> 传递。所有平台资源编号<strong>只在所属 <code>clientId</code> 范围内有效</strong>，跨客户端不可查询、不可使用。</p>
+<hr>
+<h2 id="sec-10">2. 鉴权</h2>
+<h3 id="sec-11">2.1 三套体系对照</h3>
+<div class="table-wrap"><table><thead><tr><th>体系</th><th>匹配路径</th><th>凭据</th><th>校验组件</th></tr></thead><tbody><tr><td>A. 开放 API HMAC</td><td>含 <code>/tk/open/v1/tiktok/</code></td><td><code>clientId</code> / <code>clientSecret</code></td><td><code>TkOpenApiAuthenticationFilter</code></td></tr><tr><td>B. 免登录工具接口</td><td><code>/tk/open/v1/ocr/**</code>、<code>/admin-api/tk/open/**</code></td><td>无</td><td>控制器 <code>@PermitAll</code> + <code>@TenantIgnore</code></td></tr><tr><td>C. 后台会话 API</td><td>其余 <code>/admin-api/**</code></td><td><code>accessToken</code> + <code>tenant-id</code></td><td><code>TokenAuthenticationFilter</code> + <code>@PreAuthorize</code></td></tr></tbody></table></div>
+<p>A 与 C <strong>完全独立</strong>：开放 API 不接受 <code>Bearer</code> Token，后台 API 也不接受 <code>X-TK-*</code> 签名。</p>
+<h3 id="sec-12">2.2 A. 开放 API HMAC 签名</h3>
+<h4 id="sec-13">2.2.1 客户端凭证</h4>
+<p>平台为每个外部调用方分配 <code>clientId</code>、<code>clientSecret</code>、<code>callbackSecret</code>：</p>
+<ul><li><code>clientSecret</code>：调用方请求平台时生成 HMAC 签名；</li><li><code>callbackSecret</code>：调用方校验平台回调签名（不接收回调时可不配置）；</li><li>密钥只允许保存在服务端环境变量或密钥管理系统，<strong>禁止</strong>下发到浏览器、移动端、前端代码或仓库；</li><li>每个调用方独立，不得跨客户端复用。</li></ul>
+<h4 id="sec-14">2.2.2 请求头</h4>
+<p>除 <code>GET /auth/callback</code>、<code>GET /auth/sessions/{id}/launch</code>、<code>GET /auth/sessions/{id}/launch/status</code> 外，所有 <code>/tk/open/v1/tiktok/**</code> 接口都需要签名：</p>
+<pre class="code" data-lang="http"><code>X-TK-Client-Id: client_example
+X-TK-Timestamp: 1798761600
+X-TK-Nonce: nonce_7f3c_example
+X-TK-Request-Id: req_202609010001
+X-TK-Signature: &lt;Base64 HMAC-SHA256&gt;
+Content-Type: application/json</code></pre>
+<div class="table-wrap"><table><thead><tr><th>请求头</th><th>必填</th><th>说明</th></tr></thead><tbody><tr><td><code>X-TK-Client-Id</code></td><td>是</td><td>分配的客户端编号</td></tr><tr><td><code>X-TK-Timestamp</code></td><td>是</td><td>Unix <strong>秒级</strong>时间戳，与服务端相差不超过 300 秒</td></tr><tr><td><code>X-TK-Nonce</code></td><td>是</td><td>每次请求唯一随机串，防重放窗口内不可重复</td></tr><tr><td><code>X-TK-Request-Id</code></td><td>否</td><td>1–128 位链路追踪编号；缺失或非法时服务端生成</td></tr><tr><td><code>X-TK-Signature</code></td><td>是</td><td>签名的标准 Base64 结果</td></tr><tr><td><code>Idempotency-Key</code></td><td>条件必填</td><td>创建 / 改期发布任务必填，≤128 字符</td></tr></tbody></table></div>
+<h4 id="sec-15">2.2.3 签名算法</h4>
+<p>签名原文严格由 <strong>5 行</strong>组成，行间为单个 <code>\n</code>（LF），<strong>最后一行不追加换行</strong>：</p>
+<pre class="code" data-lang="text"><code>HTTP_METHOD
+REQUEST_TARGET
+TIMESTAMP
+NONCE
+SHA256_HEX(BODY)</code></pre>
+<p>示例：</p>
+<pre class="code" data-lang="text"><code>POST
+/admin-api/tk/open/v1/tiktok/publish/tasks
+1798761600
+nonce_7f3c_example
+8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4</code></pre>
+<pre class="code" data-lang="text"><code>signature = Base64( HMAC-SHA256(clientSecret_UTF8, canonicalString_UTF8) )</code></pre>
+<p>必须遵守：</p>
+<ul><li><code>HTTP_METHOD</code> 大写（<code>GET</code> / <code>POST</code> / <code>PUT</code> / <code>DELETE</code>）；</li><li><code>REQUEST_TARGET</code> = 完整路径 + 原始查询字符串，<strong>不含域名，包含 <code>/admin-api</code></strong>；</li><li>查询参数的顺序与编码必须与实际发送的 URL <strong>完全一致</strong>；</li><li>JSON 摘要基于<strong>实际发送的原始 UTF-8 字节</strong>，签名后不得重新格式化 JSON；</li><li>二进制分片摘要基于该分片的原始字节；</li><li>GET / 无请求体 DELETE 使用空字节数组 SHA-256：<code>e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</code>；</li><li>HMAC key 只能是 <code>clientSecret</code> 原文，不得拼接 <code>clientId</code>、不得 Base64 解码、不得带引号或空白；</li><li>输出必须是<strong>标准 Base64</strong>，不是 Base64URL。</li></ul>
+<h4 id="sec-16">2.2.4 签名参考实现（Node.js，仅服务端运行）</h4>
+<pre class="code" data-lang="js"><code>import crypto from 'node:crypto';
+
+const BASE = 'https://tkassetplant.fnn.net.cn';
+const CLIENT_ID = process.env.TK_OPEN_API_CLIENT_ID;
+const CLIENT_SECRET = process.env.TK_OPEN_API_CLIENT_SECRET;
+
+const sha256Hex = (b) =&gt; crypto.createHash('sha256').update(b).digest('hex');
+
+function sign(method, target, timestamp, nonce, bodyBytes) {
+  const canonical = [
+    method.toUpperCase(), target, timestamp, nonce, sha256Hex(bodyBytes)
+  ].join('\n');
+  return crypto.createHmac('sha256', CLIENT_SECRET)
+    .update(canonical, 'utf8').digest('base64');
+}
+
+async function callOpenApi(method, path, payload, extraHeaders = {}) {
+  const bodyBytes = payload === undefined ? Buffer.alloc(0)
+    : Buffer.isBuffer(payload) ? payload
+    : Buffer.from(JSON.stringify(payload), 'utf8');
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const nonce = crypto.randomUUID().replaceAll('-', '');
+  const target = path;                       // 含 /admin-api 前缀与原始 query
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: {
+      'X-TK-Client-Id': CLIENT_ID,
+      'X-TK-Timestamp': timestamp,
+      'X-TK-Nonce': nonce,
+      'X-TK-Request-Id': crypto.randomUUID(),
+      'X-TK-Signature': sign(method, target, timestamp, nonce, bodyBytes),
+      ...(payload !== undefined ? {
+        'Content-Type': Buffer.isBuffer(payload)
+          ? 'application/octet-stream' : 'application/json'
+      } : {}),
+      ...extraHeaders
+    },
+    body: payload === undefined ? undefined : bodyBytes
+  });
+  const result = await res.json();
+  if (!res.ok || result.code !== 0) {
+    throw new Error(`${res.status} ${result.code}: ${result.msg} (requestId=${result.requestId})`);
+  }
+  return result.data;
+}</code></pre>
+<p>Python、Java 的完整示例见 <a href="../sdk/"><code>docs/sdk/</code></a>：<code>tiktok-open-api-python.md</code>、<code>tiktok-open-api-java.md</code>、<code>tiktok-open-api-node.md</code>。</p>
+<h4 id="sec-17">2.2.5 签名之外的服务端检查</h4>
+<p>依次校验：请求头完整性 → 时间戳 → 客户端存在且启用 → 来源 IP 白名单 → 签名 → 模块权限（URI 含 <code>/media/</code> 需 <code>media</code>、含 <code>/publish/</code> 需 <code>publish</code>、其余需 <code>auth</code>）→ nonce 防重放 → 每分钟限流 → 每日配额。</p>
+<div class="table-wrap"><table><thead><tr><th>限制</th><th>默认值</th></tr></thead><tbody><tr><td>时间戳容差</td><td>±300 秒</td></tr><tr><td>签名请求体上限</td><td>8,388,608 bytes</td></tr><tr><td>LOCAL 默认分片大小</td><td>1,048,576 bytes</td></tr><tr><td>每分钟调用</td><td>120 次</td></tr><tr><td>每日调用</td><td>10,000 次</td></tr></tbody></table></div>
+<p>以上均可按客户端配置。防重放与限流依赖 Redis，组件不可用时返回 <code>OPEN_API_GUARD_UNAVAILABLE</code>（503）。</p>
+<h3 id="sec-18">2.3 B. 免登录工具接口</h3>
+<p>这些接口标注 <code>@PermitAll</code>（部分同时 <code>@TenantIgnore</code>），<strong>不需要</strong> <code>clientId</code>、签名、<code>Authorization</code> 或租户头：</p>
+<div class="table-wrap"><table><thead><tr><th>接口</th><th>说明</th></tr></thead><tbody><tr><td><code>POST /admin-api/tk/open/v1/ocr/image-to-text</code></td><td>图片文字识别</td></tr><tr><td><code>POST /admin-api/tk/open/copywriting/rewrite</code></td><td>文案改写</td></tr><tr><td><code>POST /admin-api/tk/open/video/download</code></td><td>对标视频解析下载</td></tr><tr><td><code>POST /admin-api/tk/open/video/transcript/extract</code></td><td>创建视频文案时间轴提取任务（免登录）</td></tr><tr><td><code>GET /admin-api/tk/open/video/transcript/extract/{taskId}</code></td><td>查询提取任务（免登录）</td></tr></tbody></table></div>
+<p>例外：<code>POST /admin-api/tk/open/video/transcript/extract-sync</code> 标注 <code>@PreAuthorize("...tk:reference:analyze")</code>，<strong>需要后台登录与权限</strong>。</p>
+<p><code>POST /tk/tiktok/webhook</code> 是平台接收 TikTok 官方 Content Posting Webhook 的端点，由 TikTok 调用，调用方不要主动请求；且该路径无 <code>/admin-api</code> 前缀，Nginx 未转发，生产可达性需单独确认。</p>
+<h3 id="sec-19">2.4 C. 后台会话 API（仅供内部集成）</h3>
+<h4 id="sec-20">2.4.1 登录</h4>
+<pre class="code" data-lang="http"><code>POST /admin-api/system/auth/login
+Content-Type: application/json</code></pre>
+<pre class="code" data-lang="json"><code>{ "username": "admin", "password": "******" }</code></pre>
+<div class="table-wrap"><table><thead><tr><th>字段</th><th>必填</th><th>说明</th></tr></thead><tbody><tr><td><code>username</code></td><td>是</td><td>4–30 位字母数字</td></tr><tr><td><code>password</code></td><td>是</td><td>4–16 位</td></tr><tr><td><code>captchaVerification</code></td><td>条件</td><td>开启验证码时必填</td></tr></tbody></table></div>
+<p>响应 <code>data</code> 含 <code>accessToken</code>、<code>refreshToken</code>、<code>userId</code>、<code>expiresTime</code>。登录请求体<strong>明文</strong>发送（前端显式关闭 AES 加密）。</p>
+<p>租户 ID 通过单独接口换取：</p>
+<pre class="code" data-lang="http"><code>GET /admin-api/system/tenant/get-id-by-name?name=&lt;租户名&gt;</code></pre>
+<h4 id="sec-21">2.4.2 后续请求头</h4>
+<pre class="code" data-lang="http"><code>Authorization: Bearer &lt;accessToken&gt;
+tenant-id: &lt;数字租户ID&gt;</code></pre>
+<p>平台管理员跨租户访问时另加 <code>visit-tenant-id</code>。刷新令牌：<code>POST /admin-api/system/auth/refresh-token</code>；退出：<code>POST /admin-api/system/auth/logout</code>。</p>
+<h4 id="sec-22">2.4.3 后台 API 的两个使用障碍</h4>
+<ol><li><strong>权限</strong>：<code>/admin-api/tk/**</code> 绝大多数方法带 <code>@PreAuthorize("@ss.hasPermission('tk:xxx:query')")</code>，账号必须具备对应菜单权限，否则 403。</li><li><strong>API 加密</strong>：<code>application.yaml</code> 中 <code>yudao.api-encrypt.enable: true</code>（AES）。前端在请求带 <code>isEncrypt</code> 标识时会对请求体加密并设置加密标识头，响应也会加密。纯外部脚本直接按明文 JSON 调用可能被后端解密逻辑拒绝。</li></ol>
+<p>因此<strong>不建议</strong>把后台 API 作为对外集成方案。若确需内部自动化调用，应先与运维确认加密开关与具体头名，或走第 11 节的开放 API 补齐方案。</p>
+<h3 id="sec-23">2.5 客户端开通（平台侧）</h3>
+<p>由平台管理员在后台「开放 API 管理」中配置，对应源码 <code>/admin-api/tk/open-api/client/**</code> 与 <code>/admin-api/tk/open-api/operations/**</code>：</p>
+<div class="table-wrap"><table><thead><tr><th>后台端点</th><th>用途</th></tr></thead><tbody><tr><td><code>POST /admin-api/tk/open-api/client/create</code></td><td>新建调用方（返回一次性展示的密钥）</td></tr><tr><td><code>PUT /admin-api/tk/open-api/client/update</code></td><td>修改回调地址、IP 白名单、限额</td></tr><tr><td><code>PUT /admin-api/tk/open-api/client/status</code></td><td>启停</td></tr><tr><td><code>POST /admin-api/tk/open-api/client/rotate-secret</code></td><td>轮换密钥（旧密钥立即失效）</td></tr><tr><td><code>GET /admin-api/tk/open-api/client/get</code> / <code>page</code></td><td>查询</td></tr><tr><td><code>DELETE /admin-api/tk/open-api/client/delete</code></td><td>删除</td></tr><tr><td><code>GET /admin-api/tk/open-api/operations/usage</code></td><td>调用量</td></tr><tr><td><code>GET /admin-api/tk/open-api/operations/event/page</code> / <code>get</code></td><td>回调事件</td></tr><tr><td><code>POST /admin-api/tk/open-api/operations/event/replay</code></td><td>重放事件</td></tr></tbody></table></div>
+<p>新建时建议配置：权限勾选 <code>auth</code> + <code>media</code> + <code>publish</code>；每分钟 120 次、每日 10,000 次起；状态启用；IP 白名单填调用方公网出口 IP。</p>
+<hr>
+<h2 id="sec-24">3. 通用响应与错误码</h2>
+<h3 id="sec-25">3.1 响应结构</h3>
+<p>开放 API 使用 <code>TkOpenApiResponse</code>，免登录/后台接口使用 <code>CommonResult</code>，两者字段一致：</p>
+<pre class="code" data-lang="json"><code>{ "code": 0, "msg": "OK", "data": {}, "requestId": "req_202609010001" }</code></pre>
+<pre class="code" data-lang="json"><code>{ "code": "MEDIA_NOT_READY", "msg": "media is not ready", "data": null, "requestId": "req_..." }</code></pre>
+<p>调用方处理顺序：<strong>先判 HTTP 状态 → 再判 <code>code === 0</code> → 才使用 <code>data</code></strong>。错误日志至少记录 HTTP 状态、<code>code</code>、<code>msg</code>、<code>requestId</code>，不记录密钥与 Token。</p>
+<blockquote>注意：<code>code</code> 在成功时为数字 <code>0</code>，失败时为字符串错误码；免登录工具接口失败时为数字错误码（如 <code>400</code>、<code>106000052</code>）。判断请统一用 <code>code !== 0</code> 而非类型。</blockquote>
+<h3 id="sec-26">3.2 HTTP 状态</h3>
+<div class="table-wrap"><table><thead><tr><th>状态</th><th>场景</th></tr></thead><tbody><tr><td><code>200</code></td><td>成功</td></tr><tr><td><code>400</code></td><td>参数错误或业务状态不允许</td></tr><tr><td><code>401</code></td><td>认证失败</td></tr><tr><td><code>403</code></td><td>IP / 权限策略拒绝</td></tr><tr><td><code>404</code></td><td>资源不存在或不属于当前客户端</td></tr><tr><td><code>409</code></td><td>幂等键冲突</td></tr><tr><td><code>413</code></td><td>请求体或视频超限</td></tr><tr><td><code>429</code></td><td>限流或日配额超限</td></tr><tr><td><code>500</code></td><td>服务内部错误</td></tr><tr><td><code>503</code></td><td>依赖服务、配置或防护组件暂不可用</td></tr></tbody></table></div>
+<h3 id="sec-27">3.3 幂等与重试</h3>
+<ul><li>发布任务创建、快速发布、改期均需 <code>Idempotency-Key</code>（≤128 字符）；</li><li>幂等范围 = <code>clientId + Idempotency-Key</code>，记录有效期 <strong>7 天</strong>；</li><li>相同键 + 相同请求内容 → 返回原任务；相同键 + 不同内容 → <code>409 IDEMPOTENCY_KEY_CONFLICT</code>；</li><li>网络超时重试<strong>必须复用原 key</strong>，同时生成新的 <code>timestamp</code> 与 <code>nonce</code>；</li><li>每次请求的 <code>nonce</code> 必须唯一，签名重试也算新请求。</li></ul>
+<h3 id="sec-28">3.4 完整错误码（源码提取，共 47 项）</h3>
+<h4 id="sec-29">认证与网关</h4>
+<div class="table-wrap"><table><thead><tr><th>错误码</th><th>HTTP</th><th>含义</th></tr></thead><tbody><tr><td><code>OPEN_API_AUTH_HEADER_MISSING</code></td><td>401</td><td>必要认证头缺失</td></tr><tr><td><code>OPEN_API_CLIENT_INVALID</code></td><td>401</td><td>clientId 不存在或已禁用</td></tr><tr><td><code>OPEN_API_SIGNATURE_INVALID</code></td><td>401</td><td>签名错误</td></tr><tr><td><code>OPEN_API_TIMESTAMP_EXPIRED</code></td><td>401</td><td>时间戳无效或超出 300 秒</td></tr><tr><td><code>OPEN_API_NONCE_REPLAYED</code></td><td>401</td><td>nonce 已使用</td></tr><tr><td><code>OPEN_API_SECRET_UNAVAILABLE</code></td><td>500</td><td>服务端无法加载客户端密钥</td></tr><tr><td><code>OPEN_API_IP_NOT_ALLOWED</code></td><td>403</td><td>来源 IP 不在允许范围</td></tr><tr><td><code>OPEN_API_PERMISSION_DENIED</code></td><td>403</td><td>缺少模块权限</td></tr><tr><td><code>OPEN_API_RATE_LIMITED</code></td><td>429</td><td>每分钟次数超限</td></tr><tr><td><code>OPEN_API_QUOTA_EXCEEDED</code></td><td>429</td><td>每日总量超限</td></tr><tr><td><code>OPEN_API_GUARD_UNAVAILABLE</code></td><td>503</td><td>防重放/限流组件暂不可用</td></tr><tr><td><code>OPEN_API_BODY_TOO_LARGE</code></td><td>413</td><td>签名请求体超过上限</td></tr><tr><td><code>OPEN_API_PARAMETER_INVALID</code></td><td>400</td><td>参数校验失败</td></tr><tr><td><code>OPEN_API_INTERNAL_ERROR</code></td><td>500</td><td>服务内部错误</td></tr></tbody></table></div>
+<h4 id="sec-30">授权与连接</h4>
+<div class="table-wrap"><table><thead><tr><th>错误码</th><th>含义</th></tr></thead><tbody><tr><td><code>AUTH_SESSION_NOT_FOUND</code></td><td>授权会话不存在或不属于当前客户端</td></tr><tr><td><code>CONNECTION_NOT_FOUND</code></td><td>账号连接不存在或不属于当前客户端</td></tr><tr><td><code>CONNECTION_NOT_AUTHORIZED</code></td><td>连接不是已授权状态</td></tr><tr><td><code>CONNECTION_CHANGED</code></td><td>连接已变化，请重试</td></tr><tr><td><code>INVALID_USERNAME</code></td><td>username 必须为不带 <code>@</code> 的 TikTok 用户名</td></tr><tr><td><code>REAUTH_REQUIRED</code></td><td>需要重新授权</td></tr><tr><td><code>TOKEN_REFRESH_IN_PROGRESS</code></td><td>Token 正在刷新，请稍后重试</td></tr><tr><td><code>TOKEN_REFRESH_INTERRUPTED</code></td><td>Token 刷新被中断</td></tr><tr><td><code>TIKTOK_CONFIG_REQUIRED</code></td><td>TikTok 应用配置不可用</td></tr></tbody></table></div>
+<h4 id="sec-31">媒体上传</h4>
+<div class="table-wrap"><table><thead><tr><th>错误码</th><th>含义</th></tr></thead><tbody><tr><td><code>MEDIA_NOT_FOUND</code></td><td>上传会话或视频不存在</td></tr><tr><td><code>MEDIA_NOT_READY</code></td><td>分片不完整 / OSS 对象暂不可用 / 定时发布时媒体未就绪</td></tr><tr><td><code>MEDIA_FILE_INVALID</code></td><td>扩展名、大小、分片或摘要校验失败</td></tr><tr><td><code>MEDIA_FILE_TOO_LARGE</code></td><td>视频超过 1,000,000,000 bytes</td></tr><tr><td><code>MEDIA_UPLOAD_EXPIRED</code></td><td>上传会话已过期</td></tr><tr><td><code>MEDIA_UPLOAD_STATUS_INVALID</code></td><td>会话不处于 <code>UPLOADING</code></td></tr><tr><td><code>MEDIA_UPLOAD_FAILED</code></td><td>本地分片保存失败</td></tr><tr><td><code>MEDIA_SERVICE_UNAVAILABLE</code></td><td>快速发布所需远程媒体服务不可用</td></tr><tr><td><code>UPLOAD_MODE_INVALID</code></td><td>对 OSS 会话调用了本地分片接口</td></tr><tr><td><code>OSS_CONFIG_REQUIRED</code></td><td>OSS 已启用但配置不完整</td></tr></tbody></table></div>
+<h4 id="sec-32">发布、幂等与指标</h4>
+<div class="table-wrap"><table><thead><tr><th>错误码</th><th>含义</th></tr></thead><tbody><tr><td><code>IDEMPOTENCY_KEY_REQUIRED</code></td><td>缺少 <code>Idempotency-Key</code></td></tr><tr><td><code>IDEMPOTENCY_KEY_INVALID</code></td><td>幂等键超过 128 字符</td></tr><tr><td><code>IDEMPOTENCY_KEY_CONFLICT</code></td><td>相同键对应不同请求内容</td></tr><tr><td><code>IDEMPOTENCY_RESULT_UNAVAILABLE</code></td><td>幂等记录存在但原任务不可读取</td></tr><tr><td><code>PUBLISH_TASK_NOT_FOUND</code></td><td>任务不存在或不属于当前客户端</td></tr><tr><td><code>PUBLISH_DETAIL_NOT_FOUND</code></td><td>明细不存在或不属于当前客户端</td></tr><tr><td><code>PUBLISH_RETRY_STATUS_INVALID</code></td><td>明细状态不允许重试</td></tr><tr><td><code>PUBLISH_RETRY_PUBLISH_ID_EXISTS</code></td><td>明细已有 TikTok publishId，不能重新初始化</td></tr><tr><td><code>PUBLISH_ALREADY_RUNNING</code></td><td>任务已发起远程执行，不能人工终止</td></tr><tr><td><code>PUBLISH_METRICS_MULTI_DETAIL_UNSUPPORTED</code></td><td>指标查询要求一个任务只对应一个账号</td></tr><tr><td><code>PUBLISH_METRICS_BATCH_INVALID</code></td><td><code>taskIds</code> 必须 1–50 个</td></tr><tr><td><code>PULL_ACCOUNT_POLICY_MIXED</code></td><td>直拉白名单内外账号请分开创建发布任务</td></tr></tbody></table></div>
+<h4 id="sec-33">定时发布</h4>
+<div class="table-wrap"><table><thead><tr><th>错误码</th><th>含义</th></tr></thead><tbody><tr><td><code>SCHEDULE_TIME_INVALID</code></td><td><code>scheduledAt</code> 缺失或不是合法 ISO-8601（含时区偏移不匹配）</td></tr><tr><td><code>SCHEDULE_REGION_INVALID</code></td><td>不支持的 <code>regionCode</code></td></tr><tr><td><code>SCHEDULE_MODE_UNSUPPORTED</code></td><td>定时发布仅支持 <code>DIRECT_POST</code></td></tr><tr><td><code>SCHEDULE_ACCOUNT_COUNT_INVALID</code></td><td>定时发布要求恰好 1 个账号</td></tr><tr><td><code>SCHEDULE_NOT_MUTABLE</code></td><td>仅未执行的定时任务可改期</td></tr><tr><td><code>SCHEDULE_ALREADY_RUNNING</code></td><td>定时任务已开始执行</td></tr></tbody></table></div>
+<hr>
+<h2 id="sec-34">4. 授权与连接 API</h2>
+<p>基地址：<code>/admin-api/tk/open/v1/tiktok</code>。除标注外均需 HMAC 签名。</p>
+<h3 id="sec-35">4.1 创建授权会话</h3>
+<pre class="code" data-lang="http"><code>POST /auth/sessions</code></pre>
+<pre class="code" data-lang="json"><code>{
+  "externalAccountId": "account_10001",
+  "authMode": "AUTO",
+  "clientState": "page_state_001"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>字段</th><th>类型</th><th>必填</th><th>限制</th><th>说明</th></tr></thead><tbody><tr><td><code>externalAccountId</code></td><td>string</td><td>是</td><td>≤128</td><td>调用方自己的账号编号，稳定且唯一</td></tr><tr><td><code>authMode</code></td><td>string</td><td>是</td><td><code>AUTO</code> / <code>REDIRECT</code> / <code>QR_CODE</code></td><td>推荐 <code>AUTO</code></td></tr><tr><td><code>clientState</code></td><td>string</td><td>否</td><td>≤512</td><td>透传状态，不参与 OAuth 安全校验</td></tr></tbody></table></div>
+<p>会话有效期 <strong>15 分钟</strong>。响应 <code>data</code>：</p>
+<div class="table-wrap"><table><thead><tr><th>字段</th><th>说明</th></tr></thead><tbody><tr><td><code>authSessionId</code> / <code>externalAccountId</code> / <code>clientState</code> / <code>authMode</code></td><td>会话标识与回显</td></tr><tr><td><code>authorizeUrl</code></td><td>TikTok 浏览器授权地址（<code>QR_CODE</code> 时为 <code>null</code>）</td></tr><tr><td><code>qrcodeUrl</code></td><td>TikTok 二维码数据地址（不是图片）</td></tr><tr><td><code>qrcodeImageUrl</code></td><td>平台生成的二维码图片，可直接作 <code>&lt;img src&gt;</code>（<code>data:image/png;base64,...</code>）</td></tr><tr><td><code>launchUrl</code></td><td>平台托管授权页，推荐在用户浏览器打开</td></tr><tr><td><code>status</code></td><td>初始 <code>WAITING</code></td></tr><tr><td><code>expireTime</code></td><td>过期时间</td></tr></tbody></table></div>
+<h3 id="sec-36">4.2 托管授权页（公开，无需签名）</h3>
+<pre class="code" data-lang="http"><code>GET /auth/sessions/{authSessionId}/launch          -&gt; HTML
+GET /auth/sessions/{authSessionId}/launch/status   -&gt; JSON</code></pre>
+<p>托管页展示授权入口与二维码，每 3 秒轮询公开状态接口。这两个端点不需要签名；服务端正式状态查询仍应使用带签名的 <code>GET /auth/sessions/{authSessionId}</code>。</p>
+<h3 id="sec-37">4.3 TikTok OAuth 回调（平台内部）</h3>
+<pre class="code" data-lang="http"><code>GET /auth/callback?code=...&amp;state=...</code></pre>
+<p>由 TikTok 浏览器重定向访问，平台校验 <code>state</code>、换取并加密保存 Token、创建连接、生成授权回调事件。<strong>调用方不要构造或调用</strong>。平台固定 redirect URI：</p>
+<pre class="code" data-lang="text"><code>https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/callback</code></pre>
+<h3 id="sec-38">4.4 查询授权会话</h3>
+<pre class="code" data-lang="http"><code>GET /auth/sessions/{authSessionId}</code></pre>
+<p><code>data</code> 字段：<code>providerIdentity</code>（TikTok 主体 SHA-256，非原始 openId）、<code>authSessionId</code>、<code>externalAccountId</code>、<code>clientState</code>、<code>connectionId</code>、<code>accountName</code>、<code>username</code>、<code>avatarUrl</code>、<code>bioDescription</code>、<code>profileDeepLink</code>、<code>verified</code>、<code>followerCount</code>、<code>followingCount</code>、<code>likesCount</code>、<code>videoCount</code>、<code>statsUpdatedAt</code>、<code>status</code>、<code>failReason</code>、<code>expireTime</code>。</p>
+<div class="table-wrap"><table><thead><tr><th><code>status</code></th><th>含义</th></tr></thead><tbody><tr><td><code>WAITING</code></td><td>等待用户操作</td></tr><tr><td><code>SUCCESS</code></td><td>授权成功，返回 <code>connectionId</code></td></tr><tr><td><code>FAILED</code></td><td>失败，查看 <code>failReason</code></td></tr><tr><td><code>EXPIRED</code></td><td>会话过期，需重新创建</td></tr></tbody></table></div>
+<p>建议轮询间隔 3 秒，超过 <code>expireTime</code> 停止。</p>
+<h3 id="sec-39">4.5 查询账号连接</h3>
+<pre class="code" data-lang="http"><code>GET /connections?externalAccountId=account_10001&amp;status=AUTHORIZED&amp;username=example_user</code></pre>
+<p>三个查询参数均可选。<code>data</code> 为数组，元素含：<code>providerIdentity</code>、<code>connectionId</code>、<code>externalAccountId</code>、<code>accountName</code>、<code>username</code>、<code>avatarUrl</code>、<code>bioDescription</code>、<code>profileDeepLink</code>、<code>verified</code>、<code>followerCount</code>、<code>followingCount</code>、<code>likesCount</code>、<code>videoCount</code>、<code>statsUpdatedAt</code>、<code>authStatus</code>、<code>tokenStatus</code>、<code>lastAuthTime</code>、<code>videoRegion</code>（<code>status</code> / <code>locationCreated</code> / <code>countryName</code> / <code>sourceVideoId</code> / <code>sourceVideoUrl</code> / <code>fetchedAt</code>）。</p>
+<p><strong>Token 永不通过接口返回。</strong></p>
+<h3 id="sec-40">4.6 刷新账号资料</h3>
+<pre class="code" data-lang="http"><code>POST /connections/{connectionId}/profile/refresh</code></pre>
+<p>返回单个 <code>ConnectionResp</code>。用于重新拉取头像、粉丝数、地区等资料。</p>
+<h3 id="sec-41">4.7 解绑账号</h3>
+<pre class="code" data-lang="http"><code>POST /connections/{connectionId}/disconnect</code></pre>
+<p>返回 <code>data: true</code>。连接置为 <code>DISCONNECTED</code>、Token 置 <code>REVOKED</code>、清空本地 Token、阻止后续发布。当前实现<strong>不调用</strong> TikTok 撤销授权接口。</p>
+<hr>
+<h2 id="sec-42">5. 视频上传 API</h2>
+<p>基地址：<code>/admin-api/tk/open/v1/tiktok/media</code>。均需 HMAC 签名。</p>
+<h3 id="sec-43">5.1 创建上传会话</h3>
+<pre class="code" data-lang="http"><code>POST /uploads</code></pre>
+<pre class="code" data-lang="json"><code>{
+  "fileName": "video.mp4",
+  "fileSize": 104857600,
+  "contentType": "video/mp4",
+  "sha256": "0123...cdef"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead><tbody><tr><td><code>fileName</code></td><td>string</td><td>是</td><td>扩展名仅 <code>mp4</code> / <code>mov</code> / <code>webm</code></td></tr><tr><td><code>fileSize</code></td><td>integer</td><td>是</td><td>&gt; 0，上限 1,000,000,000 bytes</td></tr><tr><td><code>contentType</code></td><td>string</td><td>否</td><td>缺省按扩展名生成 <code>video/{ext}</code></td></tr><tr><td><code>sha256</code></td><td>string</td><td>否</td><td>完整文件 SHA-256 十六进制；提供后 <code>complete</code> 时必须回传相同值</td></tr></tbody></table></div>
+<p>会话默认有效期 <strong>24 小时</strong>。<code>uploadMode</code> 由服务端根据配置决定（<code>OSS</code> 或 <code>LOCAL</code>），调用方不能指定。</p>
+<p><code>data</code> 字段：<code>uploadId</code>、<code>uploadMode</code>、<code>chunkSize</code>、<code>totalChunks</code>、<code>uploadUrl</code>、<code>objectKey</code>、<code>fields</code>、<code>expireTime</code>。</p>
+<p><strong>OSS 模式</strong>：<code>fields</code> 含 <code>policy</code>、<code>ossAccessKeyId</code>、<code>signature</code>、<code>xOssMetaSha256</code>。向 <code>uploadUrl</code> 提交 <code>multipart/form-data</code> 时映射为：</p>
+<div class="table-wrap"><table><thead><tr><th>表单字段</th><th>取值</th></tr></thead><tbody><tr><td><code>key</code></td><td><code>objectKey</code></td></tr><tr><td><code>policy</code></td><td><code>fields.policy</code></td></tr><tr><td><code>OSSAccessKeyId</code></td><td><code>fields.ossAccessKeyId</code></td></tr><tr><td><code>Signature</code></td><td><code>fields.signature</code></td></tr><tr><td><code>x-oss-meta-sha256</code></td><td><code>fields.xOssMetaSha256</code>（创建时提供 SHA-256 才使用）</td></tr><tr><td><code>file</code></td><td>视频文件</td></tr></tbody></table></div>
+<p>OSS 表单地址<strong>不使用</strong> <code>X-TK-*</code> 签名头；返回字段是短期表单凭据，不是长期 OSS 密钥。上传完仍必须调用 <code>complete</code>。</p>
+<p><strong>LOCAL 模式</strong>：按 <code>chunkSize</code>（默认 1,048,576 bytes）与 <code>totalChunks</code> 逐片上传。</p>
+<h3 id="sec-44">5.2 上传本地分片</h3>
+<pre class="code" data-lang="http"><code>PUT /uploads/{uploadId}/chunks/{chunkIndex}
+Content-Type: application/octet-stream</code></pre>
+<ul><li><code>chunkIndex</code> 从 <strong>0</strong> 开始；</li><li>除最后一片外，每片字节数必须严格等于 <code>chunkSize</code>；</li><li>请求体是原始分片字节，<strong>不是</strong> multipart；</li><li>每一片单独生成新的 <code>timestamp</code> / <code>nonce</code> / 签名，body hash 基于该片字节；</li><li>对 OSS 会话调用返回 <code>UPLOAD_MODE_INVALID</code>；会话非 <code>UPLOADING</code> 返回 <code>MEDIA_UPLOAD_STATUS_INVALID</code>。</li></ul>
+<p>响应 <code>data: true</code>。</p>
+<h3 id="sec-45">5.3 查询上传进度</h3>
+<pre class="code" data-lang="http"><code>GET /uploads/{uploadId}</code></pre>
+<p><code>data</code>：<code>uploadId</code>、<code>mediaId</code>、<code>uploadMode</code>、<code>fileSize</code>、<code>uploadedSize</code>、<code>status</code>。</p>
+<div class="table-wrap"><table><thead><tr><th><code>status</code></th><th>含义</th></tr></thead><tbody><tr><td><code>UPLOADING</code></td><td>上传中</td></tr><tr><td><code>READY</code></td><td>已完成并生成 <code>mediaId</code></td></tr><tr><td><code>CANCELLED</code></td><td>已取消</td></tr></tbody></table></div>
+<p>当前响应<strong>不返回分片编号列表</strong>，调用方应自行持久化已成功的分片索引。</p>
+<h3 id="sec-46">5.4 完成上传</h3>
+<pre class="code" data-lang="http"><code>POST /uploads/{uploadId}/complete</code></pre>
+<pre class="code" data-lang="json"><code>{ "fileSize": 104857600, "sha256": "0123...cdef", "coverTimestampMs": 1200 }</code></pre>
+<div class="table-wrap"><table><thead><tr><th>字段</th><th>必填</th><th>说明</th></tr></thead><tbody><tr><td><code>fileSize</code></td><td>是</td><td>必须与创建会话时一致</td></tr><tr><td><code>sha256</code></td><td>条件</td><td>创建时提供过则此处必填且必须相同</td></tr><tr><td><code>coverTimestampMs</code></td><td>否</td><td>封面时间点，毫秒</td></tr></tbody></table></div>
+<p>LOCAL 会校验全部分片、合并长度和摘要；OSS 会 HEAD 检查对象存在、<code>Content-Length</code> 与 <code>x-oss-meta-sha256</code>。成功后 <code>data</code> 含 <code>mediaId</code>、<code>uploadId</code>、<code>fileName</code>、<code>fileSize</code>、<code>contentType</code>、<code>status: "READY"</code>。<strong>只有 <code>READY</code> 且取得 <code>mediaId</code> 才能发布。</strong></p>
+<h3 id="sec-47">5.5 取消上传</h3>
+<pre class="code" data-lang="http"><code>DELETE /uploads/{uploadId}</code></pre>
+<p>仅 <code>UPLOADING</code> 可取消。LOCAL 删除临时分片目录；OSS 在配置完整时删除对象。返回 <code>data: true</code>。</p>
+<hr>
+<h2 id="sec-48">6. 发布任务 API</h2>
+<p>基地址：<code>/admin-api/tk/open/v1/tiktok/publish</code>。均需 HMAC 签名。</p>
+<h3 id="sec-49">6.1 快速发布（推荐，视频已有公网 HTTPS 地址）</h3>
+<pre class="code" data-lang="http"><code>POST /quick-tasks
+Idempotency-Key: c-quick-publish-202609020001</code></pre>
+<pre class="code" data-lang="json"><code>{
+  "externalAccountId": "account_10001",
+  "videoUrl": "https://cdn.example.com/videos/demo.mp4",
+  "fileName": "demo.mp4",
+  "contentType": "video/mp4",
+  "coverTimestampMs": 1200,
+  "title": "视频标题",
+  "caption": "视频文案",
+  "postMode": "DIRECT_POST",
+  "privacyLevel": "PUBLIC_TO_EVERYONE",
+  "externalRequestId": "business_order_001",
+  "scheduledAt": "2026-09-26T18:00:00+08:00",
+  "regionCode": "CN"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>字段</th><th>必填</th><th>限制 / 默认值</th></tr></thead><tbody><tr><td><code>externalAccountId</code></td><td>是</td><td>≤128，平台据此定位唯一已授权连接</td></tr><tr><td><code>videoUrl</code></td><td>是</td><td>≤2048，必须是平台可访问的<strong>公网 HTTPS</strong> 地址；拒绝 HTTP、回环、内网、云元数据地址</td></tr><tr><td><code>fileName</code></td><td>否</td><td>≤512，扩展名 <code>mp4</code> / <code>mov</code> / <code>webm</code>，缺省从 URL 推断或 <code>video.mp4</code></td></tr><tr><td><code>contentType</code></td><td>否</td><td>≤128</td></tr><tr><td><code>coverTimestampMs</code></td><td>否</td><td>封面时间点，毫秒</td></tr><tr><td><code>title</code></td><td>否</td><td>≤512</td></tr><tr><td><code>caption</code></td><td>否</td><td>≤2200</td></tr><tr><td><code>postMode</code></td><td>否</td><td><code>DIRECT_POST</code>（默认）/ <code>UPLOAD_TO_INBOX</code></td></tr><tr><td><code>privacyLevel</code></td><td>否</td><td>≤64，默认 <code>PUBLIC_TO_EVERYONE</code></td></tr><tr><td><code>allowComment</code> / <code>allowDuet</code> / <code>allowStitch</code></td><td>否</td><td>默认 <code>true</code> / <code>false</code> / <code>false</code></td></tr><tr><td><code>commercialContent</code> / <code>brandContent</code></td><td>否</td><td>默认 <code>false</code></td></tr><tr><td><code>aigcContent</code></td><td>否</td><td>默认 <code>true</code></td></tr><tr><td><code>externalRequestId</code></td><td>否</td><td>≤128，调用方业务单号</td></tr><tr><td><code>scheduledAt</code> / <code>regionCode</code></td><td>否</td><td>定时发布，见第 7 节</td></tr></tbody></table></div>
+<p>一次调用完成「创建媒体 + 准备媒体 + 创建发布任务」，仍为<strong>异步</strong>：接口立即返回 <code>taskId</code>。</p>
+<h3 id="sec-50">6.2 创建发布任务</h3>
+<pre class="code" data-lang="http"><code>POST /tasks
+Idempotency-Key: publish_order_001</code></pre>
+<pre class="code" data-lang="json"><code>{
+  "connectionIds": ["conn_example"],
+  "mediaId": "media_example",
+  "title": "视频标题",
+  "caption": "视频文案",
+  "postMode": "DIRECT_POST",
+  "privacyLevel": "PUBLIC_TO_EVERYONE",
+  "allowComment": true,
+  "allowDuet": false,
+  "allowStitch": false,
+  "commercialContent": false,
+  "brandContent": false,
+  "aigcContent": true,
+  "externalRequestId": "business_order_001",
+  "scheduledAt": "2026-09-26T18:00:00+08:00",
+  "regionCode": "CN"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>字段</th><th>必填</th><th>限制</th></tr></thead><tbody><tr><td><code>connectionIds</code></td><td>是</td><td>1–20 个已授权连接；<strong>定时发布只允许 1 个</strong></td></tr><tr><td><code>mediaId</code></td><td>是</td><td>状态必须为 <code>READY</code></td></tr><tr><td><code>postMode</code></td><td>是</td><td><code>DIRECT_POST</code> / <code>UPLOAD_TO_INBOX</code></td></tr><tr><td><code>privacyLevel</code></td><td>是</td><td>非空</td></tr><tr><td><code>title</code> / <code>caption</code></td><td>否</td><td>≤512 / ≤2200</td></tr><tr><td>其余开关字段</td><td>否</td><td>同 6.1</td></tr><tr><td><code>scheduledAt</code> / <code>regionCode</code></td><td>否</td><td>≤64 / ≤16，见第 7 节</td></tr></tbody></table></div>
+<p><code>data</code> 为 <code>TaskResp</code>：<code>taskId</code>、<code>mediaId</code>、<code>externalRequestId</code>、<code>status</code>、<code>accountCount</code>、<code>successCount</code>、<code>failedCount</code>、<code>pendingCount</code>、<code>failReason</code>、<code>scheduledAt</code>、<code>regionCode</code>、<code>regionName</code>、<code>scheduleTimezone</code>、<code>scheduleUtcTime</code>、<code>scheduleBeijingTime</code>、<code>scheduleEpochMillis</code>、<code>scheduleUtcOffset</code>、<code>scheduleStatus</code>、<code>canReschedule</code>、<code>canCancel</code>、<code>createTime</code>、<code>updateTime</code>。</p>
+<h3 id="sec-51">6.3 查询任务</h3>
+<pre class="code" data-lang="http"><code>GET /tasks/{taskId}</code></pre>
+<p><code>data</code> 同 <code>TaskResp</code>。</p>
+<div class="table-wrap"><table><thead><tr><th><code>status</code></th><th>含义</th></tr></thead><tbody><tr><td><code>PENDING</code></td><td>已创建，等待处理</td></tr><tr><td><code>PROCESSING</code></td><td>至少一个明细处理中</td></tr><tr><td><code>SUCCESS</code></td><td>全部成功</td></tr><tr><td><code>FAILED</code></td><td>全部失败</td></tr><tr><td><code>PARTIAL_SUCCESS</code></td><td>部分成功</td></tr><tr><td><code>CANCELLED</code></td><td>已取消（配合 <code>scheduleStatus</code> / <code>canCancel</code> 判断）</td></tr></tbody></table></div>
+<h3 id="sec-52">6.4 查询发布明细</h3>
+<pre class="code" data-lang="http"><code>GET /tasks/{taskId}/details</code></pre>
+<p><code>data</code> 为数组，元素：<code>phase</code>、<code>uploadSource</code>、<code>lastError</code>、<code>nextReconcileTime</code>、<code>callbackStatus</code>、<code>callbackHttpStatus</code>、<code>detailId</code>、<code>taskId</code>、<code>connectionId</code>、<code>accountName</code>、<code>status</code>、<code>tiktokStatus</code>、<code>publishId</code>、<code>publishUrl</code>、<code>failReason</code>、<code>retryCount</code>、<code>updateTime</code>。</p>
+<p>业务判断以明细 <code>status</code> 与任务汇总 <code>status</code> 为准；<code>tiktokStatus</code> 仅作补充；<code>publishUrl</code> 可能为空，不能把 <code>publishId</code> 当作公开视频地址。</p>
+<h3 id="sec-53">6.5 改期定时发布</h3>
+<pre class="code" data-lang="http"><code>POST /tasks/{taskId}/reschedule
+Idempotency-Key: reschedule_order_001</code></pre>
+<pre class="code" data-lang="json"><code>{ "scheduledAt": "2026-09-27T20:00:00+08:00", "regionCode": "CN" }</code></pre>
+<p>仅未开始执行的定时任务可改期，否则 <code>SCHEDULE_NOT_MUTABLE</code> / <code>SCHEDULE_ALREADY_RUNNING</code>。返回 <code>TaskResp</code>。</p>
+<h3 id="sec-54">6.6 取消发布任务</h3>
+<pre class="code" data-lang="http"><code>POST /tasks/{taskId}/cancel</code></pre>
+<p>任务已发起远程执行时返回 <code>PUBLISH_ALREADY_RUNNING</code>。取消会触发 <code>publish.cancelled</code> 回调。返回 <code>TaskResp</code>。</p>
+<h3 id="sec-55">6.7 查询视频指标</h3>
+<pre class="code" data-lang="http"><code>GET /tasks/{taskId}/metrics</code></pre>
+<p>只需提交 <code>taskId</code>，平台按 <code>clientId + taskId</code> 查找明细并调用 TikTok <code>video.query</code>。<code>data</code>：<code>taskId</code>、<code>detailId</code>、<code>connectionId</code>、<code>publishId</code>、<code>publicPostId</code>、<code>publishUrl</code>、<code>metricsStatus</code>、<code>viewCount</code>、<code>likeCount</code>、<code>commentCount</code>、<code>shareCount</code>、<code>metricsLastSyncTime</code>、<code>metricsFailReason</code>。</p>
+<div class="table-wrap"><table><thead><tr><th><code>metricsStatus</code></th><th>处理</th></tr></thead><tbody><tr><td><code>WAITING_PUBLISH</code> / <code>WAITING_PUBLIC</code> / <code>SYNCING</code></td><td>延迟后重试</td></tr><tr><td><code>AVAILABLE</code></td><td>读取四项计数</td></tr><tr><td><code>REAUTH_REQUIRED</code></td><td>引导用户重新授权同一 <code>externalAccountId</code></td></tr><tr><td><code>UNAVAILABLE</code></td><td>视频暂不可查询（如草稿箱）</td></tr><tr><td><code>FAILED</code></td><td>记录 <code>metricsFailReason</code>，人工处理</td></tr></tbody></table></div>
+<ul><li>只返回播放、点赞、评论、分享四项，<strong>不返回收藏数</strong>；</li><li>计数为 <code>null</code> 表示暂不可用，<strong>不能当作 0 入账</strong>；</li><li>一个 <code>taskId</code> 只支持一个发布明细，多账号任务返回 <code>PUBLISH_METRICS_MULTI_DETAIL_UNSUPPORTED</code>；</li><li>建议任务 <code>SUCCESS</code> 后首次调用，之后每 5–15 分钟查询一次，不要高频轮询。</li></ul>
+<h3 id="sec-56">6.8 批量查询视频指标</h3>
+<pre class="code" data-lang="http"><code>POST /tasks/metrics/batch</code></pre>
+<pre class="code" data-lang="json"><code>{ "taskIds": ["task_1", "task_2"] }</code></pre>
+<p><code>taskIds</code> 为 1–50 个，否则 <code>PUBLISH_METRICS_BATCH_INVALID</code>。响应 <code>data</code>：<code>requestedCount</code>、<code>resultCount</code>、<code>items</code>（每项结构同 6.7）。</p>
+<h3 id="sec-57">6.9 重试失败明细</h3>
+<pre class="code" data-lang="http"><code>POST /details/{detailId}/retry</code></pre>
+<p>仅 <code>FAILED</code> 明细可重试。重试后状态回到 <code>PENDING</code>、<code>tiktokStatus=RETRY_PENDING</code>、清空旧 <code>publishId</code> 与 <code>failReason</code>、<code>retryCount + 1</code>。已有 TikTok publishId 的明细返回 <code>PUBLISH_RETRY_PUBLISH_ID_EXISTS</code>。返回 <code>data: true</code>。</p>
+<hr>
+<h2 id="sec-58">7. 定时发布规则</h2>
+<p>在创建任务或改期时传 <code>scheduledAt</code> + <code>regionCode</code> 即进入定时发布。</p>
+<div class="table-wrap"><table><thead><tr><th>约束</th><th>规则</th></tr></thead><tbody><tr><td>任务类型</td><td>仅 <code>DIRECT_POST</code>（<code>SCHEDULE_MODE_UNSUPPORTED</code>）</td></tr><tr><td>账号数量</td><td>恰好 1 个（<code>SCHEDULE_ACCOUNT_COUNT_INVALID</code>）</td></tr><tr><td>媒体</td><td>必须已 <code>READY</code>（<code>MEDIA_NOT_READY</code>）</td></tr><tr><td>时间格式</td><td>ISO-8601。可带偏移（<code>2026-09-26T18:00:00+08:00</code>，偏移必须与所选地区一致），或不带偏移（<code>2026-09-26T18:00:00</code>，按地区本地时间解释）</td></tr><tr><td>默认地区</td><td><code>CN</code>（<code>Asia/Shanghai</code>）</td></tr></tbody></table></div>
+<p>支持的 <code>regionCode</code>（大小写不敏感，不支持返回 <code>SCHEDULE_REGION_INVALID</code>）：</p>
+<div class="table-wrap"><table><thead><tr><th>代码</th><th>地区 / 时区</th><th>代码</th><th>地区 / 时区</th></tr></thead><tbody><tr><td><code>CN</code></td><td>中国区 <code>Asia/Shanghai</code></td><td><code>JP</code></td><td>日本区 <code>Asia/Tokyo</code></td></tr><tr><td><code>US</code></td><td>美区 <code>America/Los_Angeles</code></td><td><code>KR</code></td><td>韩国区 <code>Asia/Seoul</code></td></tr><tr><td><code>DE</code></td><td>德区 <code>Europe/Berlin</code></td><td><code>SG</code></td><td>新加坡区 <code>Asia/Singapore</code></td></tr><tr><td><code>UK</code></td><td>英国区 <code>Europe/London</code></td><td><code>AE</code></td><td>阿联酋区 <code>Asia/Dubai</code></td></tr><tr><td><code>FR</code></td><td>法国区 <code>Europe/Paris</code></td><td><code>AU</code></td><td>澳洲区 <code>Australia/Sydney</code></td></tr><tr><td><code>CA</code></td><td>加拿大区 <code>America/Toronto</code></td><td><code>NZ</code></td><td>新西兰区 <code>Pacific/Auckland</code></td></tr><tr><td><code>BR</code></td><td>巴西区 <code>America/Sao_Paulo</code></td><td></td><td></td></tr></tbody></table></div>
+<p><code>TaskResp</code> 会同时返回本地时间、UTC 时间、北京时间、epoch 毫秒与 UTC 偏移，便于调用方核对。<code>canReschedule</code> / <code>canCancel</code> 表示当前是否允许改期/取消。</p>
+<hr>
+<h2 id="sec-59">8. 状态回调</h2>
+<h3 id="sec-60">8.1 事件类型</h3>
+<div class="table-wrap"><table><thead><tr><th>事件</th><th>触发</th></tr></thead><tbody><tr><td><code>authorization.completed</code></td><td>授权成功</td></tr><tr><td><code>authorization.failed</code></td><td>授权失败</td></tr><tr><td><code>publish.processing</code></td><td>发布处理中</td></tr><tr><td><code>publish.success</code></td><td>单账号发布成功</td></tr><tr><td><code>publish.failed</code></td><td>单账号发布失败</td></tr><tr><td><code>publish.cancelled</code></td><td>任务取消</td></tr></tbody></table></div>
+<p>每个客户端可分别配置授权回调地址与发布回调地址，必须为 HTTPS 并通过服务端 URL 安全校验。回调是<strong>可选能力</strong>：不配置时轮询授权会话、连接列表、任务与明细即可完成全流程。</p>
+<h3 id="sec-61">8.2 回调签名</h3>
+<pre class="code" data-lang="http"><code>Content-Type: application/json
+X-TK-Event-Id: evt_example
+X-TK-Timestamp: 1798761600
+X-TK-Signature: &lt;Base64 HMAC-SHA256&gt;</code></pre>
+<p>签名原文为 <strong>3 行</strong>，行间单个 LF，末尾无换行：</p>
+<pre class="code" data-lang="text"><code>EVENT_ID
+TIMESTAMP
+SHA256_HEX(BODY)</code></pre>
+<pre class="code" data-lang="text"><code>signature = Base64( HMAC-SHA256(callbackSecret, canonicalString) )</code></pre>
+<p>调用方必须用<strong>收到的原始请求体字节</strong>计算摘要，并自行校验时间戳窗口（建议 ≤300 秒）、<code>eventId</code> 幂等、请求头与 JSON 中 <code>eventId</code> / <code>eventType</code> 一致。</p>
+<h3 id="sec-62">8.3 事件体示例</h3>
+<pre class="code" data-lang="json"><code>{
+  "eventId": "evt_publish_example",
+  "eventType": "publish.success",
+  "taskId": "task_example",
+  "detailId": "detail_example",
+  "connectionId": "conn_example",
+  "externalRequestId": "business_order_001",
+  "status": "SUCCESS",
+  "publishId": "publish_example",
+  "publishUrl": null,
+  "failReason": null,
+  "occurredAt": "2026-09-01T17:35:00+08:00"
+}</code></pre>
+<p>授权事件另含 <code>authSessionId</code>、<code>externalAccountId</code>、<code>accountName</code>、<code>clientState</code>、<code>status</code>、<code>failReason</code>。失败事件 <code>connectionId</code> 为 <code>null</code>，不可保存为有效连接。</p>
+<h3 id="sec-63">8.4 投递策略</h3>
+<div class="table-wrap"><table><thead><tr><th>项目</th><th>当前实现</th></tr></thead><tbody><tr><td>单次超时</td><td>10 秒</td></tr><tr><td>成功条件</td><td>HTTP 2xx</td></tr><tr><td>最大投递</td><td>8 次（含首次）</td></tr><tr><td>重试间隔</td><td>1、5、15、30、60、180、360 分钟</td></tr><tr><td>最终失败</td><td>事件状态 <code>FAILED</code>，可在后台 <code>operations/event/replay</code> 重放</td></tr></tbody></table></div>
+<p>回调为<strong>至少一次</strong>语义，同一 <code>eventId</code> 可能投递多次。接收方应：校验签名 → <code>eventId</code> 幂等落库 → 快速返回 2xx → 耗时处理放入自己的异步队列 → 用查询接口作为回调丢失的补偿。</p>
+<hr>
+<h2 id="sec-64">9. 免登录工具接口</h2>
+<blockquote>本节接口返回 <code>CommonResult</code>（同样为 <code>code</code> / <code>msg</code> / <code>data</code>），不需要任何鉴权头。除特别说明外路径均带 <code>/admin-api</code> 前缀。</blockquote>
+<h3 id="sec-65">9.1 图片转文字（OCR）</h3>
+<pre class="code" data-lang="http"><code>POST /admin-api/tk/open/v1/ocr/image-to-text
+Content-Type: multipart/form-data</code></pre>
+<div class="table-wrap"><table><thead><tr><th>项目</th><th>规则</th></tr></thead><tbody><tr><td>文件字段</td><td><code>file</code>（固定）</td></tr><tr><td>数量</td><td>单张</td></tr><tr><td>大小</td><td>≤20 MB</td></tr><tr><td>格式</td><td>JPG / JPEG / PNG / WEBP</td></tr></tbody></table></div>
+<pre class="code" data-lang="bash"><code>curl -X POST "https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/ocr/image-to-text" \
+  -F "file=@/path/to/image.png"</code></pre>
+<pre class="code" data-lang="json"><code>{ "code": 0, "msg": "", "data": { "text": "识别出的文字" } }</code></pre>
+<p>常见失败：<code>400</code> 图片为空 / 格式不支持 / 超过 20MB；<code>106000052</code> 模型服务暂不可用。业务逻辑不落盘图片与历史结果，图片仅在本次请求中发送给视觉模型服务。</p>
+<h3 id="sec-66">9.2 文案改写</h3>
+<pre class="code" data-lang="http"><code>POST /admin-api/tk/open/copywriting/rewrite</code></pre>
+<pre class="code" data-lang="json"><code>{ "copywriting": "原始文案", "prompt": "改成更口语化的短视频口播" }</code></pre>
+<div class="table-wrap"><table><thead><tr><th>字段</th><th>必填</th><th>限制</th></tr></thead><tbody><tr><td><code>copywriting</code></td><td>是</td><td>≤20000 字符</td></tr><tr><td><code>prompt</code></td><td>是</td><td>≤4000 字符</td></tr></tbody></table></div>
+<pre class="code" data-lang="json"><code>{ "code": 0, "msg": "", "data": { "copywriting": "改写后的文案" } }</code></pre>
+<h3 id="sec-67">9.3 对标视频下载 / 解析</h3>
+<pre class="code" data-lang="http"><code>POST /admin-api/tk/open/video/download</code></pre>
+<pre class="code" data-lang="json"><code>{ "sourceUrl": "https://...", "libraryId": 123 }</code></pre>
+<p><code>sourceUrl</code> 必填、≤2048、必须以 <code>http://</code> 或 <code>https://</code> 开头；<code>libraryId</code> 可选。响应 <code>data</code>：<code>sourceUrl</code>、<code>resolvedVideoUrl</code>、<code>coverUrl</code>、<code>videoDuration</code>、<code>resolution</code>。</p>
+<h3 id="sec-68">9.4 视频文案时间轴提取</h3>
+<div class="table-wrap"><table><thead><tr><th>方法</th><th>路径</th><th>鉴权</th></tr></thead><tbody><tr><td>POST</td><td><code>/admin-api/tk/open/video/transcript/extract</code></td><td>免登录，创建异步任务</td></tr><tr><td>GET</td><td><code>/admin-api/tk/open/video/transcript/extract/{taskId}</code></td><td>免登录，查询任务</td></tr><tr><td>POST</td><td><code>/admin-api/tk/open/video/transcript/extract-sync</code></td><td><strong>需后台权限</strong> <code>tk:reference:analyze</code>，同步等待结果</td></tr></tbody></table></div>
+<p>创建请求体：<code>sourceUrl</code>（必填，≤2048，<code>http(s)://</code> 开头）、<code>targetLanguage</code>（可选）。<code>taskId</code> 为 <code>Long</code> 数字类型。</p>
+<h3 id="sec-69">9.5 TikTok Webhook（平台侧）</h3>
+<pre class="code" data-lang="http"><code>POST /tk/tiktok/webhook
+TikTok-Signature: ...</code></pre>
+<p>由 TikTok 官方回调，平台校验签名后处理发布状态。调用方不要主动调用；该路径无 <code>/admin-api</code> 前缀，生产可达性需单独确认 Nginx 配置。</p>
+<hr>
+<h2 id="sec-70">10. 后台管理 API 索引（需登录）</h2>
+<blockquote>以下均为 <code>/admin-api/**</code>，需 <code>Authorization: Bearer &lt;accessToken&gt;</code> + <code>tenant-id</code> + 对应 <code>@PreAuthorize</code> 菜单权限，并受 API 加密影响。<strong>不属于对外交付接口</strong>，此处仅作内部集成与能力盘点索引。字段级契约请以 Swagger / 源码 VO 为准。</blockquote>
+<div class="table-wrap"><table><thead><tr><th>模块</th><th>类级路径</th><th>主要端点</th></tr></thead><tbody><tr><td>登录与权限</td><td><code>/admin-api/system/auth</code></td><td><code>POST /login</code>、<code>/logout</code>、<code>/refresh-token</code>、<code>GET /get-permission-info</code></td></tr><tr><td>租户</td><td><code>/admin-api/system/tenant</code></td><td><code>GET /get-id-by-name?name=</code></td></tr><tr><td>混剪生成任务</td><td><code>/admin-api/tk/generation</code></td><td><code>POST /precheck</code>、<code>/create</code>、<code>/create-batch</code>、<code>/create-with-opening</code>、<code>/translate-script</code>、<code>/audio-export</code>、<code>/voice-preview</code>、<code>/retry</code>、<code>/opening/session/*</code>、<code>/opening/chunk</code>、<code>GET /page</code>、<code>/page-summary</code>、<code>/status-batch</code>、<code>/get</code></td></tr><tr><td>生成批次</td><td><code>/admin-api/tk/generation-batch</code></td><td><code>GET /page</code>、<code>/get</code>、<code>POST /retry-failed</code></td></tr><tr><td>生成路由</td><td><code>/admin-api/tk/generation-route</code></td><td><code>GET /page</code>、<code>/get</code>、<code>/history/page</code>、<code>/statistics</code>、<code>PUT /update</code></td></tr><tr><td>素材视频</td><td><code>/admin-api/tk/material-video</code></td><td><code>POST /upload</code>、<code>PUT /usage-phase</code>、<code>PUT /segment-type</code>、<code>GET /get</code>、<code>/page</code>、<code>/segment-summary</code>、<code>DELETE /delete</code>、<code>/delete-batch</code></td></tr><tr><td>素材库</td><td><code>/admin-api/tk/material-library</code></td><td><code>POST /create</code>、<code>PUT /update</code>、<code>GET /get</code>、<code>/page</code>、<code>DELETE /delete</code></td></tr><tr><td>素材分片上传</td><td><code>/admin-api/tk/upload</code></td><td><code>POST /material-video/session/create</code>、<code>/chunk</code>、<code>/session/complete</code>、<code>GET /material-video/session/{uploadId}</code>、<code>DELETE /material-video/session/{uploadId}</code></td></tr><tr><td>参考分析</td><td><code>/admin-api/tk/reference</code></td><td><code>POST /analyze</code>、<code>/video/download</code>、<code>/{id}/script-options/regenerate</code>、<code>GET /latest</code>、<code>/{id}</code>、<code>/page</code>、<code>/status-batch</code></td></tr><tr><td>配音 / 音色</td><td><code>/admin-api/tk/voice-profile</code></td><td><code>POST /create</code>、<code>/mimo-design</code>、<code>/mimo-clone</code>、<code>/retry</code>、<code>GET /list</code>、<code>PUT /enabled</code>、<code>/enabled-batch</code>、<code>/tags</code>、<code>DELETE /delete</code>、<code>/delete-batch</code></td></tr><tr><td>音色选项 / 收藏</td><td><code>/admin-api/tk/voice/minimax</code>、<code>/admin-api/tk/voice/favorite</code></td><td><code>GET /options</code>、<code>POST /favorite</code>、<code>DELETE /favorite</code>；收藏为类级路径上的 <code>GET/POST/DELETE</code></td></tr><tr><td>BGM</td><td><code>/admin-api/tk/bgm</code></td><td><code>GET /list</code>、<code>/system-list</code>、<code>/reference-count</code>、<code>/references</code>、<code>POST /upload</code>、<code>DELETE /delete</code></td></tr><tr><td>受众音频预设</td><td><code>/admin-api/tk/audio-audience-preset</code></td><td><code>GET /list</code>、<code>/get</code>、<code>POST /save</code>、<code>DELETE /reset</code></td></tr><tr><td>TikTok 发布（后台）</td><td><code>/admin-api/tk/tiktok-publish</code></td><td>媒体会话全套、<code>POST /create</code>、<code>/reschedule</code>、<code>/cancel</code>、<code>/retry</code>、<code>/link/sync</code>、<code>/publish-url/register</code>、<code>/status/sync</code>、<code>GET /task-page</code>、<code>/detail-page</code>、<code>/post-page</code></td></tr><tr><td>TikTok 账号/授权/统计</td><td><code>/admin-api/tk/tiktok-account</code>、<code>/tk/tiktok-auth</code>、<code>/tk/tiktok-account-stats</code>、<code>/tk/tiktok-account-group</code>、<code>/tk/tiktok-content-display</code>、<code>/tk/video-publish-center</code>、<code>/tk/open-tiktok-publish/queue</code></td><td>分页、绑定/解绑、二维码授权、统计同步、发布队列</td></tr><tr><td>TikTok Shop</td><td><code>/admin-api/tk/tiktok-shop</code>、<code>/tk/tiktok-shop/media</code></td><td>能力查询、授权会话、商品、发布任务与确认、媒体会话</td></tr><tr><td>Facebook / Instagram</td><td><code>/admin-api/tk/social-auth</code>、<code>/tk/social-account</code>、<code>/tk/social-publish</code>、<code>/tk/social-account/stats</code></td><td>授权回调、账号、发布任务、指标同步</td></tr><tr><td>公司 / 积分 / 看板</td><td><code>/admin-api/tk/company</code>、<code>/tk/credit</code>、<code>/tk/dashboard</code>、<code>/tk/business-log</code></td><td>公司 CRUD、余额与充值、8 个看板接口、业务日志（需 <code>super_admin</code>）</td></tr><tr><td>开放平台管理</td><td><code>/admin-api/tk/open-api/client</code>、<code>/tk/open-api/operations</code></td><td>见 2.5</td></tr></tbody></table></div>
+<hr>
+<h2 id="sec-71">11. 能力缺口与 API 化建议（规划中，尚未实现）</h2>
+<h3 id="sec-72">11.1 现状差距</h3>
+<p>外部调用方目前只能「上传/指定一个视频并发布到 TikTok」，<strong>无法通过开放 API 使用本平台最核心的自动混剪能力</strong>：创建混剪任务、查询生成进度、下载成片、管理素材库、选择配音与 BGM。这些能力全部位于第 10 节的后台 API 之下，绑定后台账号、租户、菜单权限和 AES 加密。</p>
+<p>如果业务目标是「客户通过 API 完成：上传素材 → 生成混剪视频 → 拿成片 → 一键发布」，当前链路是<strong>断开的</strong>：调用方只能自己先生成好视频，再用 <code>quick-tasks</code> 交给平台发布。</p>
+<h3 id="sec-73">11.2 建议补齐的开放 API（设计草案）</h3>
+<p>沿用现有 HMAC 签名、幂等键、回调与 <code>clientId</code> 隔离模型，建议新增 <code>/admin-api/tk/open/v1/generation</code> 接口族：</p>
+<div class="table-wrap"><table><thead><tr><th>方法</th><th>建议路径</th><th>用途</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/materials/uploads</code></td><td>创建素材上传会话（复用 <code>media</code> 的 OSS / LOCAL 双模式）</td></tr><tr><td><code>POST</code></td><td><code>/materials/uploads/{id}/complete</code></td><td>完成上传，返回 <code>materialId</code></td></tr><tr><td><code>GET</code></td><td><code>/materials</code></td><td>查询当前客户端素材列表与状态</td></tr><tr><td><code>DELETE</code></td><td><code>/materials/{materialId}</code></td><td>删除素材</td></tr><tr><td><code>POST</code></td><td><code>/tasks</code></td><td>创建混剪任务（脚本、素材、音色、BGM、时长、目标语言、片头等）</td></tr><tr><td><code>GET</code></td><td><code>/tasks/{generationId}</code></td><td>查询任务状态、进度、失败原因</td></tr><tr><td><code>GET</code></td><td><code>/tasks/{generationId}/result</code></td><td>获取成片下载地址（建议短期签名 URL + 过期时间）</td></tr><tr><td><code>POST</code></td><td><code>/tasks/{generationId}/retry</code></td><td>重试失败任务</td></tr><tr><td><code>POST</code></td><td><code>/tasks/{generationId}/cancel</code></td><td>取消排队中任务</td></tr><tr><td><code>GET</code></td><td><code>/options</code></td><td>可用音色、BGM、受众预设、目标语言等枚举</td></tr><tr><td><code>POST</code></td><td><code>/tasks/{generationId}/publish</code></td><td>成片直接转为发布任务，打通第 6 节</td></tr></tbody></table></div>
+<p>配套要求：</p>
+<ul><li>新增模块权限 <code>generation</code>，并在 <code>TkOpenApiAuthenticationService</code> 的 URI→权限映射中注册；</li><li>生成任务与素材按 <code>clientId</code> 隔离，编号使用 opaque ID，不暴露数据库主键；</li><li>复用 <code>Idempotency-Key</code>（创建生成任务）和回调事件（<code>generation.processing</code> / <code>generation.success</code> / <code>generation.failed</code>）；</li><li>成片下载 URL 必须是带过期时间的签名地址，不能返回永久公开链接；</li><li>积分/配额按 <code>clientId</code> 计量，避免跨租户扣费；</li><li>生成是长耗时任务，务必异步 + 轮询 + 回调，不要设计为同步等待。</li></ul>
+<blockquote>本节为<strong>建议</strong>，不是已实现契约。落地前需单独做技术方案、数据库隔离与灰度验证。</blockquote>
+<hr>
+<h2 id="sec-74">12. 端到端调用示例</h2>
+<h3 id="sec-75">12.1 最简流程（推荐，视频已有公网 HTTPS 地址）</h3>
+<pre class="code" data-lang="text"><code>1. 服务端  POST /auth/sessions                authMode=AUTO
+2. 浏览器  打开 data.launchUrl                 用户完成 TikTok 授权（无需签名）
+3. 服务端  GET  /auth/sessions/{id}           轮询至 status=SUCCESS，保存 connectionId
+4. 服务端  POST /publish/quick-tasks          传 externalAccountId + videoUrl + Idempotency-Key
+5. 服务端  GET  /publish/tasks/{taskId}       轮询至终态
+           GET  /publish/tasks/{taskId}/details  逐账号结果
+6. 服务端  GET  /publish/tasks/{taskId}/metrics  发布成功后取四项指标</code></pre>
+<p>该流程<strong>不需要</strong>实现二维码、OAuth 回调、OSS 表单、LOCAL 分片，也不需要配置回调地址。</p>
+<h3 id="sec-76">12.2 完整上传流程（视频在调用方本地）</h3>
+<pre class="code" data-lang="text"><code>1. POST /auth/sessions (AUTO) -&gt; launchUrl -&gt; 轮询得 connectionId
+2. 计算视频 fileSize 与完整 sha256
+3. POST /media/uploads -&gt; 得到 uploadMode
+   OSS   : 按 fields 向 uploadUrl 提交 multipart/form-data
+   LOCAL : 按 chunkSize 逐片 PUT /media/uploads/{id}/chunks/{i}（每片独立签名）
+4. POST /media/uploads/{id}/complete -&gt; status=READY，保存 mediaId
+5. POST /publish/tasks（Idempotency-Key、connectionIds、mediaId、发布参数）
+6. 轮询 GET /publish/tasks/{taskId} 与 /details
+7. FAILED 明细可 POST /publish/details/{detailId}/retry
+8. 可选：配置回调接收 publish.* 事件，并以查询接口兜底</code></pre>
+<h3 id="sec-77">12.3 curl 示例（占位值需替换）</h3>
+<pre class="code" data-lang="bash"><code># 空请求体 SHA-256 固定值
+BODY_HASH="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+TS=$(date +%s)
+NONCE=$(openssl rand -hex 16)
+TARGET="/admin-api/tk/open/v1/tiktok/connections?externalAccountId=account_10001"
+CANON=$(printf 'GET\n%s\n%s\n%s\n%s' "$TARGET" "$TS" "$NONCE" "$BODY_HASH")
+SIG=$(printf '%s' "$CANON" | openssl dgst -sha256 -hmac "$TK_OPEN_API_CLIENT_SECRET" -binary | base64)
+
+curl -s "https://tkassetplant.fnn.net.cn${TARGET}" \
+  -H "X-TK-Client-Id: $TK_OPEN_API_CLIENT_ID" \
+  -H "X-TK-Timestamp: $TS" \
+  -H "X-TK-Nonce: $NONCE" \
+  -H "X-TK-Request-Id: req_$(date +%s)" \
+  -H "X-TK-Signature: $SIG"</code></pre>
+<blockquote>shell 中 <code>printf '%s'</code> 不会补尾部换行，符合 canonical「末尾无换行」要求。带 JSON 体时把 <code>$BODY_HASH</code> 换成实际 body 文件的 <code>sha256sum</code> 结果，且请求必须发送<strong>同一份字节</strong>。</blockquote>
+<hr>
+<h2 id="sec-78">13. 接入检查清单与排错</h2>
+<h3 id="sec-79">13.1 上线前检查</h3>
+<ul><li>&lt;span class="checkbox"&gt;☐&lt;/span&gt; 已获得独立 <code>clientId</code> / <code>clientSecret</code>，接收回调时另有 <code>callbackSecret</code></li><li>&lt;span class="checkbox"&gt;☐&lt;/span&gt; 密钥只保存在服务端环境变量或密钥管理系统</li><li>&lt;span class="checkbox"&gt;☐&lt;/span&gt; 后台已启用 <code>auth</code> / <code>media</code> / <code>publish</code> 权限、IP 白名单、限流与配额、客户端状态</li><li>&lt;span class="checkbox"&gt;☐&lt;/span&gt; 已实现 5 行 canonical string，末尾无换行，方法大写</li><li>&lt;span class="checkbox"&gt;☐&lt;/span&gt; 签名使用实际发送的 <code>REQUEST_TARGET</code>（含 <code>/admin-api</code> 与原始 query）和原始 body 字节</li><li>&lt;span class="checkbox"&gt;☐&lt;/span&gt; 服务器时钟同步，每次请求生成唯一 <code>nonce</code></li><li>&lt;span class="checkbox"&gt;☐&lt;/span&gt; 创建发布任务必带 <code>Idempotency-Key</code>，超时重试复用原 key</li><li>&lt;span class="checkbox"&gt;☐&lt;/span&gt; 已处理 401 / 403 / 409 / 413 / 429 / 503 与回调 <code>eventId</code> 幂等</li><li>&lt;span class="checkbox"&gt;☐&lt;/span&gt; 已确认目标环境 <code>/admin-api/</code> 基地址可达（不要使用无前缀兼容路径）</li><li>&lt;span class="checkbox"&gt;☐&lt;/span&gt; 已完成真实授权、实际启用的上传模式、发布、查询、回调全链路联调</li></ul>
+<h3 id="sec-80">13.2 <code>OPEN_API_SIGNATURE_INVALID</code> 排查顺序</h3>
+<ol><li><code>X-TK-Client-Id</code> 是否与当前 <code>clientSecret</code> 配对；</li><li><code>REQUEST_TARGET</code> 是否含 <code>/admin-api</code>、完整路径与原始查询串；</li><li>查询参数顺序、编码与实际 URL 是否一致；</li><li>JSON 是否用签名前生成的同一份 UTF-8 字节发送；</li><li>空请求体是否使用固定空串 SHA-256；</li><li>canonical 是否恰好 5 行、行间单个 LF、末尾无换行；</li><li>HMAC key 是否为 <code>clientSecret</code> 原文，结果是否标准 Base64。</li></ol>
+<p>排查时向平台提供 <code>X-TK-Request-Id</code> 即可，<strong>不要提交完整密钥或 Token</strong>。</p>
+<h3 id="sec-81">13.3 重试策略</h3>
+<ul><li>签名、参数、权限、资源编号错误：先修正再请求，不要盲目重试；</li><li>网络超时、502 / 503 / 429：有限退避重试；</li><li>发布创建超时：复用原 <code>Idempotency-Key</code>，换新 <code>timestamp</code> / <code>nonce</code>；</li><li>TikTok 已产生 publishId 但状态未定：不要重复创建发布任务，先查明细。</li></ul>
+<hr>
+<h2 id="sec-82">14. 附录</h2>
+<h3 id="sec-83">14.1 开放 API 端点总表（源码已实现，共 22 个）</h3>
+<div class="table-wrap"><table><thead><tr><th>模块</th><th>方法</th><th>路径（相对 <code>/admin-api/tk/open/v1/tiktok</code>）</th><th>签名</th></tr></thead><tbody><tr><td>授权</td><td>POST</td><td><code>/auth/sessions</code></td><td>是</td></tr><tr><td>授权</td><td>GET</td><td><code>/auth/sessions/{authSessionId}</code></td><td>是</td></tr><tr><td>授权</td><td>GET</td><td><code>/auth/sessions/{authSessionId}/launch</code></td><td>否（HTML）</td></tr><tr><td>授权</td><td>GET</td><td><code>/auth/sessions/{authSessionId}/launch/status</code></td><td>否</td></tr><tr><td>授权</td><td>GET</td><td><code>/auth/callback</code></td><td>否（TikTok 调用）</td></tr><tr><td>连接</td><td>GET</td><td><code>/connections</code></td><td>是</td></tr><tr><td>连接</td><td>POST</td><td><code>/connections/{connectionId}/profile/refresh</code></td><td>是</td></tr><tr><td>连接</td><td>POST</td><td><code>/connections/{connectionId}/disconnect</code></td><td>是</td></tr><tr><td>媒体</td><td>POST</td><td><code>/media/uploads</code></td><td>是</td></tr><tr><td>媒体</td><td>GET</td><td><code>/media/uploads/{uploadId}</code></td><td>是</td></tr><tr><td>媒体</td><td>PUT</td><td><code>/media/uploads/{uploadId}/chunks/{chunkIndex}</code></td><td>是</td></tr><tr><td>媒体</td><td>POST</td><td><code>/media/uploads/{uploadId}/complete</code></td><td>是</td></tr><tr><td>媒体</td><td>DELETE</td><td><code>/media/uploads/{uploadId}</code></td><td>是</td></tr><tr><td>发布</td><td>POST</td><td><code>/publish/tasks</code></td><td>是</td></tr><tr><td>发布</td><td>POST</td><td><code>/publish/quick-tasks</code></td><td>是</td></tr><tr><td>发布</td><td>GET</td><td><code>/publish/tasks/{taskId}</code></td><td>是</td></tr><tr><td>发布</td><td>POST</td><td><code>/publish/tasks/{taskId}/reschedule</code></td><td>是</td></tr><tr><td>发布</td><td>POST</td><td><code>/publish/tasks/{taskId}/cancel</code></td><td>是</td></tr><tr><td>发布</td><td>GET</td><td><code>/publish/tasks/{taskId}/details</code></td><td>是</td></tr><tr><td>发布</td><td>GET</td><td><code>/publish/tasks/{taskId}/metrics</code></td><td>是</td></tr><tr><td>发布</td><td>POST</td><td><code>/publish/tasks/metrics/batch</code></td><td>是</td></tr><tr><td>发布</td><td>POST</td><td><code>/publish/details/{detailId}/retry</code></td><td>是</td></tr></tbody></table></div>
+<blockquote>与既有 <code>docs/openapi/tiktok-open-api.json</code>（17 个 path、18 个 method+path 端点）相比，源码新增 4 个端点：<code>/connections/{id}/profile/refresh</code>、<code>/publish/tasks/{id}/reschedule</code>、<code>/publish/tasks/{id}/cancel</code>、<code>/publish/tasks/metrics/batch</code>；另新增 <code>publish.cancelled</code> 回调事件。<code>TaskResp</code> / <code>DetailResp</code> / <code>ConnectionResp</code> 也增加了定时发布与账号资料字段。本文与同目录 <code>tk-platform-openapi.json</code> 已补齐以上差异。</blockquote>
+<h3 id="sec-84">14.2 仓库内相关文档</h3>
+<div class="table-wrap"><table><thead><tr><th>文件</th><th>用途</th></tr></thead><tbody><tr><td><code>docs/tiktok-open-api.md</code></td><td>A 方内部接口说明 v1.2（TikTok 开放 API 主说明）</td></tr><tr><td><code>docs/openapi/tiktok-open-api-c-party-integration.md</code></td><td>C 方联调主文档 v1.4（含后台配置、验收清单）</td></tr><tr><td><code>docs/openapi/tiktok-open-api.json</code></td><td>原有 OpenAPI 3.0.3（17 端点）</td></tr><tr><td><code>docs/openapi/image-to-text-open-api.md</code></td><td>OCR 接口单独说明</td></tr><tr><td><code>docs/sdk/tiktok-open-api-{java,node,python}.md</code></td><td>三语言签名与调用示例</td></tr><tr><td><code>docs/api/tk-platform-api.md</code></td><td><strong>本文</strong>：全平台 API 参考</td></tr><tr><td><code>docs/api/tk-platform-openapi.json</code></td><td>机读版（22 开放端点 + 免登录工具接口）</td></tr><tr><td><code>docs/api/tk-platform-api.html</code></td><td>单页阅读版（离线可打开，支持目录筛选与深浅色切换）</td></tr><tr><td><code>docs/api/build_html.py</code></td><td>由本文重新生成 HTML 的构建脚本：<code>python docs/api/build_html.py</code></td></tr><tr><td><code>docs/api/tk-generation-api-fit-assessment.md</code></td><td>剪辑工具出片 9 项需求的 API 适配评估与对接清单（本文第 11 节的实测补充）</td></tr></tbody></table></div>
+<h3 id="sec-85">14.3 源码核对索引</h3>
+<div class="table-wrap"><table><thead><tr><th>内容</th><th>路径（相对 <code>yudao-module-tk/src/main/java/cn/iocoder/yudao/module/tk/</code>）</th></tr></thead><tbody><tr><td>开放 API 控制器</td><td><code>controller/open/tiktok/</code>、<code>controller/open/ocr/</code></td></tr><tr><td>请求 / 响应 VO</td><td><code>controller/open/tiktok/vo/</code>、<code>controller/open/ocr/vo/</code>、<code>controller/open/copywriting/vo/</code></td></tr><tr><td>HMAC 过滤器与签名</td><td><code>framework/openapi/TkOpenApiAuthenticationFilter.java</code>、<code>TkOpenApiSigner.java</code>、<code>TkOpenApiAuthenticationService.java</code>、<code>TkOpenApiRedisAccessGuard.java</code></td></tr><tr><td>统一响应</td><td><code>framework/openapi/TkOpenApiResponse.java</code></td></tr><tr><td>业务逻辑</td><td><code>service/open/tiktok/</code>、<code>service/open/api/TkOpenApiCallbackService.java</code>、<code>service/open/tiktok/TkOpenTiktokScheduleTimeService.java</code></td></tr><tr><td>错误码</td><td><code>framework/openapi/TkOpenApiException.java</code> 及各 Service 中的 <code>TkOpenApiException.*</code> 调用</td></tr><tr><td>后台控制器</td><td><code>controller/admin/**</code></td></tr><tr><td>Nginx 转发规则</td><td><code>deploy/nginx/tk-auto-mix.conf</code></td></tr></tbody></table></div></article></main>
+</div>
+<script>
+document.getElementById('theme').addEventListener('click', function () {
+  var h = document.documentElement;
+  h.setAttribute('data-theme', h.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+});
+var search = document.getElementById('search');
+var items = Array.prototype.slice.call(document.querySelectorAll('.toc-item'));
+search.addEventListener('input', function () {
+  var q = this.value.trim().toLowerCase();
+  items.forEach(function (a) {
+    a.classList.toggle('hidden', q !== '' && a.textContent.toLowerCase().indexOf(q) === -1);
+  });
+});
+document.addEventListener('keydown', function (e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); search.focus(); }
+});
+var links = Array.prototype.slice.call(document.querySelectorAll('.toc-item'));
+if ('IntersectionObserver' in window) {
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      links.forEach(function (a) { a.classList.toggle('active', a.dataset.id === en.target.id); });
+      var active = document.querySelector('.toc-item.active');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    });
+  }, { rootMargin: '-10% 0px -80% 0px' });
+  links.forEach(function (a) {
+    var t = document.getElementById(a.dataset.id);
+    if (t) obs.observe(t);
+  });
+}
+</script>
+</body>
+</html>

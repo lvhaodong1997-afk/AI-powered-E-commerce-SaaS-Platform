@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>出片能力 API 对接需求说明</title>
+<style>
+:root { --radius: 10px; }
+html[data-theme="dark"] {
+  --bg:#0f1420; --panel:#151c2b; --panel2:#1b2436; --text:#e6edf7; --muted:#93a3bd;
+  --border:#2a3650; --accent:#5ea8ff; --accent2:#7ee0c0; --code:#0b101a; --mark:#ffd166;
+}
+html[data-theme="light"] {
+  --bg:#f6f8fc; --panel:#ffffff; --panel2:#f0f4fa; --text:#1a2436; --muted:#5b6b84;
+  --border:#dce4f0; --accent:#1668d6; --accent2:#087f6a; --code:#f2f5fa; --mark:#fff0a8;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text);
+  font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.layout { display:flex; min-height:100vh; }
+.sidebar { width:290px; flex:0 0 290px; background:var(--panel); border-right:1px solid var(--border);
+  height:100vh; position:sticky; top:0; display:flex; flex-direction:column; }
+.brand { padding:20px 20px 14px; border-bottom:1px solid var(--border); }
+.brand b { display:block; font-size:16px; letter-spacing:.3px; }
+.brand span { color:var(--muted); font-size:12px; }
+.tools { padding:12px 14px; border-bottom:1px solid var(--border); display:flex; gap:8px; }
+#search { flex:1; min-width:0; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+  border-radius:8px; padding:7px 10px; font-size:13px; outline:none; }
+#search:focus { border-color:var(--accent); }
+#theme { background:var(--panel2); border:1px solid var(--border); color:var(--muted);
+  border-radius:8px; width:34px; cursor:pointer; font-size:14px; }
+.toc { overflow-y:auto; padding:10px 10px 40px; flex:1; }
+.toc-item { display:block; padding:5px 10px; border-radius:7px; color:var(--muted); font-size:13px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.toc-item:hover { background:var(--panel2); color:var(--text); text-decoration:none; }
+.toc-item.active { background:var(--panel2); color:var(--accent); font-weight:600; }
+.toc-item.lvl3 { padding-left:24px; font-size:12.5px; opacity:.88; }
+.toc-item.hidden { display:none; }
+.main { flex:1; min-width:0; }
+.content { max-width:960px; margin:0 auto; padding:36px 44px 120px; }
+h1 { font-size:30px; line-height:1.35; margin:0 0 24px; padding-bottom:18px; border-bottom:2px solid var(--accent); }
+h2 { font-size:22px; margin:52px 0 18px; padding-top:10px; border-top:1px solid var(--border); }
+h3 { font-size:18px; margin:32px 0 12px; color:var(--accent2); }
+h4 { font-size:15px; margin:24px 0 10px; }
+p { margin:12px 0; }
+hr { border:0; border-top:1px solid var(--border); margin:28px 0; }
+code { background:var(--panel2); border:1px solid var(--border); border-radius:5px;
+  padding:1px 5px; font-size:.88em; font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace; }
+pre.code { position:relative; background:var(--code); border:1px solid var(--border);
+  border-radius:var(--radius); padding:16px 18px; overflow-x:auto; margin:16px 0; }
+pre.code code { background:none; border:0; padding:0; font-size:13px; line-height:1.65; color:var(--text); }
+pre.code[data-lang]:not([data-lang=""])::before { content:attr(data-lang); position:absolute; top:8px; right:12px;
+  color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.6px; }
+.table-wrap { overflow-x:auto; margin:16px 0; border:1px solid var(--border); border-radius:var(--radius); }
+table { border-collapse:collapse; width:100%; font-size:13.5px; }
+th, td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--border); vertical-align:top; }
+th { background:var(--panel2); font-weight:600; white-space:nowrap; }
+tr:last-child td { border-bottom:0; }
+tbody tr:hover { background:var(--panel2); }
+blockquote { margin:16px 0; padding:10px 16px; background:var(--panel2);
+  border-left:3px solid var(--accent); border-radius:0 var(--radius) var(--radius) 0; color:var(--muted); }
+blockquote strong { color:var(--text); }
+ul, ol { padding-left:24px; margin:12px 0; }
+li { margin:5px 0; }
+.checkbox { color:var(--accent2); }
+@media (max-width: 900px) {
+  .sidebar { display:none; } .content { padding:24px 18px 80px; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><b>TK 自动混剪 SaaS</b><span>出片 API 对接需求说明 · 对外版 · 2026-11-11</span></div>
+    <div class="tools">
+      <input id="search" type="search" placeholder="筛选目录… (Ctrl+K)" autocomplete="off">
+      <button id="theme" title="切换深色 / 浅色">◐</button>
+    </div>
+    <nav class="toc" id="toc"><a class="toc-item lvl2" href="#sec-2" data-id="sec-2">1. 目标与范围</a><a class="toc-item lvl2" href="#sec-3" data-id="sec-3">2. 必需能力清单（按出片顺序）</a><a class="toc-item lvl2" href="#sec-4" data-id="sec-4">3. 生成任务必须一次传入的参数</a><a class="toc-item lvl2" href="#sec-5" data-id="sec-5">4. 技术要求（避免静默降级）</a><a class="toc-item lvl2" href="#sec-6" data-id="sec-6">5. 建议的接口清单</a><a class="toc-item lvl2" href="#sec-7" data-id="sec-7">6. 需要确认的问题</a><a class="toc-item lvl2" href="#sec-8" data-id="sec-8">7. 验收口径</a><a class="toc-item lvl2" href="#sec-9" data-id="sec-9">附录 A：工具侧选取规则（供理解调用逻辑，不要求接口实现）</a></nav>
+  </aside>
+  <main class="main"><article class="content" id="content"><h1 id="sec-1">出片能力 API 对接需求说明</h1>
+<blockquote>版本：1.0 · 日期：2026-11-11 用途：自动化出片工具接入本平台、实现「不点网页即可完整出片」所需的 API 能力清单 范围：<strong>千川上传与入计划不在本清单内</strong>（该部分已有现成接口）</blockquote>
+<hr>
+<h2 id="sec-2">1. 目标与范围</h2>
+<p>工具按实际出片顺序，依次调用 API 完成：鉴权 → 查积分 → 选素材库 → 选音色 → 选 BGM → 提交生成任务 → 查进度 → 下载成片。全流程不得依赖网页点击，所有失败必须可读、不得静默降级或静默失败。</p>
+<p>请确认以下能力由哪一层提供：<strong>现有开放 API</strong>、<strong>新增生成类开放接口</strong>，或其他方式；并据第 5 节给出接口清单与字段约定。</p>
+<hr>
+<h2 id="sec-3">2. 必需能力清单（按出片顺序）</h2>
+<div class="table-wrap"><table><thead><tr><th>#</th><th>环节</th><th>需求</th><th>期望返回 / 约束</th></tr></thead><tbody><tr><td>1</td><td>登录与账号</td><td>使用已有账号完成鉴权，并保持会话有效</td><td>Token、有效期、续期方式；会话过期可自动续期</td></tr><tr><td>2</td><td>查积分</td><td>返回当前可用积分；积分不足时明确报错</td><td>余额数值 + 独立错误码与所需积分数；<strong>不得静默失败</strong></td></tr><tr><td>3</td><td>查素材库</td><td>列出可用素材库，并能指定使用「芒果干」</td><td>至少返回库 ID、名称、标签、素材数量；可按名称检索</td></tr><tr><td>4</td><td>查配音音色</td><td>列出可用音色，便于按人群选择</td><td>至少返回音色标识、显示名、是否可用；需能过滤不可用项</td></tr><tr><td>5</td><td>查已上传 BGM</td><td>列出「我的上传」曲目，<strong>至少返回文件名</strong></td><td>曲目 ID、文件名、时长、可访问地址；只列本人/本租户上传</td></tr><tr><td>6</td><td>提交生成任务</td><td>一次调用传入第 3 节全部参数</td><td>返回任务号；参数被拒或不生效时必须报错或回显实际值</td></tr><tr><td>7</td><td>查询任务进度</td><td>返回任务号、当前步骤、是否完成或失败</td><td>状态、当前步骤、进度；失败时返回可读原因与错误码</td></tr><tr><td>8</td><td>下载成片</td><td>任务完成后给出可下载的成片文件或地址</td><td>带过期时间的下载地址 + 建议文件名；便于按约定命名保存</td></tr><tr><td>9（加分）</td><td>按标签抽画面</td><td>按场景、产地、口感等业务标签控制画面方向</td><td>若不支持，工具将从「芒果干」库自行全库随机混剪</td></tr></tbody></table></div>
+<hr>
+<h2 id="sec-4">3. 生成任务必须一次传入的参数</h2>
+<div class="table-wrap"><table><thead><tr><th>项目</th><th>要求</th></tr></thead><tbody><tr><td>完整口播正文</td><td>原文传入，平台不改写、不拼接人群画像或结构说明</td></tr><tr><td>翻译</td><td>关闭</td></tr><tr><td>目标地区</td><td>中国大陆，需<strong>独立字段</strong>并在任务详情回显，不能仅由语言推断</td></tr><tr><td>素材库</td><td>第 3 项查得的库 ID</td></tr><tr><td>配音音色</td><td>第 4 项选定的音色标识</td></tr><tr><td>BGM</td><td>第 5 项选定的曲目 ID</td></tr><tr><td>BGM 音量</td><td>约 40%，<strong>原样生效并在任务详情回显实际值</strong></td></tr><tr><td>智能字幕</td><td>开启；特大字号、标准白字黑边、智能避让、关键词高亮、逐字卡点</td></tr><tr><td>成片时长</td><td><strong>严格跟随完整口播结束即停</strong>；不强制 15／29／35 秒，口播短于设定值时也不补画面</td></tr><tr><td>画幅与帧率</td><td>竖屏 1080×1920、30 帧</td></tr></tbody></table></div>
+<hr>
+<h2 id="sec-5">4. 技术要求（避免静默降级）</h2>
+<ol><li><strong>积分不足</strong>：返回独立错误码与所需积分数，任务不创建，不得静默失败。</li><li><strong>BGM 音量</strong>：传入值必须原样生效；若发生钳制、降级或默认版本差异，必须在响应中回显实际生效值。</li><li><strong>时长</strong>：提供「跟随口播音频」的时长模式，成片时长等于口播音频时长，不得以设定最小时长补齐画面。</li><li><strong>目标地区</strong>：提供独立字段并在任务详情回显。</li><li><strong>BGM 列表</strong>：返回原始文件名；「我的上传」应有明确的来源区分，不与系统曲库混列。</li><li><strong>字幕</strong>：逐字卡点等能力若因时间轴质量降级，必须在任务结果中返回降级状态与原因，不能只看开关是否开启。</li><li><strong>任务结果</strong>：状态、当前步骤、失败原因、错误码必须可读；建议提供失败重试与排队任务取消。</li><li><strong>成片地址</strong>：带过期时间的签名地址，含建议文件名；地址失效后可重新签发。</li><li><strong>回调（建议）</strong>：任务完成／失败时推送结果，失败回调携带错误码与原因。</li><li><strong>鉴权与计费</strong>：按调用方隔离数据与积分，任务号使用不可枚举 ID，写操作支持幂等键。</li></ol>
+<hr>
+<h2 id="sec-6">5. 建议的接口清单</h2>
+<p>建议沿用现有开放 API 的签名鉴权、幂等键、回调与调用方隔离模型，新增一组生成类接口：</p>
+<div class="table-wrap"><table><thead><tr><th>方法</th><th>建议路径</th><th>对应需求</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/open/v1/generation/credits/balance</code></td><td>2 查积分</td></tr><tr><td><code>GET</code></td><td><code>/open/v1/generation/material-libraries</code></td><td>3 列出素材库</td></tr><tr><td><code>GET</code></td><td><code>/open/v1/generation/material-libraries/{id}/tags</code></td><td>9 列出可用画面标签（加分项）</td></tr><tr><td><code>GET</code></td><td><code>/open/v1/generation/voices</code></td><td>4 列出音色</td></tr><tr><td><code>GET</code></td><td><code>/open/v1/generation/bgm?sourceType=USER</code></td><td>5 只列「我的上传」</td></tr><tr><td><code>POST</code></td><td><code>/open/v1/generation/tasks/precheck</code></td><td>6 提交前预检（积分、素材、字幕可行性）</td></tr><tr><td><code>POST</code></td><td><code>/open/v1/generation/tasks</code></td><td>6 一次传入全部生成参数</td></tr><tr><td><code>GET</code></td><td><code>/open/v1/generation/tasks/{taskId}</code></td><td>7 任务号、状态、当前步骤、失败原因</td></tr><tr><td><code>GET</code></td><td><code>/open/v1/generation/tasks/{taskId}/result</code></td><td>8 成片下载地址、建议文件名、字幕降级原因</td></tr><tr><td><code>POST</code></td><td><code>/open/v1/generation/tasks/{taskId}/retry</code></td><td>7 失败重试</td></tr><tr><td><code>POST</code></td><td><code>/open/v1/generation/tasks/{taskId}/cancel</code></td><td>7 取消排队任务</td></tr><tr><td><code>POST</code></td><td><code>/open/v1/generation/tasks/{taskId}/publish</code></td><td>打通现有发布接口，成片直发</td></tr></tbody></table></div>
+<p><code>POST /tasks</code> 建议支持的最小字段集：<code>libraryId</code>、<code>promptText</code>、<code>translationEnabled</code>、<code>targetRegion</code>、<code>voiceCode</code>、<code>bgmAssetId</code>、<code>bgmVolume</code>、<code>subtitle</code>（含字号／样式／避让／关键词高亮／逐字卡点）、<code>durationMode</code>、<code>materialTags</code>、<code>externalRequestId</code>、<code>Idempotency-Key</code>。</p>
+<hr>
+<h2 id="sec-7">6. 需要确认的问题</h2>
+<ol><li>上述 9 项是走<strong>现有开放 API</strong>、需要<strong>新增生成类开放接口</strong>，还是其他接入方式？</li><li>鉴权方式与账号归属：使用已有账号时，Token 有效期、自动续期与权限范围由谁维护？</li><li>BGM 音量 40% 能否原样生效并在详情回显？是否存在默认版本差异？</li><li>能否保证「成片时长 = 完整口播结束」，口播短于设定时长时不补画面？</li><li>「我的上传」列表是否返回原始文件名？下列人群曲池当前是否已按命名入库？</li><li>是否提供按业务标签（场景／产地／口感）抽画面的能力？若否，是否接受工具侧全库随机混剪作为兜底？</li></ol>
+<hr>
+<h2 id="sec-8">7. 验收口径</h2>
+<p>使用已有账号，按第 2 节顺序一次性跑通：查积分 → 指定「芒果干」库 → 选定音色与同人群 BGM → 提交含全部参数的生成任务 → 轮询至完成 → 下载成片并按约定文件名保存。过程中无需任何网页操作；任一环节失败均可读到明确原因。</p>
+<hr>
+<h2 id="sec-9">附录 A：工具侧选取规则（供理解调用逻辑，不要求接口实现）</h2>
+<p><strong>音色优先级</strong>：精致妈妈、新锐白领 → 「温柔学姐」；资深中产 → 优先「沉稳高管」，不可用则「温柔学姐」；小镇青年 → 优先「霸道青年音色-beta」，不可用则「温柔学姐」。</p>
+<p><strong>BGM 人群池</strong>：仅在同人群内随机选一首，音量约 40%，不借用其他人群曲目。</p>
+<div class="table-wrap"><table><thead><tr><th>人群</th><th>曲池命名</th></tr></thead><tbody><tr><td>精致妈妈</td><td>温馨居家 01–12</td></tr><tr><td>资深中产</td><td>品质感 01–11</td></tr><tr><td>新锐白领</td><td>办公室下午茶 01–12</td></tr><tr><td>小镇青年</td><td>活泼日常 01–11</td></tr></tbody></table></div>
+<blockquote>曲池曲目依赖运行时数据命名，请确认当前库中是否已按此命名；工具侧按名称前缀匹配并限定同池随机。</blockquote></article></main>
+</div>
+<script>
+document.getElementById('theme').addEventListener('click', function () {
+  var h = document.documentElement;
+  h.setAttribute('data-theme', h.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+});
+var search = document.getElementById('search');
+var items = Array.prototype.slice.call(document.querySelectorAll('.toc-item'));
+search.addEventListener('input', function () {
+  var q = this.value.trim().toLowerCase();
+  items.forEach(function (a) {
+    a.classList.toggle('hidden', q !== '' && a.textContent.toLowerCase().indexOf(q) === -1);
+  });
+});
+document.addEventListener('keydown', function (e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); search.focus(); }
+});
+var links = Array.prototype.slice.call(document.querySelectorAll('.toc-item'));
+if ('IntersectionObserver' in window) {
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      links.forEach(function (a) { a.classList.toggle('active', a.dataset.id === en.target.id); });
+      var active = document.querySelector('.toc-item.active');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    });
+  }, { rootMargin: '-10% 0px -80% 0px' });
+  links.forEach(function (a) {
+    var t = document.getElementById(a.dataset.id);
+    if (t) obs.observe(t);
+  });
+}
+</script>
+</body>
+</html>

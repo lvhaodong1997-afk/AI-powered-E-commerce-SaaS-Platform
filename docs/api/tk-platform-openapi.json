@@ -1,0 +1,3123 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "TK 自动混剪 SaaS 开放 API",
+    "version": "2.0.0",
+    "description": "基于当前源码整理的开放 API 契约。包含 HMAC 签名的 TikTok 授权/上传/发布接口（22 个）与免登录工具接口。\n\n签名规则：canonical = METHOD\\nREQUEST_TARGET\\nTIMESTAMP\\nNONCE\\nSHA256_HEX(BODY)，signature = Base64(HMAC-SHA256(clientSecret, canonical))。REQUEST_TARGET 必须包含 /admin-api 前缀与原始查询串。\n\n注意：本文件描述源码已实现的契约，不代表已完成部署或生产验收。自动混剪生成、素材库等能力当前仅提供需登录的后台 API，尚未开放。",
+    "contact": {
+      "name": "TK Team"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://tkassetplant.fnn.net.cn",
+      "description": "约定生产地址（所有 paths 均含 /admin-api 前缀）"
+    }
+  ],
+  "tags": [
+    {
+      "name": "授权与连接",
+      "description": "TikTok 授权会话与账号连接"
+    },
+    {
+      "name": "视频上传",
+      "description": "OSS 直传 / LOCAL 分片上传"
+    },
+    {
+      "name": "发布任务",
+      "description": "异步发布、定时发布、状态与指标"
+    },
+    {
+      "name": "免登录工具",
+      "description": "OCR、文案改写、视频解析等公开接口"
+    },
+    {
+      "name": "需后台权限",
+      "description": "需要后台 Bearer Token 与菜单权限"
+    }
+  ],
+  "security": [
+    {
+      "TkClientId": []
+    },
+    {
+      "TkTimestamp": []
+    },
+    {
+      "TkNonce": []
+    },
+    {
+      "TkSignature": []
+    }
+  ],
+  "paths": {
+    "/admin-api/tk/open/v1/tiktok/auth/sessions": {
+      "post": {
+        "tags": [
+          "授权与连接"
+        ],
+        "summary": "创建授权会话",
+        "description": "创建 TikTok 授权会话，authMode 支持 AUTO / REDIRECT / QR_CODE，会话有效期 15 分钟。推荐在用户浏览器打开返回的 launchUrl。",
+        "operationId": "postTiktokAuthSessions",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreateReq"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "会话创建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/SessionResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/auth/sessions/{authSessionId}": {
+      "get": {
+        "tags": [
+          "授权与连接"
+        ],
+        "summary": "查询授权会话",
+        "description": "服务端查询授权状态。WAITING / SUCCESS / FAILED / EXPIRED；SUCCESS 时返回 connectionId。",
+        "operationId": "getTiktokAuthSessionsAuthsessionid",
+        "parameters": [
+          {
+            "name": "authSessionId",
+            "in": "path",
+            "required": true,
+            "description": "授权会话 ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/SessionStatusResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/auth/sessions/{authSessionId}/launch": {
+      "get": {
+        "tags": [
+          "授权与连接"
+        ],
+        "summary": "打开托管授权页",
+        "description": "返回 HTML 托管授权页，公开接口，无需 HMAC 签名。",
+        "operationId": "getTiktokAuthSessionsAuthsessionidLaunch",
+        "security": [],
+        "parameters": [
+          {
+            "name": "authSessionId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML 页面",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/auth/sessions/{authSessionId}/launch/status": {
+      "get": {
+        "tags": [
+          "授权与连接"
+        ],
+        "summary": "托管页公开状态",
+        "description": "托管授权页每 3 秒轮询的公开状态接口，无需 HMAC 签名。服务端正式查询请使用带签名的 GET /auth/sessions/{id}。",
+        "operationId": "getTiktokAuthSessionsAuthsessionidLaunchStatus",
+        "parameters": [
+          {
+            "name": "authSessionId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/SessionStatusResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/auth/callback": {
+      "get": {
+        "tags": [
+          "授权与连接"
+        ],
+        "summary": "TikTok OAuth 回调",
+        "description": "由 TikTok 浏览器重定向调用，平台校验 state、换取并保存 Token。调用方不要主动请求。",
+        "operationId": "getTiktokAuthCallback",
+        "security": [],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "description": "授权码",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "会话状态",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error_description",
+            "in": "query",
+            "required": false,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML 提示页",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/connections": {
+      "get": {
+        "tags": [
+          "授权与连接"
+        ],
+        "summary": "查询账号连接",
+        "description": "查询当前 clientId 下的 TikTok 账号连接，可按 externalAccountId / status / username 过滤。Token 不返回。",
+        "operationId": "getTiktokConnections",
+        "parameters": [
+          {
+            "name": "externalAccountId",
+            "in": "query",
+            "required": false,
+            "description": "调用方账号编号",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "如 AUTHORIZED",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "username",
+            "in": "query",
+            "required": false,
+            "description": "TikTok 用户名，不带 @",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ConnectionResp"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/connections/{connectionId}/profile/refresh": {
+      "post": {
+        "tags": [
+          "授权与连接"
+        ],
+        "summary": "刷新账号资料",
+        "description": "重新拉取账号头像、粉丝数、地区等资料并返回最新连接信息。",
+        "operationId": "postTiktokConnectionsConnectionidProfileRefresh",
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ConnectionResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/connections/{connectionId}/disconnect": {
+      "post": {
+        "tags": [
+          "授权与连接"
+        ],
+        "summary": "解绑账号",
+        "description": "连接置为 DISCONNECTED、Token 置 REVOKED 并清空；该连接不能再创建发布任务。当前不调用 TikTok 撤销授权接口。",
+        "operationId": "postTiktokConnectionsConnectionidDisconnect",
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/media/uploads": {
+      "post": {
+        "tags": [
+          "视频上传"
+        ],
+        "summary": "创建上传会话",
+        "description": "创建视频上传会话。服务端决定 OSS 直传或 LOCAL 分片模式，调用方不能指定。会话默认有效期 24 小时，文件上限 1,000,000,000 bytes。",
+        "operationId": "postTiktokMediaUploads",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCreateReq"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/UploadSessionResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/media/uploads/{uploadId}": {
+      "get": {
+        "tags": [
+          "视频上传"
+        ],
+        "summary": "查询上传进度",
+        "description": "返回 uploadId / mediaId / uploadMode / fileSize / uploadedSize / status；不返回分片编号列表。",
+        "operationId": "getTiktokMediaUploadsUploadid",
+        "parameters": [
+          {
+            "name": "uploadId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/UploadStatusResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "视频上传"
+        ],
+        "summary": "取消上传",
+        "description": "仅 UPLOADING 状态可取消。LOCAL 删除临时分片，OSS 在配置完整时删除对象。",
+        "operationId": "deleteTiktokMediaUploadsUploadid",
+        "parameters": [
+          {
+            "name": "uploadId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/media/uploads/{uploadId}/chunks/{chunkIndex}": {
+      "put": {
+        "tags": [
+          "视频上传"
+        ],
+        "summary": "上传本地分片",
+        "description": "仅 LOCAL 模式。chunkIndex 从 0 开始；除最后一片外每片必须严格等于 chunkSize；请求体为原始分片字节；每片独立签名，body hash 基于该片字节。",
+        "operationId": "putTiktokMediaUploadsUploadidChunksChunkindex",
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "uploadId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chunkIndex",
+            "in": "path",
+            "required": true,
+            "description": "分片索引，从 0 开始",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/media/uploads/{uploadId}/complete": {
+      "post": {
+        "tags": [
+          "视频上传"
+        ],
+        "summary": "完成上传",
+        "description": "校验分片完整性 / OSS 对象元数据与 SHA-256，成功后生成 mediaId 且 status=READY。只有 READY 的媒体才能发布。",
+        "operationId": "postTiktokMediaUploadsUploadidComplete",
+        "parameters": [
+          {
+            "name": "uploadId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCompleteReq"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/MediaResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/publish/tasks": {
+      "post": {
+        "tags": [
+          "发布任务"
+        ],
+        "summary": "创建发布任务",
+        "description": "使用已 READY 的 mediaId 与 1-20 个已授权连接创建异步发布任务。定时任务要求恰好 1 个账号且 postMode=DIRECT_POST。",
+        "operationId": "postTiktokPublishTasks",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "幂等键，≤128 字符；超时重试必须复用原值",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskCreateReq"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/TaskResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/publish/quick-tasks": {
+      "post": {
+        "tags": [
+          "发布任务"
+        ],
+        "summary": "快速发布（公网 HTTPS 视频地址）",
+        "description": "一次调用完成创建媒体 + 准备媒体 + 创建发布任务，跳过上传流程。videoUrl 必须是平台可访问的公网 HTTPS 地址。仍为异步。",
+        "operationId": "postTiktokPublishQuickTasks",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "幂等键，≤128 字符；超时重试必须复用原值",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuickTaskCreateReq"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/TaskResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/publish/tasks/{taskId}": {
+      "get": {
+        "tags": [
+          "发布任务"
+        ],
+        "summary": "查询发布任务",
+        "description": "返回任务汇总状态与定时发布信息。PENDING / PROCESSING / SUCCESS / FAILED / PARTIAL_SUCCESS / CANCELLED。",
+        "operationId": "getTiktokPublishTasksTaskid",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/TaskResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/publish/tasks/{taskId}/reschedule": {
+      "post": {
+        "tags": [
+          "发布任务"
+        ],
+        "summary": "改期定时发布",
+        "description": "仅未开始执行的定时任务可改期；scheduledAt 为 ISO-8601，regionCode 默认 CN。",
+        "operationId": "postTiktokPublishTasksTaskidReschedule",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "幂等键，≤128 字符；超时重试必须复用原值",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleReq"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/TaskResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/publish/tasks/{taskId}/cancel": {
+      "post": {
+        "tags": [
+          "发布任务"
+        ],
+        "summary": "取消发布任务",
+        "description": "任务已发起远程执行时返回 PUBLISH_ALREADY_RUNNING。取消会触发 publish.cancelled 回调。",
+        "operationId": "postTiktokPublishTasksTaskidCancel",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/TaskResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/publish/tasks/{taskId}/details": {
+      "get": {
+        "tags": [
+          "发布任务"
+        ],
+        "summary": "查询发布明细",
+        "description": "按账号返回发布结果。业务判断以明细 status 与任务汇总 status 为主，tiktokStatus 仅作补充。",
+        "operationId": "getTiktokPublishTasksTaskidDetails",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/DetailResp"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/publish/tasks/{taskId}/metrics": {
+      "get": {
+        "tags": [
+          "发布任务"
+        ],
+        "summary": "查询视频指标",
+        "description": "只传 taskId 查询播放 / 点赞 / 评论 / 分享四项指标。一个 taskId 只支持一个发布明细；计数为 null 表示暂不可用，不能当作 0。",
+        "operationId": "getTiktokPublishTasksTaskidMetrics",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/MetricsResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/publish/tasks/metrics/batch": {
+      "post": {
+        "tags": [
+          "发布任务"
+        ],
+        "summary": "批量查询视频指标",
+        "description": "taskIds 为 1-50 个，返回 requestedCount / resultCount / items。",
+        "operationId": "postTiktokPublishTasksMetricsBatch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetricsBatchReq"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/MetricsBatchResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/tiktok/publish/details/{detailId}/retry": {
+      "post": {
+        "tags": [
+          "发布任务"
+        ],
+        "summary": "重试失败明细",
+        "description": "仅 FAILED 明细可重试；已有 TikTok publishId 的明细返回 PUBLISH_RETRY_PUBLISH_ID_EXISTS。",
+        "operationId": "postTiktokPublishDetailsDetailidRetry",
+        "parameters": [
+          {
+            "name": "detailId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "TkClientId": []
+          },
+          {
+            "TkTimestamp": []
+          },
+          {
+            "TkNonce": []
+          },
+          {
+            "TkSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/ocr/image-to-text": {
+      "post": {
+        "tags": [
+          "免登录工具"
+        ],
+        "summary": "图片转文字（OCR）",
+        "description": "multipart/form-data 上传单张图片，字段名固定 file，≤20MB，支持 JPG/JPEG/PNG/WEBP。不需要任何鉴权头。",
+        "operationId": "postOcrImageToText",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "识别结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/OcrResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "图片为空 / 格式不支持 / 超过 20MB"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/copywriting/rewrite": {
+      "post": {
+        "tags": [
+          "免登录工具"
+        ],
+        "summary": "文案改写",
+        "description": "按提示词改写文案。copywriting ≤20000 字符，prompt ≤4000 字符。",
+        "operationId": "postCopywritingRewrite",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RewriteReq"
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/RewriteResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/video/download": {
+      "post": {
+        "tags": [
+          "免登录工具"
+        ],
+        "summary": "对标视频下载/解析",
+        "description": "解析视频链接并返回可直接访问的视频地址、封面、时长与分辨率。",
+        "operationId": "postVideoDownload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoDownloadReq"
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/VideoDownloadResp"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/video/transcript/extract": {
+      "post": {
+        "tags": [
+          "免登录工具"
+        ],
+        "summary": "创建视频文案时间轴提取任务",
+        "description": "异步创建提取任务，返回 taskId 后用查询接口轮询。",
+        "operationId": "postVideoTranscriptExtract",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranscriptExtractReq"
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/video/transcript/extract/{taskId}": {
+      "get": {
+        "tags": [
+          "免登录工具"
+        ],
+        "summary": "查询文案时间轴提取任务",
+        "description": "taskId 为 Long 数字类型。",
+        "operationId": "getVideoTranscriptExtractTaskid",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/video/transcript/extract-sync": {
+      "post": {
+        "tags": [
+          "需后台权限"
+        ],
+        "summary": "同步提取视频文案时间轴（需后台权限）",
+        "description": "标注 @PreAuthorize(\"tk:reference:analyze\")，需要后台登录 Token 与菜单权限，不属于免登录接口。",
+        "operationId": "postVideoTranscriptExtractSync",
+        "security": [
+          {
+            "AdminBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranscriptExtractReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenApiResponse"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "TkClientId": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-TK-Client-Id",
+        "description": "客户端 ID"
+      },
+      "TkTimestamp": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-TK-Timestamp",
+        "description": "Unix 秒级时间戳"
+      },
+      "TkNonce": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-TK-Nonce",
+        "description": "每次请求唯一随机串"
+      },
+      "TkSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-TK-Signature",
+        "description": "Base64 HMAC-SHA256"
+      },
+      "TkRequestId": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-TK-Request-Id",
+        "description": "可选链路追踪编号"
+      },
+      "AdminBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "后台 accessToken，配合 tenant-id 头"
+      }
+    },
+    "schemas": {
+      "OpenApiResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "成功为 0，失败为字符串错误码或数字错误码"
+          },
+          "msg": {
+            "type": "string"
+          },
+          "data": {
+            "description": "业务数据，失败时为 null"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "链路追踪编号，排错时提供给平台"
+          }
+        },
+        "required": [
+          "code",
+          "msg"
+        ]
+      },
+      "SessionCreateReq": {
+        "type": "object",
+        "properties": {
+          "externalAccountId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "authMode": {
+            "type": "string",
+            "enum": [
+              "AUTO",
+              "REDIRECT",
+              "QR_CODE"
+            ]
+          },
+          "clientState": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "externalAccountId",
+          "authMode"
+        ]
+      },
+      "SessionResp": {
+        "type": "object",
+        "properties": {
+          "authSessionId": {
+            "type": "string"
+          },
+          "externalAccountId": {
+            "type": "string"
+          },
+          "clientState": {
+            "type": "string"
+          },
+          "authMode": {
+            "type": "string"
+          },
+          "authorizeUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "qrcodeUrl": {
+            "type": "string"
+          },
+          "qrcodeImageUrl": {
+            "type": "string"
+          },
+          "launchUrl": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "expireTime": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SessionStatusResp": {
+        "type": "object",
+        "properties": {
+          "providerIdentity": {
+            "type": "string"
+          },
+          "authSessionId": {
+            "type": "string"
+          },
+          "externalAccountId": {
+            "type": "string"
+          },
+          "clientState": {
+            "type": "string"
+          },
+          "connectionId": {
+            "type": "string"
+          },
+          "accountName": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": "string"
+          },
+          "bioDescription": {
+            "type": "string"
+          },
+          "profileDeepLink": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "followerCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "followingCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "likesCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "videoCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "statsUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "failReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "expireTime": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ConnectionResp": {
+        "type": "object",
+        "properties": {
+          "providerIdentity": {
+            "type": "string"
+          },
+          "connectionId": {
+            "type": "string"
+          },
+          "externalAccountId": {
+            "type": "string"
+          },
+          "accountName": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": "string"
+          },
+          "bioDescription": {
+            "type": "string"
+          },
+          "profileDeepLink": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "followerCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "followingCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "likesCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "videoCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "statsUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authStatus": {
+            "type": "string"
+          },
+          "tokenStatus": {
+            "type": "string"
+          },
+          "lastAuthTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "videoRegion": {
+            "type": "object",
+            "nullable": true
+          }
+        }
+      },
+      "UploadCreateReq": {
+        "type": "object",
+        "properties": {
+          "fileName": {
+            "type": "string"
+          },
+          "fileSize": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fileName",
+          "fileSize"
+        ]
+      },
+      "UploadSessionResp": {
+        "type": "object",
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "uploadMode": {
+            "type": "string",
+            "enum": [
+              "OSS",
+              "LOCAL"
+            ]
+          },
+          "chunkSize": {
+            "type": "integer",
+            "nullable": true
+          },
+          "totalChunks": {
+            "type": "integer",
+            "nullable": true
+          },
+          "uploadUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "objectKey": {
+            "type": "string",
+            "nullable": true
+          },
+          "fields": {
+            "type": "object",
+            "nullable": true,
+            "description": "OSS 短期表单字段：policy / ossAccessKeyId / signature / xOssMetaSha256"
+          },
+          "expireTime": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UploadStatusResp": {
+        "type": "object",
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "mediaId": {
+            "type": "string",
+            "nullable": true
+          },
+          "uploadMode": {
+            "type": "string"
+          },
+          "fileSize": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "uploadedSize": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "UPLOADING",
+              "READY",
+              "CANCELLED"
+            ]
+          }
+        }
+      },
+      "UploadCompleteReq": {
+        "type": "object",
+        "properties": {
+          "fileSize": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "coverTimestampMs": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "fileSize"
+        ]
+      },
+      "MediaResp": {
+        "type": "object",
+        "properties": {
+          "mediaId": {
+            "type": "string"
+          },
+          "uploadId": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "fileSize": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskCreateReq": {
+        "type": "object",
+        "properties": {
+          "connectionIds": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string"
+            }
+          },
+          "mediaId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "caption": {
+            "type": "string",
+            "maxLength": 2200
+          },
+          "postMode": {
+            "type": "string",
+            "enum": [
+              "DIRECT_POST",
+              "UPLOAD_TO_INBOX"
+            ]
+          },
+          "privacyLevel": {
+            "type": "string"
+          },
+          "allowComment": {
+            "type": "boolean"
+          },
+          "allowDuet": {
+            "type": "boolean"
+          },
+          "allowStitch": {
+            "type": "boolean"
+          },
+          "commercialContent": {
+            "type": "boolean"
+          },
+          "brandContent": {
+            "type": "boolean"
+          },
+          "aigcContent": {
+            "type": "boolean"
+          },
+          "externalRequestId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "scheduledAt": {
+            "type": "string"
+          },
+          "regionCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connectionIds",
+          "mediaId",
+          "postMode",
+          "privacyLevel"
+        ]
+      },
+      "QuickTaskCreateReq": {
+        "type": "object",
+        "properties": {
+          "externalAccountId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "videoUrl": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "coverTimestampMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string"
+          },
+          "caption": {
+            "type": "string"
+          },
+          "postMode": {
+            "type": "string"
+          },
+          "privacyLevel": {
+            "type": "string"
+          },
+          "allowComment": {
+            "type": "boolean"
+          },
+          "allowDuet": {
+            "type": "boolean"
+          },
+          "allowStitch": {
+            "type": "boolean"
+          },
+          "commercialContent": {
+            "type": "boolean"
+          },
+          "brandContent": {
+            "type": "boolean"
+          },
+          "aigcContent": {
+            "type": "boolean"
+          },
+          "externalRequestId": {
+            "type": "string"
+          },
+          "scheduledAt": {
+            "type": "string"
+          },
+          "regionCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "externalAccountId",
+          "videoUrl"
+        ]
+      },
+      "ScheduleReq": {
+        "type": "object",
+        "properties": {
+          "scheduledAt": {
+            "type": "string"
+          },
+          "regionCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scheduledAt"
+        ]
+      },
+      "TaskResp": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "mediaId": {
+            "type": "string"
+          },
+          "externalRequestId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "accountCount": {
+            "type": "integer"
+          },
+          "successCount": {
+            "type": "integer"
+          },
+          "failedCount": {
+            "type": "integer"
+          },
+          "pendingCount": {
+            "type": "integer"
+          },
+          "failReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "scheduledAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "regionCode": {
+            "type": "string"
+          },
+          "regionName": {
+            "type": "string"
+          },
+          "scheduleTimezone": {
+            "type": "string"
+          },
+          "scheduleUtcTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scheduleBeijingTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scheduleEpochMillis": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scheduleUtcOffset": {
+            "type": "string"
+          },
+          "scheduleStatus": {
+            "type": "string"
+          },
+          "canReschedule": {
+            "type": "boolean"
+          },
+          "canCancel": {
+            "type": "boolean"
+          },
+          "createTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateTime": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DetailResp": {
+        "type": "object",
+        "properties": {
+          "detailId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "connectionId": {
+            "type": "string"
+          },
+          "accountName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tiktokStatus": {
+            "type": "string"
+          },
+          "publishId": {
+            "type": "string"
+          },
+          "publishUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "failReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "retryCount": {
+            "type": "integer"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "uploadSource": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "nextReconcileTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "callbackStatus": {
+            "type": "string"
+          },
+          "callbackHttpStatus": {
+            "type": "integer"
+          },
+          "updateTime": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MetricsResp": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "detailId": {
+            "type": "string"
+          },
+          "connectionId": {
+            "type": "string"
+          },
+          "publishId": {
+            "type": "string"
+          },
+          "publicPostId": {
+            "type": "string"
+          },
+          "publishUrl": {
+            "type": "string"
+          },
+          "metricsStatus": {
+            "type": "string"
+          },
+          "viewCount": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "likeCount": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "commentCount": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "shareCount": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "metricsLastSyncTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "metricsFailReason": {
+            "type": "string"
+          }
+        }
+      },
+      "MetricsBatchReq": {
+        "type": "object",
+        "properties": {
+          "taskIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "taskIds"
+        ]
+      },
+      "MetricsBatchResp": {
+        "type": "object",
+        "properties": {
+          "requestedCount": {
+            "type": "integer"
+          },
+          "resultCount": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsResp"
+            }
+          }
+        }
+      },
+      "OcrResp": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "RewriteReq": {
+        "type": "object",
+        "properties": {
+          "copywriting": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "copywriting",
+          "prompt"
+        ]
+      },
+      "RewriteResp": {
+        "type": "object",
+        "properties": {
+          "copywriting": {
+            "type": "string"
+          }
+        }
+      },
+      "VideoDownloadReq": {
+        "type": "object",
+        "properties": {
+          "sourceUrl": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "libraryId": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "sourceUrl"
+        ]
+      },
+      "VideoDownloadResp": {
+        "type": "object",
+        "properties": {
+          "sourceUrl": {
+            "type": "string"
+          },
+          "resolvedVideoUrl": {
+            "type": "string"
+          },
+          "coverUrl": {
+            "type": "string"
+          },
+          "videoDuration": {
+            "type": "integer"
+          },
+          "resolution": {
+            "type": "string"
+          }
+        }
+      },
+      "TranscriptExtractReq": {
+        "type": "object",
+        "properties": {
+          "sourceUrl": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "targetLanguage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourceUrl"
+        ]
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "参数错误或业务状态不允许（400）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OpenApiResponse"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "认证失败：签名 / 时间戳 / nonce（401）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OpenApiResponse"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "IP 或权限策略拒绝（403）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OpenApiResponse"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "资源不存在或不属于当前客户端（404）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OpenApiResponse"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "幂等键冲突（409）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OpenApiResponse"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "限流或日配额超限（429）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OpenApiResponse"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "依赖服务或防护组件暂不可用（503）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OpenApiResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}
