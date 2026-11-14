@@ -1,5 +1,5 @@
 <template>
-  <div ref="pageRoot" class="api-docs-page" data-tk-i18n-ignore>
+  <div ref="pageRoot" class="clipforge-theme api-docs-page" data-tk-i18n-ignore>
     <header class="docs-topbar">
       <RouterLink class="docs-brand" to="/"
         ><img src="/clipforge-app-icon.png?v=20260728-system-icon" alt="" /><span
@@ -8,7 +8,7 @@
       >
       <div class="docs-top-actions"
         ><span class="docs-version">API v1</span
-        ><RouterLink to="/login" class="console-link"
+        ><RouterLink to="/login" class="console-link button-primary"
           >进入工作台 <span aria-hidden="true">↗</span></RouterLink
         ></div
       >
@@ -97,25 +97,39 @@
         <template v-else-if="catalog">
           <template v-if="activeId === 'overview'">
             <div class="docs-breadcrumb">文档 / 开始接入</div>
-            <section class="docs-intro"
-              ><p class="docs-eyebrow">BUILD WITH CLIPFORGE</p
-              ><h1>把出片流程，<br />接进你的应用。</h1
-              ><p class="intro-text"
-                >从完整口播到可下载的视频，用 API
-                连接素材、配音、字幕与混剪。按照接入步骤，完成你的第一次调用。</p
-              ><div class="intro-actions"
-                ><button
-                  type="button"
-                  class="button-primary"
-                  @click="selectTopic('guide-quickstart')"
-                  >开始接入 <span>→</span></button
-                ><a href="/api-reference/clipforge-api-kit.zip" class="button-secondary" download
-                  >下载完整接入包 ↓</a
+            <section class="docs-intro">
+              <div class="intro-copy"
+                ><p class="docs-eyebrow">CLIPFORGE API / DEVELOPER CENTER</p
+                ><h1>把出片流程，接进你的应用。</h1>
+                <p class="intro-text"
+                  >从完整口播到可下载的视频，用 API
+                  连接素材、配音、字幕与混剪。按照接入步骤，完成你的第一次调用。</p
+                >
+                <div class="intro-actions"
+                  ><button
+                    type="button"
+                    class="button-primary"
+                    @click="selectTopic('guide-quickstart')"
+                    >开始接入 <span>→</span></button
+                  ><a href="/api-reference/clipforge-api-kit.zip" class="button-secondary" download
+                    >下载完整接入包 ↓</a
+                  ></div
+                >
+                <p class="intro-caption">包含 Python / Node.js 示例、Postman 与 OpenAPI 文件</p>
+              </div>
+              <div class="intro-guide-panel"
+                ><p>接入指南 <span>从第一步开始</span></p
+                ><a
+                  v-for="(guide, index) in catalog.guides.slice(0, 3)"
+                  :key="guide.id"
+                  :href="'#guide-' + guide.id"
+                  @click.prevent="selectTopic('guide-' + guide.id)"
+                  ><span class="guide-number">0{{ index + 1 }}</span
+                  ><strong>{{ guide.title }}</strong
+                  ><span aria-hidden="true">↗</span></a
                 ></div
-              ><p class="intro-caption"
-                >包含 Python / Node.js 示例、Postman 与 OpenAPI 文件</p
-              ></section
-            >
+              >
+            </section>
             <section class="docs-auth-cards"
               ><article
                 ><span class="section-index">01 / 自动出片</span><h2>账号 Token</h2
@@ -184,140 +198,144 @@
                 >复制</button
               ></div
             >
-            <ApiDocMarkdown
-              :source="
-                activeOperation.description ||
-                '按下方参数与示例调用。资源编号请使用自己账号查询到的真实值。'
-              "
-              @copy="copy"
-            />
-            <div v-if="activeOperation.path.includes('/automation/')" class="docs-note"
-              >请求头需要账号 Token 和
-              tenant-id。提交生成任务会沿用平台积分规则；示例中的资源编号必须替换。生成创建接口不提供幂等去重。</div
-            >
-            <div v-if="requestExample.signed" class="docs-note"
-              >示例中的签名头是占位符。请按照“TikTok
-              发布接入”的规则，对实际发送的方法、路径、查询串和请求体签名。</div
-            >
-            <section v-if="parameters.length" class="docs-section"
-              ><h2>请求参数</h2
-              ><div class="doc-table-scroll"
-                ><table
-                  ><thead
-                    ><tr><th>字段</th><th>位置 / 类型</th><th>必填</th><th>说明</th></tr></thead
-                  ><tbody
-                    ><tr v-for="param in parameters" :key="`${param.in}-${param.name}`"
-                      ><td
-                        ><code>{{ param.name }}</code></td
-                      ><td
-                        >{{ param.in }} /
-                        {{ resolveSchema(catalog.spec, param.schema).type || 'string' }}</td
-                      ><td>{{ param.required ? '是' : '否' }}</td
-                      ><td
-                        ><ApiDocText
-                          :text="param.description || '—'" /></td></tr></tbody></table></div
-            ></section>
-            <section v-if="bodyRows.length" class="docs-section"
-              ><h2
-                >请求体 <small>{{ bodyMediaType }}</small></h2
-              ><p v-if="bodySchema.description" class="section-description">{{
-                bodySchema.description
-              }}</p
-              ><div class="doc-table-scroll"
-                ><table
-                  ><thead
-                    ><tr><th>字段</th><th>类型 / 必填</th><th>说明与限制</th></tr></thead
-                  ><tbody
-                    ><tr v-for="field in bodyRows" :key="field.name"
-                      ><td
-                        ><code>{{ field.name }}</code></td
-                      ><td
-                        >{{ field.type
-                        }}<span v-if="field.required" class="required-mark"> 必填</span></td
-                      ><td
-                        ><ApiDocText :text="field.description" /><small
-                          v-if="field.constraint"
-                          class="field-constraint"
-                          >{{ field.constraint }}</small
-                        ></td
-                      ></tr
-                    ></tbody
-                  ></table
-                ></div
-              ></section
-            >
-            <section class="docs-section"
-              ><div class="section-heading"
-                ><h2>调用示例</h2
-                ><div class="code-tabs" aria-label="示例语言"
-                  ><button
-                    v-for="language in languages"
-                    :key="language.id"
-                    type="button"
-                    :class="{ active: codeLanguage === language.id }"
-                    @click="codeLanguage = language.id"
-                    >{{ language.label }}</button
-                  ></div
-                ></div
-              ><p v-if="requestExample.multipart || requestExample.binary" class="docs-note"
-                >这是文件上传接口，请准备示例指定的实际文件。{{
-                  requestExample.signed ? '文件内容参与请求签名，请参考签名教程。' : ''
-                }}</p
-              ><div class="doc-code"
-                ><div class="doc-code-bar"
-                  ><span>{{
-                    codeLanguage === 'javascript' ? 'NODE.JS' : codeLanguage.toUpperCase()
-                  }}</span
-                  ><button type="button" @click="copy(requestExample[codeLanguage])"
-                    >复制代码</button
-                  ></div
-                >><pre><code>{{ requestExample[codeLanguage] }}</code></pre></div
-              ><p class="snippet-caption"
-                >单接口示例用于理解请求格式。自动刷新、异常处理和完整出片流程，请使用<a
-                  href="#downloads"
-                  @click.prevent="selectTopic('downloads')"
-                  >完整示例</a
-                >。</p
-              ></section
-            >
-            <section class="docs-section"
-              ><div class="section-heading"
-                ><h2>响应示例</h2
-                ><label class="response-select"
-                  >响应
-                  <select v-model="responseStatus"
-                    ><option
-                      v-for="status in Object.keys(activeOperation.responses || {})"
-                      :key="status"
-                      :value="status"
-                      >{{ status }}</option
-                    ></select
-                  ></label
-                ></div
-              ><div class="doc-code"
-                ><div class="doc-code-bar"
-                  ><span>JSON</span
-                  ><button type="button" @click="copy(responseExample)">复制响应</button></div
-                >><pre><code>{{ responseExample }}</code></pre></div
-              ><div v-if="responseRows.length" class="doc-table-scroll"
-                ><table
-                  ><thead
-                    ><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead
-                  ><tbody
-                    ><tr v-for="field in responseRows" :key="field.name"
-                      ><td
-                        ><code>{{ field.name }}</code></td
-                      ><td>{{ field.type }}</td
-                      ><td
-                        ><ApiDocText
-                          :text="
-                            field.description || field.constraint || '—'
-                          " /></td></tr></tbody></table></div
-            ></section>
-            <div class="docs-note"
-              >HTTP 成功不等于业务成功。账号接口检查 code=0；TikTok
-              签名接口按其响应格式判断。异步任务继续检查 status、失败原因和字幕诊断字段。</div
-            >
+            <div class="operation-layout"
+              ><div class="operation-body">
+                <ApiDocMarkdown
+                  :source="
+                    activeOperation.description ||
+                    '按下方参数与示例调用。资源编号请使用自己账号查询到的真实值。'
+                  "
+                  @copy="copy"
+                />
+                <div v-if="activeOperation.path.includes('/automation/')" class="docs-note"
+                  >请求头需要账号 Token 和
+                  tenant-id。提交生成任务会沿用平台积分规则；示例中的资源编号必须替换。生成创建接口不提供幂等去重。</div
+                >
+                <div v-if="requestExample.signed" class="docs-note"
+                  >示例中的签名头是占位符。请按照“TikTok
+                  发布接入”的规则，对实际发送的方法、路径、查询串和请求体签名。</div
+                >
+                <section v-if="parameters.length" class="docs-section"
+                  ><h2>请求参数</h2
+                  ><div class="doc-table-scroll"
+                    ><table
+                      ><thead
+                        ><tr><th>字段</th><th>位置 / 类型</th><th>必填</th><th>说明</th></tr></thead
+                      ><tbody
+                        ><tr v-for="param in parameters" :key="`${param.in}-${param.name}`"
+                          ><td
+                            ><code>{{ param.name }}</code></td
+                          ><td
+                            >{{ param.in }} /
+                            {{ resolveSchema(catalog.spec, param.schema).type || 'string' }}</td
+                          ><td>{{ param.required ? '是' : '否' }}</td
+                          ><td
+                            ><ApiDocText
+                              :text="param.description || '—'" /></td></tr></tbody></table></div
+                ></section>
+                <section v-if="bodyRows.length" class="docs-section"
+                  ><h2
+                    >请求体 <small>{{ bodyMediaType }}</small></h2
+                  ><p v-if="bodySchema.description" class="section-description">{{
+                    bodySchema.description
+                  }}</p
+                  ><div class="doc-table-scroll"
+                    ><table
+                      ><thead
+                        ><tr><th>字段</th><th>类型 / 必填</th><th>说明与限制</th></tr></thead
+                      ><tbody
+                        ><tr v-for="field in bodyRows" :key="field.name"
+                          ><td
+                            ><code>{{ field.name }}</code></td
+                          ><td
+                            >{{ field.type
+                            }}<span v-if="field.required" class="required-mark"> 必填</span></td
+                          ><td
+                            ><ApiDocText :text="field.description" /><small
+                              v-if="field.constraint"
+                              class="field-constraint"
+                              >{{ field.constraint }}</small
+                            ></td
+                          ></tr
+                        ></tbody
+                      ></table
+                    ></div
+                  ></section
+                >
+                <div class="docs-note"
+                  >HTTP 成功不等于业务成功。账号接口检查 code=0；TikTok
+                  签名接口按其响应格式判断。异步任务继续检查 status、失败原因和字幕诊断字段。</div
+                > </div
+              ><aside class="operation-examples" aria-label="请求与响应示例"
+                ><section class="docs-section"
+                  ><div class="section-heading"
+                    ><h2>调用示例</h2
+                    ><div class="code-tabs" aria-label="示例语言"
+                      ><button
+                        v-for="language in languages"
+                        :key="language.id"
+                        type="button"
+                        :class="{ active: codeLanguage === language.id }"
+                        @click="codeLanguage = language.id"
+                        >{{ language.label }}</button
+                      ></div
+                    ></div
+                  ><p v-if="requestExample.multipart || requestExample.binary" class="docs-note"
+                    >这是文件上传接口，请准备示例指定的实际文件。{{
+                      requestExample.signed ? '文件内容参与请求签名，请参考签名教程。' : ''
+                    }}</p
+                  ><div class="doc-code"
+                    ><div class="doc-code-bar"
+                      ><span>{{
+                        codeLanguage === 'javascript' ? 'NODE.JS' : codeLanguage.toUpperCase()
+                      }}</span
+                      ><button type="button" @click="copy(requestExample[codeLanguage])"
+                        >复制代码</button
+                      ></div
+                    >><pre><code>{{ requestExample[codeLanguage] }}</code></pre></div
+                  ><p class="snippet-caption"
+                    >单接口示例用于理解请求格式。自动刷新、异常处理和完整出片流程，请使用<a
+                      href="#downloads"
+                      @click.prevent="selectTopic('downloads')"
+                      >完整示例</a
+                    >。</p
+                  ></section
+                >
+                <section class="docs-section"
+                  ><div class="section-heading"
+                    ><h2>响应示例</h2
+                    ><label class="response-select"
+                      >响应
+                      <select v-model="responseStatus"
+                        ><option
+                          v-for="status in Object.keys(activeOperation.responses || {})"
+                          :key="status"
+                          :value="status"
+                          >{{ status }}</option
+                        ></select
+                      ></label
+                    ></div
+                  ><div class="doc-code"
+                    ><div class="doc-code-bar"
+                      ><span>JSON</span
+                      ><button type="button" @click="copy(responseExample)">复制响应</button></div
+                    >><pre><code>{{ responseExample }}</code></pre></div
+                  ><div v-if="responseRows.length" class="doc-table-scroll"
+                    ><table
+                      ><thead
+                        ><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead
+                      ><tbody
+                        ><tr v-for="field in responseRows" :key="field.name"
+                          ><td
+                            ><code>{{ field.name }}</code></td
+                          ><td>{{ field.type }}</td
+                          ><td
+                            ><ApiDocText
+                              :text="
+                                field.description || field.constraint || '—'
+                              " /></td></tr></tbody></table></div
+                ></section> </aside
+            ></div>
           </template>
 
           <template v-else-if="activeId === 'downloads'">
@@ -385,6 +403,7 @@
 </template>
 
 <script setup lang="ts">
+import '@/styles/clipforge-theme.css'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ApiDocMarkdown from './ApiDocMarkdown.vue'

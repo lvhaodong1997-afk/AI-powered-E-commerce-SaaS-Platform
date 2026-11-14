@@ -104,7 +104,13 @@ export function safeProviderUrl(value: unknown, kind: 'redirect' | 'qr'): string
     const hosts =
       kind === 'qr'
         ? ['qr.stripe.com', 'q.stripe.com']
-        : ['checkout.stripe.com', 'payments.stripe.com', 'hooks.stripe.com', 'pay.stripe.com']
+        : [
+            'checkout.stripe.com',
+            'payments.stripe.com',
+            'hooks.stripe.com',
+            'pay.stripe.com',
+            'pm-redirects.stripe.com'
+          ]
     if (
       url.protocol !== 'https:' ||
       url.username ||
@@ -137,6 +143,20 @@ export function mergePaymentOrder<T extends PaymentState>(current: T | undefined
 }
 export const isPaidAndCredited = (order: Pick<PaymentState, 'status' | 'creditStatus'>) =>
   order.status === 'paid' && order.creditStatus === 'CREDITED'
+export function paymentEntryState(
+  order: Pick<PaymentState, 'status' | 'creditStatus'> & {
+    qrImageUrl?: string
+    redirectUrl?: string
+  },
+  options: { refreshing?: boolean; imageFailed?: boolean } = {}
+) {
+  if (isPaidAndCredited(order)) return 'complete'
+  if (order.status === 'paid') return 'credit_pending'
+  if (order.status !== 'payment_pending') return order.status
+  if (safeProviderUrl(order.qrImageUrl, 'qr')) return options.imageFailed ? 'image_failed' : 'qr'
+  if (safeProviderUrl(order.redirectUrl, 'redirect')) return 'redirect'
+  return options.refreshing ? 'loading' : 'entry_missing'
+}
 export const shouldPollOrder = (order: Pick<PaymentState, 'status' | 'creditStatus'>) =>
   ['quoted', 'payment_pending', 'refund_pending'].includes(order.status) ||
   (order.status === 'paid' && order.creditStatus === 'PENDING')

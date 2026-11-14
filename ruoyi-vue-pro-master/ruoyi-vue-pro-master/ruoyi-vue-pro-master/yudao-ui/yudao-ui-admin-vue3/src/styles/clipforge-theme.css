@@ -1,0 +1,75 @@
+.clipforge-theme {
+  --cf-primary: #1677ff;
+  --cf-primary-hover: #0958d9;
+  --cf-ink: #172b4d;
+  --cf-muted: #61748e;
+  --cf-line: #dce6f2;
+  --cf-surface: #f5f9ff;
+  --el-color-primary: var(--cf-primary);
+  --el-color-primary-dark-2: var(--cf-primary-hover);
+  --el-color-primary-light-3: #5c9fff;
+  --el-color-primary-light-5: #8bbaff;
+  --el-color-primary-light-7: #bad6ff;
+  --el-color-primary-light-8: #d5e6ff;
+  --el-color-primary-light-9: #edf5ff;
+  --el-text-color-primary: var(--cf-ink);
+  --el-text-color-regular: #425875;
+  --el-text-color-secondary: var(--cf-muted);
+  --el-border-color: var(--cf-line);
+  --el-border-color-light: #e7eef7;
+  --el-fill-color-light: var(--cf-surface);
+  --el-bg-color: #fff;
+  --el-bg-color-overlay: #fff;
+  color: var(--cf-ink);
+  color-scheme: light;
+}
+
+.clipforge-theme :focus-visible {
+  outline: 3px solid #91c0ff;
+  outline-offset: 3px;
+}
+
+.clipforge-theme .el-button {
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.clipforge-theme .el-button:not(.is-link, .el-button--primary) {
+  color: #315e99;
+  background: #fff;
+}
+
+.clipforge-theme .el-button--primary:not(.is-disabled):hover,
+.clipforge-theme.el-button--primary:not(.is-disabled):hover {
+  background: var(--cf-primary-hover);
+  border-color: var(--cf-primary-hover);
+}
+
+.cashier-dialog.clipforge-theme {
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--cf-line);
+  border-radius: 18px;
+  box-shadow: 0 24px 80px #123b752e;
+}
+
+.cashier-dialog .el-dialog__header {
+  padding: 22px 28px;
+  margin: 0;
+  border-bottom: 1px solid var(--cf-line);
+}
+
+.cashier-dialog .el-dialog__headerbtn {
+  top: 18px;
+  right: 18px;
+}
+
+.cashier-dialog .el-dialog__body {
+  padding: 0;
+}
+
+.cashier-dialog .el-dialog__footer {
+  padding: 17px 28px;
+  background: #fff;
+  border-top: 1px solid var(--cf-line);
+}

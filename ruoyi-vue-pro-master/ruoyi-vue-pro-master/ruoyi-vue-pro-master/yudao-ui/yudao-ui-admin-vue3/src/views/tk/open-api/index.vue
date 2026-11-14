@@ -7,7 +7,7 @@
       </div>
       <div class="toolbar-actions">
         <RouterLink to="/api-docs" target="_blank" rel="noopener noreferrer">
-          <el-button type="primary" plain>
+          <el-button type="primary" class="clipforge-theme">
             <Icon icon="ep:document" class="mr-5px" /> {{ tt('openApi.apiDocs') }}
           </el-button>
         </RouterLink>
@@ -226,7 +226,9 @@
             prop="requestDate"
             min-width="150"
           >
-            <template #default="{ row }">{{ formatTimestamp(row.requestDate, 'YYYY-MM-DD') }}</template>
+            <template #default="{ row }">{{
+              formatTimestamp(row.requestDate, 'YYYY-MM-DD')
+            }}</template>
           </el-table-column>
           <el-table-column :label="tt('openApi.usage.clientId')" prop="clientId" min-width="220">
             <template #default="{ row }">{{ valueOrDash(row.clientId) }}</template>
@@ -591,6 +593,7 @@
 </template>
 
 <script setup lang="ts">
+import '@/styles/clipforge-theme.css'
 import type { FormInstance, FormRules } from 'element-plus'
 import {
   TkOpenApiApi,
