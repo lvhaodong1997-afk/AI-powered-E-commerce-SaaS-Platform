@@ -70,6 +70,10 @@ public class TkPaymentOrderStore {
         if(!Arrays.asList("quoted","payment_pending","paid","canceled","refund_pending","refunded","review").contains(next))throw new IllegalArgumentException("支付状态无效");
         String payment=remote.path("paymentId").isTextual()?remote.path("paymentId").asText():null;
         if(row.get("payment_id")!=null && !row.get("payment_id").equals(payment))throw new IllegalArgumentException("渠道付款编号不匹配");
+        if(version==old && !current.equals(next))throw new IllegalArgumentException("支付版本冲突");
+        ObjectNode previous=row.get("snapshot_json")==null?null:parse(row.get("snapshot_json"));
+        if(previous!=null && previous.path("refundId").isTextual() && !previous.path("refundId").equals(remote.path("refundId")))
+            throw new IllegalArgumentException("渠道退款编号不匹配");
         Timestamp paid=null;
         String credit=(String)row.get("credit_status");
         if(Arrays.asList("paid","refund_pending","refunded").contains(next)) {
@@ -88,8 +92,6 @@ public class TkPaymentOrderStore {
                 credit=batches.reserveRefund(tenant,order)?"REFUND_PENDING":"REVIEW";
             } else if("refunded".equals(next)) credit=batches.confirmRefund(tenant,order)?"REFUNDED":"REVIEW";
         } else if("review".equals(next))credit="REVIEW";
-        // A conflicting snapshot at the same delivery version cannot mutate an established state.
-        if(version==old && !current.equals(next))throw new IllegalArgumentException("支付版本冲突");
         db.update("UPDATE tk_payment_order SET quote_json=?,snapshot_json=?,payment_id=?,status=?,credit_status=?,version=?,paid_at=COALESCE(paid_at,?),next_check_at=?,lease_until=NULL,check_failures=0,force_check=0,update_time=CURRENT_TIMESTAMP WHERE order_no=?",
                 encode(quote),encode(remote),payment,next,credit,version,paid,nextCheck(next,credit),order);
         return get(order,null);
@@ -103,6 +105,30 @@ public class TkPaymentOrderStore {
         credits.ensureAccount(tenant);
         if(!batches.reserveRefund(tenant,order))throw new IllegalStateException("订单积分已消耗或被任务冻结，需要人工处理");
         db.update("UPDATE tk_payment_order SET credit_status='REFUND_PENDING',next_check_at=CURRENT_TIMESTAMP WHERE order_no=?",order);
+    }
+
+    /** Remote proof is fetched by the platform-only service before opening this transaction. */
+    @Transactional(rollbackFor=Exception.class)
+    public ObjectNode releaseFailedRefund(String order,ObjectNode remote) {
+        Map<String,Object> row=db.queryForMap("SELECT * FROM tk_payment_order WHERE order_no=? FOR UPDATE",TkPaymentProtocol.orderNo(order));
+        ObjectNode previous=row.get("snapshot_json")==null?null:parse(row.get("snapshot_json"));
+        if(previous==null || !remote.path("refundId").isTextual() || remote.path("refundId").asText().isEmpty()
+                || (previous.path("refundId").isTextual() && !previous.path("refundId").equals(remote.path("refundId")))
+                || row.get("payment_id")==null || !row.get("payment_id").equals(remote.path("paymentId").asText())
+                || !"review".equals(remote.path("status").asText())
+                || !("failed".equals(remote.path("refundStatus").asText()) || "canceled".equals(remote.path("refundStatus").asText()))
+                || remote.path("version").asLong(-1)<((Number)row.get("version")).longValue()
+                || !("REFUND_PENDING".equals(row.get("credit_status")) || "REVIEW".equals(row.get("credit_status"))))
+            throw new IllegalArgumentException("缺少绑定原付款和退款的明确失败凭据");
+        validateQuote(parse(row.get("request_json")),remote);
+        TkPaymentProtocol.validateSnapshot(parse(row.get("quote_json")),remote);
+        if(row.get("paid_at")==null || !((Timestamp)row.get("paid_at")).toInstant().equals(Instant.parse(remote.path("paidAt").asText()).truncatedTo(java.time.temporal.ChronoUnit.MILLIS)))
+            throw new IllegalArgumentException("退款付款时间不匹配");
+        long tenant=((Number)row.get("tenant_id")).longValue();
+        credits.ensureAccount(tenant);batches.releaseFailedRefund(tenant,order);
+        // Review remains a permanent charge/refund retry fence; a released reservation is never re-bound.
+        db.update("UPDATE tk_payment_order SET snapshot_json=?,status='review',credit_status='REVIEW',version=?,lease_until=NULL,force_check=0,update_time=CURRENT_TIMESTAMP WHERE order_no=?",encode(remote),remote.path("version").asLong(),order);
+        return get(order,null);
     }
 
     @Transactional(rollbackFor=Exception.class)

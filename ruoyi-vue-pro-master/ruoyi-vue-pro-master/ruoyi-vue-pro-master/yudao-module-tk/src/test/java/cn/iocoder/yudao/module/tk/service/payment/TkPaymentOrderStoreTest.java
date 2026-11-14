@@ -69,4 +69,53 @@ class TkPaymentOrderStoreTest {
         db.update("UPDATE tk_payment_order SET next_check_at=CURRENT_TIMESTAMP");assertFalse(store.due().contains(order));
         store.failed(order);db.update("UPDATE tk_payment_order SET next_check_at=CURRENT_TIMESTAMP");assertTrue(store.due().contains(order));
     }
+
+
+    ObjectNode failedRefund(String failure) {
+        ObjectNode paid=snapshot("paid",2);tx.execute(s->store.apply(order,paid));tx.execute(s->{store.reserveRefund(order);return null;});
+        ObjectNode review=paid.deepCopy().put("status","refund_pending").put("version",3).put("refundId","re_original").put("refundStatus","pending");
+        tx.execute(s->store.apply(order,review));
+        review.put("status","review").put("version",4);
+        if(failure==null)review.putNull("refundStatus");else review.put("refundStatus",failure);
+        tx.execute(s->store.apply(order,review));return review;
+    }
+    @Test void canonicalFailedRefundReleasesOnceButKeepsReviewFence(){
+        ObjectNode remote=failedRefund("failed");
+        tx.execute(s->store.releaseFailedRefund(order,remote));tx.execute(s->store.releaseFailedRefund(order,remote));
+        assertEquals(250,db.queryForObject("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=9",Long.class));
+        assertEquals(0,db.queryForObject("SELECT refund_reserved FROM tk_credit_batch WHERE source_key=?",Long.class,order));
+        assertEquals("review",store.get(order,9L).path("status").asText());
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM tk_credit_log WHERE biz_type='REFUND_FAILURE'",Long.class));
+    }
+    @Test void canceledRefundAfterExpiryReleasesOnlyToExpired(){
+        ObjectNode remote=failedRefund("canceled");
+        db.update("UPDATE tk_credit_batch SET expires_at=? WHERE source_key=?",java.sql.Timestamp.from(Instant.now().minusSeconds(1)),order);
+        tx.execute(s->store.releaseFailedRefund(order,remote));
+        assertEquals(0,db.queryForObject("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=9",Long.class));
+        assertEquals(250,db.queryForObject("SELECT expired FROM tk_credit_batch WHERE source_key=?",Long.class,order));
+    }
+    @Test void unknownOrMismatchedRefundNeverReleasesReservation(){
+        ObjectNode remote=failedRefund(null);
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->store.releaseFailedRefund(order,remote)));
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->store.releaseFailedRefund(order,remote.deepCopy().put("refundStatus","failed").put("refundId","re_other"))));
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->store.releaseFailedRefund(order,remote.deepCopy().put("refundStatus","failed").put("paymentId","pi_other"))));
+        assertEquals(250,db.queryForObject("SELECT refund_reserved FROM tk_credit_batch WHERE source_key=?",Long.class,order));
+        assertEquals(0,db.queryForObject("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=9",Long.class));
+    }
+    @Test void quotePendingPaidUseDistinctCanonicalDeliveryVersions(){
+        ObjectNode quoted=snapshot("quoted",0);quoted.putNull("paymentId");tx.execute(s->store.apply(order,quoted));
+        ObjectNode pending=snapshot("payment_pending",1).put("redirectUrl","https://hooks.stripe.com/test");
+        assertEquals("payment_pending",tx.execute(s->store.apply(order,pending)).path("status").asText());
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->store.apply(order,pending.deepCopy().put("status","paid"))));
+        tx.execute(s->store.apply(order,snapshot("paid",2)));
+        assertEquals(250,db.queryForObject("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=9",Long.class));
+    }
+
+    @Test void lostRefundResponseCanRecoverFromCanonicalBoundFailure(){
+        ObjectNode paid=snapshot("paid",2);tx.execute(s->store.apply(order,paid));tx.execute(s->{store.reserveRefund(order);return null;});
+        ObjectNode remote=paid.deepCopy().put("status","review").put("version",4).put("refundId","re_original").put("refundStatus","failed");
+        tx.execute(s->store.releaseFailedRefund(order,remote));
+        assertEquals(250,db.queryForObject("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=9",Long.class));
+        assertEquals("re_original",store.get(order,9L).path("refundId").asText());
+    }
 }

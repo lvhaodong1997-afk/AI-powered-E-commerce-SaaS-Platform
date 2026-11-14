@@ -18,4 +18,5 @@ public class TkPaymentController {
     @GetMapping("/payments") public CommonResult<ObjectNode> page(@RequestParam(defaultValue="1") int pageNo,@RequestParam(defaultValue="10") int pageSize){return success(service.page(pageNo,pageSize));}
     @PostMapping("/payments/{orderNo}/cancel") public CommonResult<ObjectNode> cancel(@PathVariable String orderNo){return success(service.cancel(orderNo));}
     @PostMapping("/payments/{orderNo}/refund") public CommonResult<ObjectNode> refund(@PathVariable String orderNo){return success(service.refund(orderNo));}
+    @PostMapping("/payments/{orderNo}/refund/release-failed") public CommonResult<ObjectNode> releaseFailedRefund(@PathVariable String orderNo){return success(service.releaseFailedRefund(orderNo));}
 }

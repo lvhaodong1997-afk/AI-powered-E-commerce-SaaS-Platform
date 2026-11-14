@@ -35,6 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 
 import javax.annotation.Resource;
@@ -74,6 +75,9 @@ public class TenantServiceImpl implements TenantService {
     private MenuService menuService;
     @Resource
     private PermissionService permissionService;
+
+    @Autowired(required=false)
+    private TenantCreditQuotaUpdater creditQuotaUpdater;
 
     @Override
     public List<Long> getTenantIdList() {
@@ -147,8 +151,12 @@ public class TenantServiceImpl implements TenantService {
     }
 
     @Override
-    @DSTransactional // 多数据源，使用 @DSTransactional 保证本地事务，以及数据源的切换
+    // This method and the product ledger use the same default datasource/Spring transaction.
+    @Transactional(rollbackFor=Exception.class)
     public void updateTenant(TenantSaveReqVO updateReqVO) {
+        if (creditQuotaUpdater != null && updateReqVO.getAccountCount() != null) {
+            creditQuotaUpdater.applyAbsoluteQuota(updateReqVO.getId(), updateReqVO.getAccountCount());
+        }
         // 校验存在
         TenantDO tenant = validateUpdateTenant(updateReqVO.getId());
         // 校验租户名称是否重复

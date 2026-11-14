@@ -61,7 +61,7 @@ class TkCreditServiceImplTest {
         account.setTenantId(8L);
 
         when(tenantService.getTenant(8L)).thenReturn(tenant);
-        when(creditAccountMapper.selectByTenantId(8L)).thenReturn(account);
+        when(creditAccountMapper.selectCurrentByTenantId(8L)).thenReturn(account);
         when(creditAccountMapper.freezeCredits(any(), any())).thenReturn(1);
 
         ReflectionTestUtils.setField(service, "batchService", mock(TkCreditBatchService.class));

@@ -6,6 +6,8 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.TkTenantCreditAccountDO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Options;
 
 @Mapper
 public interface TkTenantCreditAccountMapper extends BaseMapperX<TkTenantCreditAccountDO> {
@@ -14,6 +16,11 @@ public interface TkTenantCreditAccountMapper extends BaseMapperX<TkTenantCreditA
         return selectOne(new LambdaQueryWrapperX<TkTenantCreditAccountDO>()
                 .eq(TkTenantCreditAccountDO::getTenantId, tenantId));
     }
+
+    /** Current read: ignore SESSION snapshots across JDBC ledger mutations and repeatable-read waits. */
+    @Select("SELECT * FROM tk_tenant_credit_account WHERE tenant_id=#{tenantId} AND deleted=0 FOR UPDATE")
+    @Options(useCache=false, flushCache=Options.FlushCachePolicy.TRUE)
+    TkTenantCreditAccountDO selectCurrentByTenantId(@Param("tenantId") Long tenantId);
 
     @Update("UPDATE tk_tenant_credit_account SET remaining_credits = remaining_credits - #{credits}, "
             + "frozen_credits = frozen_credits + #{credits}, update_time = NOW() "

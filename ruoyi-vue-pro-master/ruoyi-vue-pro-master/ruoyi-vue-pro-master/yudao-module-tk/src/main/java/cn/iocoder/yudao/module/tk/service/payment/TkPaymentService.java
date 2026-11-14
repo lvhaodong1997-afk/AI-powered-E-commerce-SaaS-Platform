@@ -62,6 +62,12 @@ public class TkPaymentService {
         try{return store.apply(order,gateway.request("POST","refunds",json.createObjectNode().put("orderNo",order)));}
         catch(RuntimeException e){store.failed(order);throw e;}
     }
+    public ObjectNode releaseFailedRefund(String order) {
+        scopes.validatePlatformAdmin();
+        store.get(order,null);
+        ObjectNode canonical=gateway.request("GET","orders/"+TkPaymentProtocol.orderNo(order),null);
+        return store.releaseFailedRefund(order,canonical);
+    }
     public void notify(String timestamp,String nonce,String signature,String body) {
         if(body==null||body.length()>65536)throw new IllegalArgumentException("支付通知过大");
         TkPaymentProtocol.verify(properties.getNotifySecret(),timestamp,nonce,signature,"POST",properties.getNotifyPath(),body,Instant.now().getEpochSecond());
