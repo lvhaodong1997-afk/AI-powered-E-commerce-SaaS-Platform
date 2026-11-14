@@ -68,7 +68,8 @@
         "description": "ClipForge Studio helps teams create, review, and prepare short-form videos with AI-assisted scripts, video assembly, and user-confirmed publishing workflows.",
         "publisher": {
           "@type": "Organization",
-          "name": "ClipForge Studio",
+          "name": "山西闻智科技有限公司",
+          "legalName": "山西闻智科技有限公司",
           "url": "https://clipforgestudio.fnn.net.cn/"
         }
       }
@@ -321,6 +322,51 @@
           text-decoration: none;
         }
 
+        .app-loading .app-loading-actions {
+          position: relative;
+          z-index: 1;
+          display: flex;
+          margin-top: 18px;
+          gap: 10px;
+          justify-content: center;
+        }
+
+        .app-loading .app-loading-action {
+          display: inline-flex;
+          min-width: 104px;
+          padding: 9px 14px;
+          justify-content: center;
+          align-items: center;
+          border: 1px solid rgba(110, 223, 255, 0.35);
+          border-radius: 6px;
+          color: #061326;
+          background: #9be8ff;
+          cursor: pointer;
+          font: inherit;
+          font-size: 13px;
+          font-weight: 700;
+          text-decoration: none;
+        }
+
+        .app-loading .app-loading-action.secondary {
+          color: rgba(226, 243, 255, 0.92);
+          background: rgba(9, 33, 61, 0.58);
+        }
+
+        .app-loading .app-loading-error-message {
+          position: relative;
+          z-index: 1;
+          display: none;
+          margin: 14px 0 0;
+          color: #ffd8d8;
+          font-size: 12px;
+          text-align: center;
+        }
+
+        .app-loading.app-loading-error .app-loading-error-message {
+          display: block;
+        }
+
         .app-loading .app-loading-scan {
           position: absolute;
           inset: 0;
@@ -433,6 +479,7 @@
           </div>
           <section class="public-fallback" aria-label="ClipForge Studio public website fallback">
             <h1>Create, review, and prepare short-form videos</h1>
+            <p>ClipForge Studio is operated by 山西闻智科技有限公司.</p>
             <p>
               ClipForge Studio provides AI-assisted scripts, video assembly, data controls, and
               user-confirmed publishing preparation. This public website is not a login page.
@@ -441,6 +488,17 @@
               ><!--/email_off-->, or see <a href="/privacy-policy">Privacy Policy</a>,
               <a href="/terms-of-service">Terms of Service</a>, and
               <a href="/data-deletion">Data Deletion</a>.
+            </p>
+            <div class="app-loading-actions">
+              <a class="app-loading-action" href="/login?redirect=/tk/video-publish-center">
+                进入应用
+              </a>
+              <button class="app-loading-action secondary" type="button" data-app-loading-retry>
+                重新加载
+              </button>
+            </div>
+            <p class="app-loading-error-message" data-app-loading-error>
+              应用脚本加载超时，请点击“重新加载”再试。
             </p>
           </section>
         </div>
@@ -455,6 +513,33 @@
         : configuredTitle
       document.title = resolvedTitle
       if (loadingTitle) loadingTitle.textContent = resolvedTitle
+
+      const appLoading = document.querySelector('.app-loading')
+      const appLoadingError = document.querySelector('[data-app-loading-error]')
+      const markAppLoadingError = () => {
+        appLoading?.classList.add('app-loading-error')
+        if (appLoadingError) appLoadingError.hidden = false
+      }
+
+      document.querySelector('[data-app-loading-retry]')?.addEventListener('click', () => {
+        const retryUrl = new URL(window.location.href)
+        retryUrl.searchParams.set('_app_retry', String(Date.now()))
+        window.location.replace(retryUrl.toString())
+      })
+
+      window.addEventListener(
+        'error',
+        (event) => {
+          if (event.target?.tagName === 'SCRIPT' && event.target.type === 'module') {
+            markAppLoadingError()
+          }
+        },
+        true
+      )
+
+      window.setTimeout(() => {
+        if (document.querySelector('.app-loading')) markAppLoadingError()
+      }, 12000)
     </script>
     <script type="module" src="/src/main.ts"></script>
   </body>

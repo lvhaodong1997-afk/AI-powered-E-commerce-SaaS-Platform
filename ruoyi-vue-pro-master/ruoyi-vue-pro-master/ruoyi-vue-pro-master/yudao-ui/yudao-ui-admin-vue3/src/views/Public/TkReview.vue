@@ -25,6 +25,7 @@
           ClipForge Studio helps creators and businesses analyze references, generate scripts,
           assemble edited videos, and prepare user-reviewed publishing tasks.
         </p>
+        <p class="hero-text">ClipForge Studio is operated by 山西闻智科技有限公司.</p>
         <p class="reviewer-note">
           This website is the public product site for ClipForge Studio, not a login page. Reviewers
           can read the product workflow, TikTok integration model, support contact, and data
@@ -120,6 +121,7 @@
     <section id="support" class="support-section">
       <div>
         <p class="eyebrow">Support and legal</p>
+        <p>ClipForge Studio 由山西闻智科技有限公司运营，为创作者和企业提供 AI 视频创作与发布工作流工具。</p>
         <h2>Public contact for product, privacy, and platform questions</h2>
       </div>
       <div class="support-card">
@@ -132,7 +134,7 @@
     </section>
 
     <footer class="public-footer">
-      <span>ClipForge Studio</span>
+      <span>ClipForge Studio · 山西闻智科技有限公司</span>
       <div>
         <RouterLink to="/">Home</RouterLink>
         <RouterLink to="/privacy-policy">Privacy Policy</RouterLink>

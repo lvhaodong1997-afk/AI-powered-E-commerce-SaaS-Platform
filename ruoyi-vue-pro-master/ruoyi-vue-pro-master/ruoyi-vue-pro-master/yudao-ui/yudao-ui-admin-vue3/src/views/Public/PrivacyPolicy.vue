@@ -3,9 +3,10 @@
     <section class="legal-shell">
       <p class="eyebrow">ClipForge Studio</p>
       <h1>Privacy Policy</h1>
-      <p class="updated">Last updated: July 2, 2026</p>
+      <p class="updated">Last updated: November 12, 2026</p>
 
       <article>
+        <p>ClipForge Studio is operated by 山西闻智科技有限公司. In this policy, “we”, “us”, and “our” refer to this company.</p>
         <h2>1. Overview</h2>
         <p>
           ClipForge Studio is a web-based video creation and publishing tool for creators and
