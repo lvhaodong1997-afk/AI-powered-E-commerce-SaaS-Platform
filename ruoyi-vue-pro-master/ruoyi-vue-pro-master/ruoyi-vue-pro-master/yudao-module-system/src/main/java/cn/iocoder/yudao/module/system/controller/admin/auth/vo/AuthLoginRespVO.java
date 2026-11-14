@@ -27,4 +27,13 @@ public class AuthLoginRespVO {
     @Schema(description = "过期时间", requiredMode = Schema.RequiredMode.REQUIRED)
     private LocalDateTime expiresTime;
 
+    private Long tenantId;
+
+    private String tenantName;
+
+    /** Preserve the original constructor for existing Java callers. */
+    public AuthLoginRespVO(Long userId, String accessToken, String refreshToken, LocalDateTime expiresTime) {
+        this.userId = userId; this.accessToken = accessToken; this.refreshToken = refreshToken; this.expiresTime = expiresTime;
+    }
+
 }

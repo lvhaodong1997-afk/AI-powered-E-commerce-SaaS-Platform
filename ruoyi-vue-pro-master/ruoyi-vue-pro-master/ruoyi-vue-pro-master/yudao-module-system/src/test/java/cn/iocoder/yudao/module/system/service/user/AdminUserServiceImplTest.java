@@ -162,7 +162,7 @@ public class AdminUserServiceImplTest extends BaseDbUnitTest {
         reqVO.setNickname("Tenant User");
         reqVO.setPassword("123456");
         reqVO.setTkUserLevel("TENANT_USER");
-        TenantDO tenant = randomPojo(TenantDO.class, o -> o.setAccountCount(10));
+        TenantDO tenant = randomPojo(TenantDO.class, o -> o.setAccountCount(10).setMemberLimit(10));
         doNothing().when(tenantService).handleTenantInfo(argThat(handler -> {
             handler.handle(tenant);
             return true;
@@ -187,14 +187,15 @@ public class AdminUserServiceImplTest extends BaseDbUnitTest {
         // 准备参数
         UserSaveReqVO reqVO = randomPojo(UserSaveReqVO.class);
         // mock 账户额度不足
-        TenantDO tenant = randomPojo(TenantDO.class, o -> o.setAccountCount(-1));
+        userMapper.insert(randomAdminUserDO());
+        TenantDO tenant = randomPojo(TenantDO.class, o -> o.setAccountCount(0).setMemberLimit(1));
         doNothing().when(tenantService).handleTenantInfo(argThat(handler -> {
             handler.handle(tenant);
             return true;
         }));
 
         // 调用，并断言异常
-        assertServiceException(() -> userService.createUser(reqVO), USER_COUNT_MAX, -1);
+        assertServiceException(() -> userService.createUser(reqVO), USER_COUNT_MAX, 1);
     }
 
     @Test
@@ -212,7 +213,7 @@ public class AdminUserServiceImplTest extends BaseDbUnitTest {
         reqVO.setPassword("123456");
         reqVO.setTkUserLevel("TENANT_USER");
         reqVO.setTenantId(null);
-        TenantDO tenant = randomPojo(TenantDO.class, o -> o.setAccountCount(10));
+        TenantDO tenant = randomPojo(TenantDO.class, o -> o.setAccountCount(10).setMemberLimit(10));
         doNothing().when(tenantService).handleTenantInfo(argThat(handler -> {
             handler.handle(tenant);
             return true;

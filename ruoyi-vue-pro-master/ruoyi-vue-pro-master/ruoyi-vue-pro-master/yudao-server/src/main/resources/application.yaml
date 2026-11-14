@@ -163,6 +163,16 @@ yudao:
 debug: false
 
 tk:
+  registration:
+    enabled: ${TK_REGISTRATION_ENABLED:false}
+    default-package-id: ${TK_REGISTRATION_DEFAULT_PACKAGE_ID:0}
+    validity-days: ${TK_REGISTRATION_VALIDITY_DAYS:0}
+    validity-years: ${TK_REGISTRATION_VALIDITY_YEARS:0}
+    member-limit: ${TK_REGISTRATION_MEMBER_LIMIT:1}
+    phone-base-url: ${TK_REGISTRATION_PHONE_BASE_URL:}
+    phone-secret: ${TK_REGISTRATION_PHONE_SECRET:}
+    invite-base-url: ${TK_REGISTRATION_INVITE_BASE_URL:${yudao.web.admin-ui.url:}}
+    trusted-proxy-ips: ${TK_REGISTRATION_TRUSTED_PROXY_IPS:}
   tiktok-shop:
     enabled: ${TIKTOK_SHOP_ENABLED:false}
     app-key: ${TIKTOK_SHOP_APP_KEY:}

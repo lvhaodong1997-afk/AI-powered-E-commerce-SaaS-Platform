@@ -1,5 +1,7 @@
 package cn.iocoder.yudao.module.system.service.user;
 
+import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
@@ -105,6 +107,9 @@ public class AdminUserServiceImpl implements AdminUserService {
     @Resource
     private AdminUserProducer adminUserProducer;
 
+    @org.springframework.beans.factory.annotation.Value("${tk.registration.enabled:false}")
+    private boolean tenantRegistrationEnabled;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     @LogRecord(type = SYSTEM_USER_TYPE, subType = SYSTEM_USER_CREATE_SUB_TYPE, bizNo = "{{#user.id}}",
@@ -119,6 +124,14 @@ public class AdminUserServiceImpl implements AdminUserService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createTenantAdminUser(UserSaveReqVO createReqVO) {
+        // Internal provisioning only: the tenant creator owns this context, never a public role selector.
+        Long tenantId = TenantContextHolder.getTenantId();
+        if (tenantId == null || tenantId <= 0 || !tenantId.equals(createReqVO.getTenantId())
+                || (SecurityFrameworkUtils.getLoginUser() != null
+                    && !tkTenantAccessService.isCurrentUserPlatformAdmin())) {
+            throw exception(USER_TK_TENANT_ADMIN_FORBIDDEN);
+        }
+        createReqVO.setTkUserLevel(TK_TENANT_ADMIN).setTkCompanyId(null);
         return createUserInternal(createReqVO, true);
     }
 
@@ -127,8 +140,8 @@ public class AdminUserServiceImpl implements AdminUserService {
             // 1.1 校验账户配合
             tenantService.handleTenantInfo(tenant -> {
                 long count = userMapper.selectCount();
-                if (count >= tenant.getAccountCount()) {
-                    throw exception(USER_COUNT_MAX, tenant.getAccountCount());
+                if (count >= tenant.resolveMemberLimit(count)) {
+                    throw exception(USER_COUNT_MAX, tenant.resolveMemberLimit(count));
                 }
             });
             // 1.2 校验正确性
@@ -137,7 +150,13 @@ public class AdminUserServiceImpl implements AdminUserService {
             // 2.1 插入用户
             AdminUserDO user = BeanUtils.toBean(createReqVO, AdminUserDO.class);
             removeDeptAndPost(user);
-            prepareTkUserScopeForSave(user, null, allowTenantAdmin);
+            if (allowTenantAdmin) {
+                user.setTkUserLevel(TK_TENANT_ADMIN);
+                user.setTkCompanyId(null);
+                user.setTenantId(TenantContextHolder.getRequiredTenantId());
+            } else {
+                prepareTkUserScopeForSave(user, null, false);
+            }
             tkTenantAccessService.applyCurrentTenantForNonPlatform(user);
             user.setStatus(CommonStatusEnum.ENABLE.getStatus()); // 默认开启
             user.setPassword(encodePassword(createReqVO.getPassword())); // 加密密码
@@ -180,6 +199,9 @@ public class AdminUserServiceImpl implements AdminUserService {
 
     @Override
     public Long registerUser(AuthRegisterReqVO registerReqVO) {
+        if (tenantRegistrationEnabled) {
+            throw exception(USER_REGISTER_DISABLED);
+        }
         // 1.1 校验是否开启注册
         if (ObjUtil.notEqual(configApi.getConfigValueByKey(USER_REGISTER_ENABLED_KEY), "true")) {
             throw exception(USER_REGISTER_DISABLED);
@@ -187,8 +209,8 @@ public class AdminUserServiceImpl implements AdminUserService {
         // 1.2 校验账户配合
         tenantService.handleTenantInfo(tenant -> {
             long count = userMapper.selectCount();
-            if (count >= tenant.getAccountCount()) {
-                throw exception(USER_COUNT_MAX, tenant.getAccountCount());
+            if (count >= tenant.resolveMemberLimit(count)) {
+                throw exception(USER_COUNT_MAX, tenant.resolveMemberLimit(count));
             }
         });
         // 1.3 校验正确性
