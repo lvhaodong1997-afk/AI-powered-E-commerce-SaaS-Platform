@@ -27,10 +27,11 @@ const whiteList = [
   '/privacy-policy',
   '/terms-of-service',
   '/data-deletion',
+  '/api-docs',
   '/review'
 ]
 
-const publicPageList = ['/', '/privacy-policy', '/terms-of-service', '/data-deletion', '/review']
+const publicPageList = ['/', '/privacy-policy', '/terms-of-service', '/data-deletion', '/api-docs', '/review']
 
 // 路由加载前
 router.beforeEach(async (to, from, next) => {

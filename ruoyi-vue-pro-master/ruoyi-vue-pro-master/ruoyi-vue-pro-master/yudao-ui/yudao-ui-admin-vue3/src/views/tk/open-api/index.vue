@@ -5,9 +5,16 @@
         <h1>{{ tt('openApi.title') }}</h1>
         <p>{{ tt('openApi.subtitle') }}</p>
       </div>
-      <el-button :loading="activeLoading" @click="refreshActiveTab">
-        <Icon icon="ep:refresh" class="mr-5px" /> {{ tt('openApi.refresh') }}
-      </el-button>
+      <div class="toolbar-actions">
+        <RouterLink to="/api-docs" target="_blank" rel="noopener noreferrer">
+          <el-button type="primary" plain>
+            <Icon icon="ep:document" class="mr-5px" /> {{ tt('openApi.apiDocs') }}
+          </el-button>
+        </RouterLink>
+        <el-button :loading="activeLoading" @click="refreshActiveTab">
+          <Icon icon="ep:refresh" class="mr-5px" /> {{ tt('openApi.refresh') }}
+        </el-button>
+      </div>
     </div>
 
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
@@ -1075,6 +1082,12 @@ onMounted(getClientList)
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 8px;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .page-toolbar h1,

@@ -1,0 +1,21 @@
+{
+  "libraryId": "REPLACE_WITH_LIBRARY_ID_FROM_RESOURCES",
+  "title": "芒果干_精致妈妈_01",
+  "scriptText": "这里填写完整口播正文，不要放入画像、结构说明或剪辑指令。",
+  "ttsProvider": "MINIMAX",
+  "voiceCode": "REPLACE_WITH_VOICE_CODE_FROM_RESOURCES",
+  "bgmAssetId": "REPLACE_WITH_OWN_BGM_ID_FROM_RESOURCES",
+  "bgmVolume": 0.4,
+  "translationEnabled": false,
+  "targetRegion": "CN",
+  "durationMode": "FOLLOW_NARRATION",
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "subtitleEnabled": true,
+  "subtitleFontSize": "extra_large",
+  "subtitleStyle": "classic_white",
+  "subtitlePositionMode": "smart_safe",
+  "subtitleKeywordEnabled": true,
+  "subtitleKaraokeEnabled": true
+}

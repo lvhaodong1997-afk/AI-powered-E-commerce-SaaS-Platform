@@ -2,13 +2,15 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | v2.0 |
-| 整理日期 | 2026-11-11 |
+| 文档版本 | v2.1 |
+| 整理日期 | 2026-11-14 |
 | 适用对象 | 需要通过 API 集成本平台的合作方 / 客户后端、本平台开发与运维 |
 | 依据 | 仓库当前源码（`yudao-module-tk` 控制器、VO、鉴权过滤器、错误码常量）与 `docs/` 既有交付文档 |
 | 交付物 | 本文（人读）、[`tk-platform-openapi.json`](tk-platform-openapi.json)（机读）、[`tk-platform-api.html`](tk-platform-api.html)（单页阅读版）、`build_html.py`（HTML 构建脚本） |
 
 > **重要声明**：本文描述的是**当前源码已实现**的接口契约，不代表这些接口已完成部署、联调或通过生产验收。调用前须由双方确认目标环境连通性、客户端配置与权限开通状态。凡标记「规划中」的章节均**尚未实现**，不可作为联调依据。
+
+自动出片接入从 [快速开始](quickstart.md) 进入；字段说明见 [自动出片 API](tk-automation-v1.md)，会话、错误和重试规则见 [调用规则](calling-rules.md)。TikTok 发布接入见 [TikTok 接入指南](tiktok-integration.md)。[Postman 集合](tk-automation.postman_collection.json) 和 [环境模板](tk-automation.postman_environment.json) 默认禁止收费创建。
 
 ---
 
@@ -20,12 +22,13 @@
 | --- | --- | --- | --- |
 | TikTok 账号授权（浏览器 / 二维码 / 托管页） | `/tk/open/v1/tiktok/auth/**` | HMAC 签名 | 已实现 |
 | TikTok 账号连接查询、资料刷新、解绑 | `/tk/open/v1/tiktok/connections/**` | HMAC 签名 | 已实现 |
-| 视频上传（OSS 直传 / 分片） | `/tk/open/v1/tiktok/media/**` | HMAC 签名 | 已实现 |
-| 视频发布、定时发布、取消、重试、状态查询 | `/tk/open/v1/tiktok/publish/**` | HMAC 签名 | 已实现 |
+| 视频/图片上传（OSS 直传 / 分片，图片异步转 JPEG） | `/tk/open/v1/tiktok/media/**` | HMAC 签名 | 已实现，省略 mediaType 默认 VIDEO |
+| 视频/有序图文发布、定时发布、取消、重试、状态查询 | `/tk/open/v1/tiktok/publish/**` | HMAC 签名 | 已实现；PHOTO 1–35 张 |
 | 发布后视频指标（播放/点赞/评论/分享） | `/publish/tasks/{taskId}/metrics` | HMAC 签名 | 已实现 |
 | 图片转文字（OCR） | `/tk/open/v1/ocr/**` | **免鉴权** | 已实现 |
 | 文案改写、对标视频下载、视频文案时间轴提取 | `/admin-api/tk/open/**` | **免鉴权**（个别子接口需后台权限） | 已实现 |
-| 自动混剪生成任务、素材库、配音、BGM、参考分析 | `/admin-api/tk/generation/**` 等 | **后台登录 Token + 菜单权限** | 仅后台可用，**无对外开放接口** |
+| 完整口播自动出片、积分、素材库/音色/BGM 查询、进度、下载 | `/admin-api/tk/automation/v1/**` | **账号登录 Token + tenant-id + 菜单权限** | 已实现，7 个出片端点 |
+| 更多生成管理、素材编辑、参考分析 | `/admin-api/tk/generation/**` 等 | **后台登录 Token + 菜单权限** | 后台管理能力，非本版稳定出片接入契约 |
 | TikTok Shop、Facebook / Instagram 发布、账号统计 | `/admin-api/tk/tiktok-shop/**`、`/admin-api/tk/social-*` | **后台登录 Token + 菜单权限** | 仅后台可用，**无对外开放接口** |
 
 ### 0.2 必须先明确的边界
@@ -34,16 +37,18 @@
 
 因此「用户通过 API 操作本项目」在现阶段有两种可行路径：
 
-1. **走开放 API（推荐给外部合作方）**：使用 `clientId` + `clientSecret` 做 HMAC 签名，可完成 TikTok 授权 → 视频上传 → 发布 → 查询 → 指标全链路。这是唯一面向第三方正式设计的接口族。
-2. **走后台 API（仅建议内部系统集成）**：先调用 `/admin-api/system/auth/login` 换取 `accessToken`，再带 `Authorization: Bearer ...` 与 `tenant-id` 调用 `/admin-api/tk/**`。它绑定后台账号、租户和菜单权限，且启用了 API 加密，**不适合直接发给外部客户**。
+1. **TikTok 授权、上传与发布**：使用 `clientId` + `clientSecret` 做 HMAC 签名，完成授权 → 上传 → 发布 → 查询 → 指标全链路。
+2. **自动出片**：先通过租户名称取得租户 ID，调用 `/admin-api/system/auth/login` 换取 `accessToken`，再带 `Authorization: Bearer ...` 与 `tenant-id` 调用 `/admin-api/tk/automation/v1/**`。它复用账号、租户、资源及菜单权限，支持直接 JSON 请求，不需要 HMAC。环境启用验证码时须遵循原登录流程。
 
-> **结论**：如果业务诉求是「客户用 API 触发自动混剪并拿到成片」，当前开放 API **尚不覆盖**该能力，需要按第 11 节补齐。本文第 11 节给出可直接落地的接口设计草案。
+> 当前已可通过账号 API 完成「资源查询 → 完整口播出片 → 查询进度 → 下载」。HMAC 生成接口、生成幂等和生成回调仍属第 11 节的后续扩展，不可把 TikTok 的鉴权或重试规则套到出片接口上。
 
 ---
 
 ## 1. 基础信息
 
 ### 1.1 服务地址
+
+自动出片默认产品地址：`https://clipforgestudio.fnn.net.cn`，业务前缀 `/admin-api/tk/automation/v1`。登录与租户查询同样使用该产品地址。
 
 约定生产基地址（`docs/tiktok-open-api.md`、`docs/openapi/tiktok-open-api-c-party-integration.md` 中固定）：
 
@@ -89,7 +94,7 @@ POST https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions
 | 分片上传 Content-Type | `application/octet-stream` |
 | OCR / 表单上传 | `multipart/form-data` |
 | API 版本 | 路径中的 `v1`；不兼容变更须升版本路径，不得静默改变 v1 字段语义 |
-| 时间格式 | ISO-8601，如 `2026-09-01T17:35:00`；带时区时如 `2026-09-26T18:00:00+08:00` |
+| 时间格式 | TikTok 定时发布按字段要求使用 ISO-8601；账号 `expiresTime`、素材 `createTime` 默认 Unix 毫秒时间戳。逐字段以契约为准 |
 
 ### 1.4 资源编号（opaque ID）
 
@@ -107,6 +112,8 @@ POST https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions
 
 调用方自己的业务编号通过 `externalAccountId`、`externalRequestId`、`clientState` 传递。所有平台资源编号**只在所属 `clientId` 范围内有效**，跨客户端不可查询、不可使用。
 
+本节不透明字符串编号特指发布/TikTok 接口。自动出片的 `taskId`、素材库/BGM/音色 ID 为正整数，属于当前账号资源范围；两个接口族的 `taskId` 不能互换。
+
 ---
 
 ## 2. 鉴权
@@ -117,7 +124,7 @@ POST https://tkassetplant.fnn.net.cn/admin-api/tk/open/v1/tiktok/auth/sessions
 | --- | --- | --- | --- |
 | A. 开放 API HMAC | 含 `/tk/open/v1/tiktok/` | `clientId` / `clientSecret` | `TkOpenApiAuthenticationFilter` |
 | B. 免登录工具接口 | `/tk/open/v1/ocr/**`、`/admin-api/tk/open/**` | 无 | 控制器 `@PermitAll` + `@TenantIgnore` |
-| C. 后台会话 API | 其余 `/admin-api/**` | `accessToken` + `tenant-id` | `TokenAuthenticationFilter` + `@PreAuthorize` |
+| C. 账号会话 API（含自动出片） | `/admin-api/tk/automation/v1/**` 及后台业务接口 | `accessToken` + `tenant-id` | `TokenAuthenticationFilter` + `@PreAuthorize` |
 
 A 与 C **完全独立**：开放 API 不接受 `Bearer` Token，后台 API 也不接受 `X-TK-*` 签名。
 
@@ -273,7 +280,7 @@ Python、Java 的完整示例见 [`docs/sdk/`](../sdk/)：`tiktok-open-api-pytho
 
 `POST /tk/tiktok/webhook` 是平台接收 TikTok 官方 Content Posting Webhook 的端点，由 TikTok 调用，调用方不要主动请求；且该路径无 `/admin-api` 前缀，Nginx 未转发，生产可达性需单独确认。
 
-### 2.4 C. 后台会话 API（仅供内部集成）
+### 2.4 C. 账号会话 API
 
 #### 2.4.1 登录
 
@@ -283,7 +290,7 @@ Content-Type: application/json
 ```
 
 ```json
-{ "username": "admin", "password": "******" }
+{ "username": "YOUR_LOGIN_NAME", "password": "YOUR_PASSWORD" }
 ```
 
 | 字段 | 必填 | 说明 |
@@ -307,14 +314,14 @@ Authorization: Bearer <accessToken>
 tenant-id: <数字租户ID>
 ```
 
-平台管理员跨租户访问时另加 `visit-tenant-id`。刷新令牌：`POST /admin-api/system/auth/refresh-token`；退出：`POST /admin-api/system/auth/logout`。
+刷新令牌：`POST /admin-api/system/auth/refresh-token?refreshToken=<URL编码的刷新令牌>`，带 `tenant-id`，保存返回的新令牌与到期时间。退出：`POST /admin-api/system/auth/logout`。出片接入不要使用更换租户头的方式尝试访问其他租户资源。
 
-#### 2.4.3 后台 API 的两个使用障碍
+#### 2.4.3 验证码与可选请求加密
 
 1. **权限**：`/admin-api/tk/**` 绝大多数方法带 `@PreAuthorize("@ss.hasPermission('tk:xxx:query')")`，账号必须具备对应菜单权限，否则 403。
-2. **API 加密**：`application.yaml` 中 `yudao.api-encrypt.enable: true`（AES）。前端在请求带 `isEncrypt` 标识时会对请求体加密并设置加密标识头，响应也会加密。纯外部脚本直接按明文 JSON 调用可能被后端解密逻辑拒绝。
+2. **请求加密**：后台前端有可选 AES 请求标识流程，不能因此推断所有接口都强制加密。自动出片与登录示例使用 HTTPS 下的直接 JSON，无需手工模拟前端加密标识。
 
-因此**不建议**把后台 API 作为对外集成方案。若确需内部自动化调用，应先与运维确认加密开关与具体头名，或走第 11 节的开放 API 补齐方案。
+新接入用户使用已整理的 `/automation/v1` 契约；其他后台管理接口按具体权限、字段和环境约定使用，不应假设与出片接口拥有相同的稳定集成范围。
 
 ### 2.5 客户端开通（平台侧）
 
@@ -377,7 +384,7 @@ tenant-id: <数字租户ID>
 - 网络超时重试**必须复用原 key**，同时生成新的 `timestamp` 与 `nonce`；
 - 每次请求的 `nonce` 必须唯一，签名重试也算新请求。
 
-### 3.4 完整错误码（源码提取，共 47 项）
+### 3.4 主要错误码（含视频、图文与调度）
 
 #### 认证与网关
 
@@ -454,6 +461,23 @@ tenant-id: <数字租户ID>
 | `SCHEDULE_ACCOUNT_COUNT_INVALID` | 定时发布要求恰好 1 个账号 |
 | `SCHEDULE_NOT_MUTABLE` | 仅未执行的定时任务可改期 |
 | `SCHEDULE_ALREADY_RUNNING` | 定时任务已开始执行 |
+
+#### 图文上传与发布
+
+| 错误码 | 含义 |
+| --- | --- |
+| `MEDIA_NOT_READY` | 图片还未转换为 READY，继续查询上传状态 |
+| `PHOTO_MEDIA_TYPE_INVALID` | 必须使用转换后的 READY 图片媒体 |
+| `MEDIA_NOT_FOUND` | 资源不存在或不属于当前 client |
+| `PHOTO_MEDIA_INVALID` | 图片 ID 列表无效，须按顺序提供 1–35 张 |
+| `PHOTO_COVER_INVALID` | 封面索引超出当前图片列表范围 |
+| `PHOTO_TITLE_TOO_LONG` / `PHOTO_CAPTION_TOO_LONG` | 图文标题/描述超过 90/4000 个 UTF-16 代码单元 |
+| `PHOTO_DUET_UNSUPPORTED` / `PHOTO_STITCH_UNSUPPORTED` | 图文不支持启用合拍/拼接 |
+| `PHOTO_SCOPE_REQUIRED` | 缺少直发 `video.publish` 或收件箱 `video.upload` 授权 |
+| `PHOTO_MUSIC_MODE_UNSUPPORTED` | 自动配乐仅支持 PHOTO DIRECT_POST |
+| `PHOTO_VIDEO_MEDIA_CONFLICT` / `VIDEO_PHOTO_MEDIA_CONFLICT` | 图片列表和视频 mediaId 不可混传 |
+
+转换失败的具体原因通过上传状态 `failReason` 返回。修正原文件或授权问题后再按会话规则重试，不要无限重试。
 
 ---
 
@@ -559,7 +583,7 @@ POST /connections/{connectionId}/disconnect
 
 ---
 
-## 5. 视频上传 API
+## 5. 视频与图片上传 API
 
 基地址：`/admin-api/tk/open/v1/tiktok/media`。均需 HMAC 签名。
 
@@ -584,6 +608,7 @@ POST /uploads
 | `fileSize` | integer | 是 | > 0，上限 1,000,000,000 bytes |
 | `contentType` | string | 否 | 缺省按扩展名生成 `video/{ext}` |
 | `sha256` | string | 否 | 完整文件 SHA-256 十六进制；提供后 `complete` 时必须回传相同值 |
+| `mediaType` | string | 否 | 默认 `VIDEO`；图片使用 `PHOTO`，限制及完整流程见 5.6 |
 
 会话默认有效期 **24 小时**。`uploadMode` 由服务端根据配置决定（`OSS` 或 `LOCAL`），调用方不能指定。
 
@@ -633,7 +658,7 @@ GET /uploads/{uploadId}
 | `READY` | 已完成并生成 `mediaId` |
 | `CANCELLED` | 已取消 |
 
-当前响应**不返回分片编号列表**，调用方应自行持久化已成功的分片索引。
+当前响应**不返回分片编号列表**，调用方应自行持久化已成功的分片索引。上表是 VIDEO 状态；PHOTO 还包含 `PROCESSING`、`FAILED`、`EXPIRED`，并返回 `mediaType,failReason,width,height`，只能在 READY 后读取 `mediaId`。
 
 ### 5.4 完成上传
 
@@ -651,7 +676,7 @@ POST /uploads/{uploadId}/complete
 | `sha256` | 条件 | 创建时提供过则此处必填且必须相同 |
 | `coverTimestampMs` | 否 | 封面时间点，毫秒 |
 
-LOCAL 会校验全部分片、合并长度和摘要；OSS 会 HEAD 检查对象存在、`Content-Length` 与 `x-oss-meta-sha256`。成功后 `data` 含 `mediaId`、`uploadId`、`fileName`、`fileSize`、`contentType`、`status: "READY"`。**只有 `READY` 且取得 `mediaId` 才能发布。**
+LOCAL 会校验全部分片、合并长度和摘要；OSS 会 HEAD 检查对象存在、`Content-Length` 与 `x-oss-meta-sha256`。VIDEO 成功后 `data` 含 `mediaId`、`uploadId`、`fileName`、`fileSize`、`contentType`、`status: "READY"`；PHOTO 首次返回 PROCESSING，见 5.6。**只有 `READY` 且取得 `mediaId` 才能发布。**
 
 ### 5.5 取消上传
 
@@ -659,7 +684,23 @@ LOCAL 会校验全部分片、合并长度和摘要；OSS 会 HEAD 检查对象�
 DELETE /uploads/{uploadId}
 ```
 
-仅 `UPLOADING` 可取消。LOCAL 删除临时分片目录；OSS 在配置完整时删除对象。返回 `data: true`。
+VIDEO 仅 `UPLOADING` 可取消。LOCAL 删除临时分片目录；OSS 在配置完整时删除对象。返回 `data: true`。PHOTO 取消规则见 5.6。
+
+### 5.6 图片上传与异步转换（PHOTO）
+
+图片沿用本章全部路由和 HMAC，**没有新增图片专用路径**。创建时传 `mediaType=PHOTO`，支持 jpg/jpeg/webp/png/gif/heic/heif，单张 1 字节至 20MiB（20,971,520 字节），MIME 与原扩展名匹配；服务端还验证实际内容。VIDEO 的 1,000,000,000 字节限制不适用于图片。
+
+```json
+{"mediaType":"PHOTO","fileName":"product.heic","fileSize":718114,"contentType":"image/heic"}
+```
+
+按返回的 `uploadMode` 上传原文件。PHOTO OSS multipart 除 5.1 公共字段外还必须映射 `fields.xOssObjectAcl` → `x-oss-object-acl=private`、`fields.contentType` → `Content-Type`，二者是**表单字段**，不是平台请求头；`file` 放在表单最后。原图为私有对象，不要把原图 URL 用于发布。LOCAL 按返回分片大小上传（PHOTO 为 1MiB），索引从 0 开始。
+
+完成接口仍需 JSON `fileSize`，创建时绑定 SHA 的首次 complete 必须传相同值。PHOTO complete 快速返回 `PROCESSING`，后台转为校正方向/sRGB/白底的 JPEG；GIF 取首个显示画面，动画仅保留静态图。最长边≤1920、短边≤1080且不放大，输出≤20MiB。
+
+每 2–5 秒查询上传状态，READY 后才保存 `mediaId` 并发布。FAILED 查看 `failReason`；会话有效期内可再次 complete 重试，保留原文件字节、长度和已绑定摘要，不能换成另一张图。重试 complete 可省略 SHA，传入时仍必须一致。临时轮询失败保留 `uploadId` 继续查询，不重复创建上传。
+
+PHOTO 可取消尚未 READY 的会话；CANCELLED/EXPIRED 不能发布。有效期以 `expireTime` 为准（默认重试窗口 24 小时）。VIDEO 同步完成为 READY 的行为保持不变。
 
 ---
 
@@ -710,6 +751,8 @@ Idempotency-Key: c-quick-publish-202609020001
 
 一次调用完成「创建媒体 + 准备媒体 + 创建发布任务」，仍为**异步**：接口立即返回 `taskId`。
 
+`quick-tasks` 仅支持视频，不支持远程图片 URL。图片必须先通过 5.6 上传并转换，再调用下方 `/tasks`。
+
 ### 6.2 创建发布任务
 
 ```http
@@ -740,14 +783,36 @@ Idempotency-Key: publish_order_001
 | 字段 | 必填 | 限制 |
 | --- | --- | --- |
 | `connectionIds` | 是 | 1–20 个已授权连接；**定时发布只允许 1 个** |
-| `mediaId` | 是 | 状态必须为 `READY` |
+| `mediaType` | 否 | 默认 `VIDEO`，或 `PHOTO` |
+| `mediaId` | VIDEO 是 | READY 视频媒体；PHOTO 不传 |
+| `photoMediaIds` | PHOTO 是 | 1–35 个有序、当前 client 的 READY 图片 ID；不与 mediaId 同传 |
+| `photoCoverIndex` | 否 | PHOTO 封面，默认 0，从 0 起且小于图片数量 |
+| `autoAddMusic` | 否 | 仅 PHOTO DIRECT_POST，TikTok 自动配乐，不是自定义音频上传 |
 | `postMode` | 是 | `DIRECT_POST` / `UPLOAD_TO_INBOX` |
 | `privacyLevel` | 是 | 非空 |
-| `title` / `caption` | 否 | ≤512 / ≤2200 |
+| `title` / `caption` | 否 | VIDEO ≤512/≤2200；PHOTO ≤90/≤4000，按 UTF-16 代码单元计数 |
 | 其余开关字段 | 否 | 同 6.1 |
 | `scheduledAt` / `regionCode` | 否 | ≤64 / ≤16，见第 7 节 |
 
 `data` 为 `TaskResp`：`taskId`、`mediaId`、`externalRequestId`、`status`、`accountCount`、`successCount`、`failedCount`、`pendingCount`、`failReason`、`scheduledAt`、`regionCode`、`regionName`、`scheduleTimezone`、`scheduleUtcTime`、`scheduleBeijingTime`、`scheduleEpochMillis`、`scheduleUtcOffset`、`scheduleStatus`、`canReschedule`、`canCancel`、`createTime`、`updateTime`。
+
+图文额外返回 `mediaType,photoMediaIds,photoCount,photoCoverIndex,autoAddMusic`。PHOTO 不支持启用 `allowDuet/allowStitch`。DIRECT_POST 需 `video.publish` 并校验 creator-info 的隐私选项；UPLOAD_TO_INBOX 需 `video.upload`，用户仍需在 TikTok 完成发布，不能启用自动配乐或定时发送收件箱。为兼容请求校验，两种模式都要提交 `privacyLevel`，收件箱初始化不向 TikTok 透传它。
+
+```json
+{
+  "mediaType": "PHOTO",
+  "connectionIds": ["conn_example"],
+  "photoMediaIds": ["media_first", "media_second"],
+  "photoCoverIndex": 0,
+  "postMode": "DIRECT_POST",
+  "privacyLevel": "SELF_ONLY",
+  "title": "商品展示",
+  "caption": "商品细节与使用场景",
+  "autoAddMusic": true
+}
+```
+
+图文也必须带 `Idempotency-Key`。幂等摘要包含图片顺序、封面、音乐和其他参数；同一业务重试保留 key 和原参数，改变顺序或参数需用新 key。
 
 ### 6.3 查询任务
 
@@ -926,6 +991,8 @@ signature = Base64( HMAC-SHA256(callbackSecret, canonicalString) )
 
 授权事件另含 `authSessionId`、`externalAccountId`、`accountName`、`clientState`、`status`、`failReason`。失败事件 `connectionId` 为 `null`，不可保存为有效连接。
 
+图文发布回调新增 `mediaType` 与 `photoCount`，VIDEO 的回调 `photoCount=0`；原有签名与事件幂等规则不变，接收方应容忍新增字段。PHOTO 按平台发布状态判断成功，分享链接可能为空；metrics 返回 `UNAVAILABLE` 不表示发布失败。
+
 ### 8.4 投递策略
 
 | 项目 | 当前实现 |
@@ -1023,7 +1090,7 @@ TikTok-Signature: ...
 
 ## 10. 后台管理 API 索引（需登录）
 
-> 以下均为 `/admin-api/**`，需 `Authorization: Bearer <accessToken>` + `tenant-id` + 对应 `@PreAuthorize` 菜单权限，并受 API 加密影响。**不属于对外交付接口**，此处仅作内部集成与能力盘点索引。字段级契约请以 Swagger / 源码 VO 为准。
+> 以下为后台管理能力索引，需 `Authorization: Bearer <accessToken>` + `tenant-id` + 对应菜单权限；具体请求加密按接口及环境约定。自动出片对用户交付的字段级契约单独见 [自动出片 API](tk-automation-v1.md)。其他管理功能以 Swagger / 源码 VO 为准。
 
 | 模块 | 类级路径 | 主要端点 |
 | --- | --- | --- |
@@ -1049,15 +1116,25 @@ TikTok-Signature: ...
 
 ---
 
-## 11. 能力缺口与 API 化建议（规划中，尚未实现）
+## 11. 现有出片能力与后续 HMAC 扩展
 
-### 11.1 现状差距
+### 11.1 已实现的自动出片接口
 
-外部调用方目前只能「上传/指定一个视频并发布到 TikTok」，**无法通过开放 API 使用本平台最核心的自动混剪能力**：创建混剪任务、查询生成进度、下载成片、管理素材库、选择配音与 BGM。这些能力全部位于第 10 节的后台 API 之下，绑定后台账号、租户、菜单权限和 AES 加密。
+当前账号 API 已覆盖积分、素材库、可用音色、我的上传 BGM、提交完整口播、任务进度和失败原因、成片下载。统一前缀 `/admin-api/tk/automation/v1`，同时携带 Bearer Token 与 `tenant-id`。
 
-如果业务目标是「客户通过 API 完成：上传素材 → 生成混剪视频 → 拿成片 → 一键发布」，当前链路是**断开的**：调用方只能自己先生成好视频，再用 `quick-tasks` 交给平台发布。
+| 方法 | 相对路径 | 用途 |
+| --- | --- | --- |
+| GET | `/credits` | 当前租户积分 |
+| GET | `/material-libraries` | 可用素材库分页查询 |
+| GET | `/voices` | 可用音色及供应商 |
+| GET | `/bgms` | 当前账号自己上传的可用 BGM |
+| POST | `/tasks` | 异步完整口播出片，可能使用积分 |
+| GET | `/tasks/{taskId}` | 进度、终态、失败原因、字幕诊断 |
+| GET | `/tasks/{taskId}/download` | 临时成片地址及建议文件名 |
 
-### 11.2 建议补齐的开放 API（设计草案）
+从既有素材库出片已可完整调用。自动出片创建尚无幂等键与 Webhook，不支持按标签抽画面。下载链接若用作 TikTok `quick-tasks.videoUrl`，须满足该接口公网 HTTPS 与有效期要求，并使用另一套 HMAC 凭证；不要转发出片 Token。
+
+### 11.2 后续 HMAC 出片扩展（规划中，尚未实现）
 
 沿用现有 HMAC 签名、幂等键、回调与 `clientId` 隔离模型，建议新增 `/admin-api/tk/open/v1/generation` 接口族：
 
@@ -1180,7 +1257,7 @@ curl -s "https://tkassetplant.fnn.net.cn${TARGET}" \
 
 ## 14. 附录
 
-### 14.1 开放 API 端点总表（源码已实现，共 22 个）
+### 14.1 TikTok 开放 API 端点总表（源码已实现，共 22 个）
 
 | 模块 | 方法 | 路径（相对 `/admin-api/tk/open/v1/tiktok`） | 签名 |
 | --- | --- | --- | --- |
@@ -1215,14 +1292,21 @@ curl -s "https://tkassetplant.fnn.net.cn${TARGET}" \
 | --- | --- |
 | `docs/tiktok-open-api.md` | A 方内部接口说明 v1.2（TikTok 开放 API 主说明） |
 | `docs/openapi/tiktok-open-api-c-party-integration.md` | C 方联调主文档 v1.4（含后台配置、验收清单） |
-| `docs/openapi/tiktok-open-api.json` | 原有 OpenAPI 3.0.3（17 端点） |
+| `docs/openapi/tiktok-open-api.json` | TikTok 专项 OpenAPI 3.0.3 v1.5，含 PHOTO 字段契约 |
+| `docs/openapi/tiktok-photo-open-api.md` | 图文上传转换、隐私表单、发布与重试说明 |
 | `docs/openapi/image-to-text-open-api.md` | OCR 接口单独说明 |
 | `docs/sdk/tiktok-open-api-{java,node,python}.md` | 三语言签名与调用示例 |
 | `docs/api/tk-platform-api.md` | **本文**：全平台 API 参考 |
-| `docs/api/tk-platform-openapi.json` | 机读版（22 开放端点 + 免登录工具接口） |
+| `docs/api/tk-platform-openapi.json` | 机读版（原有 TikTok/工具接口 + 租户/登录/刷新 + 7 个出片端点，共 37 个 path） |
+| [快速开始](quickstart.md) | 从账号登录到下载成片的 cURL 示例 |
+| [调用规则](calling-rules.md) | 会话、权限、参数、错误、异步与重试 |
+| [自动出片参考](tk-automation-v1.md) | 出片参数/响应字段及人群资源选择 |
+| [TikTok 接入指南](tiktok-integration.md) | 授权、上传、发布、查询、回调与 Python/Node 签名 |
+| [Postman 集合](tk-automation.postman_collection.json) / [环境模板](tk-automation.postman_environment.json) | 占位凭证、捕获令牌/任务号、默认禁止收费创建 |
+| [Python/Node.js 示例](examples/README.md) | 可执行自动出片脚本及使用说明 |
 | `docs/api/tk-platform-api.html` | 单页阅读版（离线可打开，支持目录筛选与深浅色切换） |
 | `docs/api/build_html.py` | 由本文重新生成 HTML 的构建脚本：`python docs/api/build_html.py` |
-| `docs/api/tk-generation-api-fit-assessment.md` | 剪辑工具出片 9 项需求的 API 适配评估与对接清单（本文第 11 节的实测补充） |
+| `docs/api/tk-generation-api-fit-assessment.md` | 历史 API 适配评估；当前已实现出片契约以本目录 v2.1 文档为准 |
 
 ### 14.3 源码核对索引
 

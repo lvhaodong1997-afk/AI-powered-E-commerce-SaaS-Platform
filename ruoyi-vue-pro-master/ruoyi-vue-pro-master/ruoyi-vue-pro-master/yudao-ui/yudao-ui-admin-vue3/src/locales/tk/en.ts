@@ -398,6 +398,7 @@ export const tkEn: Record<string, string> = {
   'openApi.title': 'Open API Management',
   'openApi.subtitle': 'Clients, usage statistics, and callback events',
   'openApi.refresh': 'Refresh',
+  'openApi.apiDocs': 'API Docs',
   'openApi.search': 'Search',
   'openApi.reset': 'Reset',
   'openApi.confirm': 'Confirm',

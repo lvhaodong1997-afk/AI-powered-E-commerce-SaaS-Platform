@@ -1,12 +1,16 @@
-# GPT 自动出片 API v1
+# 自动出片 API v1
 
-接口已于 2026-11-12 部署到产品服务器，入口为 `https://clipforgestudio.fnn.net.cn/admin-api/tk/automation/v1`。新路由使用已有账号 Token，继承当前账号的租户/素材/任务访问权限。它与 TikTok HMAC Open API 是两套鉴权入口，不能混用凭证。部署记录见 [部署验收记录](tk-automation-v1-deployment-2026-11-12.md)。
+入口为 `https://clipforgestudio.fnn.net.cn/admin-api/tk/automation/v1`。使用已有账号 Token，继承当前账号的租户/素材/任务访问权限。它与 TikTok HMAC Open API 是两套鉴权入口，不能混用凭证。字段以本页及 [OpenAPI 契约](tk-platform-openapi.json) 为准，目标环境和权限由管理员确认。
+
+首次接入先看 [快速开始](quickstart.md)，异常和重试看 [调用规则](calling-rules.md)。本页不包含千川上传、入计划接口。
 
 ## 1. 登录及保持会话
 
-`POST /admin-api/system/auth/login`，JSON：`{"username":"实际登录账号","password":"账号密码"}`。
+先调用 `GET /admin-api/system/tenant/get-id-by-name?name=<URL编码的租户名称>`，成功响应 `data` 为租户 ID，`null` 表示未找到。此查询不需已有 Token。
 
-“赵倩”可能是昵称，必须使用该用户实际的数字/字母登录账号，不能直接假定昵称可登录。响应 `data` 含 `userId`、`accessToken`、`refreshToken`、`expiresTime`。请求需携带该用户所属租户的 `tenant-id`。如环境开启验证码，遵循原登录流程提交有效 `captchaVerification`，本功能不绕过验证码。
+`POST /admin-api/system/auth/login`，JSON：`{"username":"YOUR_LOGIN_NAME","password":"YOUR_PASSWORD"}`。
+
+必须使用实际的数字/字母登录账号，不能用显示昵称代替。用户名长度 4–30、只允许字母和数字；密码长度 4–16。响应 `data` 含 `userId`、`accessToken`、`refreshToken`、`expiresTime`（默认 Unix 毫秒时间戳）。请求需携带该用户所属租户的 `tenant-id`。如环境开启验证码，遵循原登录流程提交有效 `captchaVerification`，本功能不绕过验证码。
 
 后续 API 请求头：
 
@@ -36,7 +40,32 @@ Content-Type: application/json
 
 先通过素材库查询返回的真实 ID 选择“芒果干”；同名库有多个时明确选择，不固定示例 ID。当前版本使用电商手动文案模式和素材库全池随机混剪；素材需满足现有生成预检。积分查询是快照，提交时仍由原有服务原子冻结/结算积分，不够积分返回业务错误，创建或生成失败沿用现有退款逻辑。
 
-兼容端点：`GET /admin-api/tk/bgm/user-list` 也可查询自有上传 BGM；网页原 `/tk/bgm/list` 接口行为不变。
+### 2.1 查询参数
+
+`credits`、`voices`、`bgms` 没有业务查询参数。`material-libraries` 支持：
+
+| 参数 | 类型 | 默认/限制 | 说明 |
+| --- | --- | --- | --- |
+| `pageNo` | integer | 默认 1，最小 1 | 页码 |
+| `pageSize` | integer | 默认 10，1–200 | 每页条数；遍历所有页 |
+| `name` | string | 可选 | 名称筛选，例如芒果干 |
+| `companyId` | int64 | 可选 | 公司筛选，仍受资源权限限制 |
+| `category` | string | 可选 | 分类 |
+| `materialPurpose` | string | 可选 | 用途，例如 `ECOMMERCE` |
+| `status` | integer | 可选 | 素材库状态筛选 |
+
+### 2.2 查询响应字段
+
+下表均指成功响应中的 `data`；可选字段可能为 `null` 或省略，调用端应兼容。
+
+| 接口 | data 结构 |
+| --- | --- |
+| 积分 | `tenantId,totalCredits,remainingCredits,frozenCredits,warningThreshold` 为整数，`lowBalance` 为布尔值；剩余积分不足时创建明确报错 |
+| 素材库 | 对象：`list` 数组、`total` 总条数。每项含 `id,name,tenantId,companyId,category,scene,materialPurpose,tags,description,coverUrl,previewVideoUrl,videoCount,totalSize,defaulted,status,createTime`；时间默认 Unix 毫秒 |
+| 音色 | 数组：每项含 `name,ttsProvider,voiceProfileId,voiceCode,language`。只返回启用且 READY 的租户音色及可用系统音色 |
+| BGM | 数组：每项含 `id,name,fileName,sourceType`，仅当前账号可用的自有上传；按文件名或显示名识别曲目 |
+
+素材库的 `tags` 是已有标签文本，不代表本版支持通过生成参数按标签抽取画面。
 
 ## 3. 音色及 BGM 选择
 
@@ -81,9 +110,34 @@ Content-Type: application/json
 
 正文必填，最长3000字符，直接用于配音，不调用 AI 改写；人群画像和结构说明不要写入正文。可选 `title` 最长128字符，不会混入口播。字幕等参数省略时使用示例默认值；必填字段为 `libraryId,scriptText,ttsProvider,bgmAssetId` 和一个音色标识。音量范围为0–1，`0.4` 表示40%，使用混音版本2，不使用旧版30%上限。
 
+### 4.1 创建参数
+
+| 字段 | 类型 | 必填 | 默认与限制 |
+| --- | --- | --- | --- |
+| `libraryId` | int64 | 是 | 正整数，来自素材库列表 |
+| `scriptText` | string | 是 | 非空白，最长 3000 字符 |
+| `title` | string | 否 | 最长 128 字符；建议用来核对提交记录 |
+| `ttsProvider` | string | 是 | `MINIMAX` / `DASHSCOPE` / `MIMO`，与选定音色一致 |
+| `voiceProfileId` | int64 | 二选一 | 正整数；MiMo 必须用此字段 |
+| `voiceCode` | string | 二选一 | 系统音色编码，非空白；与 `voiceProfileId` 只提交一个 |
+| `bgmAssetId` | int64 | 是 | 正整数，当前账号自有上传 BGM |
+| `bgmVolume` | number | 否 | 默认 `0.4`，范围 0–1 |
+| `translationEnabled` | boolean | 否 | 默认且仅允许 `false` |
+| `targetRegion` | string | 否 | 默认且仅允许 `CN` |
+| `durationMode` | string | 否 | 默认且仅允许 `FOLLOW_NARRATION` |
+| `width` / `height` / `fps` | integer | 否 | 默认且仅允许 `1080` / `1920` / `30` |
+| `subtitleEnabled` | boolean | 否 | 默认 `true` |
+| `subtitleFontSize` | string | 否 | 默认且仅允许 `extra_large` |
+| `subtitleStyle` | string | 否 | 默认且仅允许 `classic_white` |
+| `subtitlePositionMode` | string | 否 | 默认且仅允许 `smart_safe` |
+| `subtitleKeywordEnabled` | boolean | 否 | 默认 `true` |
+| `subtitleKaraokeEnabled` | boolean | 否 | 默认 `true`；质量需查询诊断字段 |
+
+省略可选字段才使用默认值；不要显式传 `null` 来启用默认值。使用租户音色时删除 `voiceCode`，改传列表返回的 `voiceProfileId` 与 `ttsProvider`。
+
 本版本仅支持关闭翻译、中国大陆、跟随口播、竖屏1080×1920和30fps；提供其他值会返回参数错误。字幕样式固定为示例值，开关可设为 false。当前不提供标签抽画面、固定秒数或其他输出规格接口。
 
-系统先取得完整配音时长规划素材，最终合成按实际配音时长结束，不强制15、29或35秒（编码可能有帧/音频采样精度偏差）。超过当前后端配置上限（最大500秒）或无法识别配音时长时，任务明确失败，避免静默截断。
+系统先取得完整配音时长规划素材，最终合成按实际配音时长结束，不强制15、29或35秒（编码可能有帧/音频采样精度偏差）。系统硬上限最大500秒，当前环境配置可能更低；超过有效上限或无法识别配音时长时，任务明确失败，避免静默截断。
 
 ## 5. 进度、失败和下载
 
@@ -112,6 +166,39 @@ Content-Type: application/json
 
 任务响应还包含 `subtitleKaraokeStatus,subtitleKaraokeReason`，透传现有字幕质量诊断；如逐字卡点降级，调用方需明确提示，不能把仅成功开启请求开关视为已完成逐字字幕验收。
 
+### 5.1 任务响应字段
+
+创建与查询任务都返回 `TaskResp`：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `taskId` | int64 | 任务号，创建后立即保存 |
+| `status` | string | `SUCCESS` 成功、`FAILED` 失败；其余表示处理中 |
+| `progress` | integer | 阶段进度，可能为空；不代表媒体验收 |
+| `currentStep` / `currentStepCode` | string | 当前步骤说明/代码，可能为空 |
+| `completed` / `failed` | boolean | 终态标记 |
+| `failCode` / `failReason` | string | 失败代码/原因，非失败时可能为空 |
+| `subtitleKaraokeStatus` / `subtitleKaraokeReason` | string | 逐字字幕诊断，可能为空或表示降级 |
+| `downloadUrl` | string | 成功时可能提供的临时成片地址；也可通过下载接口获取 |
+
+`taskId` 路径参数必须为正整数。任务归属会再次检查，不能查询其他账号无权访问的任务。
+
+### 5.2 下载响应示例
+
+```json
+{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "taskId": 789,
+    "fileName": "video-789.mp4",
+    "downloadUrl": "https://storage.example.invalid/video-789.mp4?signature=EXAMPLE"
+  }
+}
+```
+
+上方 URL 仅示意，不可用于下载。省略 `fileName` 默认 `video-{taskId}.mp4`；自定义名必须以 `.mp4` 结尾，拒绝控制字符及 `/ \ : " < > | ? *`。成功后访问 `data.downloadUrl` 获取文件；不要向存储地址转发平台 Token。
+
 ## 6. 错误和联调边界
 
 成功以响应 JSON 的 `code=0` 为准，不仅检查 HTTP 状态。原平台部分业务错误通过 HTTP 200 内的非零 code 返回；令牌、权限、参数和业务错误均读取 `code,msg`。`1060000029` 表示积分不足；失败任务原因通过 `failCode,failReason` 获取。未完成任务获取下载地址返回业务 `code=409`。
@@ -120,12 +207,10 @@ Content-Type: application/json
 
 当前创建接口不支持 `Idempotency-Key` 去重。创建响应超时/丢失时不要盲目再次 POST，以免重复生成/扣分；可通过现有 `/admin-api/tk/generation/page` 按任务标题及时间核对，确认没有创建后再提交。查询和下载信息接口可重试。标签、幂等和 Webhook 可后续扩展。
 
-真实账号“赵倩”、素材“芒果干”、各人群音色/BGM是否已配置，以及语音、字幕、FFmpeg、OSS的完整媒体链路，需在部署后的测试环境实际联调；单元/控制器测试不能代替真实成片验收。
+目标租户的素材、音色、BGM及语音/字幕/存储配置应在接入时确认。接口提交成功后仍应检查最终成片及字幕诊断，不要将示例资源名视为每个环境都已配置。
 
-## 7. 本次验证记录
+## 7. 调用示例与可导入文件
 
-2026-11-12 本地离线 Maven 构建完成编译，聚焦回归执行 135 项：134 项通过，1 项既有字幕测试失败。新增自动化 API、账号权限、资源筛选、积分错误、下载、时长模式及既有生成/混音相关测试通过。两处时长修复（请求复制保留模式、原生开头计入总时长）已经代码复核。
+[快速开始](quickstart.md) 提供登录、资源查询、创建、查询、下载及刷新 cURL；[Postman 集合](tk-automation.postman_collection.json) 配合 [环境模板](tk-automation.postman_environment.json) 导入。默认 `allowPaidCreate=false`，只读查询与登录不触发生成；核对参数并显式开启后才允许发送一次创建请求。
 
-未通过项为 `DefaultTkAssSubtitleRenderServiceTest.highlightingPreservesChineseAndEnglishWrapping`，单独执行也可复现：测试辅助方法只取第一条 `Dialogue`，既有英文渲染会拆成多条事件，导致断言缺少末尾 `today`。该渲染器及测试与 Git HEAD 一致，本次未修改，不能声称全部回归通过。初次实现阶段未进行生产部署、真实账号登录或完整媒体出片验收。
-
-后续按用户指令同步远端主分支并部署：基础版本 `25363c20`；发布回归 381 项中 380 项通过、1 项跳过，未纳入上述既有字幕失败测试。服务器版本、校验值、接口鉴权及公网检查结果见部署验收记录。仍未使用真实账号提交收费生成任务。
+自动化脚本见 [Python/Node.js 示例](examples/README.md)，完整接口契约见 [API 总览](tk-platform-api.md)、[OpenAPI JSON](tk-platform-openapi.json)。

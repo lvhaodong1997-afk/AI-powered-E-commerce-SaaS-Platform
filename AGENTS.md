@@ -30,6 +30,13 @@ Read the nearest child `AGENTS.md` after entering an active subproject.
 - Do not delete the latest release under `deploy/voice-video-upload-20260715/` without explicit approval.
 - Do not move or flatten the nested backend root without a dedicated migration task.
 
+## Release Source Policy
+
+- Before every deployment, fetch and integrate the latest `origin/main` while preserving unrelated local changes.
+- Commit completed release changes and push them to the remote `main` branch. Never force-push to bypass intervening changes.
+- Fetch `origin/main` again immediately before preparing release artifacts, verify the remote commit, and build from that clean committed revision.
+- If `main` changes during preparation, integrate and validate the incoming changes before deploying the new remote revision. Record the deployed remote commit and artifact checksums.
+
 ## Focused Verification
 
 - Operations console: run `npm run check` in `tk-ops-console/`.

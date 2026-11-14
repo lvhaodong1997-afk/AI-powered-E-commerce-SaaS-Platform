@@ -116,7 +116,7 @@ const walk = (root: ParentNode) => {
       if (!parent || ['SCRIPT', 'STYLE', 'TEXTAREA'].includes(parent.tagName)) {
         return NodeFilter.FILTER_REJECT
       }
-      if (parent.closest('.tox, .w-e-text-container, [contenteditable="true"]')) {
+      if (parent.closest('.tox, .w-e-text-container, [contenteditable="true"], [data-tk-i18n-ignore]')) {
         return NodeFilter.FILTER_REJECT
       }
       return NodeFilter.FILTER_ACCEPT
