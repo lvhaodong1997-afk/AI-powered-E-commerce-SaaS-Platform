@@ -182,7 +182,7 @@ const registrationUncertain = ref(false)
 let attempt: ReturnType<typeof registrationAttempt> | undefined
 let pendingAction: 'sms' | 'register' | 'retry' = 'register'
 const fields = computed(() => [
-  { key: 'tenantName' as const, label: text('租户名称', 'Workspace name'), max: 63 },
+  { key: 'tenantName' as const, label: text('租户名称', 'Workspace name'), max: 30 },
   { key: 'username' as const, label: text('登录账号', 'Username'), max: 30 },
   { key: 'nickname' as const, label: text('姓名 / 昵称', 'Name / nickname'), max: 30 },
   {
@@ -197,7 +197,17 @@ const requiredRule = () => ({
   trigger: 'blur'
 })
 const rules = computed(() => ({
-  tenantName: [requiredRule()],
+  tenantName: [
+    requiredRule(),
+    {
+      max: 30,
+      message: text(
+        '租户名称不能超过 30 个字符',
+        'Use at most 30 characters for the workspace name'
+      ),
+      trigger: 'blur'
+    }
+  ],
   username: [
     requiredRule(),
     {

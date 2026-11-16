@@ -22,7 +22,7 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Real H2 unique indexes and actual DSTransactional interceptor, with JDBC adapters at service boundaries. */
+/** Real H2 unique indexes and actual DSTransactional interceptor, with a real registration mapper and JDBC adapters at other service boundaries. */
 class TenantRegistrationTransactionTest {
     DynamicRoutingDataSource dataSource;
     JdbcTemplate jdbc;
@@ -37,18 +37,7 @@ class TenantRegistrationTransactionTest {
         dataSource.afterPropertiesSet();
         new ResourceDatabasePopulator(new ClassPathResource("sql/create_tables.sql")).execute(dataSource);
         jdbc = new JdbcTemplate(dataSource);
-        TenantRegistrationMapper mapper = mock(TenantRegistrationMapper.class);
-        when(mapper.selectByRequestId(anyString())).thenAnswer(i -> selectRegistration("request_id", i.getArgument(0)));
-        when(mapper.selectByMobile(anyString())).thenAnswer(i -> selectRegistration("mobile", i.getArgument(0)));
-        when(mapper.insert(any(TenantRegistrationDO.class))).thenAnswer(i -> {
-            TenantRegistrationDO row = i.getArgument(0);
-            jdbc.update("INSERT INTO system_tenant_registration(request_id,mobile,payload_hash) VALUES(?,?,?)", row.getRequestId(), row.getMobile(), row.getPayloadHash());
-            row.setId(jdbc.queryForObject("SELECT id FROM system_tenant_registration WHERE request_id=?", Long.class, row.getRequestId())); return 1;
-        });
-        when(mapper.updateById(any(TenantRegistrationDO.class))).thenAnswer(i -> {
-            TenantRegistrationDO row = i.getArgument(0);
-            return jdbc.update("UPDATE system_tenant_registration SET tenant_id=?,user_id=? WHERE id=?",row.getTenantId(),row.getUserId(),row.getId());
-        });
+        TenantRegistrationMapper mapper = TenantRegistrationMapperTestSupport.createMappers(dataSource).getMapper(TenantRegistrationMapper.class);
         TenantService tenants = mock(TenantService.class);
         when(tenants.createTenant(any())).thenAnswer(i -> {
             TenantSaveReqVO req=i.getArgument(0);
@@ -77,12 +66,6 @@ class TenantRegistrationTransactionTest {
     }
     @AfterEach void close() { dataSource.destroy(); }
 
-    TenantRegistrationDO selectRegistration(String field,String value) {
-        List<TenantRegistrationDO> rows=jdbc.query("SELECT * FROM system_tenant_registration WHERE "+field+"=?",(rs,n)->new TenantRegistrationDO()
-                .setId(rs.getLong("id")).setRequestId(rs.getString("request_id")).setMobile(rs.getString("mobile"))
-                .setPayloadHash(rs.getString("payload_hash")).setTenantId((Long)rs.getObject("tenant_id")).setUserId((Long)rs.getObject("user_id")),value);
-        return rows.isEmpty()?null:rows.get(0);
-    }
     TenantRegistrationReqVO request(String id) {
         TenantRegistrationReqVO req=new TenantRegistrationReqVO();req.setRequestId(id);req.setTenantName("Business"+id);req.setUsername("owner"+id);
         req.setNickname("Owner");req.setPassword("Password1");req.setMobile("13800138000");req.setSmsRequestId("sms123");req.setSmsCode("123456");req.setInviteCode("ABCDEFGHIJ");return req;

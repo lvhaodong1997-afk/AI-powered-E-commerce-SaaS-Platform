@@ -10,7 +10,7 @@ import javax.validation.constraints.*;
 public class TenantRegistrationReqVO extends AuthRegisterReqVO {
     @NotBlank @Pattern(regexp = "^[a-zA-Z0-9-]{32,64}$")
     private String requestId;
-    @NotBlank @Size(max = 63)
+    @NotBlank @Size(max = 30, message = "租户名称长度不能超过 30 个字符")
     private String tenantName;
     @NotBlank @Pattern(regexp = "^1[3-9][0-9]{9}$")
     private String mobile;

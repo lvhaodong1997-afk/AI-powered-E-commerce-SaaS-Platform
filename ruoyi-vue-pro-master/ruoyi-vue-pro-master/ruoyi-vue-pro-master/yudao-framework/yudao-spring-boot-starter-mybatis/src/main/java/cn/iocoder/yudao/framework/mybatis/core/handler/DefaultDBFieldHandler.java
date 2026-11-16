@@ -34,13 +34,13 @@ public class DefaultDBFieldHandler implements MetaObjectHandler {
             }
 
             Long userId = SecurityFrameworkUtils.getLoginUserId();
-            // 当前登录用户不为空，创建人为空，则当前登录用户为创建人
-            if (Objects.nonNull(userId) && Objects.isNull(baseDO.getCreator())) {
-                baseDO.setCreator(userId.toString());
+            // 匿名插入使用数据库的空字符串审计默认值；填充字段会显式写入，不能依赖数据库替换 NULL。
+            String actor = userId == null ? "" : userId.toString();
+            if (Objects.isNull(baseDO.getCreator())) {
+                baseDO.setCreator(actor);
             }
-            // 当前登录用户不为空，更新人为空，则当前登录用户为更新人
-            if (Objects.nonNull(userId) && Objects.isNull(baseDO.getUpdater())) {
-                baseDO.setUpdater(userId.toString());
+            if (Objects.isNull(baseDO.getUpdater())) {
+                baseDO.setUpdater(actor);
             }
         }
     }
