@@ -29,3 +29,19 @@ test('workspace validation accepts thirty characters and rejects thirty-one', as
   await validator.validate({ tenantName: '租'.repeat(30) })
   await assert.rejects(validator.validate({ tenantName: '租'.repeat(31) }))
 })
+
+test('password input describes the six-to-sixteen-character registration policy', () => {
+  const field = context.exports.fields.find((field) => field.key === 'password')
+  assert.equal(field.max, 16)
+  assert.equal(field.label, 'Password (6–16 characters)')
+})
+
+test('password validation accepts six and sixteen characters and rejects shorter or longer values', async () => {
+  const validator = new Schema({ password: context.exports.rules.password })
+  for (const length of [4, 5, 17]) {
+    await assert.rejects(validator.validate({ password: 'p'.repeat(length) }))
+  }
+  for (const length of [6, 16]) {
+    await validator.validate({ password: 'p'.repeat(length) })
+  }
+})

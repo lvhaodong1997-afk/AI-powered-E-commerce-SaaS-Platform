@@ -10,6 +10,20 @@ import java.util.Collections;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TenantRegistrationValidationTest {
+    @Test void registrationPasswordAcceptsSixToSixteenCharacters() {
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            TenantRegistrationReqVO request = new TenantRegistrationReqVO();
+            for (int length : new int[]{4, 5, 17}) {
+                request.setPassword(String.join("", Collections.nCopies(length, "p")));
+                assertFalse(factory.getValidator().validateProperty(request, "password").isEmpty(), "length " + length);
+            }
+            for (int length : new int[]{6, 16}) {
+                request.setPassword(String.join("", Collections.nCopies(length, "p")));
+                assertTrue(factory.getValidator().validateProperty(request, "password").isEmpty(), "length " + length);
+            }
+        }
+    }
+
     @Test void workspaceNameAcceptsThirtyCharactersAndRejectsThirtyOneBeforeProvisioning() {
         try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
             TenantRegistrationReqVO request = new TenantRegistrationReqVO();

@@ -8,6 +8,12 @@ import javax.validation.constraints.*;
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class TenantRegistrationReqVO extends AuthRegisterReqVO {
+    @Override
+    @Size(min = 6, max = 16, message = "密码长度为 6-16 位")
+    public String getPassword() {
+        return super.getPassword();
+    }
+
     @NotBlank @Pattern(regexp = "^[a-zA-Z0-9-]{32,64}$")
     private String requestId;
     @NotBlank @Size(max = 30, message = "租户名称长度不能超过 30 个字符")

@@ -187,7 +187,7 @@ const fields = computed(() => [
   { key: 'nickname' as const, label: text('姓名 / 昵称', 'Name / nickname'), max: 30 },
   {
     key: 'password' as const,
-    label: text('密码（4–16 位）', 'Password (4–16 characters)'),
+    label: text('密码（6–16 位）', 'Password (6–16 characters)'),
     max: 16
   }
 ])
@@ -219,7 +219,7 @@ const rules = computed(() => ({
   nickname: [requiredRule()],
   password: [
     requiredRule(),
-    { min: 4, max: 16, message: text('密码长度为 4–16 位', 'Use 4–16 characters'), trigger: 'blur' }
+    { min: 6, max: 16, message: text('密码长度为 6–16 位', 'Use 6–16 characters'), trigger: 'blur' }
   ],
   mobile: [
     requiredRule(),
