@@ -311,7 +311,8 @@ class DefaultTkAssSubtitleRenderServiceTest {
                 .subtitleActiveColor("#35F27A")
                 .subtitleKaraokeEnabled(!words.isEmpty())
                 .build();
-        TkSubtitleSegment segment = new TkSubtitleSegment("Limited offer today",
+        TkSubtitleSegment segment = new TkSubtitleSegment(words.isEmpty() ? "Limited offer today"
+                : words.stream().map(TkSubtitleWord::getText).collect(java.util.stream.Collectors.joining(" ")),
                 0D, 2D, "bottom_center", 540, 1450, words);
         File file = File.createTempFile("subtitle-style", ".ass");
 
@@ -377,6 +378,6 @@ class DefaultTkAssSubtitleRenderServiceTest {
         File file = File.createTempFile("subtitle-highlight", ".ass");
         service.render(task, new TkSubtitleLayout(List.of(segment)), file);
         return Files.readString(file.toPath()).lines().filter(line -> line.startsWith("Dialogue:"))
-                .findFirst().orElseThrow().split(",", 10)[9];
+                .map(line -> line.split(",", 10)[9]).collect(java.util.stream.Collectors.joining("\\N"));
     }
 }

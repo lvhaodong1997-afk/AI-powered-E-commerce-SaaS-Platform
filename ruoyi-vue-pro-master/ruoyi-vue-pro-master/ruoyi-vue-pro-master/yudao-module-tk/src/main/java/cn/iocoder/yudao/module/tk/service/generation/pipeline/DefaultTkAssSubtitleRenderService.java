@@ -181,21 +181,30 @@ public class DefaultTkAssSubtitleRenderService implements TkAssSubtitleRenderSer
 
     // Shared with diagnostics: exactly the same decision must describe what was rendered.
     static boolean canRenderKaraoke(TkSubtitleSegment segment) {
-        if (!Boolean.TRUE.equals(segment.getWordTimingReliable()) || segment.getWords() == null
-                || segment.getWords().isEmpty() || !Double.isFinite(segment.getStart())
-                || !Double.isFinite(segment.getEnd()) || segment.getEnd() <= segment.getStart()) {
-            return false;
+        return "OK".equals(karaokeTimingReason(segment));
+    }
+
+    static String karaokeTimingReason(TkSubtitleSegment segment) {
+        if (segment == null) return "MISSING_SEGMENT";
+        if (!Double.isFinite(segment.getStart()) || !Double.isFinite(segment.getEnd())
+                || segment.getStart() < 0D || segment.getEnd() <= segment.getStart()) return "INVALID_SEGMENT_TIME";
+        if (segment.getWords() == null || segment.getWords().isEmpty()) return "MISSING_WORD_TIMING";
+        if (!Boolean.TRUE.equals(segment.getWordTimingReliable())) {
+            return segment.getWordTimingReason() == null ? "ESTIMATED_OR_UNMATCHED_TIMING" : segment.getWordTimingReason();
         }
         double previousEnd = segment.getStart();
+        StringBuilder spoken = new StringBuilder();
         for (TkSubtitleWord word : segment.getWords()) {
-            if (!Double.isFinite(word.getStart()) || !Double.isFinite(word.getEnd())
-                    || word.getStart() < previousEnd - 0.011D || word.getEnd() <= word.getStart()
-                    || word.getEnd() > segment.getEnd() + 0.011D) {
-                return false;
-            }
+            if (word == null || !Double.isFinite(word.getStart()) || !Double.isFinite(word.getEnd())
+                    || word.getStart() < 0D || word.getEnd() <= word.getStart()) return "INVALID_WORD_TIME";
+            if (word.getStart() < previousEnd - 0.011D) return "OVERLAPPING_WORD_TIME";
+            if (word.getEnd() > segment.getEnd() + 0.011D) return "WORD_TIME_OUT_OF_SEGMENT";
             previousEnd = word.getEnd();
+            if (word.getText() != null) spoken.append(word.getText());
         }
-        return true;
+        if (!TkSubtitleKaraokeQuality.spokenText(segment.getText()).equals(
+                TkSubtitleKaraokeQuality.spokenText(spoken.toString()))) return "WORD_TEXT_MISMATCH";
+        return "OK";
     }
 
     private TkSubtitleLineBreakSupport metrics(SubtitleStyle style, TkSubtitleSegment segment) {

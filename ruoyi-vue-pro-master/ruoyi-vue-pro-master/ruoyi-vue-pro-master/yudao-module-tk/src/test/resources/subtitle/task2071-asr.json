@@ -1,0 +1,262 @@
+{
+  "script": "雨天出门，给鞋子多一层保护。套好防雨鞋套，检查边缘是否贴合。遇到湿滑路面放慢脚步，出行更从容。",
+  "asr": {
+    "language": "zh",
+    "audioDuration": 7.14,
+    "segments": [
+      {
+        "text": "雨天出門給鞋子多一層保護套好防雨鞋套檢查邊緣是否貼合遇到石滑路面放慢腳步出行更從容",
+        "start": 0.0,
+        "end": 6.8,
+        "words": [
+          {
+            "text": "雨",
+            "start": 0.0,
+            "end": 0.24,
+            "keyword": false
+          },
+          {
+            "text": "天",
+            "start": 0.24,
+            "end": 0.36,
+            "keyword": false
+          },
+          {
+            "text": "出",
+            "start": 0.36,
+            "end": 0.52,
+            "keyword": false
+          },
+          {
+            "text": "門",
+            "start": 0.52,
+            "end": 0.68,
+            "keyword": false
+          },
+          {
+            "text": "給",
+            "start": 0.68,
+            "end": 0.9,
+            "keyword": false
+          },
+          {
+            "text": "鞋",
+            "start": 0.9,
+            "end": 1.06,
+            "keyword": false
+          },
+          {
+            "text": "子",
+            "start": 1.06,
+            "end": 1.14,
+            "keyword": false
+          },
+          {
+            "text": "多",
+            "start": 1.14,
+            "end": 1.26,
+            "keyword": false
+          },
+          {
+            "text": "一",
+            "start": 1.26,
+            "end": 1.38,
+            "keyword": false
+          },
+          {
+            "text": "層",
+            "start": 1.38,
+            "end": 1.48,
+            "keyword": false
+          },
+          {
+            "text": "保",
+            "start": 1.48,
+            "end": 1.6,
+            "keyword": false
+          },
+          {
+            "text": "護",
+            "start": 1.6,
+            "end": 1.84,
+            "keyword": false
+          },
+          {
+            "text": "套",
+            "start": 2.14,
+            "end": 2.22,
+            "keyword": false
+          },
+          {
+            "text": "好",
+            "start": 2.22,
+            "end": 2.38,
+            "keyword": false
+          },
+          {
+            "text": "防",
+            "start": 2.38,
+            "end": 2.48,
+            "keyword": false
+          },
+          {
+            "text": "雨",
+            "start": 2.48,
+            "end": 2.62,
+            "keyword": false
+          },
+          {
+            "text": "鞋",
+            "start": 2.62,
+            "end": 2.78,
+            "keyword": false
+          },
+          {
+            "text": "套",
+            "start": 2.78,
+            "end": 2.96,
+            "keyword": false
+          },
+          {
+            "text": "檢",
+            "start": 3.14,
+            "end": 3.26,
+            "keyword": false
+          },
+          {
+            "text": "查",
+            "start": 3.26,
+            "end": 3.36,
+            "keyword": false
+          },
+          {
+            "text": "邊",
+            "start": 3.36,
+            "end": 3.5,
+            "keyword": false
+          },
+          {
+            "text": "緣",
+            "start": 3.5,
+            "end": 3.64,
+            "keyword": false
+          },
+          {
+            "text": "是",
+            "start": 3.64,
+            "end": 3.82,
+            "keyword": false
+          },
+          {
+            "text": "否",
+            "start": 3.82,
+            "end": 3.94,
+            "keyword": false
+          },
+          {
+            "text": "貼",
+            "start": 3.94,
+            "end": 4.14,
+            "keyword": false
+          },
+          {
+            "text": "合",
+            "start": 4.14,
+            "end": 4.34,
+            "keyword": false
+          },
+          {
+            "text": "遇",
+            "start": 4.56,
+            "end": 4.62,
+            "keyword": false
+          },
+          {
+            "text": "到",
+            "start": 4.62,
+            "end": 4.74,
+            "keyword": false
+          },
+          {
+            "text": "石",
+            "start": 4.74,
+            "end": 4.9,
+            "keyword": false
+          },
+          {
+            "text": "滑",
+            "start": 4.9,
+            "end": 5.02,
+            "keyword": false
+          },
+          {
+            "text": "路",
+            "start": 5.02,
+            "end": 5.14,
+            "keyword": false
+          },
+          {
+            "text": "面",
+            "start": 5.14,
+            "end": 5.3,
+            "keyword": false
+          },
+          {
+            "text": "放",
+            "start": 5.3,
+            "end": 5.48,
+            "keyword": false
+          },
+          {
+            "text": "慢",
+            "start": 5.48,
+            "end": 5.62,
+            "keyword": false
+          },
+          {
+            "text": "腳",
+            "start": 5.62,
+            "end": 5.76,
+            "keyword": false
+          },
+          {
+            "text": "步",
+            "start": 5.76,
+            "end": 5.92,
+            "keyword": false
+          },
+          {
+            "text": "出",
+            "start": 5.92,
+            "end": 6.18,
+            "keyword": false
+          },
+          {
+            "text": "行",
+            "start": 6.18,
+            "end": 6.32,
+            "keyword": false
+          },
+          {
+            "text": "更",
+            "start": 6.32,
+            "end": 6.44,
+            "keyword": false
+          },
+          {
+            "text": "從",
+            "start": 6.44,
+            "end": 6.64,
+            "keyword": false
+          },
+          {
+            "text": "容",
+            "start": 6.64,
+            "end": 6.8,
+            "keyword": false
+          }
+        ]
+      }
+    ]
+  }
+}

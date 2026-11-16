@@ -227,6 +227,191 @@ class DefaultTkSubtitleTimelineServiceTest {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
                 ()->service.buildTimeline(task,"甲乙丙丁戊己庚辛。",modelTestAudio(),Collections.emptyList()));
     }
+    @Test
+    void textMismatchRetryDoesNotReplaceBetterReliablePrimaryWithEstimatedWords() throws Exception {
+        String scriptText="甲乙丙丁戊己庚辛。壬癸。";
+        String primary=JsonUtils.toJsonString(characterTimeline("甲乙丙丁戊己庚辛天地"));
+        TkSubtitleTimeline fallback=characterTimeline("甲乙丙丁戊己庚辛壬癸");
+        fallback.getSegments().get(0).setWords(Collections.emptyList());
+        String backup=JsonUtils.toJsonString(fallback);
+        Path asr=tempDir.resolve("mismatch-quality.py");
+        Files.writeString(asr,"import sys\nm=sys.argv[sys.argv.index('--model')+1]\nprint("
+                +JsonUtils.toJsonString(primary)+" if m=='small' else "+JsonUtils.toJsonString(backup)+")\n");
+        TkGenerationProperties properties=modelTestProperties(asr);
+        properties.getSubtitle().getAsr().setMinTextSimilarity(0.95);
+        properties.getSubtitle().getAsr().setRetryEnabled(true);
+        properties.getSubtitle().getAsr().setRetryModel("medium");
+        ReflectionTestUtils.setField(service,"generationProperties",properties);
+        TkGenerationTaskDO task=TkGenerationTaskDO.builder().targetLanguage("zh-cn").subtitleKaraokeEnabled(true).build();
+        TkSubtitleTimeline result=service.buildTimeline(task,scriptText,modelTestAudio(),Collections.emptyList());
+        assertEquals(0.8,TkSubtitleKaraokeQuality.inspect(task,result).getReliableSpokenTextCoverage(),0.001);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name="retry {0}")
+    @org.junit.jupiter.params.provider.ValueSource(strings={"correct","bad-json","exit","timeout","invalid-timing","worse","disabled","same-model"})
+    void qualityRetryIsBoundedAndRetainsPrimaryOnBadBackup(String mode) throws Exception {
+        Path script=tempDir.resolve("retry-cases.py");
+        Files.writeString(script,"import json,sys,pathlib,time\n"
+                + "m=sys.argv[sys.argv.index('--model')+1]\n"
+                + "p=pathlib.Path(__file__).with_name('calls.txt')\np.write_text((p.read_text() if p.exists() else '')+m+'\\n')\n"
+                + "mode='"+mode+"'\n"
+                + "if m=='medium' and mode=='bad-json': print('invalid');sys.exit(0)\n"
+                + "if m=='medium' and mode=='exit': sys.exit(2)\n"
+                + "if m=='medium' and mode=='timeout': time.sleep(2)\n"
+                + "w=[]\n"
+                + "if m=='medium' and mode in ['correct','invalid-timing']: w=[{'text':'Buy','start':0,'end':0.6},{'text':'this','start':0.6,'end':1.2},{'text':'serum','start':1.2,'end':2.5}]\n"
+                + "if mode=='invalid-timing':\n for x in w: x['end']=x['start']\n"
+                + "print(json.dumps({'audioDuration':2.5,'segments':[{'text':'Buy this serum','start':0,'end':2.5,'words':w}]}))\n");
+        TkGenerationProperties properties=modelTestProperties(script);
+        properties.getSubtitle().getAsr().setRetryEnabled(!mode.equals("disabled"));
+        properties.getSubtitle().getAsr().setRetryModel(mode.equals("same-model")?"small":"medium");
+        properties.getSubtitle().getAsr().setTimeoutSeconds(mode.equals("timeout")?1:10);
+        ReflectionTestUtils.setField(service,"generationProperties",properties);
+        TkGenerationTaskDO karaokeTask = modelTestTask();
+        karaokeTask.setSubtitleKaraokeEnabled(true);
+        long start=System.nanoTime();
+        TkSubtitleTimeline result=service.buildTimeline(karaokeTask,"Buy this serum",modelTestAudio(),Collections.emptyList());
+        assertEquals(mode.equals("correct"),result.getSegments().stream().allMatch(DefaultTkAssSubtitleRenderService::canRenderKaraoke));
+        int calls=Files.readAllLines(tempDir.resolve("calls.txt")).size();
+        if(mode.equals("timeout")) {
+            assertTrue(calls>=1 && calls<=2,"skip backup when primary exhausts the shared budget");
+            assertTrue((System.nanoTime()-start)/1e9<2,"primary and retry share one second recognition budget");
+        } else {
+            assertEquals(mode.equals("disabled")||mode.equals("same-model")?1:2,calls);
+        }
+    }
+
+    @Test
+    void salvageChoosesSpokenTextCoverageInsteadOfNumberOfCaptions() {
+        ReflectionTestUtils.setField(service,"generationProperties",new TkGenerationProperties());
+        TkGenerationTaskDO task=TkGenerationTaskDO.builder().targetLanguage("zh-cn").subtitleKaraokeEnabled(true).build();
+        TkSubtitleTimeline many=characterTimeline("天地玄黄宇宙洪荒壬癸");
+        TkSubtitleTimeline substantial=characterTimeline("甲乙丙丁戊己庚辛天地");
+        TkSubtitleTimeline selected=ReflectionTestUtils.invokeMethod(service,"salvageReliableSegments",task,
+                "甲乙丙丁戊己庚辛。壬。癸。",null,Collections.emptyList(),new TkSubtitleTimeline[]{many,substantial});
+        assertTrue(DefaultTkAssSubtitleRenderService.canRenderKaraoke(selected.getSegments().get(0)));
+        assertEquals(0.8,TkSubtitleKaraokeQuality.inspect(task,selected).getReliableSpokenTextCoverage(),0.001);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"哈哈哈哈","香蕉香蕉新鲜","120元","12.5%","Hello 世界","买一送一","“配料干净！”"})
+    void exactAlignmentRetainsRepeatedNumericMixedAndPunctuatedSpeech(String text) {
+        ReflectionTestUtils.setField(service,"generationProperties",new TkGenerationProperties());
+        List<String> units=ReflectionTestUtils.invokeMethod(service,"buildSubtitleUnits",text);
+        List<TkSubtitleWord> words=new ArrayList<>();
+        for(int i=0;i<units.size();i++) words.add(new TkSubtitleWord(units.get(i),i,i+1,false));
+        TkSubtitleTimeline source=new TkSubtitleTimeline(); source.setAudioDuration(units.size());
+        source.setSegments(Collections.singletonList(new TkSubtitleSegment(text,0,units.size(),null,0,0,words)));
+        TkSubtitleTimeline result=ReflectionTestUtils.invokeMethod(service,"rebuildExactTimelineWithScriptText",
+                TkGenerationTaskDO.builder().targetLanguage("zh-cn").build(),text,source,Collections.emptyList());
+        assertTrue(result.getSegments().stream().allMatch(DefaultTkAssSubtitleRenderService::canRenderKaraoke));
+        assertEquals(text,result.getSegments().stream().map(TkSubtitleSegment::getText)
+                .collect(java.util.stream.Collectors.joining()));
+    }
+
+    private TkSubtitleTimeline characterTimeline(String text) {
+        List<TkSubtitleWord> words=new ArrayList<>();
+        for(int i=0;i<text.length();i++) words.add(new TkSubtitleWord(text.substring(i,i+1),i,i+1,false));
+        TkSubtitleTimeline source=new TkSubtitleTimeline();source.setAudioDuration(text.length());
+        source.setSegments(Collections.singletonList(new TkSubtitleSegment(text,0,text.length(),null,0,0,words)));
+        return source;
+    }
+
+    @Test
+    void task2071TraditionalOrthographyRetainsActualTimingButWrongWordStaysPlain() throws Exception {
+        com.fasterxml.jackson.databind.JsonNode fixture;
+        try(java.io.InputStream stream=getClass().getResourceAsStream("/subtitle/task2071-asr.json")) {
+            fixture=JsonUtils.parseTree(stream.readAllBytes());
+        }
+        ReflectionTestUtils.setField(service,"generationProperties",new TkGenerationProperties());
+        TkSubtitleTimeline source=JsonUtils.parseObject(fixture.path("asr").toString(),TkSubtitleTimeline.class);
+        TkGenerationTaskDO task=TkGenerationTaskDO.builder().targetLanguage("zh-cn").subtitleKaraokeEnabled(true)
+                .subtitleStyle("classic_white").subtitleFontSize("extra_large").build();
+        TkSubtitleTimeline result=ReflectionTestUtils.invokeMethod(service,"rebuildExactTimelineWithScriptText",
+                task,fixture.path("script").asText(),source,Collections.emptyList());
+        assertEquals(3,TkSubtitleKaraokeQuality.inspect(task,result).getReliableSegments());
+        assertEquals(31D/41D,TkSubtitleKaraokeQuality.inspect(task,result).getReliableSpokenTextCoverage(),0.00001);
+        TkSubtitleSegment wrong=result.getSegments().stream().filter(x->x.getText().contains("湿")).findFirst().orElseThrow();
+        assertFalse(DefaultTkAssSubtitleRenderService.canRenderKaraoke(wrong));
+        assertEquals("WORD_TEXT_MISMATCH",wrong.getWordTimingReason());
+        assertEquals(fixture.path("script").asText(),result.getSegments().stream().map(TkSubtitleSegment::getText)
+                .collect(java.util.stream.Collectors.joining()));
+        assertEquals(0.52,result.getSegments().get(0).getWords().get(3).getStart(),0.001);
+    }
+
+    @Test
+    void movesCaptionBoundaryToKeepChineseAsrGroupWhole() {
+        ReflectionTestUtils.setField(service,"generationProperties",new TkGenerationProperties());
+        String text="甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉";
+        List<String> original=ReflectionTestUtils.invokeMethod(service,"splitSentences",
+                TkGenerationTaskDO.builder().targetLanguage("zh-cn").build(),text);
+        int cut=original.get(0).length();
+        List<TkSubtitleWord> words=new ArrayList<>();
+        for(int i=0;i<text.length();) {
+            int end=i==cut-1 ? i+2 : i+1;
+            words.add(new TkSubtitleWord(text.substring(i,end),i,end,false)); i=end;
+        }
+        TkSubtitleTimeline asr=new TkSubtitleTimeline(); asr.setAudioDuration(text.length());
+        asr.setSegments(Collections.singletonList(new TkSubtitleSegment(text,0,text.length(),null,0,0,words)));
+        TkSubtitleTimeline result=ReflectionTestUtils.invokeMethod(service,"rebuildExactTimelineWithScriptText",
+                TkGenerationTaskDO.builder().targetLanguage("zh-cn").build(),text,asr,Collections.emptyList());
+        assertTrue(result.getSegments().stream().allMatch(DefaultTkAssSubtitleRenderService::canRenderKaraoke));
+        assertEquals(text,result.getSegments().stream().map(TkSubtitleSegment::getText).collect(java.util.stream.Collectors.joining()));
+    }
+
+    @Test
+    void acceptableTextRetriesForMissingRealWordCoverage() throws Exception {
+        Path script=tempDir.resolve("quality-retry.py");
+        Files.writeString(script, "import json,sys,pathlib\n"
+                + "m=sys.argv[sys.argv.index('--model')+1]\n"
+                + "p=pathlib.Path(__file__).with_name('calls.txt')\np.write_text((p.read_text() if p.exists() else '')+m+'\\n')\n"
+                + "w=[] if m=='small' else [{'text':'Buy','start':0,'end':0.6},{'text':'this','start':0.6,'end':1.2},{'text':'serum','start':1.2,'end':2.5}]\n"
+                + "print(json.dumps({'audioDuration':2.5,'segments':[{'text':'Buy this serum','start':0,'end':2.5,'words':w}]}))\n");
+        TkGenerationProperties properties=modelTestProperties(script);
+        properties.getSubtitle().getAsr().setRetryEnabled(true);
+        properties.getSubtitle().getAsr().setRetryModel("medium");
+        ReflectionTestUtils.setField(service,"generationProperties",properties);
+        TkGenerationTaskDO karaokeTask = modelTestTask();
+        karaokeTask.setSubtitleKaraokeEnabled(true);
+        TkSubtitleTimeline result=service.buildTimeline(karaokeTask,"Buy this serum",modelTestAudio(),Collections.emptyList());
+        assertTrue(result.getSegments().stream().allMatch(DefaultTkAssSubtitleRenderService::canRenderKaraoke));
+        assertEquals(2,Files.readAllLines(tempDir.resolve("calls.txt")).size());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"甲丙,甲乙丙", "甲甲丙,甲甲乙丙", "甲丙丁,甲乙丙丁"})
+    void interiorUnmatchedSourceGroupStaysPlain(String scriptText, String spoken) {
+        ReflectionTestUtils.setField(service, "generationProperties", new TkGenerationProperties());
+        TkSubtitleTimeline source = new TkSubtitleTimeline();
+        source.setAudioDuration(2D);
+        source.setSegments(Collections.singletonList(new TkSubtitleSegment(spoken, 0.25D, 1.75D, null, 0, 0,
+                Collections.singletonList(new TkSubtitleWord(spoken, 0.25D, 1.75D, false)))));
+        TkSubtitleTimeline result = ReflectionTestUtils.invokeMethod(service, "rebuildExactTimelineWithScriptText",
+                TkGenerationTaskDO.builder().targetLanguage("zh-cn").build(), scriptText, source, Collections.emptyList());
+        assertFalse(DefaultTkAssSubtitleRenderService.canRenderKaraoke(result.getSegments().get(0)));
+        assertEquals("WORD_TEXT_MISMATCH", result.getSegments().get(0).getWordTimingReason());
+        assertEquals(0.25D, source.getSegments().get(0).getWords().get(0).getStart());
+        assertEquals(1.75D, source.getSegments().get(0).getWords().get(0).getEnd());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"false", "null", "subtitles-disabled"})
+    void plainCaptionsDoNotRetryForMissingWordCoverage(String mode) throws Exception {
+        Path script = tempDir.resolve("plain-asr.py");
+        Files.writeString(script, "import pathlib,json\n"
+                + "p=pathlib.Path(__file__).with_name('calls.txt')\np.write_text((p.read_text() if p.exists() else '')+'x')\n"
+                + "print(json.dumps({'audioDuration':2.5,'segments':[{'text':'Buy this serum','start':0,'end':2.5,'words':[]}]}))\n");
+        TkGenerationProperties properties = modelTestProperties(script);
+        properties.getSubtitle().getAsr().setRetryEnabled(true);
+        properties.getSubtitle().getAsr().setRetryModel("medium");
+        ReflectionTestUtils.setField(service, "generationProperties", properties);
+        TkGenerationTaskDO task = modelTestTask();
+        task.setSubtitleKaraokeEnabled(mode.equals("null") ? null : mode.equals("subtitles-disabled"));
+        if (mode.equals("subtitles-disabled")) task.setSubtitleEnabled(false);
+        service.buildTimeline(task, "Buy this serum", modelTestAudio(), Collections.emptyList());
+        assertEquals("x", Files.readString(tempDir.resolve("calls.txt")));
+    }
+
     private TkGenerationProperties modelTestProperties(Path script) {
         TkGenerationProperties properties = new TkGenerationProperties();
         properties.getSubtitle().setLeadSeconds(0D);

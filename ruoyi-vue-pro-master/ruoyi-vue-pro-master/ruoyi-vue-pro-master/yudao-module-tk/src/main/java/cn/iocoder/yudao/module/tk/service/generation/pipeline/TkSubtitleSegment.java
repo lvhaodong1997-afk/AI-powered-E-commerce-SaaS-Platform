@@ -18,6 +18,7 @@ public class TkSubtitleSegment {
     private int y;
     private List<TkSubtitleWord> words = new ArrayList<>();
     private Boolean wordTimingReliable = Boolean.TRUE;
+    private String wordTimingReason;
 
     public TkSubtitleSegment(String text, double start, double end, String position, int x, int y,
                              List<TkSubtitleWord> words) {
