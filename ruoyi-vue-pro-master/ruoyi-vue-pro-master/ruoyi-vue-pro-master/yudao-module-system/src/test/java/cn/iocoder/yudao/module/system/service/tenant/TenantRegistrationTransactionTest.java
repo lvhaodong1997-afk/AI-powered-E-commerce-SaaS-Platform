@@ -41,7 +41,7 @@ class TenantRegistrationTransactionTest {
         TenantService tenants = mock(TenantService.class);
         when(tenants.createTenant(any())).thenAnswer(i -> {
             TenantSaveReqVO req=i.getArgument(0);
-            jdbc.update("INSERT INTO system_tenant(name,contact_name,contact_mobile,status,package_id,expire_time,account_count,member_limit) VALUES(?,?,?,0,?,DATEADD('DAY',30,CURRENT_TIMESTAMP),0,1)",req.getName(),req.getContactName(),req.getContactMobile(),req.getPackageId());
+            jdbc.update("INSERT INTO system_tenant(name,contact_name,contact_mobile,status,package_id,expire_time,account_count,member_limit) VALUES(?,?,?,0,?,?,?,?)",req.getName(),req.getContactName(),req.getContactMobile(),req.getPackageId(),req.getExpireTime(),req.getAccountCount(),req.getMemberLimit());
             Long id=jdbc.queryForObject("SELECT id FROM system_tenant WHERE name=?",Long.class,req.getName());
             jdbc.update("INSERT INTO system_users(username,nickname,password,status,tenant_id) VALUES(?,?,?,0,?)",req.getUsername(),req.getContactName(),"encoded",id);
             Long uid=jdbc.queryForObject("SELECT id FROM system_users WHERE tenant_id=?",Long.class,id);
@@ -71,15 +71,22 @@ class TenantRegistrationTransactionTest {
         req.setNickname("Owner");req.setPassword("Password1");req.setMobile("13800138000");req.setSmsRequestId("sms123");req.setSmsCode("123456");req.setInviteCode("ABCDEFGHIJ");return req;
     }
     long count(String table) { return jdbc.queryForObject("SELECT COUNT(*) FROM "+table,Long.class); }
+    long initialCredits() { return jdbc.queryForObject("SELECT COALESCE(SUM(account_count),0) FROM system_tenant",Long.class); }
+    void assertSingleTenantWithInitialCredits() {
+        assertEquals(1,count("system_tenant_registration"));assertEquals(1,count("system_tenant"));assertEquals(1,count("system_users"));
+        assertEquals(10,initialCredits());assertEquals(5,jdbc.queryForObject("SELECT member_limit FROM system_tenant",Integer.class));
+    }
 
     @Test void localFailureRollsBackTenantOwnerOwnCodeReferralAndReservationThenSameRequestRecovers() {
         failAfterReferral.set(true);TenantRegistrationReqVO req=request("request1");
         assertThrows(RuntimeException.class,()->service.provision(req));
         for(String table:Arrays.asList("system_tenant_registration","system_tenant","system_users","system_tenant_invite","system_tenant_referral")) { assertEquals(0,count(table),table); }
+        assertEquals(0,initialCredits());
         assertEquals(1,remoteConsumes.get());
         failAfterReferral.set(false);TenantRegistrationDO result=service.provision(req);assertNotNull(result.getUserId());
         assertEquals(2,remoteConsumes.get());assertEquals(1,count("system_tenant"));assertEquals(1,count("system_tenant_referral"));
         assertEquals(result.getUserId(),service.provision(req).getUserId());assertEquals(2,remoteConsumes.get());
+        assertSingleTenantWithInitialCredits();
     }
     @Test void concurrentPhoneRequestsCreateOneIndependentTenant() throws Exception {
         ExecutorService pool=Executors.newFixedThreadPool(2);CountDownLatch start=new CountDownLatch(1);
@@ -87,7 +94,7 @@ class TenantRegistrationTransactionTest {
         Callable<Boolean> second=()->{start.await();try{service.provision(request("request2"));return true;}catch(RuntimeException conflict){return false;}};
         try {Future<Boolean>a=pool.submit(first),b=pool.submit(second);start.countDown();assertEquals(1,(a.get(15,TimeUnit.SECONDS)?1:0)+(b.get(15,TimeUnit.SECONDS)?1:0));}
         finally {pool.shutdownNow();}
-        assertEquals(1,count("system_tenant_registration"));assertEquals(1,count("system_tenant"));assertEquals(1,count("system_users"));assertEquals(1,remoteConsumes.get());
+        assertSingleTenantWithInitialCredits();assertEquals(1,remoteConsumes.get());
     }
     @Test void databaseRejectsRequestCodeAndReferralRebinding() {
         jdbc.update("INSERT INTO system_tenant_registration(request_id,mobile,payload_hash) VALUES('r','13800138000','hash')");

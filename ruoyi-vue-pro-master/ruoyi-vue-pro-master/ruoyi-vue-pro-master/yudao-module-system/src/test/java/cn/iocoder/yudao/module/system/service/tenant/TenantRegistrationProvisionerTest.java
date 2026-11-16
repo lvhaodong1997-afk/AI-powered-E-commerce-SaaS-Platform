@@ -38,11 +38,11 @@ class TenantRegistrationProvisionerTest {
         r.setUsername("owner123"); r.setNickname("Owner"); r.setPassword("Password1");
         return r;
     }
-    @Test void createsZeroCreditTenantAndOwnerBoundToPhone() {
+    @Test void createsTenCreditTenantWithFiveSeatsAndOwnerBoundToPhone() {
         TenantRegistrationDO result = service.provision(request());
         ArgumentCaptor<TenantSaveReqVO> c = ArgumentCaptor.forClass(TenantSaveReqVO.class);
         verify(tenants).createTenant(c.capture());
-        assertEquals(0, c.getValue().getAccountCount()); assertEquals(5, c.getValue().getMemberLimit());
+        assertEquals(10, c.getValue().getAccountCount()); assertEquals(5, c.getValue().getMemberLimit());
         assertEquals("13800138000", c.getValue().getContactMobile());
         assertEquals(21L, result.getUserId()); verify(phone).consume(any()); verify(invites).createCode(20L);
         verify(invites, never()).bind(anyLong(), anyLong());
@@ -81,6 +81,7 @@ class TenantRegistrationProvisionerTest {
         service.provision(r); verify(invites).bind(9L,20L);
     }
     @Test void memberLimitDoesNotTrackCreditBalance() {
+        assertEquals(5, new TenantDO().setAccountCount(10).setMemberLimit(5).resolveMemberLimit(1));
         assertEquals(1, new TenantDO().setAccountCount(0).setMemberLimit(1).resolveMemberLimit(0));
         assertEquals(25, new TenantDO().setAccountCount(25).resolveMemberLimit(3));
         assertEquals(30, new TenantDO().setAccountCount(25).resolveMemberLimit(30));
@@ -91,7 +92,7 @@ class TenantRegistrationProvisionerTest {
         ArgumentCaptor<TenantSaveReqVO> c = ArgumentCaptor.forClass(TenantSaveReqVO.class);
         verify(tenants, times(1)).createTenant(c.capture());
         assertEquals(8, c.getValue().getMemberLimit());
-        assertEquals(0, c.getValue().getAccountCount());
+        assertEquals(10, c.getValue().getAccountCount());
         verify(tenants).getTenant(20L);
         verifyNoMoreInteractions(tenants);
     }

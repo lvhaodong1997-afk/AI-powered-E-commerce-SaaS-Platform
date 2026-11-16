@@ -42,7 +42,7 @@ public class TenantRegistrationProvisioner {
                 ? now.plusYears(properties.getValidityYears()) : now.plusDays(properties.getValidityDays());
         TenantSaveReqVO tenant = new TenantSaveReqVO().setName(req.getTenantName().trim()).setContactName(req.getNickname())
                 .setContactMobile(req.getMobile()).setStatus(CommonStatusEnum.ENABLE.getStatus()).setPackageId(properties.getDefaultPackageId())
-                .setExpireTime(expireTime).setAccountCount(0)
+                .setExpireTime(expireTime).setAccountCount(10)
                 .setMemberLimit(properties.getMemberLimit()).setUsername(req.getUsername()).setPassword(req.getPassword());
         Long tenantId = tenantService.createTenant(tenant);
         inviteService.createCode(tenantId);

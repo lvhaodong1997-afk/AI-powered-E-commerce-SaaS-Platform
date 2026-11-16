@@ -11,8 +11,8 @@
     <h3>{{ text('创建独立租户', 'Create your workspace') }}</h3>
     <p class="registration-note">{{
       text(
-        '注册后拥有独立账号与数据，初始付费积分为 0。邀请码仅用于推荐。',
-        'Your tenant has independent accounts and data, with zero initial paid credits. An invite is optional and records a referral only.'
+        '注册后拥有独立账号与数据，每个新租户一次性获赠 10 个永久有效积分。邀请码仅用于推荐。',
+        'Your new tenant has independent accounts and data and receives 10 free credits once, with no expiry. An invite is optional and records a referral only.'
       )
     }}</p>
     <el-alert

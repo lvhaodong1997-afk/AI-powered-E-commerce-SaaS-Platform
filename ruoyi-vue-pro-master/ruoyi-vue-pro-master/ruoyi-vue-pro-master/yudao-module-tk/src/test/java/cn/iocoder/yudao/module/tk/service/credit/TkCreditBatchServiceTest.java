@@ -37,6 +37,35 @@ class TkCreditBatchServiceTest {
         assertEquals(0, number("SELECT frozen FROM tk_credit_batch WHERE tenant_id=8"));
     }
 
+    @Test void tenInitialCreditsRemainPermanentAndUniqueWhenPaidCreditsExpire() {
+        db.update("INSERT INTO system_tenant(id,account_count) VALUES(10,10)");
+        tx.execute(s -> {
+            long initialCredits=ledger.currentTenantTotal(10L);
+            assertEquals(10,initialCredits);
+            db.update("INSERT INTO tk_tenant_credit_account(tenant_id,total_credits,remaining_credits,frozen_credits) VALUES(?,?,?,0)",10L,initialCredits,initialCredits);
+            ledger.prepare(10L);ledger.prepare(10L);
+            return null;
+        });
+        assertEquals(1,number("SELECT COUNT(*) FROM tk_credit_batch WHERE tenant_id=10"));
+        assertEquals(10,number("SELECT initial_credits FROM tk_credit_batch WHERE source_key='LEGACY:10'"));
+        assertEquals(10,number("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=10"));
+        assertNull(db.queryForObject("SELECT expires_at FROM tk_credit_batch WHERE source_key='LEGACY:10'",java.sql.Timestamp.class));
+
+        tx.execute(s -> {assertTrue(ledger.grantPayment(10L,"TKP_initial",250,now));return null;});
+        assertEquals(260,number("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=10"));
+        assertEquals(Instant.parse("2026-07-31T10:00:00Z"),db.queryForObject("SELECT expires_at FROM tk_credit_batch WHERE source_key='TKP_initial'",java.sql.Timestamp.class).toInstant());
+        ledger=new TkCreditBatchService(db,Clock.fixed(Instant.parse("2126-08-01T00:00:00Z"),ZoneOffset.UTC));
+        tx.execute(s -> {ledger.prepare(10L);ledger.prepare(10L);return null;});
+        assertEquals(2,number("SELECT COUNT(*) FROM tk_credit_batch WHERE tenant_id=10"));
+        assertEquals(10,number("SELECT available FROM tk_credit_batch WHERE source_key='LEGACY:10'"));
+        assertEquals(0,number("SELECT expired FROM tk_credit_batch WHERE source_key='LEGACY:10'"));
+        assertNull(db.queryForObject("SELECT expires_at FROM tk_credit_batch WHERE source_key='LEGACY:10'",java.sql.Timestamp.class));
+        assertEquals(250,number("SELECT expired FROM tk_credit_batch WHERE source_key='TKP_initial'"));
+        assertEquals(0,number("SELECT available FROM tk_credit_batch WHERE source_key='TKP_initial'"));
+        assertEquals(260,number("SELECT total_credits FROM tk_tenant_credit_account WHERE tenant_id=10"));
+        assertEquals(10,number("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=10"));
+    }
+
     @Test void paidGrantIsUniqueAndSixCalendarMonthsStartAtPayment() {
         tx.execute(s -> {ledger.prepare(9L); assertTrue(ledger.grantPayment(9L,"TKP_a",250,now)); assertFalse(ledger.grantPayment(9L,"TKP_a",250,now)); return null;});
         assertEquals(250,number("SELECT remaining_credits FROM tk_tenant_credit_account WHERE tenant_id=9"));
