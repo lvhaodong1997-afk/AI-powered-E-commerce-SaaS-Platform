@@ -42,7 +42,7 @@ class TenantRegistrationProvisionerTest {
         TenantRegistrationDO result = service.provision(request());
         ArgumentCaptor<TenantSaveReqVO> c = ArgumentCaptor.forClass(TenantSaveReqVO.class);
         verify(tenants).createTenant(c.capture());
-        assertEquals(0, c.getValue().getAccountCount()); assertEquals(1, c.getValue().getMemberLimit());
+        assertEquals(0, c.getValue().getAccountCount()); assertEquals(5, c.getValue().getMemberLimit());
         assertEquals("13800138000", c.getValue().getContactMobile());
         assertEquals(21L, result.getUserId()); verify(phone).consume(any()); verify(invites).createCode(20L);
         verify(invites, never()).bind(anyLong(), anyLong());
@@ -84,5 +84,15 @@ class TenantRegistrationProvisionerTest {
         assertEquals(1, new TenantDO().setAccountCount(0).setMemberLimit(1).resolveMemberLimit(0));
         assertEquals(25, new TenantDO().setAccountCount(25).resolveMemberLimit(3));
         assertEquals(30, new TenantDO().setAccountCount(25).resolveMemberLimit(30));
+    }
+    @Test void explicitMemberLimitOverrideIsPreservedWithSingleTenantCreation() {
+        properties.setMemberLimit(8);
+        service.provision(request());
+        ArgumentCaptor<TenantSaveReqVO> c = ArgumentCaptor.forClass(TenantSaveReqVO.class);
+        verify(tenants, times(1)).createTenant(c.capture());
+        assertEquals(8, c.getValue().getMemberLimit());
+        assertEquals(0, c.getValue().getAccountCount());
+        verify(tenants).getTenant(20L);
+        verifyNoMoreInteractions(tenants);
     }
 }

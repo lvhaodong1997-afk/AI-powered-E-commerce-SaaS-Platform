@@ -15,7 +15,7 @@ public class TenantRegistrationProperties {
     private Long defaultPackageId;
     private Integer validityDays;
     private Integer validityYears = 0;
-    private int memberLimit = 1;
+    private int memberLimit = 5;
     private String phoneBaseUrl;
     private String phoneSecret;
     private String inviteBaseUrl;
