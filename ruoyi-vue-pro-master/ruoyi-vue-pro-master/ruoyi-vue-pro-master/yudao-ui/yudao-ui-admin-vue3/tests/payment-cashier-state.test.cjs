@@ -37,6 +37,35 @@ test('Alipay provider redirect supports the current exact pm-redirects host', ()
     assert.equal(safeProviderUrl(url, 'redirect'), '')
 })
 
+test('cashier rejects legacy extra Stripe hosts outside the server action contract', () => {
+  assert.equal(
+    safeProviderUrl('https://qr.stripe.com/fixture', 'qr'),
+    'https://qr.stripe.com/fixture'
+  )
+  assert.equal(
+    safeProviderUrl('https://hooks.stripe.com/fixture', 'redirect'),
+    'https://hooks.stripe.com/fixture'
+  )
+  for (const [url, kind] of [
+    ['https://q.stripe.com/fixture', 'qr'],
+    ['https://checkout.stripe.com/fixture', 'redirect'],
+    ['https://payments.stripe.com/fixture', 'redirect'],
+    ['https://pay.stripe.com/fixture', 'redirect'],
+    ['https://qr.stripe.com/fixture', 'redirect'],
+    ['https://hooks.stripe.com/fixture', 'qr'],
+    ['https://pm-redirects.stripe.com/fixture', 'qr']
+  ])
+    assert.equal(safeProviderUrl(url, kind), '', `${url} must not be exposed as ${kind}`)
+  assert.equal(
+    paymentEntryState({ ...pending, qrImageUrl: 'https://q.stripe.com/fixture' }),
+    'entry_missing'
+  )
+  assert.equal(
+    paymentEntryState({ ...pending, redirectUrl: 'https://checkout.stripe.com/fixture' }),
+    'entry_missing'
+  )
+})
+
 test('pending provider entry survives elapsed quote time and repeated authoritative reads', () => {
   const order = { ...pending, qrImageUrl: 'https://qr.stripe.com/fixture' }
   assert.equal(paymentEntryState(order), 'qr')

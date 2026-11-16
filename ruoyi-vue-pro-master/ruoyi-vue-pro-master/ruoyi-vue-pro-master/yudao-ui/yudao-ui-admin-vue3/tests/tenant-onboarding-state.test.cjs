@@ -55,7 +55,7 @@ test('recovery accepts only verification quantities 1/5/10 and regular quantity 
   assert.equal(parsePaymentDraft(JSON.stringify({...base,packageCode:'P1000',quantity:1}))?.quantity,1)
 })
 test('only HTTPS exact Stripe hosts and safe URL parameters are accepted', () => {
-  assert.equal(safeProviderUrl('https://checkout.stripe.com/c/pay/cs_test_1','redirect'),'https://checkout.stripe.com/c/pay/cs_test_1')
+  assert.equal(safeProviderUrl('https://hooks.stripe.com/redirect/fixture','redirect'),'https://hooks.stripe.com/redirect/fixture')
   assert.equal(safeProviderUrl('https://qr.stripe.com/test.png','qr'),'https://qr.stripe.com/test.png')
   for (const url of ['javascript:alert(1)','http://checkout.stripe.com/x','https://checkout.stripe.com.evil.test/x',
     'https://user:pass@checkout.stripe.com/x','https://checkout.stripe.com:444/x','https://checkout.stripe.com/x?client_secret=s',

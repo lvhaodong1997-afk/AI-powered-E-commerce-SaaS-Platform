@@ -292,7 +292,8 @@
                       ><button type="button" @click="copy(requestExample[codeLanguage])"
                         >复制代码</button
                       ></div
-                    >><pre><code>{{ requestExample[codeLanguage] }}</code></pre></div
+                    >
+                    <pre><code>{{ requestExample[codeLanguage] }}</code></pre></div
                   ><p class="snippet-caption"
                     >单接口示例用于理解请求格式。自动刷新、异常处理和完整出片流程，请使用<a
                       href="#downloads"
@@ -319,7 +320,8 @@
                     ><div class="doc-code-bar"
                       ><span>JSON</span
                       ><button type="button" @click="copy(responseExample)">复制响应</button></div
-                    >><pre><code>{{ responseExample }}</code></pre></div
+                    >
+                    <pre><code>{{ responseExample }}</code></pre></div
                   ><div v-if="responseRows.length" class="doc-table-scroll"
                     ><table
                       ><thead

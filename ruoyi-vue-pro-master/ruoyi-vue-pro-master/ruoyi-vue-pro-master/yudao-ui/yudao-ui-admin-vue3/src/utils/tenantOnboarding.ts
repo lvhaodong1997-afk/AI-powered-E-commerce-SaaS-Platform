@@ -102,15 +102,7 @@ export function safeProviderUrl(value: unknown, kind: 'redirect' | 'qr'): string
   try {
     const url = new URL(value)
     const hosts =
-      kind === 'qr'
-        ? ['qr.stripe.com', 'q.stripe.com']
-        : [
-            'checkout.stripe.com',
-            'payments.stripe.com',
-            'hooks.stripe.com',
-            'pay.stripe.com',
-            'pm-redirects.stripe.com'
-          ]
+      kind === 'qr' ? ['qr.stripe.com'] : ['pm-redirects.stripe.com', 'hooks.stripe.com']
     if (
       url.protocol !== 'https:' ||
       url.username ||
