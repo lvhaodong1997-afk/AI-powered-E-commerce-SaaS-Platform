@@ -1,0 +1,1476 @@
+{
+  "date": "2026-11-16",
+  "environment": {
+    "baseUrl": "https://clipforgestudio.fnn.net.cn",
+    "tenantId": 166,
+    "account": "xiumei02"
+  },
+  "material": {
+    "runId": "material-smoke-2026-11-16T03-57-01-801Z-ede18b0b",
+    "startedAt": "2026-11-16T03:57:01.820Z",
+    "mode": "write",
+    "ok": true,
+    "libraryId": 155,
+    "videoIds": [
+      6372,
+      6373
+    ],
+    "sessionIds": [
+      "ea15b7410ab7418888c3aa6b9830ed9e",
+      "1fc86916890148b3a7e15028eefb3bf6"
+    ],
+    "checks": [
+      {
+        "name": "library page query",
+        "status": "passed"
+      },
+      {
+        "name": "video page query",
+        "status": "passed"
+      },
+      {
+        "name": "anonymous query rejected with 401",
+        "status": "passed"
+      },
+      {
+        "name": "create dedicated ECOMMERCE library",
+        "status": "passed"
+      },
+      {
+        "name": "get own library",
+        "status": "passed"
+      },
+      {
+        "name": "update own library",
+        "status": "passed"
+      },
+      {
+        "name": "search dedicated library",
+        "status": "passed"
+      },
+      {
+        "name": "ordinary multipart upload",
+        "status": "passed"
+      },
+      {
+        "name": "ordinary upload: parse AVAILABLE",
+        "status": "passed"
+      },
+      {
+        "name": "update own video usage",
+        "status": "passed"
+      },
+      {
+        "name": "update own video segment",
+        "status": "passed"
+      },
+      {
+        "name": "verify own video metadata update",
+        "status": "passed"
+      },
+      {
+        "name": "empty library name rejected",
+        "status": "passed"
+      },
+      {
+        "name": "empty session filename rejected",
+        "status": "passed"
+      },
+      {
+        "name": "invalid extension rejected",
+        "status": "passed"
+      },
+      {
+        "name": "empty file rejected",
+        "status": "passed"
+      },
+      {
+        "name": "create disposable session for cancellation",
+        "status": "passed"
+      },
+      {
+        "name": "get own disposable session",
+        "status": "passed"
+      },
+      {
+        "name": "cancel own disposable session",
+        "status": "passed"
+      },
+      {
+        "name": "create session for upload completion",
+        "status": "passed"
+      },
+      {
+        "name": "get own upload session",
+        "status": "passed"
+      },
+      {
+        "name": "upload bytes via selected session mode",
+        "status": "passed"
+      },
+      {
+        "name": "complete own upload session",
+        "status": "passed"
+      },
+      {
+        "name": "session upload: parse AVAILABLE",
+        "status": "passed"
+      },
+      {
+        "name": "query own video page",
+        "status": "passed"
+      },
+      {
+        "name": "query own segment summary",
+        "status": "passed"
+      },
+      {
+        "name": "get retained library statistics",
+        "status": "passed"
+      }
+    ],
+    "trace": [
+      {
+        "sequence": 1,
+        "method": "GET",
+        "path": "/tk/material-library/page?pageNo=1&pageSize=10",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:01.892Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "total": 116,
+          "list": [
+            {
+              "id": 149,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": "[omitted]",
+              "scene": "[omitted]",
+              "materialPurpose": "ECOMMERCE",
+              "tags": "[omitted]",
+              "description": "[omitted]",
+              "coverUrl": "[omitted]",
+              "previewVideoUrl": "[omitted]",
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 148,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": "[omitted]",
+              "scene": "[omitted]",
+              "materialPurpose": "ECOMMERCE",
+              "tags": "[omitted]",
+              "description": "[omitted]",
+              "coverUrl": "[omitted]",
+              "previewVideoUrl": "[omitted]",
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 147,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": "[omitted]",
+              "scene": "[omitted]",
+              "materialPurpose": "ECOMMERCE",
+              "tags": "[omitted]",
+              "description": "[omitted]",
+              "coverUrl": "[omitted]",
+              "previewVideoUrl": "[omitted]",
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 146,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": "[omitted]",
+              "scene": "[omitted]",
+              "materialPurpose": "ECOMMERCE",
+              "tags": "[omitted]",
+              "description": "[omitted]",
+              "coverUrl": "[omitted]",
+              "previewVideoUrl": "[omitted]",
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 145,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": "[omitted]",
+              "scene": "[omitted]",
+              "materialPurpose": "ECOMMERCE",
+              "tags": "[omitted]",
+              "description": "[omitted]",
+              "coverUrl": "[omitted]",
+              "previewVideoUrl": "[omitted]",
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 144,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": "[omitted]",
+              "scene": "[omitted]",
+              "materialPurpose": "ECOMMERCE",
+              "tags": "[omitted]",
+              "description": "[omitted]",
+              "coverUrl": "[omitted]",
+              "previewVideoUrl": "[omitted]",
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 143,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": "[omitted]",
+              "scene": "[omitted]",
+              "materialPurpose": "ECOMMERCE",
+              "tags": "[omitted]",
+              "description": "[omitted]",
+              "coverUrl": "[omitted]",
+              "previewVideoUrl": "[omitted]",
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 142,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": "[omitted]",
+              "scene": "[omitted]",
+              "materialPurpose": "ECOMMERCE",
+              "tags": "[omitted]",
+              "description": "[omitted]",
+              "coverUrl": "[omitted]",
+              "previewVideoUrl": "[omitted]",
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 141,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": "[omitted]",
+              "scene": "[omitted]",
+              "materialPurpose": "ECOMMERCE",
+              "tags": "[omitted]",
+              "description": "[omitted]",
+              "coverUrl": "[omitted]",
+              "previewVideoUrl": "[omitted]",
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 140,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": "[omitted]",
+              "scene": "[omitted]",
+              "materialPurpose": "ECOMMERCE",
+              "tags": "[omitted]",
+              "description": "[omitted]",
+              "coverUrl": "[omitted]",
+              "previewVideoUrl": "[omitted]",
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            }
+          ]
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:02.442Z"
+      },
+      {
+        "sequence": 2,
+        "method": "GET",
+        "path": "/tk/material-video/page?pageNo=1&pageSize=10",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:02.443Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "total": 4134,
+          "list": [
+            {
+              "id": 6071,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 149,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 2,
+              "size": 1227278,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "RESULT_EFFECT",
+              "segmentType": "S5_PROOF",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 6070,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 149,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 2,
+              "size": 982229,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "RESULT_EFFECT",
+              "segmentType": "S5_PROOF",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 6069,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 149,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 2,
+              "size": 1615795,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "RESULT_EFFECT",
+              "segmentType": "S5_PROOF",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 6068,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 149,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 2,
+              "size": 2068609,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "RESULT_EFFECT",
+              "segmentType": "S5_PROOF",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 6067,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 149,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 2,
+              "size": 2104842,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "RESULT_EFFECT",
+              "segmentType": "S5_PROOF",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 6066,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 149,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 2,
+              "size": 915637,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "RESULT_EFFECT",
+              "segmentType": "S5_PROOF",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 6065,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 149,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 2,
+              "size": 1812217,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "RESULT_EFFECT",
+              "segmentType": "S5_PROOF",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 6064,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 149,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 3,
+              "size": 4333885,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "RESULT_EFFECT",
+              "segmentType": "S5_PROOF",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 6063,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 149,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 2,
+              "size": 1617738,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "RESULT_EFFECT",
+              "segmentType": "S5_PROOF",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 6062,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 149,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 3,
+              "size": 2212360,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "RESULT_EFFECT",
+              "segmentType": "S5_PROOF",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            }
+          ]
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:02.838Z"
+      },
+      {
+        "sequence": 3,
+        "method": "GET",
+        "path": "/tk/material-library/page?pageNo=1&pageSize=1",
+        "auth": "none",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:02.838Z",
+        "httpStatus": 200,
+        "code": 401,
+        "response": null,
+        "ok": false,
+        "finishedAt": "2026-11-16T03:57:03.098Z"
+      },
+      {
+        "sequence": 4,
+        "method": "POST",
+        "path": "/tk/material-library/create",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "name": "[omitted]",
+          "materialPurpose": "ECOMMERCE",
+          "description": "[omitted]",
+          "defaulted": false,
+          "status": "[omitted]"
+        },
+        "startedAt": "2026-11-16T03:57:03.098Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": "[omitted]",
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:03.323Z"
+      },
+      {
+        "sequence": 5,
+        "method": "GET",
+        "path": "/tk/material-library/get?id=155",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:03.323Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "id": 155,
+          "tenantId": "[omitted]",
+          "companyId": "[omitted]",
+          "name": "[omitted]",
+          "category": null,
+          "scene": null,
+          "materialPurpose": "ECOMMERCE",
+          "tags": null,
+          "description": "[omitted]",
+          "coverUrl": null,
+          "previewVideoUrl": null,
+          "videoCount": "[omitted]",
+          "totalSize": "[omitted]",
+          "defaulted": false,
+          "status": "[omitted]",
+          "createTime": "[omitted]"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:03.493Z"
+      },
+      {
+        "sequence": 6,
+        "method": "PUT",
+        "path": "/tk/material-library/update",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "id": 155,
+          "name": "[omitted]",
+          "materialPurpose": "ECOMMERCE",
+          "description": "[omitted]"
+        },
+        "startedAt": "2026-11-16T03:57:03.493Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": true,
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:03.689Z"
+      },
+      {
+        "sequence": 7,
+        "method": "GET",
+        "path": "/tk/material-library/page?pageNo=1&pageSize=10&name=material-smoke-2026-11-16T03-57-01-801Z-ede18b0b&materialPurpose=ECOMMERCE",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:03.689Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "total": 1,
+          "list": [
+            {
+              "id": 155,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "name": "[omitted]",
+              "category": null,
+              "scene": null,
+              "materialPurpose": "ECOMMERCE",
+              "tags": null,
+              "description": "[omitted]",
+              "coverUrl": null,
+              "previewVideoUrl": null,
+              "videoCount": "[omitted]",
+              "totalSize": "[omitted]",
+              "defaulted": false,
+              "status": "[omitted]",
+              "createTime": "[omitted]"
+            }
+          ]
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:03.859Z"
+      },
+      {
+        "sequence": 8,
+        "method": "POST",
+        "path": "/tk/material-video/upload",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "multipartFields": [
+            "libraryId",
+            "tags",
+            "usagePhase",
+            "segmentType",
+            "file"
+          ]
+        },
+        "startedAt": "2026-11-16T03:57:03.860Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": "[omitted]",
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:05.922Z"
+      },
+      {
+        "sequence": 9,
+        "method": "GET",
+        "path": "/tk/material-video/get?id=6372",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:05.922Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "id": 6372,
+          "tenantId": "[omitted]",
+          "companyId": "[omitted]",
+          "libraryId": 155,
+          "fileName": "[omitted]",
+          "fileUrl": "[omitted]",
+          "coverUrl": null,
+          "duration": null,
+          "size": 1227278,
+          "resolution": null,
+          "format": "[omitted]",
+          "tags": "[omitted]",
+          "usagePhase": "GENERAL",
+          "segmentType": "GENERAL",
+          "status": "PARSING",
+          "failReason": null,
+          "createTime": "[omitted]"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:06.072Z"
+      },
+      {
+        "sequence": 10,
+        "method": "GET",
+        "path": "/tk/material-video/get?id=6372",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:09.139Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "id": 6372,
+          "tenantId": "[omitted]",
+          "companyId": "[omitted]",
+          "libraryId": 155,
+          "fileName": "[omitted]",
+          "fileUrl": "[omitted]",
+          "coverUrl": "[omitted]",
+          "duration": 2,
+          "size": 1227278,
+          "resolution": "[omitted]",
+          "format": "[omitted]",
+          "tags": "[omitted]",
+          "usagePhase": "GENERAL",
+          "segmentType": "GENERAL",
+          "status": "AVAILABLE",
+          "failReason": null,
+          "createTime": "[omitted]"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:09.350Z"
+      },
+      {
+        "sequence": 11,
+        "method": "PUT",
+        "path": "/tk/material-video/usage-phase",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "ids": [
+            6372
+          ],
+          "usagePhase": "ATTENTION"
+        },
+        "startedAt": "2026-11-16T03:57:09.350Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": true,
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:09.589Z"
+      },
+      {
+        "sequence": 12,
+        "method": "PUT",
+        "path": "/tk/material-video/segment-type",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "ids": [
+            6372
+          ],
+          "segmentType": "S1_HOOK"
+        },
+        "startedAt": "2026-11-16T03:57:09.590Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": true,
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:09.814Z"
+      },
+      {
+        "sequence": 13,
+        "method": "GET",
+        "path": "/tk/material-video/get?id=6372",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:09.814Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "id": 6372,
+          "tenantId": "[omitted]",
+          "companyId": "[omitted]",
+          "libraryId": 155,
+          "fileName": "[omitted]",
+          "fileUrl": "[omitted]",
+          "coverUrl": "[omitted]",
+          "duration": 2,
+          "size": 1227278,
+          "resolution": "[omitted]",
+          "format": "[omitted]",
+          "tags": "[omitted]",
+          "usagePhase": "ATTENTION",
+          "segmentType": "S1_HOOK",
+          "status": "AVAILABLE",
+          "failReason": null,
+          "createTime": "[omitted]"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:09.950Z"
+      },
+      {
+        "sequence": 14,
+        "method": "POST",
+        "path": "/tk/material-library/create",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "name": "[omitted]",
+          "materialPurpose": "ECOMMERCE"
+        },
+        "startedAt": "2026-11-16T03:57:09.950Z",
+        "httpStatus": 200,
+        "code": 400,
+        "response": null,
+        "ok": false,
+        "finishedAt": "2026-11-16T03:57:10.044Z"
+      },
+      {
+        "sequence": 15,
+        "method": "POST",
+        "path": "/tk/upload/material-video/session/create",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "libraryId": 155,
+          "fileName": "[omitted]",
+          "fileSize": 1227278
+        },
+        "startedAt": "2026-11-16T03:57:10.044Z",
+        "httpStatus": 200,
+        "code": 400,
+        "response": null,
+        "ok": false,
+        "finishedAt": "2026-11-16T03:57:10.139Z"
+      },
+      {
+        "sequence": 16,
+        "method": "POST",
+        "path": "/tk/material-video/upload",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "multipartFields": [
+            "libraryId",
+            "file"
+          ]
+        },
+        "startedAt": "2026-11-16T03:57:10.140Z",
+        "httpStatus": 200,
+        "code": 1060000012,
+        "response": null,
+        "ok": false,
+        "finishedAt": "2026-11-16T03:57:10.250Z"
+      },
+      {
+        "sequence": 17,
+        "method": "POST",
+        "path": "/tk/material-video/upload",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "multipartFields": [
+            "libraryId",
+            "file"
+          ]
+        },
+        "startedAt": "2026-11-16T03:57:10.250Z",
+        "httpStatus": 200,
+        "code": 1060000010,
+        "response": null,
+        "ok": false,
+        "finishedAt": "2026-11-16T03:57:10.350Z"
+      },
+      {
+        "sequence": 18,
+        "method": "POST",
+        "path": "/tk/upload/material-video/session/create",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "libraryId": 155,
+          "fileName": "[omitted]",
+          "fileSize": 1227278,
+          "contentType": "[omitted]"
+        },
+        "startedAt": "2026-11-16T03:57:10.350Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "uploadId": "ea15b7410ab7418888c3aa6b9830ed9e",
+          "uploadMode": "oss",
+          "chunkSize": null,
+          "totalChunks": null,
+          "uploadedSize": 0,
+          "uploadedChunks": [],
+          "uploadUrl": "[omitted]",
+          "publicUrl": "[omitted]",
+          "objectKey": "[omitted]",
+          "accessKeyId": "[omitted]",
+          "policy": "[omitted]",
+          "signature": "[omitted]",
+          "successActionStatus": "[omitted]",
+          "expiration": "[omitted]"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:10.500Z"
+      },
+      {
+        "sequence": 19,
+        "method": "GET",
+        "path": "/tk/upload/material-video/session/ea15b7410ab7418888c3aa6b9830ed9e",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:10.500Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "uploadId": "ea15b7410ab7418888c3aa6b9830ed9e",
+          "chunkSize": null,
+          "totalChunks": null,
+          "fileSize": 1227278,
+          "uploadedSize": 0,
+          "uploadedChunks": [],
+          "status": "UPLOADING"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:10.621Z"
+      },
+      {
+        "sequence": 20,
+        "method": "DELETE",
+        "path": "/tk/upload/material-video/session/ea15b7410ab7418888c3aa6b9830ed9e",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:10.621Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": true,
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:10.747Z"
+      },
+      {
+        "sequence": 21,
+        "method": "POST",
+        "path": "/tk/upload/material-video/session/create",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "libraryId": 155,
+          "fileName": "[omitted]",
+          "fileSize": 1227278,
+          "contentType": "[omitted]"
+        },
+        "startedAt": "2026-11-16T03:57:10.747Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "uploadId": "1fc86916890148b3a7e15028eefb3bf6",
+          "uploadMode": "oss",
+          "chunkSize": null,
+          "totalChunks": null,
+          "uploadedSize": 0,
+          "uploadedChunks": [],
+          "uploadUrl": "[omitted]",
+          "publicUrl": "[omitted]",
+          "objectKey": "[omitted]",
+          "accessKeyId": "[omitted]",
+          "policy": "[omitted]",
+          "signature": "[omitted]",
+          "successActionStatus": "[omitted]",
+          "expiration": "[omitted]"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:10.893Z"
+      },
+      {
+        "sequence": 22,
+        "method": "GET",
+        "path": "/tk/upload/material-video/session/1fc86916890148b3a7e15028eefb3bf6",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:10.894Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "uploadId": "1fc86916890148b3a7e15028eefb3bf6",
+          "chunkSize": null,
+          "totalChunks": null,
+          "fileSize": 1227278,
+          "uploadedSize": 0,
+          "uploadedChunks": [],
+          "status": "UPLOADING"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:11.001Z"
+      },
+      {
+        "sequence": 23,
+        "method": "POST",
+        "path": "[OSS upload URL omitted]",
+        "auth": "none",
+        "tenantHeader": false,
+        "request": {
+          "multipartFields": [
+            "key",
+            "policy",
+            "OSSAccessKeyId",
+            "signature",
+            "success_action_status",
+            "file"
+          ]
+        },
+        "startedAt": "2026-11-16T03:57:11.004Z",
+        "httpStatus": 200,
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:12.090Z"
+      },
+      {
+        "sequence": 24,
+        "method": "POST",
+        "path": "/tk/upload/material-video/session/complete",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": {
+          "uploadId": "1fc86916890148b3a7e15028eefb3bf6",
+          "libraryId": 155,
+          "fileName": "[omitted]",
+          "fileSize": 1227278,
+          "contentType": "[omitted]",
+          "tags": "[omitted]",
+          "usagePhase": "PRODUCT_SHOW",
+          "segmentType": "GENERAL",
+          "objectKey": "[omitted]"
+        },
+        "startedAt": "2026-11-16T03:57:12.090Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": "[omitted]",
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:13.215Z"
+      },
+      {
+        "sequence": 25,
+        "method": "GET",
+        "path": "/tk/material-video/get?id=6373",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:13.215Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "id": 6373,
+          "tenantId": "[omitted]",
+          "companyId": "[omitted]",
+          "libraryId": 155,
+          "fileName": "[omitted]",
+          "fileUrl": "[omitted]",
+          "coverUrl": null,
+          "duration": null,
+          "size": 1227278,
+          "resolution": null,
+          "format": "[omitted]",
+          "tags": "[omitted]",
+          "usagePhase": "PRODUCT_SHOW",
+          "segmentType": "GENERAL",
+          "status": "PARSING",
+          "failReason": null,
+          "createTime": "[omitted]"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:13.382Z"
+      },
+      {
+        "sequence": 26,
+        "method": "GET",
+        "path": "/tk/material-video/get?id=6373",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:16.384Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "id": 6373,
+          "tenantId": "[omitted]",
+          "companyId": "[omitted]",
+          "libraryId": 155,
+          "fileName": "[omitted]",
+          "fileUrl": "[omitted]",
+          "coverUrl": "[omitted]",
+          "duration": 2,
+          "size": 1227278,
+          "resolution": "[omitted]",
+          "format": "[omitted]",
+          "tags": "[omitted]",
+          "usagePhase": "PRODUCT_SHOW",
+          "segmentType": "GENERAL",
+          "status": "AVAILABLE",
+          "failReason": null,
+          "createTime": "[omitted]"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:16.518Z"
+      },
+      {
+        "sequence": 27,
+        "method": "GET",
+        "path": "/tk/material-video/page?pageNo=1&pageSize=10&libraryId=155",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:16.518Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "total": 2,
+          "list": [
+            {
+              "id": 6373,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 155,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 2,
+              "size": 1227278,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "PRODUCT_SHOW",
+              "segmentType": "GENERAL",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            },
+            {
+              "id": 6372,
+              "tenantId": "[omitted]",
+              "companyId": "[omitted]",
+              "libraryId": 155,
+              "fileName": "[omitted]",
+              "fileUrl": "[omitted]",
+              "coverUrl": "[omitted]",
+              "duration": 2,
+              "size": 1227278,
+              "resolution": "[omitted]",
+              "format": "[omitted]",
+              "tags": "[omitted]",
+              "usagePhase": "ATTENTION",
+              "segmentType": "S1_HOOK",
+              "status": "AVAILABLE",
+              "failReason": null,
+              "createTime": "[omitted]"
+            }
+          ]
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:16.661Z"
+      },
+      {
+        "sequence": 28,
+        "method": "GET",
+        "path": "/tk/material-video/segment-summary?libraryId=155",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:16.661Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": [
+          {
+            "segmentType": "S1_HOOK",
+            "count": 1
+          },
+          {
+            "segmentType": "GENERAL",
+            "count": 1
+          }
+        ],
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:16.815Z"
+      },
+      {
+        "sequence": 29,
+        "method": "GET",
+        "path": "/tk/material-library/get?id=155",
+        "auth": "Bearer [omitted]",
+        "tenantHeader": true,
+        "request": null,
+        "startedAt": "2026-11-16T03:57:16.815Z",
+        "httpStatus": 200,
+        "code": 0,
+        "response": {
+          "id": 155,
+          "tenantId": "[omitted]",
+          "companyId": "[omitted]",
+          "name": "[omitted]",
+          "category": null,
+          "scene": null,
+          "materialPurpose": "ECOMMERCE",
+          "tags": null,
+          "description": "[omitted]",
+          "coverUrl": "[omitted]",
+          "previewVideoUrl": "[omitted]",
+          "videoCount": "[omitted]",
+          "totalSize": "[omitted]",
+          "defaulted": false,
+          "status": "[omitted]",
+          "createTime": "[omitted]"
+        },
+        "ok": true,
+        "finishedAt": "2026-11-16T03:57:16.965Z"
+      }
+    ],
+    "retention": "Primary library and videos are retained. Only the runner-owned disposable session is cancelled. No automatic cleanup or paid generation.",
+    "finishedAt": "2026-11-16T03:57:16.965Z",
+    "summary": {
+      "passed": 27,
+      "failed": 0
+    }
+  },
+  "deletion": {
+    "summary": {
+      "passed": 13,
+      "failed": 0
+    },
+    "checks": [
+      {
+        "name": "创建独立删除测试库",
+        "expectedCode": 0,
+        "passed": true,
+        "http": 200,
+        "code": 0,
+        "data": 156
+      },
+      {
+        "name": "删除本次创建的空库",
+        "expectedCode": 0,
+        "passed": true,
+        "http": 200,
+        "code": 0,
+        "data": true
+      },
+      {
+        "name": "确认删除测试库不可读",
+        "passed": true,
+        "http": 200,
+        "code": 1060000001,
+        "data": null
+      },
+      {
+        "name": "创建独立素材删除测试库",
+        "expectedCode": 0,
+        "passed": true,
+        "http": 200,
+        "code": 0,
+        "data": 157
+      },
+      {
+        "name": "上传独立删除测试素材 delete-fixture-1.mp4",
+        "passed": true,
+        "http": 200,
+        "code": 0,
+        "data": 6374
+      },
+      {
+        "name": "上传独立删除测试素材 delete-fixture-2.mp4",
+        "passed": true,
+        "http": 200,
+        "code": 0,
+        "data": 6375
+      },
+      {
+        "name": "上传独立删除测试素材 delete-fixture-3.mp4",
+        "passed": true,
+        "http": 200,
+        "code": 0,
+        "data": 6376
+      },
+      {
+        "name": "非空测试库拒绝删除",
+        "passed": true,
+        "http": 200,
+        "code": 1060000002,
+        "data": null
+      },
+      {
+        "name": "删除本次单条测试素材",
+        "expectedCode": 0,
+        "passed": true,
+        "http": 200,
+        "code": 0,
+        "data": true
+      },
+      {
+        "name": "单删后素材不可读",
+        "expectedCode": 1060000003,
+        "passed": true,
+        "http": 200,
+        "code": 1060000003,
+        "data": null,
+        "recheckedAt": "2026-11-16T04:05:47.838Z"
+      },
+      {
+        "name": "批量删除另外两条测试素材",
+        "expectedCode": 0,
+        "passed": true,
+        "http": 200,
+        "code": 0,
+        "data": true
+      },
+      {
+        "name": "批量删除后测试库素材为零",
+        "passed": true,
+        "http": 200,
+        "code": 0,
+        "total": 0
+      },
+      {
+        "name": "删除已清空的本次测试库",
+        "expectedCode": 0,
+        "passed": true,
+        "http": 200,
+        "code": 0,
+        "data": true
+      }
+    ]
+  },
+  "generation": {
+    "taskId": 2071,
+    "request": {
+      "libraryId": 155,
+      "title": "API素材新建上传出片验收_库155_1794801647272",
+      "scriptText": "雨天出门，给鞋子多一层保护。套好防雨鞋套，检查边缘是否贴合。遇到湿滑路面放慢脚步，出行更从容。",
+      "ttsProvider": "MINIMAX",
+      "voiceCode": "Chinese (Mandarin)_Gentle_Senior",
+      "bgmAssetId": 148,
+      "bgmVolume": 0.4,
+      "translationEnabled": false,
+      "targetRegion": "CN",
+      "durationMode": "FOLLOW_NARRATION",
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "subtitleEnabled": true,
+      "subtitleFontSize": "extra_large",
+      "subtitleStyle": "classic_white",
+      "subtitlePositionMode": "smart_safe",
+      "subtitleKeywordEnabled": true,
+      "subtitleKaraokeEnabled": true
+    },
+    "create": {
+      "code": 0,
+      "status": "PENDING"
+    },
+    "history": [
+      {
+        "at": "2026-11-16T04:01:31.544Z",
+        "taskId": 2071,
+        "status": "RENDERING",
+        "progress": 88,
+        "currentStep": "正在生成字幕",
+        "currentStepCode": "RENDER_SUBTITLE",
+        "completed": false,
+        "failed": false,
+        "failCode": null,
+        "failReason": null,
+        "subtitleKaraokeStatus": null,
+        "subtitleKaraokeReason": null,
+        "downloadUrl": null
+      },
+      {
+        "at": "2026-11-16T04:02:03.254Z",
+        "taskId": 2071,
+        "status": "SUCCESS",
+        "progress": 100,
+        "currentStep": "生成完成",
+        "currentStepCode": "SUCCESS",
+        "completed": true,
+        "failed": false,
+        "failCode": null,
+        "failReason": null,
+        "subtitleKaraokeStatus": "partial",
+        "subtitleKaraokeReason": "WORD_TIMING_UNRELIABLE: 3/4 segments use plain captions; ASR words were unavailable, mismatched, interpolated or invalid",
+        "downloadUrl": "[REDACTED]"
+      }
+    ],
+    "final": {
+      "taskId": 2071,
+      "status": "SUCCESS",
+      "progress": 100,
+      "currentStep": "生成完成",
+      "currentStepCode": "SUCCESS",
+      "completed": true,
+      "failed": false,
+      "failCode": null,
+      "failReason": null,
+      "subtitleKaraokeStatus": "partial",
+      "subtitleKaraokeReason": "WORD_TIMING_UNRELIABLE: 3/4 segments use plain captions; ASR words were unavailable, mismatched, interpolated or invalid",
+      "downloadUrl": "[REDACTED]"
+    },
+    "media": {
+      "sha256": "5b314763f714eb50af860c920ee517590bcf34695009a6c4f62a27d57543fc8c",
+      "bytes": 1289806,
+      "durationSeconds": 7.167,
+      "video": {
+        "codec": "h264",
+        "width": 1080,
+        "height": 1920,
+        "fps": 30
+      },
+      "audio": {
+        "codec": "aac",
+        "sampleRate": 44100,
+        "channels": 2,
+        "duration": 7.14
+      },
+      "fullDecode": "passed",
+      "browserPlayback": {
+        "ended": true,
+        "error": null
+      }
+    },
+    "credits": {
+      "before": {
+        "remaining": 103740,
+        "frozen": 10
+      },
+      "after": {
+        "remaining": 103739,
+        "frozen": 10
+      },
+      "observedRemainingDelta": -1,
+      "attribution": "Shared account observation; exclusive billing attribution not proven"
+    }
+  },
+  "localVerification": {
+    "documentation": {
+      "passed": 19,
+      "failed": 0
+    },
+    "smokeHarness": {
+      "passed": 9,
+      "failed": 0
+    }
+  },
+  "limitations": [
+    "Production local-chunk path not selected; local mock only",
+    "Cross-tenant or company isolation not exercised",
+    "Large-file stress and interrupted/resumed real uploads not exercised",
+    "Subjective narration accuracy, full-script coverage and audio mixing not assessed",
+    "3/4 karaoke segments degraded to plain captions"
+  ],
+  "reviewCorrections": [
+    "Material createTime schema and response examples corrected to Unix milliseconds; regression confirmed fail then pass"
+  ]
+}

@@ -3,14 +3,14 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档版本 | v2.1 |
-| 整理日期 | 2026-11-14 |
+| 整理日期 | 2026-11-16 |
 | 适用对象 | 需要通过 API 集成本平台的合作方 / 客户后端、本平台开发与运维 |
 | 依据 | 仓库当前源码（`yudao-module-tk` 控制器、VO、鉴权过滤器、错误码常量）与 `docs/` 既有交付文档 |
 | 交付物 | 本文（人读）、[`tk-platform-openapi.json`](tk-platform-openapi.json)（机读）、[`tk-platform-api.html`](tk-platform-api.html)（单页阅读版）、`build_html.py`（HTML 构建脚本） |
 
 > **重要声明**：本文描述的是**当前源码已实现**的接口契约，不代表这些接口已完成部署、联调或通过生产验收。调用前须由双方确认目标环境连通性、客户端配置与权限开通状态。凡标记「规划中」的章节均**尚未实现**，不可作为联调依据。
 
-自动出片接入从 [快速开始](quickstart.md) 进入；字段说明见 [自动出片 API](tk-automation-v1.md)，会话、错误和重试规则见 [调用规则](calling-rules.md)。TikTok 发布接入见 [TikTok 接入指南](tiktok-integration.md)。[Postman 集合](tk-automation.postman_collection.json) 和 [环境模板](tk-automation.postman_environment.json) 默认禁止收费创建。
+素材库管理、视频上传与解析见 [素材库指南](material-library.md)。自动出片接入从 [快速开始](quickstart.md) 进入；字段说明见 [自动出片 API](tk-automation-v1.md)，会话、错误和重试规则见 [调用规则](calling-rules.md)。TikTok 发布接入见 [TikTok 接入指南](tiktok-integration.md)。[Postman 集合](tk-automation.postman_collection.json) 和 [环境模板](tk-automation.postman_environment.json) 默认禁止收费创建。
 
 ---
 
@@ -28,7 +28,8 @@
 | 图片转文字（OCR） | `/tk/open/v1/ocr/**` | **免鉴权** | 已实现 |
 | 文案改写、对标视频下载、视频文案时间轴提取 | `/admin-api/tk/open/**` | **免鉴权**（个别子接口需后台权限） | 已实现 |
 | 完整口播自动出片、积分、素材库/音色/BGM 查询、进度、下载 | `/admin-api/tk/automation/v1/**` | **账号登录 Token + tenant-id + 菜单权限** | 已实现，7 个出片端点 |
-| 更多生成管理、素材编辑、参考分析 | `/admin-api/tk/generation/**` 等 | **后台登录 Token + 菜单权限** | 后台管理能力，非本版稳定出片接入契约 |
+| 素材库 CRUD、视频上传/查询/用途/分段/删除、上传会话 | `/admin-api/tk/material-library/**`、`/admin-api/tk/material-video/**`、`/admin-api/tk/upload/material-video/**` | **账号 Token + tenant-id + 菜单权限** | 已实现后台接口，接入契约见 [素材库指南](material-library.md) |
+| 更多生成管理、参考分析 | `/admin-api/tk/generation/**` 等 | **后台登录 Token + 菜单权限** | 后台管理能力，非本版稳定出片接入契约 |
 | TikTok Shop、Facebook / Instagram 发布、账号统计 | `/admin-api/tk/tiktok-shop/**`、`/admin-api/tk/social-*` | **后台登录 Token + 菜单权限** | 仅后台可用，**无对外开放接口** |
 
 ### 0.2 必须先明确的边界

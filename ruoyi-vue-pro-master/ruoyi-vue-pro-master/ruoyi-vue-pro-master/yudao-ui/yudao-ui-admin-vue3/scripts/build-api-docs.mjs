@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url'
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repo = path.resolve(web, '../../../../..')
 const source = path.join(repo, 'docs/api')
-const output = path.join(web, 'public/api-reference')
+const outputOption = process.argv.indexOf('--output-dir')
+if (outputOption >= 0 && !process.argv[outputOption + 1]) throw Error('--output-dir requires a directory')
+const output = outputOption >= 0 ? path.resolve(process.argv[outputOption + 1]) : path.join(web, 'public/api-reference')
 const check = process.argv.includes('--check')
 const guides = [
   {
@@ -13,6 +15,12 @@ const guides = [
     title: '快速开始',
     hint: '从准备账号到下载第一条成片',
     file: 'quickstart.md'
+  },
+  {
+    id: 'material-library',
+    title: '素材库管理与视频上传',
+    hint: '创建素材库、上传视频、等待可用，再交给自动出片',
+    file: 'material-library.md'
   },
   {
     id: 'calling-rules',
@@ -28,6 +36,8 @@ const guides = [
   }
 ]
 const downloads = [
+  { file: 'material-library.md', title: '素材库管理指南', detail: '库管理、单文件与 OSS / 本地分片上传' },
+  { file: 'examples/material-library-smoke.mjs', title: '素材库 Smoke 示例', detail: '显式执行测试写入、上传和可用状态验证' },
   {
     file: 'tk-automation-v1.md',
     title: '自动出片参数参考',
@@ -77,7 +87,7 @@ const spec = JSON.parse(files.get('tk-platform-openapi.json').toString())
 if (!spec.paths?.['/admin-api/tk/automation/v1/tasks']?.post)
   throw Error('自动出片契约缺失，拒绝生成不完整接入包')
 const catalog = {
-  version: '2026-11-14',
+  version: '2026-11-16',
   spec,
   guides: guides.map((item) => ({ ...item, content: files.get(item.file).toString() })),
   downloads

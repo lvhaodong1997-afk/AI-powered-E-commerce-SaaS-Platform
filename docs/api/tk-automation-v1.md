@@ -2,7 +2,7 @@
 
 入口为 `https://clipforgestudio.fnn.net.cn/admin-api/tk/automation/v1`。使用已有账号 Token，继承当前账号的租户/素材/任务访问权限。它与 TikTok HMAC Open API 是两套鉴权入口，不能混用凭证。字段以本页及 [OpenAPI 契约](tk-platform-openapi.json) 为准，目标环境和权限由管理员确认。
 
-首次接入先看 [快速开始](quickstart.md)，异常和重试看 [调用规则](calling-rules.md)。本页不包含千川上传、入计划接口。
+首次接入先看 [快速开始](quickstart.md)，异常和重试看 [调用规则](calling-rules.md)。需要新建库或上传视频时，先看 [素材库管理与视频上传](material-library.md)；等待视频 AVAILABLE，再使用返回的 libraryId 出片。本页不包含千川上传、入计划接口。
 
 ## 1. 登录及保持会话
 

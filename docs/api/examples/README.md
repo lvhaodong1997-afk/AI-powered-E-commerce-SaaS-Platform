@@ -115,3 +115,21 @@ node automation.mjs resume --state mango-01.json --output mango-01.mp4 --timeout
 python -m unittest discover -s docs/api/examples/tests -p "test_*.py"
 node --test docs/api/examples/tests/automation.test.mjs
 ```
+
+## 7. 素材库 smoke
+
+`material-library-smoke.mjs` 使用 Node.js 18+ 内置 fetch，无第三方依赖。先按 [素材库指南](../material-library.md) 获取账号 Token 及对应权限。它使用独立环境变量，不读取上文自动出片脚本的会话文件，也不自动登录或刷新 Token。
+
+```powershell
+$env:MATERIAL_API_BASE_URL = 'https://clipforgestudio.fnn.net.cn/admin-api'
+$env:MATERIAL_API_TOKEN = '你的访问Token'
+$env:MATERIAL_API_TENANT_ID = '你的租户ID'
+# 默认只读：查询分页并验证匿名请求被拒绝
+node material-library-smoke.mjs --output ./material-evidence
+# 确认允许创建测试资源后，另行执行一次写入测试
+node material-library-smoke.mjs --allow-write --file ./sample.mp4 --output ./material-evidence
+```
+
+写入测试创建并保留专用素材库和两条视频，覆盖普通 multipart、环境选择的 OSS/local 会话上传、解析到 AVAILABLE、用途/分段维护和统计。只取消本次创建且未上传的独立会话，不删除素材，不提交收费出片任务。失败 POST 不重试；查询到失败或超时后保留资源 ID，先检查证据再决定后续操作，不要直接重跑造成重复资源。证据只保存白名单字段，省略 Token、临时签名、下载地址及任意服务端消息。
+
+仅支持 `--allow-write`、`--file`、`--output`；默认只读，没有 `--help`。脚本不会强制切换生产存储，因此一次成功执行不代表 OSS/local 两种方式均完成真实验证。

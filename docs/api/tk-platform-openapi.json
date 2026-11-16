@@ -3,7 +3,7 @@
   "info": {
     "title": "TK 自动混剪 SaaS 开放 API",
     "version": "2.1.0",
-    "description": "ClipForge Studio API 契约。自动出片使用账号 Bearer Token + tenant-id，TikTok 授权/上传/发布使用 clientId + clientSecret 的 HMAC 签名，两套鉴权不可混用。出片创建为异步任务，不支持 Idempotency-Key 去重；HTTP 200 不保证业务成功，必须判断 code=0。支持能力以目标环境为准；尚未实现的 HMAC 出片扩展不在 paths 中。签名原文为 METHOD\nREQUEST_TARGET\nTIMESTAMP\nNONCE\nSHA256_HEX(BODY)，使用 LF 分隔且末尾不换行；最终 Base64(HMAC-SHA256(secret,canonical))；REQUEST_TARGET 包含 /admin-api 与原始查询串。 TikTok现支持PHOTO：私有原图上传/异步转JPEG/有序图文发布；VIDEO仍为默认，图片不支持远程URL quick-publish。",
+    "description": "ClipForge Studio API 契约。自动出片使用账号 Bearer Token + tenant-id，TikTok 授权/上传/发布使用 clientId + clientSecret 的 HMAC 签名，两套鉴权不可混用。出片创建为异步任务，不支持 Idempotency-Key 去重；HTTP 200 不保证业务成功，必须判断 code=0。支持能力以目标环境为准；尚未实现的 HMAC 出片扩展不在 paths 中。签名原文为 METHOD\nREQUEST_TARGET\nTIMESTAMP\nNONCE\nSHA256_HEX(BODY)，使用 LF 分隔且末尾不换行；最终 Base64(HMAC-SHA256(secret,canonical))；REQUEST_TARGET 包含 /admin-api 与原始查询串。 TikTok现支持PHOTO：私有原图上传/异步转JPEG/有序图文发布；VIDEO仍为默认，图片不支持远程URL quick-publish。 素材库管理、素材视频管理与素材上传同样使用账号 Bearer Token + tenant-id，并要求各接口列出的 tk:* 权限和 TK 公司/租户数据范围；素材解析成功状态为 AVAILABLE，不能套用其他业务的 READY。",
     "contact": {
       "name": "TK Team"
     }
@@ -46,6 +46,18 @@
     {
       "name": "自动出片",
       "description": "账号 Token + tenant-id，异步生成并获取成片"
+    },
+    {
+      "name": "素材库管理",
+      "description": "账号 Bearer Token + tenant-id；素材库增删改查和公司数据范围。"
+    },
+    {
+      "name": "素材视频管理",
+      "description": "素材单文件上传、异步解析、用途与分段管理、删除和分页查询。"
+    },
+    {
+      "name": "素材上传",
+      "description": "服务器配置选择 local 分片或 oss 表单直传；不是 TikTok 开放上传接口。"
     }
   ],
   "security": [
@@ -3208,6 +3220,2903 @@
           }
         ]
       }
+    },
+    "/admin-api/tk/material-library/create": {
+      "post": {
+        "tags": [
+          "素材库管理"
+        ],
+        "operationId": "createMaterialLibrary",
+        "summary": "创建素材库",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-library:create，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。返回新素材库 ID；tenantId 由账号范围确定，companyId 由可写范围解析；名称必填，其余字段见请求定义。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "integer",
+                              "format": "int64",
+                              "description": "素材库 ID。"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": 101
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000009,
+                      "msg": "当前用户未配置 TK 用户级别或所属公司",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterialLibrarySaveRequest"
+              },
+              "example": {
+                "name": "商品演示素材",
+                "materialPurpose": "ECOMMERCE",
+                "tags": "商品,演示"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/material-library/update": {
+      "put": {
+        "tags": [
+          "素材库管理"
+        ],
+        "operationId": "updateMaterialLibrary",
+        "summary": "更新素材库",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-library:update，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。传 id 与非空 name；保留原库所属公司，不支持通过 companyId 迁移。materialPurpose 省略会归一为 ECOMMERCE。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": true
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000001,
+                      "msg": "素材库不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterialLibrarySaveRequest"
+              },
+              "example": {
+                "id": 101,
+                "name": "商品演示素材（更新）",
+                "materialPurpose": "ECOMMERCE"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/material-library/delete": {
+      "delete": {
+        "tags": [
+          "素材库管理"
+        ],
+        "operationId": "deleteMaterialLibrary",
+        "summary": "删除空素材库",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-library:delete，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。只允许删除空库；任何未删除视频（包括 PARSING/FAILED）都会阻止删除，不会级联清空视频。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": true
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000001,
+                      "msg": "素材库不存在",
+                      "data": null
+                    }
+                  },
+                  "notEmpty": {
+                    "value": {
+                      "code": 1060000002,
+                      "msg": "素材库内已有视频，请先清空或迁移视频",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "资源 ID，需在当前账号可读/可写范围。",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "资源 ID。",
+              "example": 101
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/tk/material-library/get": {
+      "get": {
+        "tags": [
+          "素材库管理"
+        ],
+        "operationId": "getMaterialLibrary",
+        "summary": "查询素材库详情",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-library:query，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。不存在返回业务错误；返回实时素材总数/总字节数及首条素材封面与预览。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "$ref": "#/components/schemas/MaterialLibrary"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "id": 101,
+                        "tenantId": 1,
+                        "companyId": 10,
+                        "name": "商品演示素材",
+                        "category": "家居",
+                        "scene": "厨房",
+                        "materialPurpose": "ECOMMERCE",
+                        "tags": "商品,演示",
+                        "description": "用于商品自动出片",
+                        "coverUrl": "https://media.example.test/cover.jpg",
+                        "previewVideoUrl": "https://media.example.test/demo.mp4",
+                        "videoCount": 1,
+                        "totalSize": 1048576,
+                        "defaulted": false,
+                        "status": 0,
+                        "createTime": 1794794400000
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000001,
+                      "msg": "素材库不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "资源 ID，需在当前账号可读/可写范围。",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "资源 ID。",
+              "example": 101
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/tk/material-library/page": {
+      "get": {
+        "tags": [
+          "素材库管理"
+        ],
+        "operationId": "pageMaterialLibraries",
+        "summary": "分页查询素材库",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-library:query，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。按 ID 倒序，受数据范围限制。name 模糊匹配，category/materialPurpose/status 精确匹配；筛选值不做用途归一化。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "$ref": "#/components/schemas/MaterialLibraryPage"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "list": [
+                          {
+                            "id": 101,
+                            "tenantId": 1,
+                            "companyId": 10,
+                            "name": "商品演示素材",
+                            "category": "家居",
+                            "scene": "厨房",
+                            "materialPurpose": "ECOMMERCE",
+                            "tags": "商品,演示",
+                            "description": "用于商品自动出片",
+                            "coverUrl": "https://media.example.test/cover.jpg",
+                            "previewVideoUrl": "https://media.example.test/demo.mp4",
+                            "videoCount": 1,
+                            "totalSize": 1048576,
+                            "defaulted": false,
+                            "status": 0,
+                            "createTime": 1794794400000
+                          }
+                        ],
+                        "total": 1
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000001,
+                      "msg": "素材库不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "parameters": [
+          {
+            "name": "pageNo",
+            "in": "query",
+            "required": false,
+            "description": "页码，从 1 开始；可省略使用默认值。",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "description": "每页条数，1–200；不支持 -1。",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 10
+            }
+          },
+          {
+            "name": "companyId",
+            "in": "query",
+            "required": false,
+            "description": "平台管理员可按公司筛选；其他账号遵循自身范围。",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "公司 ID。"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "名称模糊筛选。",
+            "schema": {
+              "type": "string",
+              "description": "名称。"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "description": "分类精确筛选。",
+            "schema": {
+              "type": "string",
+              "description": "分类。"
+            }
+          },
+          {
+            "name": "materialPurpose",
+            "in": "query",
+            "required": false,
+            "description": "用途精确筛选，用规范大写值。",
+            "schema": {
+              "type": "string",
+              "description": "用途。",
+              "example": "ECOMMERCE"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "状态精确筛选。",
+            "schema": {
+              "type": "integer",
+              "example": 0
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/tk/material-video/upload": {
+      "post": {
+        "tags": [
+          "素材视频管理"
+        ],
+        "operationId": "uploadMaterialVideo",
+        "summary": "单文件上传素材视频",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:upload，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。multipart/form-data 上传，单文件固定上限 104857600 字节（100 MiB），且非空；仅 mp4/mov/webm，扩展名忽略大小写。至少 16 字节，mp4/mov 需包含 ftyp 和 moov 标记，webm 需 EBML 文件头；这些是基础容器检查，不保证实际解码成功。contentType 未做 MIME 白名单验证。接口读入整文件并经 FileApi 存储；大文件建议使用会话模式。成功返回素材 ID，初始 PARSING，异步解析后查询 /material-video/get 的 AVAILABLE 或 FAILED；不是 READY。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "integer",
+                              "format": "int64",
+                              "description": "素材视频 ID。"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": 201
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000001,
+                      "msg": "素材库不存在",
+                      "data": null
+                    }
+                  },
+                  "emptyFile": {
+                    "value": {
+                      "code": 1060000010,
+                      "msg": "上传文件不能为空",
+                      "data": null
+                    }
+                  },
+                  "tooLarge": {
+                    "value": {
+                      "code": 1060000011,
+                      "msg": "视频文件超过当前上传大小限制",
+                      "data": null
+                    }
+                  },
+                  "invalidExtension": {
+                    "value": {
+                      "code": 1060000012,
+                      "msg": "仅支持 mp4、mov、webm 视频",
+                      "data": null
+                    }
+                  },
+                  "invalidContainer": {
+                    "value": {
+                      "code": 1060000031,
+                      "msg": "视频文件不完整或无法识别，请重新导出或转码后再上传",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "libraryId",
+                  "file"
+                ],
+                "properties": {
+                  "libraryId": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "可写素材库 ID。",
+                    "example": 101
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "原始视频文件，非空，至多 104857600 字节。"
+                  },
+                  "tags": {
+                    "type": "string",
+                    "description": "标签字符串。",
+                    "example": "商品,演示"
+                  },
+                  "usagePhase": {
+                    "$ref": "#/components/schemas/MaterialUsagePhaseInput"
+                  },
+                  "segmentType": {
+                    "$ref": "#/components/schemas/MaterialSegmentTypeInput"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/material-video/usage-phase": {
+      "put": {
+        "tags": [
+          "素材视频管理"
+        ],
+        "operationId": "updateMaterialVideoUsagePhase",
+        "summary": "批量更新素材用途",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:upload，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。ids 非空且元素不可 null，usagePhase 不可为空串（全空白及未知值会归一为 GENERAL）；只更新用途，不改分段。逐条校验并更新，不承诺全批事务回滚，失败后应重新查询。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": true
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000003,
+                      "msg": "素材视频不存在",
+                      "data": null
+                    }
+                  },
+                  "missingVideo": {
+                    "value": {
+                      "code": 1060000003,
+                      "msg": "素材视频不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterialUsagePhaseUpdateRequest"
+              },
+              "example": {
+                "ids": [
+                  201
+                ],
+                "usagePhase": "PRODUCT_SHOW"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/material-video/segment-type": {
+      "put": {
+        "tags": [
+          "素材视频管理"
+        ],
+        "operationId": "updateMaterialVideoSegmentType",
+        "summary": "批量更新素材分段",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:upload，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。ids 非空且元素不可 null，segmentType 不可为空串；trim、忽略大小写，未知/全空白归一 GENERAL。更新分段会同步覆盖 usagePhase：S1_HOOK/S2_PAIN→ATTENTION，S5_PROOF→RESULT_EFFECT，其余（含 GENERAL）→PRODUCT_SHOW。逐条处理，不承诺批次整体回滚。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": true
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000003,
+                      "msg": "素材视频不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterialSegmentTypeUpdateRequest"
+              },
+              "example": {
+                "ids": [
+                  201
+                ],
+                "segmentType": "S4_DEMO"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/material-video/segment-type/update": {
+      "put": {
+        "tags": [
+          "素材视频管理"
+        ],
+        "operationId": "updateMaterialVideoSegmentTypeAlias",
+        "summary": "批量更新素材分段（兼容别名）",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:upload，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。与 PUT /admin-api/tk/material-video/segment-type 为同一个控制器方法，无语义差异。ids 非空且元素不可 null，segmentType 不可为空串；trim、忽略大小写，未知/全空白归一 GENERAL。更新分段会同步覆盖 usagePhase：S1_HOOK/S2_PAIN→ATTENTION，S5_PROOF→RESULT_EFFECT，其余（含 GENERAL）→PRODUCT_SHOW。逐条处理，不承诺批次整体回滚。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": true
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000003,
+                      "msg": "素材视频不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterialSegmentTypeUpdateRequest"
+              },
+              "example": {
+                "ids": [
+                  201
+                ],
+                "segmentType": "S4_DEMO"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/material-video/delete": {
+      "delete": {
+        "tags": [
+          "素材视频管理"
+        ],
+        "operationId": "deleteMaterialVideo",
+        "summary": "删除素材视频",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:delete，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。删除素材记录并尝试删除文件与封面，刷新所属库统计；OSS 清理异常被忽略，不保证物理对象一定删除。不存在的 ID 返回业务错误。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": true
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000003,
+                      "msg": "素材视频不存在",
+                      "data": null
+                    }
+                  },
+                  "missingVideo": {
+                    "value": {
+                      "code": 1060000003,
+                      "msg": "素材视频不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "资源 ID，需在当前账号可读/可写范围。",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "素材视频 ID。",
+              "example": 201
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/tk/material-video/delete-batch": {
+      "delete": {
+        "tags": [
+          "素材视频管理"
+        ],
+        "operationId": "batchDeleteMaterialVideos",
+        "summary": "批量删除素材视频",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:delete，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。DELETE 请求使用 JSON body {ids:[...]}，不使用查询数组。数组非空且元素不可 null；服务去重后先校验所有视频与可写范围，再清理文件、删除记录和刷新库统计。不承诺跨数据库与存储事务原子性。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": true
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000003,
+                      "msg": "素材视频不存在",
+                      "data": null
+                    }
+                  },
+                  "missingVideo": {
+                    "value": {
+                      "code": 1060000003,
+                      "msg": "素材视频不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterialVideoIdsRequest"
+              },
+              "example": {
+                "ids": [
+                  201,
+                  202
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/material-video/get": {
+      "get": {
+        "tags": [
+          "素材视频管理"
+        ],
+        "operationId": "getMaterialVideo",
+        "summary": "查询素材视频详情与解析状态",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:query，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。上传成功后用返回的素材 ID 查询。PARSING 为处理中，AVAILABLE 才可参与生成，FAILED 时读取 failReason；不会返回本业务不存在的 READY 状态。建议有限次数轮询并设置总超时，避免无间隔轮询。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "$ref": "#/components/schemas/MaterialVideo"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "id": 201,
+                        "tenantId": 1,
+                        "companyId": 10,
+                        "libraryId": 101,
+                        "fileName": "demo.mp4",
+                        "fileUrl": "https://media.example.test/demo.mp4",
+                        "coverUrl": "https://media.example.test/cover.jpg",
+                        "duration": 5,
+                        "size": 1048576,
+                        "resolution": "1080x1920",
+                        "format": "mp4",
+                        "tags": "商品,演示",
+                        "usagePhase": "PRODUCT_SHOW",
+                        "segmentType": "S4_DEMO",
+                        "status": "AVAILABLE",
+                        "failReason": null,
+                        "createTime": 1794794460000
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000003,
+                      "msg": "素材视频不存在",
+                      "data": null
+                    }
+                  },
+                  "missingVideo": {
+                    "value": {
+                      "code": 1060000003,
+                      "msg": "素材视频不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "资源 ID，需在当前账号可读/可写范围。",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "素材视频 ID。",
+              "example": 201
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/tk/material-video/page": {
+      "get": {
+        "tags": [
+          "素材视频管理"
+        ],
+        "operationId": "pageMaterialVideos",
+        "summary": "分页查询素材视频",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:query，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。libraryId 可选；提供时先校验素材库可读。按 ID 倒序，fileName 模糊匹配，status/usagePhase/segmentType 为原值精确匹配，不做输入归一化。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "$ref": "#/components/schemas/MaterialVideoPage"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "list": [
+                          {
+                            "id": 201,
+                            "tenantId": 1,
+                            "companyId": 10,
+                            "libraryId": 101,
+                            "fileName": "demo.mp4",
+                            "fileUrl": "https://media.example.test/demo.mp4",
+                            "coverUrl": "https://media.example.test/cover.jpg",
+                            "duration": 5,
+                            "size": 1048576,
+                            "resolution": "1080x1920",
+                            "format": "mp4",
+                            "tags": "商品,演示",
+                            "usagePhase": "PRODUCT_SHOW",
+                            "segmentType": "S4_DEMO",
+                            "status": "AVAILABLE",
+                            "failReason": null,
+                            "createTime": 1794794460000
+                          }
+                        ],
+                        "total": 1
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000001,
+                      "msg": "素材库不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "parameters": [
+          {
+            "name": "pageNo",
+            "in": "query",
+            "required": false,
+            "description": "页码，从 1 开始；可省略使用默认值。",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "description": "每页条数，1–200；不支持 -1。",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 10
+            }
+          },
+          {
+            "name": "companyId",
+            "in": "query",
+            "required": false,
+            "description": "平台管理员公司筛选；其余账号遵循数据范围。",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "公司 ID。"
+            }
+          },
+          {
+            "name": "libraryId",
+            "in": "query",
+            "required": false,
+            "description": "可选素材库筛选。",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "素材库 ID。",
+              "example": 101
+            }
+          },
+          {
+            "name": "fileName",
+            "in": "query",
+            "required": false,
+            "description": "文件名模糊筛选。",
+            "schema": {
+              "type": "string",
+              "description": "文件名。"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "精确筛选，使用 UPLOADING/PARSING/AVAILABLE/FAILED。",
+            "schema": {
+              "type": "string",
+              "description": "状态。",
+              "example": "AVAILABLE"
+            }
+          },
+          {
+            "name": "usagePhase",
+            "in": "query",
+            "required": false,
+            "description": "精确筛选，使用规范大写值。",
+            "schema": {
+              "type": "string",
+              "description": "用途。",
+              "example": "PRODUCT_SHOW"
+            }
+          },
+          {
+            "name": "segmentType",
+            "in": "query",
+            "required": false,
+            "description": "精确筛选，使用规范大写值。",
+            "schema": {
+              "type": "string",
+              "description": "分段。",
+              "example": "S4_DEMO"
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/tk/material-video/segment-summary": {
+      "get": {
+        "tags": [
+          "素材视频管理"
+        ],
+        "operationId": "getMaterialVideoSegmentSummary",
+        "summary": "查询可用素材分段统计",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:query，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。只统计指定素材库中 AVAILABLE 视频，按归一后的 segmentType 分组；只返回实际存在的分组，没有素材时返回 []；数组顺序不保证，不补零分组。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/MaterialSegmentSummary"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": [
+                        {
+                          "segmentType": "S4_DEMO",
+                          "count": 1
+                        }
+                      ]
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000001,
+                      "msg": "素材库不存在",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "parameters": [
+          {
+            "name": "libraryId",
+            "in": "query",
+            "required": true,
+            "description": "需要可读的素材库 ID。",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "素材库 ID。",
+              "example": 101
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/tk/upload/material-video/session/create": {
+      "post": {
+        "tags": [
+          "素材上传"
+        ],
+        "operationId": "createMaterialVideoUploadSession",
+        "summary": "创建素材上传会话",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:upload，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。服务端 storage-type=oss 且 oss.enabled=true 时返回 uploadMode=oss，否则 local；客户端不能通过请求指定模式。模式值小写。仅 mp4/mov/webm，文件 >0，上限来自配置（无效时回退 104857600 字节）。local 的 chunkSize 也来自配置（无效时回退 8388608 字节）。只创建会话，不创建素材记录；不要在同一上传过程中切换服务端存储模式。注意配置类默认上限为 1000000000 字节、分片 1048576 字节，前述 100 MiB/8 MiB 是 null 或非正配置的服务回退值；以部署配置及返回的 chunkSize 为准。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "$ref": "#/components/schemas/MaterialUploadSession"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "uploadId": "0123456789abcdef0123456789abcdef",
+                        "uploadMode": "local",
+                        "chunkSize": 8388608,
+                        "totalChunks": 1,
+                        "uploadedSize": 0,
+                        "uploadedChunks": []
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000001,
+                      "msg": "素材库不存在",
+                      "data": null
+                    }
+                  },
+                  "emptyFile": {
+                    "value": {
+                      "code": 1060000010,
+                      "msg": "上传文件不能为空",
+                      "data": null
+                    }
+                  },
+                  "tooLarge": {
+                    "value": {
+                      "code": 1060000011,
+                      "msg": "视频文件超过当前上传大小限制",
+                      "data": null
+                    }
+                  },
+                  "invalidExtension": {
+                    "value": {
+                      "code": 1060000012,
+                      "msg": "仅支持 mp4、mov、webm 视频",
+                      "data": null
+                    }
+                  },
+                  "invalidContainer": {
+                    "value": {
+                      "code": 1060000031,
+                      "msg": "视频文件不完整或无法识别，请重新导出或转码后再上传",
+                      "data": null
+                    }
+                  },
+                  "ossSuccess": {
+                    "summary": "示意：oss 模式返回，用实际临时签名值替换占位符",
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "uploadId": "0123456789abcdef0123456789abcdef",
+                        "uploadMode": "oss",
+                        "uploadedSize": 0,
+                        "uploadedChunks": [],
+                        "uploadUrl": "https://example-bucket.oss.example.test",
+                        "publicUrl": "https://media.example.test/tk/1/10/material-libraries/101/material-videos/20261116/0123456789abcdef0123456789abcdef.mp4",
+                        "objectKey": "tk/1/10/material-libraries/101/material-videos/20261116/0123456789abcdef0123456789abcdef.mp4",
+                        "accessKeyId": "REPLACE_WITH_SESSION_ACCESS_KEY_ID",
+                        "policy": "REPLACE_WITH_SESSION_POLICY",
+                        "signature": "REPLACE_WITH_SESSION_SIGNATURE",
+                        "successActionStatus": "200",
+                        "expiration": "2026-11-16T02:15:00Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterialUploadCreateRequest"
+              },
+              "example": {
+                "libraryId": 101,
+                "fileName": "demo.mp4",
+                "fileSize": 1048576,
+                "contentType": "video/mp4"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/upload/material-video/session/{uploadId}": {
+      "get": {
+        "tags": [
+          "素材上传"
+        ],
+        "operationId": "getMaterialVideoUploadSession",
+        "summary": "查询进行中的素材上传会话",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:upload，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。只允许未过期且 UPLOADING 的可访问会话。local 从 manifest/分片文件返回进度；oss 只返回数据库会话信息，uploadedSize=0、uploadedChunks=[]，不反映对象真实上传进度。完成/取消/过期后查询返回失效错误，不是可靠的终态轮询接口；解析状态用素材详情查询。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "$ref": "#/components/schemas/MaterialUploadSessionStatus"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": {
+                        "uploadId": "0123456789abcdef0123456789abcdef",
+                        "chunkSize": 8388608,
+                        "totalChunks": 1,
+                        "fileSize": 1048576,
+                        "uploadedSize": 0,
+                        "uploadedChunks": [],
+                        "status": "UPLOADING"
+                      }
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000049,
+                      "msg": "上传会话已失效，请重新选择文件上传",
+                      "data": null
+                    }
+                  },
+                  "invalidSession": {
+                    "value": {
+                      "code": 1060000049,
+                      "msg": "上传会话已失效，请重新选择文件上传",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "parameters": [
+          {
+            "name": "uploadId",
+            "in": "path",
+            "required": true,
+            "description": "创建接口返回的会话 ID 原值。",
+            "schema": {
+              "type": "string",
+              "example": "0123456789abcdef0123456789abcdef"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "素材上传"
+        ],
+        "operationId": "cancelMaterialVideoUpload",
+        "summary": "取消素材上传会话",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:upload，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。未过期且 UPLOADING 时标记 CANCELLED；local 清理临时分片。对不存在或已失效的会话通常直接返回 true；数据范围拒绝仍会报错。不是回滚已创建素材的接口。当前素材 oss 模式取消不会删除已直传对象，不保证清理 OSS 残留。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": true
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000005,
+                      "msg": "无权访问其他租户的数据",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "parameters": [
+          {
+            "name": "uploadId",
+            "in": "path",
+            "required": true,
+            "description": "创建接口返回的会话 ID 原值。",
+            "schema": {
+              "type": "string",
+              "example": "0123456789abcdef0123456789abcdef"
+            }
+          }
+        ]
+      }
+    },
+    "/admin-api/tk/upload/material-video/chunk": {
+      "post": {
+        "tags": [
+          "素材上传"
+        ],
+        "operationId": "uploadMaterialVideoChunk",
+        "summary": "上传 local 素材分片",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:upload，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。只适用于 uploadMode=local，oss 应使用返回的 OSS 表单直传。chunkIndex 从 0 到 totalChunks-1，chunk 非空；同编号重传会覆盖。当前分片接口没有按 chunkSize 单独强制校验每片长度，也没有在此处累加限制总字节数；完成时验证所有分片齐全且合并总大小等于会话 fileSize。需要会话仍为未过期 UPLOADING。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": true
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000049,
+                      "msg": "上传会话已失效，请重新选择文件上传",
+                      "data": null
+                    }
+                  },
+                  "invalidSession": {
+                    "value": {
+                      "code": 1060000049,
+                      "msg": "上传会话已失效，请重新选择文件上传",
+                      "data": null
+                    }
+                  },
+                  "emptyChunk": {
+                    "value": {
+                      "code": 1060000010,
+                      "msg": "上传文件不能为空",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "uploadId",
+                  "chunkIndex",
+                  "chunk"
+                ],
+                "properties": {
+                  "uploadId": {
+                    "type": "string",
+                    "description": "会话 ID。",
+                    "example": "0123456789abcdef0123456789abcdef"
+                  },
+                  "chunkIndex": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "零起始编号，必须小于会话 totalChunks。",
+                    "example": 0
+                  },
+                  "chunk": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "当前分片原始字节，非空。"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/upload/material-video/session/complete": {
+      "post": {
+        "tags": [
+          "素材上传"
+        ],
+        "operationId": "completeMaterialVideoUpload",
+        "summary": "完成上传并创建待解析素材",
+        "description": "需要账号 Bearer Token + tenant-id，权限 tk:material-video:upload，同时受 TK 数据范围约束（当前库/视频校验主要按租户，companyId 不是独立隔离保证）。local：仅使用 uploadId/tags/usagePhase/segmentType，从 manifest 读取库及文件信息，校验片数、合并总大小和基础容器标记（webm EBML，mp4/mov ftyp+moov）。oss：必须提交 uploadId、libraryId、fileName、fileSize、objectKey；匹配会话库与总大小，校验对象路径，向 OSS HEAD 校验对象存在且 Content-Length 等于声明大小；此处不检查视频容器内容，交给异步解析。成功返回素材 ID，记录为 PARSING 并提交异步解析，后续查询素材 AVAILABLE/FAILED。完成没有幂等重放保证：首次成功会将会话标记 COMPLETED（local 同时清理临时目录），再次完成通常会因会话失效失败；遇到超时先核对素材列表，不要盲目重试创建。",
+        "security": [
+          {
+            "AdminBearer": [],
+            "TenantId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CommonResult：必须先判断 code=0；HTTP 200 也可能包含参数、权限或业务错误。data 是本次接口结果，不代表异步解析已成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialApiSuccess"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "data"
+                          ],
+                          "properties": {
+                            "data": {
+                              "type": "integer",
+                              "format": "int64",
+                              "description": "新素材视频 ID。"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaterialApiError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 0,
+                      "msg": "",
+                      "data": 201
+                    }
+                  },
+                  "businessError": {
+                    "value": {
+                      "code": 1060000049,
+                      "msg": "上传会话已失效，请重新选择文件上传",
+                      "data": null
+                    }
+                  },
+                  "invalidSession": {
+                    "value": {
+                      "code": 1060000049,
+                      "msg": "上传会话已失效，请重新选择文件上传",
+                      "data": null
+                    }
+                  },
+                  "invalidContainer": {
+                    "value": {
+                      "code": 1060000031,
+                      "msg": "视频文件不完整或无法识别，请重新导出或转码后再上传",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数绑定、JSON 或 Bean Validation 错误；部分环境以 HTTP 200 + 非零 code 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 400,
+                  "msg": "请求参数不正确",
+                  "data": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "账号未登录/Token 失效；可能以 HTTP 200 + code=401 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 401,
+                  "msg": "账号未登录",
+                  "data": null
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无本接口权限或不在租户/公司数据范围；可能以 HTTP 200 + code=403 返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialApiError"
+                },
+                "example": {
+                  "code": 403,
+                  "msg": "没有该操作权限",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "文件系统、存储配置、OSS HEAD、缺片或合并等处理失败；可能由统一异常处理封装为 HTTP 200 + 非零 code。勿将此状态解释为操作一定未产生副作用。"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterialUploadCompleteRequest"
+              },
+              "examples": {
+                "local": {
+                  "summary": "local：仅会话 ID 与可选元数据",
+                  "value": {
+                    "uploadId": "0123456789abcdef0123456789abcdef",
+                    "tags": "商品,演示",
+                    "usagePhase": "PRODUCT_SHOW",
+                    "segmentType": "S4_DEMO"
+                  }
+                },
+                "oss": {
+                  "summary": "oss：直传成功后提交对象和会话信息",
+                  "value": {
+                    "uploadId": "0123456789abcdef0123456789abcdef",
+                    "libraryId": 101,
+                    "fileName": "demo.mp4",
+                    "fileSize": 1048576,
+                    "objectKey": "tk/1/10/material-libraries/101/material-videos/20261116/0123456789abcdef0123456789abcdef.mp4",
+                    "tags": "商品,演示",
+                    "usagePhase": "PRODUCT_SHOW",
+                    "segmentType": "S4_DEMO"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4928,6 +7837,703 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 35
+          }
+        }
+      },
+      "MaterialUsagePhaseInput": {
+        "type": "string",
+        "description": "素材用途：ATTENTION、PRODUCT_SHOW、RESULT_EFFECT、GENERAL。写入时去除首尾空白并忽略大小写，空白或未知值归一为 GENERAL；不是严格枚举校验。分页筛选为原值精确匹配，请使用大写规范值。",
+        "example": "PRODUCT_SHOW"
+      },
+      "MaterialSegmentTypeInput": {
+        "type": "string",
+        "description": "素材分段：S1_HOOK、S2_PAIN、S3_REVEAL、S4_DEMO、S5_PROOF、S6_DETAIL、S7_LIFESTYLE、GENERAL。写入时 trim 并忽略大小写，空白或未知值归一为 GENERAL；分页筛选使用大写规范值。",
+        "example": "S4_DEMO"
+      },
+      "MaterialLibrarySaveRequest": {
+        "type": "object",
+        "description": "创建与更新共用 VO；更新应传 id 和 name。未承诺 PUT 全量替换或可用 null 清空字段。",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "更新时传已有素材库 ID；创建时省略。VO 未对 id 添加非空校验，更新实际需要定位可写的库。",
+            "example": 101
+          },
+          "companyId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "平台管理员创建时可传公司 ID，省略时回退当前 tenantId；非平台管理员当前忽略请求值并使用 tenantId。更新时保留原库所属公司，此字段不能用于迁移。当前 TK 读写校验主要按租户，companyId 本身不是独立隔离保证。",
+            "example": 10
+          },
+          "name": {
+            "type": "string",
+            "description": "素材库名称，@NotBlank：不能为 null、空串或全空白。没有 VO 层最大长度校验。",
+            "minLength": 1,
+            "pattern": "\\S",
+            "example": "商品演示素材"
+          },
+          "category": {
+            "type": "string",
+            "description": "分类，自定义字符串。",
+            "example": "家居"
+          },
+          "scene": {
+            "type": "string",
+            "description": "场景，自定义字符串。",
+            "example": "厨房"
+          },
+          "materialPurpose": {
+            "type": "string",
+            "description": "素材库用途：ECOMMERCE、LEAD_GENERATION；去除首尾空白并转大写，只保留 LEAD_GENERATION，其他值（含空值）归一为 ECOMMERCE。更新省略也会归一为 ECOMMERCE。",
+            "example": "ECOMMERCE"
+          },
+          "tags": {
+            "type": "string",
+            "description": "素材库标签字符串；不是 JSON 数组，后端按字符串保存。",
+            "example": "商品,演示"
+          },
+          "description": {
+            "type": "string",
+            "description": "素材库说明。",
+            "example": "用于商品自动出片"
+          },
+          "coverUrl": {
+            "type": "string",
+            "description": "素材库封面地址；读取时优先使用首条素材的视频封面。",
+            "example": "https://media.example.test/cover.jpg"
+          },
+          "defaulted": {
+            "type": "boolean",
+            "description": "默认库标记；创建时省略为 false，不保证同公司只存在一个默认库。",
+            "example": false
+          },
+          "status": {
+            "type": "integer",
+            "description": "状态：约定 0 启用、1 停用；创建省略默认为 0，当前保存 VO 不限制为该枚举。",
+            "example": 0
+          }
+        }
+      },
+      "MaterialLibrary": {
+        "type": "object",
+        "description": "读取时重新统计 videoCount/totalSize；封面和预览从首条素材填充。",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "更新时传已有素材库 ID；创建时省略。VO 未对 id 添加非空校验，更新实际需要定位可写的库。",
+            "example": 101
+          },
+          "companyId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "平台管理员创建时可传公司 ID，省略时回退当前 tenantId；非平台管理员当前忽略请求值并使用 tenantId。更新时保留原库所属公司，此字段不能用于迁移。当前 TK 读写校验主要按租户，companyId 本身不是独立隔离保证。",
+            "example": 10
+          },
+          "name": {
+            "type": "string",
+            "description": "素材库名称，@NotBlank：不能为 null、空串或全空白。没有 VO 层最大长度校验。",
+            "minLength": 1,
+            "pattern": "\\S",
+            "example": "商品演示素材"
+          },
+          "category": {
+            "type": "string",
+            "description": "分类，自定义字符串。",
+            "example": "家居"
+          },
+          "scene": {
+            "type": "string",
+            "description": "场景，自定义字符串。",
+            "example": "厨房"
+          },
+          "materialPurpose": {
+            "type": "string",
+            "description": "素材库用途：ECOMMERCE、LEAD_GENERATION；去除首尾空白并转大写，只保留 LEAD_GENERATION，其他值（含空值）归一为 ECOMMERCE。更新省略也会归一为 ECOMMERCE。",
+            "example": "ECOMMERCE"
+          },
+          "tags": {
+            "type": "string",
+            "description": "素材库标签字符串；不是 JSON 数组，后端按字符串保存。",
+            "example": "商品,演示"
+          },
+          "description": {
+            "type": "string",
+            "description": "素材库说明。",
+            "example": "用于商品自动出片"
+          },
+          "coverUrl": {
+            "type": "string",
+            "description": "素材库封面地址；读取时优先使用首条素材的视频封面。",
+            "example": "https://media.example.test/cover.jpg"
+          },
+          "defaulted": {
+            "type": "boolean",
+            "description": "默认库标记；创建时省略为 false，不保证同公司只存在一个默认库。",
+            "example": false
+          },
+          "status": {
+            "type": "integer",
+            "description": "状态：约定 0 启用、1 停用；创建省略默认为 0，当前保存 VO 不限制为该枚举。",
+            "example": 0
+          },
+          "tenantId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "所属租户 ID，由服务端数据范围决定。",
+            "example": 1
+          },
+          "previewVideoUrl": {
+            "type": "string",
+            "description": "按素材 ID 升序取首条素材的 fileUrl，不限 AVAILABLE；无素材时可能为空。",
+            "nullable": true
+          },
+          "videoCount": {
+            "type": "integer",
+            "description": "未删除素材总数，包括解析中与失败素材。",
+            "example": 1
+          },
+          "totalSize": {
+            "type": "integer",
+            "format": "int64",
+            "description": "未删除素材总大小，字节。",
+            "example": 1048576
+          },
+          "createTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "创建时间，Unix 毫秒时间戳。",
+            "example": 1794794400000
+          }
+        }
+      },
+      "MaterialVideo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "素材视频 ID。",
+            "example": 201
+          },
+          "tenantId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "所属租户 ID。",
+            "example": 1
+          },
+          "companyId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "所属公司 ID，继承素材库。",
+            "example": 10
+          },
+          "libraryId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "所属素材库 ID。",
+            "example": 101
+          },
+          "fileName": {
+            "type": "string",
+            "description": "原始文件名。",
+            "example": "demo.mp4"
+          },
+          "fileUrl": {
+            "type": "string",
+            "description": "视频读取 URL；OSS 可能返回有有效期的签名 URL。",
+            "example": "https://media.example.test/demo.mp4"
+          },
+          "coverUrl": {
+            "type": "string",
+            "description": "解析生成的封面 URL；解析结束前可能为空。",
+            "nullable": true
+          },
+          "duration": {
+            "type": "integer",
+            "format": "int64",
+            "description": "视频时长，单位秒；解析结束前可能为空。",
+            "nullable": true,
+            "example": 5
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "文件大小，单位字节。",
+            "example": 1048576
+          },
+          "resolution": {
+            "type": "string",
+            "description": "解析得到的宽x高。",
+            "nullable": true,
+            "example": "1080x1920"
+          },
+          "format": {
+            "type": "string",
+            "description": "小写扩展名。",
+            "example": "mp4"
+          },
+          "tags": {
+            "type": "string",
+            "description": "标签字符串，不是数组。",
+            "nullable": true,
+            "example": "商品,演示"
+          },
+          "usagePhase": {
+            "$ref": "#/components/schemas/MaterialUsagePhaseInput"
+          },
+          "segmentType": {
+            "$ref": "#/components/schemas/MaterialSegmentTypeInput"
+          },
+          "status": {
+            "type": "string",
+            "description": "素材状态：上传/完成接口成功只代表创建素材记录并提交异步解析，通常先为 PARSING；解析成功为 AVAILABLE，失败为 FAILED，失败原因见 failReason。AVAILABLE 才可参与生成；不能使用 READY。UPLOADING 为已定义状态，当前这三种上传实现插入记录时直接使用 PARSING。",
+            "enum": [
+              "UPLOADING",
+              "PARSING",
+              "AVAILABLE",
+              "FAILED"
+            ],
+            "example": "AVAILABLE"
+          },
+          "failReason": {
+            "type": "string",
+            "description": "解析失败原因；成功或尚未失败时可能为 null。",
+            "nullable": true
+          },
+          "createTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "创建时间，Unix 毫秒时间戳。",
+            "example": 1794794460000
+          }
+        }
+      },
+      "MaterialVideoIdsRequest": {
+        "type": "object",
+        "description": "不能为空数组；没有 VO 层批次数量上限。批量删除服务会去重；批量更新按提交顺序执行，不承诺整体事务回滚。",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "description": "素材视频 ID，不允许 null。"
+            },
+            "minItems": 1,
+            "example": [
+              201,
+              202
+            ]
+          }
+        }
+      },
+      "MaterialUsagePhaseUpdateRequest": {
+        "type": "object",
+        "required": [
+          "ids",
+          "usagePhase"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "description": "素材视频 ID，不允许 null。"
+            },
+            "minItems": 1,
+            "example": [
+              201,
+              202
+            ]
+          },
+          "usagePhase": {
+            "type": "string",
+            "description": "素材用途：ATTENTION、PRODUCT_SHOW、RESULT_EFFECT、GENERAL。写入时去除首尾空白并忽略大小写，空白或未知值归一为 GENERAL；不是严格枚举校验。分页筛选为原值精确匹配，请使用大写规范值。",
+            "example": "PRODUCT_SHOW",
+            "minLength": 1
+          }
+        }
+      },
+      "MaterialSegmentTypeUpdateRequest": {
+        "type": "object",
+        "required": [
+          "ids",
+          "segmentType"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "description": "素材视频 ID，不允许 null。"
+            },
+            "minItems": 1,
+            "example": [
+              201,
+              202
+            ]
+          },
+          "segmentType": {
+            "type": "string",
+            "description": "素材分段：S1_HOOK、S2_PAIN、S3_REVEAL、S4_DEMO、S5_PROOF、S6_DETAIL、S7_LIFESTYLE、GENERAL。写入时 trim 并忽略大小写，空白或未知值归一为 GENERAL；分页筛选使用大写规范值。",
+            "example": "S4_DEMO",
+            "minLength": 1
+          }
+        }
+      },
+      "MaterialSegmentSummary": {
+        "type": "object",
+        "properties": {
+          "segmentType": {
+            "$ref": "#/components/schemas/MaterialSegmentTypeInput"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "该分段下 AVAILABLE 素材数量。",
+            "example": 3
+          }
+        }
+      },
+      "MaterialUploadCreateRequest": {
+        "type": "object",
+        "required": [
+          "libraryId",
+          "fileName",
+          "fileSize"
+        ],
+        "properties": {
+          "libraryId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "已有且可写的素材库 ID。",
+            "example": 101
+          },
+          "fileName": {
+            "type": "string",
+            "description": "带扩展名的非空文件名，仅 mp4、mov、webm；扩展名忽略大小写。",
+            "minLength": 1,
+            "pattern": "\\S",
+            "example": "demo.mp4"
+          },
+          "fileSize": {
+            "type": "integer",
+            "format": "int64",
+            "description": "文件总大小，字节，必须 >0。会话上传上限来自 tk.generation.upload.max-file-size-bytes；配置类默认 1000000000（十进制 1 GB），null/非正时服务回退 104857600（100 MiB）。运行环境可覆盖，不要假定所有环境固定为某值。",
+            "minimum": 1,
+            "example": 1048576
+          },
+          "contentType": {
+            "type": "string",
+            "description": "可选 MIME 字符串；为空时根据扩展名补 video/{ext}，当前服务没有严格 MIME 白名单验证。",
+            "example": "video/mp4"
+          }
+        }
+      },
+      "MaterialUploadCompleteRequest": {
+        "type": "object",
+        "description": "VO 只对 uploadId 做 @NotBlank；其余字段按环境选择的上传模式处理。oss 完成需 libraryId、fileName、fileSize、objectKey，省略会失败（部分缺值路径不是友好的 Bean Validation 错误）。local 只需 uploadId 和可选标签/用途/分段。",
+        "required": [
+          "uploadId"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "description": "创建返回的会话 ID，非空。",
+            "minLength": 1,
+            "pattern": "\\S",
+            "example": "0123456789abcdef0123456789abcdef"
+          },
+          "libraryId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "oss 模式必须提供，与创建会话一致；local 模式从 manifest 读取并忽略请求值。",
+            "example": 101
+          },
+          "fileName": {
+            "type": "string",
+            "description": "oss 模式必须提供带受支持扩展名的文件名；建议复用创建值，当前没有与会话原始文件名做全等校验。local 忽略。",
+            "example": "demo.mp4"
+          },
+          "fileSize": {
+            "type": "integer",
+            "format": "int64",
+            "description": "oss 模式必须提供，与会话 fileSize 及对象 HEAD 大小一致；local 忽略。",
+            "example": 1048576
+          },
+          "contentType": {
+            "type": "string",
+            "description": "当前完成实现未使用该字段，可省略。",
+            "example": "video/mp4"
+          },
+          "objectKey": {
+            "type": "string",
+            "description": "oss 模式必须提供创建返回的 objectKey；要求匹配租户、公司、素材库路径（兼容旧公司级路径）与 uploadId 文件名前缀，禁止 ..、反斜杠、前导 /。local 忽略。",
+            "example": "tk/1/10/material-libraries/101/material-videos/20261116/0123456789abcdef0123456789abcdef.mp4"
+          },
+          "fileUrl": {
+            "type": "string",
+            "description": "当前完成实现未使用；oss 从配置和 objectKey 重新构造读取 URL，不能用该值导入任意远程视频。"
+          },
+          "tags": {
+            "type": "string",
+            "description": "标签字符串。",
+            "example": "商品,演示"
+          },
+          "usagePhase": {
+            "$ref": "#/components/schemas/MaterialUsagePhaseInput"
+          },
+          "segmentType": {
+            "$ref": "#/components/schemas/MaterialSegmentTypeInput"
+          }
+        },
+        "x-upload-mode-requirements": {
+          "local": [
+            "uploadId"
+          ],
+          "oss": [
+            "uploadId",
+            "libraryId",
+            "fileName",
+            "fileSize",
+            "objectKey"
+          ]
+        }
+      },
+      "MaterialUploadSession": {
+        "type": "object",
+        "description": "local：按 chunkSize 切片并调用 chunk，重传同编号覆盖旧分片。oss：向 uploadUrl 发送 multipart/form-data，字段 key=objectKey、OSSAccessKeyId=accessKeyId、policy、signature、success_action_status=successActionStatus、file=原始视频（file 放最后），直接上传到 OSS 后再调用业务 complete。OSS 请求不携带账号 Authorization 或 tenant-id，OSS 的 HTTP 成功响应也不是 CommonResult。不调用业务 chunk，不把这个接口混同 TikTok 的 LOCAL/OSS 上传。",
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "description": "上传会话 ID；后续使用原值。",
+            "example": "0123456789abcdef0123456789abcdef"
+          },
+          "uploadMode": {
+            "type": "string",
+            "description": "模式由服务端配置决定，必须使用返回的小写值分支处理。",
+            "enum": [
+              "local",
+              "oss"
+            ],
+            "example": "local"
+          },
+          "chunkSize": {
+            "type": "integer",
+            "description": "local 分片大小，字节；配置类默认 1048576（1 MiB），配置为 null/非正时服务回退 8388608（8 MiB），实际使用本字段返回值；oss 不返回有效分片参数。",
+            "nullable": true,
+            "example": 8388608
+          },
+          "totalChunks": {
+            "type": "integer",
+            "description": "local 总分片数 ceil(fileSize/chunkSize)；oss 为空。",
+            "nullable": true,
+            "example": 1
+          },
+          "uploadedSize": {
+            "type": "integer",
+            "format": "int64",
+            "description": "local 为实际已落盘分片字节和；oss 创建和查询固定为 0，不能用于判断 OSS 上传完成。",
+            "example": 0
+          },
+          "uploadedChunks": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "uniqueItems": true,
+            "description": "local 已收到分片编号集合，零起始；oss 为空数组。",
+            "example": []
+          },
+          "uploadUrl": {
+            "type": "string",
+            "description": "oss 模式的 OSS 表单 POST URL；不是业务 API。",
+            "nullable": true,
+            "example": "https://example-bucket.oss.example.test"
+          },
+          "publicUrl": {
+            "type": "string",
+            "description": "oss 对象读取 URL，可能含有效期签名；不能作为完成凭据，HEAD 检查以 objectKey 为准。",
+            "nullable": true
+          },
+          "objectKey": {
+            "type": "string",
+            "description": "oss 表单 key 与完成请求 objectKey 使用此原值。",
+            "nullable": true
+          },
+          "accessKeyId": {
+            "type": "string",
+            "description": "OSS 表单 OSSAccessKeyId 字段值；不是 accessKeySecret。请勿记录完整临时上传凭据。",
+            "nullable": true
+          },
+          "policy": {
+            "type": "string",
+            "description": "OSS 表单 policy 字段值（Base64 签名策略）。",
+            "nullable": true
+          },
+          "signature": {
+            "type": "string",
+            "description": "OSS 表单 signature 字段值。",
+            "nullable": true
+          },
+          "successActionStatus": {
+            "type": "string",
+            "description": "OSS 表单 success_action_status 字段值。",
+            "nullable": true,
+            "example": "200"
+          },
+          "expiration": {
+            "type": "string",
+            "description": "OSS 签名策略失效时间；与数据库上传会话有效期独立。",
+            "nullable": true,
+            "format": "date-time"
+          }
+        }
+      },
+      "MaterialUploadSessionStatus": {
+        "type": "object",
+        "description": "只允许未过期且 UPLOADING 的会话查询/分片/完成。COMPLETED、CANCELLED、EXPIRED 或已到期会话查询返回失效业务错误，不保证能查询到终态；local 完成后临时 manifest 被删除。会话有效期来自 session-expire-hours，缺省 24 小时，最少 1 小时。oss 查询不会 HEAD 对象，也不统计真实上传进度，uploadedSize=0、uploadedChunks=[]。完成后请查询素材 /material-video/get 的 AVAILABLE/FAILED，不能继续轮询本会话。",
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "description": "会话 ID。"
+          },
+          "chunkSize": {
+            "type": "integer",
+            "description": "local 分片大小，字节；配置类默认 1048576（1 MiB），配置为 null/非正时服务回退 8388608（8 MiB），实际使用本字段返回值；oss 不返回有效分片参数。",
+            "nullable": true,
+            "example": 8388608
+          },
+          "totalChunks": {
+            "type": "integer",
+            "description": "local 总分片数 ceil(fileSize/chunkSize)；oss 为空。",
+            "nullable": true,
+            "example": 1
+          },
+          "uploadedSize": {
+            "type": "integer",
+            "format": "int64",
+            "description": "local 为实际已落盘分片字节和；oss 创建和查询固定为 0，不能用于判断 OSS 上传完成。",
+            "example": 0
+          },
+          "uploadedChunks": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "uniqueItems": true,
+            "description": "local 已收到分片编号集合，零起始；oss 为空数组。",
+            "example": []
+          },
+          "fileSize": {
+            "type": "integer",
+            "format": "int64",
+            "description": "创建时声明的总字节数。"
+          },
+          "status": {
+            "type": "string",
+            "description": "可访问时通常为 UPLOADING；数据库终态 COMPLETED、CANCELLED、EXPIRED 不应被当作可继续上传的状态。",
+            "enum": [
+              "UPLOADING"
+            ],
+            "example": "UPLOADING"
+          }
+        }
+      },
+      "MaterialApiSuccess": {
+        "type": "object",
+        "required": [
+          "code",
+          "msg"
+        ],
+        "properties": {
+          "code": {
+            "type": "integer",
+            "enum": [
+              0
+            ],
+            "example": 0
+          },
+          "msg": {
+            "type": "string",
+            "description": "成功消息。",
+            "example": ""
+          }
+        }
+      },
+      "MaterialApiError": {
+        "type": "object",
+        "description": "HTTP 200 仍可能返回此业务错误；始终先判断 code===0。业务数据不可从错误体读取。",
+        "required": [
+          "code",
+          "msg"
+        ],
+        "properties": {
+          "code": {
+            "type": "integer",
+            "description": "非零业务码或框架错误码。",
+            "example": 1060000001,
+            "not": {
+              "enum": [
+                0
+              ]
+            }
+          },
+          "msg": {
+            "type": "string",
+            "description": "错误说明。",
+            "example": "素材库不存在"
+          },
+          "data": {
+            "nullable": true,
+            "example": null,
+            "type": "object"
+          }
+        }
+      },
+      "MaterialLibraryPage": {
+        "type": "object",
+        "properties": {
+          "list": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MaterialLibrary"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "匹配总数。",
+            "example": 1
+          }
+        }
+      },
+      "MaterialVideoPage": {
+        "type": "object",
+        "properties": {
+          "list": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MaterialVideo"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "匹配总数。",
+            "example": 1
           }
         }
       }

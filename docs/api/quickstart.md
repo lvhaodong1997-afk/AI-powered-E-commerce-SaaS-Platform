@@ -4,7 +4,7 @@
 
 ## 1. 准备接入信息
 
-向管理员取得产品地址、租户名称、实际登录用户名和密码，并开通 `tk:generation:query`、`tk:generation:create`、`tk:material-library:query`。用户名是登录账号，不是显示昵称。先确认租户内已有可用素材库、音色和当前账号自己上传的 BGM。
+向管理员取得产品地址、租户名称、实际登录用户名和密码，并开通 `tk:generation:query`、`tk:generation:create`、`tk:material-library:query`。用户名是登录账号，不是显示昵称。先确认租户内已有可用素材库、音色和当前账号自己上传的 BGM。若还没有素材，先按 [素材库管理与视频上传](material-library.md) 创建库、上传视频并等待 AVAILABLE，再回到第3节继续出片。素材写入另需该指南列出的菜单权限。
 
 以下为 Bash/cURL 示例，Windows 可使用 Git Bash；PowerShell 请使用 `curl.exe` 并调整换行/环境变量语法。示例值均为占位值，响应中的 ID 才可用于后续请求。
 

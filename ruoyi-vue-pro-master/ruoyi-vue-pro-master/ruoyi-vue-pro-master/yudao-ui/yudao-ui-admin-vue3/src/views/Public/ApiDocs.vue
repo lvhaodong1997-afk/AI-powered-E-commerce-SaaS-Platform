@@ -120,7 +120,7 @@
               <div class="intro-guide-panel"
                 ><p>接入指南 <span>从第一步开始</span></p
                 ><a
-                  v-for="(guide, index) in catalog.guides.slice(0, 3)"
+                  v-for="(guide, index) in catalog.guides"
                   :key="guide.id"
                   :href="'#guide-' + guide.id"
                   @click.prevent="selectTopic('guide-' + guide.id)"
@@ -133,7 +133,7 @@
             <section class="docs-auth-cards"
               ><article
                 ><span class="section-index">01 / 自动出片</span><h2>账号 Token</h2
-                ><p>使用自己的账号与租户，查询素材、提交任务、获取成片。</p
+                ><p>使用自己的账号与租户，管理素材、上传视频、提交任务、获取成片。</p
                 ><code>Authorization: Bearer …</code></article
               ><article
                 ><span class="section-index">02 / TikTok 发布</span><h2>HMAC 请求签名</h2
@@ -371,6 +371,10 @@
           <template v-else-if="activeId === 'changelog'"
             ><div class="docs-breadcrumb">文档 / 更新记录</div><p class="docs-eyebrow">CHANGELOG</p
             ><h1>版本与更新记录</h1
+            ><section class="change-entry"
+              ><time>2026.11.16</time><h2>素材库管理与视频上传</h2
+              ><p>补齐素材库管理、视频上传、解析状态与 OSS / 本地分片调用说明，新增 Postman 请求和素材验证脚本。</p
+              ></section
             ><section class="change-entry"
               ><time>2026.11.14</time><h2>接入文档中心上线</h2
               ><p

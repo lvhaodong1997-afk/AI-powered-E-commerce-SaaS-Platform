@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "ClipForge 自动出片 API v1",
-    "description": "按00–09顺序接入。所有值均为占位符。导入环境模板并在本机填写凭证。07创建会使用积分，默认跳过，显式开启仅发送一次。集合不自动重试或轮询，不包含千川接口；TikTok发布使用独立HMAC凭证。",
+    "description": "按00–09顺序接入。所有值均为占位符。导入环境模板并在本机填写凭证。07创建会使用积分，默认跳过，显式开启仅发送一次。集合不自动重试或轮询，不包含千川接口；TikTok发布使用独立HMAC凭证。 2026-11-16：素材库管理文件夹使用登录后的Token；所有素材写操作默认跳过，需单次设置allowMaterialWrite=true，发送前自动恢复false；OSS直传不带平台凭证。文件需在本机选择，不自动切片、轮询或清理。",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -589,6 +589,1251 @@
         }
       ],
       "response": []
+    },
+    {
+      "name": "素材库管理与视频上传",
+      "description": "先完成00–02登录。阅读material-library.md后逐个执行。素材写入每次需allowMaterialWrite=true，立即自动恢复false；不自动创建、轮询或删除。",
+      "item": [
+        {
+          "name": "M01 素材库分页",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-library/page?pageNo={{pageNo}}&pageSize={{pageSize}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-library",
+                "page"
+              ],
+              "query": [
+                {
+                  "key": "pageNo",
+                  "value": "{{pageNo}}"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "{{pageSize}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M02 素材库详情",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-library/get?id={{libraryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-library",
+                "get"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{{libraryId}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M03 创建素材库（默认跳过）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-library/create",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-library",
+                "create"
+              ]
+            },
+            "description": "成功data是新库ID，自动写入libraryId供上传和出片使用。不自动创建重复库。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\":\"{{materialLibraryName}}\",\"materialPurpose\":\"ECOMMERCE\",\"defaulted\":false,\"status\":0}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "if (read(\"libraryId\")) stop(\"已有libraryId，请先核对；明确新建时清空后再开启写入\");",
+                  "if (!read(\"materialLibraryName\")) stop(\"填写唯一的materialLibraryName\");",
+                  "pm.request.body.update(JSON.stringify({name: read(\"materialLibraryName\"), materialPurpose: \"ECOMMERCE\", defaulted: false, status: 0}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));",
+                  "if (result.code === 0 && result.data != null) {",
+                  "  const rawData = pm.response.text().match(/\"data\"\\s*:\\s*([1-9][0-9]*)\\s*[,}]/);",
+                  "  if (!rawData) throw new Error(\"响应没有有效整数ID\");",
+                  "  pm.environment.set(\"libraryId\", rawData[1]);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M04 编辑素材库（默认跳过）",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-library/update",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-library",
+                "update"
+              ]
+            },
+            "description": "先查询现有库，按需补齐要保留的可写字段；此示例明确设置用途与状态。不能修改所属公司。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":{{libraryId}},\"name\":\"{{materialLibraryName}}\",\"materialPurpose\":\"ECOMMERCE\",\"status\":0}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "const library = id(\"libraryId\"); if (!read(\"materialLibraryName\")) stop(\"填写需要保留的库名称\");",
+                  "pm.request.body.update(JSON.stringify({id: \"__ID__\", name: read(\"materialLibraryName\"), materialPurpose: \"ECOMMERCE\", status: 0}).replace(/\"id\":\"__ID__\"/, \"\\\"id\\\":\" + library));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M05 视频分页（仅可用）",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-video/page?libraryId={{libraryId}}&status=AVAILABLE&pageNo={{pageNo}}&pageSize={{pageSize}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-video",
+                "page"
+              ],
+              "query": [
+                {
+                  "key": "libraryId",
+                  "value": "{{libraryId}}"
+                },
+                {
+                  "key": "status",
+                  "value": "AVAILABLE"
+                },
+                {
+                  "key": "pageNo",
+                  "value": "{{pageNo}}"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "{{pageSize}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M06 视频详情（等待 AVAILABLE）",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-video/get?id={{videoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-video",
+                "get"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{{videoId}}"
+                }
+              ]
+            },
+            "description": "每3–5秒手动查询，设置总超时；AVAILABLE才可用，FAILED停止并查看failReason。不会自动无限轮询。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));",
+                  "if (result.code === 0 && result.data) {",
+                  "  pm.environment.set(\"materialVideoStatus\", result.data.status || \"\");",
+                  "  pm.test(\"Not failed\", () => pm.expect(result.data.status, result.data.failReason).not.to.eql(\"FAILED\"));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M07 单文件上传（默认跳过）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-video/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-video",
+                "upload"
+              ]
+            },
+            "description": "本机文件，mp4/mov/webm，非空且最大100MiB。成功返回videoId后查询解析状态，不自动重复上传。",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "libraryId",
+                  "type": "text",
+                  "value": "{{libraryId}}"
+                },
+                {
+                  "key": "tags",
+                  "type": "text",
+                  "value": "{{materialTags}}"
+                },
+                {
+                  "key": "usagePhase",
+                  "type": "text",
+                  "value": "{{usagePhase}}"
+                },
+                {
+                  "key": "segmentType",
+                  "type": "text",
+                  "value": "{{segmentType}}"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "{{materialFile}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "id(\"libraryId\"); if (!read(\"materialFile\")) stop(\"请在本机选择materialFile视频文件\");",
+                  "if (read(\"videoId\")) stop(\"已有videoId，请先查询，勿重复上传\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));",
+                  "if (result.code === 0 && result.data != null) {",
+                  "  const rawData = pm.response.text().match(/\"data\"\\s*:\\s*([1-9][0-9]*)\\s*[,}]/);",
+                  "  if (!rawData) throw new Error(\"响应没有有效整数ID\");",
+                  "  pm.environment.set(\"videoId\", rawData[1]);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M08 创建上传会话（默认跳过）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/upload/material-video/session/create",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "upload",
+                "material-video",
+                "session",
+                "create"
+              ]
+            },
+            "description": "fileSize为原文件实际字节数。根据返回uploadMode分支；所有OSS临时信息自动保存到本机环境，不可导出分享。 会话配置类默认上限1000000000字节、分片1048576字节；实际按环境和返回chunkSize/totalChunks执行，与单文件100MiB不同。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"libraryId\":{{libraryId}},\"fileName\":\"{{materialFileName}}\",\"fileSize\":{{materialFileSize}},\"contentType\":\"{{materialContentType}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "const library = id(\"libraryId\"); const size = id(\"materialFileSize\");",
+                  "if (read(\"uploadId\")) stop(\"已有uploadId，请先检查会话，不重复创建\");",
+                  "if (!read(\"materialFileName\")) stop(\"填写原始文件名\");",
+                  "pm.request.body.update(JSON.stringify({libraryId:\"__LIBRARY__\",fileName:read(\"materialFileName\"),fileSize:\"__SIZE__\",contentType:read(\"materialContentType\") || \"video/mp4\"}).replace(/\"libraryId\":\"__LIBRARY__\"/, \"\\\"libraryId\\\":\" + library).replace(/\"fileSize\":\"__SIZE__\"/, \"\\\"fileSize\\\":\" + size));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));",
+                  "if (result.code === 0 && result.data) {",
+                  "  pm.environment.set(\"uploadId\", result.data.uploadId);",
+                  "  pm.environment.set(\"materialUploadMode\", result.data.uploadMode || \"local\");",
+                  "  const mapping = {uploadUrl:\"materialUploadUrl\",publicUrl:\"materialPublicUrl\",objectKey:\"materialObjectKey\",accessKeyId:\"materialOssAccessKeyId\",policy:\"materialOssPolicy\",signature:\"materialOssSignature\",successActionStatus:\"materialOssSuccessActionStatus\",expiration:\"materialOssExpiration\",chunkSize:\"materialChunkSize\",totalChunks:\"materialTotalChunks\"};",
+                  "  for (const [source, target] of Object.entries(mapping)) pm.environment.set(target, result.data[source] == null ? \"\" : String(result.data[source]));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M09 查询上传会话",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/upload/material-video/session/{{uploadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "upload",
+                "material-video",
+                "session",
+                "{{uploadId}}"
+              ]
+            },
+            "description": "返回uploadedChunks和uploadedSize用于断点续传；此状态不等于视频AVAILABLE。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M10 本地上传一个分片（默认跳过）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/upload/material-video/chunk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "upload",
+                "material-video",
+                "chunk"
+              ]
+            },
+            "description": "仅本地模式；先按服务器chunkSize切片，选择当前片文件和0起始chunkIndex。不会自动切片/循环。",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "uploadId",
+                  "type": "text",
+                  "value": "{{uploadId}}"
+                },
+                {
+                  "key": "chunkIndex",
+                  "type": "text",
+                  "value": "{{chunkIndex}}"
+                },
+                {
+                  "key": "chunk",
+                  "type": "file",
+                  "src": "{{materialChunkFile}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "if (read(\"materialUploadMode\") === \"oss\") stop(\"OSS模式不使用本地chunk接口\");",
+                  "if (!read(\"uploadId\")) stop(\"请先创建或查询本地上传会话\");",
+                  "if (!/^(0|[1-9][0-9]*)$/.test(read(\"chunkIndex\"))) stop(\"chunkIndex从0开始\");",
+                  "if (!read(\"materialChunkFile\")) stop(\"按返回chunkSize切片，在本机选择materialChunkFile\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M11 OSS直传文件（默认跳过）",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{materialUploadUrl}}",
+              "host": [
+                "{{materialUploadUrl}}"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "key",
+                  "type": "text",
+                  "value": "{{materialObjectKey}}"
+                },
+                {
+                  "key": "OSSAccessKeyId",
+                  "type": "text",
+                  "value": "{{materialOssAccessKeyId}}"
+                },
+                {
+                  "key": "policy",
+                  "type": "text",
+                  "value": "{{materialOssPolicy}}"
+                },
+                {
+                  "key": "signature",
+                  "type": "text",
+                  "value": "{{materialOssSignature}}"
+                },
+                {
+                  "key": "success_action_status",
+                  "type": "text",
+                  "value": "{{materialOssSuccessActionStatus}}"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "{{materialFile}}"
+                }
+              ]
+            },
+            "description": "只发送到本次会话返回的可信OSS uploadUrl，绝不携带平台Token或tenant-id。HTTP成功后再调用M12完成。临时策略过期需重新创建。"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "if (read(\"materialUploadMode\") !== \"oss\") stop(\"仅OSS模式可直传\");",
+                  "if (!read(\"materialUploadUrl\").startsWith(\"https://\")) stop(\"需要可信会话返回的HTTPS uploadUrl\");",
+                  "for (const key of [\"materialObjectKey\",\"materialOssAccessKeyId\",\"materialOssPolicy\",\"materialOssSignature\",\"materialFile\"]) if (!read(key)) stop(key + \"未配置\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"OSS HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M12 完成上传会话（默认跳过）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/upload/material-video/session/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "upload",
+                "material-video",
+                "session",
+                "complete"
+              ]
+            },
+            "description": "先完成所有本地分片或OSS直传。OSS自动加入libraryId/fileName/fileSize/objectKey等信息。本地从manifest读取。返回videoId，必须继续查询AVAILABLE。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"uploadId\":\"{{uploadId}}\",\"tags\":\"{{materialTags}}\",\"usagePhase\":\"{{usagePhase}}\",\"segmentType\":\"{{segmentType}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "if (!read(\"uploadId\")) stop(\"请先创建或查询上传会话\");",
+                  "if (read(\"videoId\")) stop(\"已有videoId，请先核对，不能自动重复完成\");",
+                  "const payload = {uploadId:read(\"uploadId\"), tags:read(\"materialTags\"), usagePhase:read(\"usagePhase\") || \"GENERAL\", segmentType:read(\"segmentType\") || \"GENERAL\"};",
+                  "let library, size;",
+                  "if (read(\"materialUploadMode\") === \"oss\") { library = id(\"libraryId\"); size = id(\"materialFileSize\"); if (!read(\"materialObjectKey\") || !read(\"materialFileName\")) stop(\"OSS完成必须保留创建响应的objectKey和原始文件信息\"); Object.assign(payload, {libraryId:\"__LIBRARY__\",fileName:read(\"materialFileName\"),fileSize:\"__SIZE__\",contentType:read(\"materialContentType\"),objectKey:read(\"materialObjectKey\"),fileUrl:read(\"materialPublicUrl\")}); }",
+                  "let raw = JSON.stringify(payload); if (library) raw = raw.replace(/\"libraryId\":\"__LIBRARY__\"/, \"\\\"libraryId\\\":\" + library).replace(/\"fileSize\":\"__SIZE__\"/, \"\\\"fileSize\\\":\" + size);",
+                  "pm.request.body.update(raw);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));",
+                  "if (result.code === 0 && result.data != null) {",
+                  "  const rawData = pm.response.text().match(/\"data\"\\s*:\\s*([1-9][0-9]*)\\s*[,}]/);",
+                  "  if (!rawData) throw new Error(\"响应没有有效整数ID\");",
+                  "  pm.environment.set(\"videoId\", rawData[1]);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M13 更新视频用途（默认跳过）",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-video/usage-phase",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-video",
+                "usage-phase"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"ids\":[{{videoId}}],\"usagePhase\":\"{{usagePhase}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "const video = id(\"videoId\"); if (![\"ATTENTION\",\"PRODUCT_SHOW\",\"RESULT_EFFECT\",\"GENERAL\"].includes(read(\"usagePhase\"))) stop(\"usagePhase枚举无效\");",
+                  "pm.request.body.update(JSON.stringify({ids:[\"__ID__\"],usagePhase:read(\"usagePhase\")}).replace(/\"__ID__\"/,video));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M14 更新视频分段（默认跳过）",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-video/segment-type",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-video",
+                "segment-type"
+              ]
+            },
+            "description": "同步usagePhase：S1/S2=ATTENTION；S5=RESULT_EFFECT；其他=PRODUCT_SHOW。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"ids\":[{{videoId}}],\"segmentType\":\"{{segmentType}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "const video = id(\"videoId\"); if (![\"S1_HOOK\",\"S2_PAIN\",\"S3_REVEAL\",\"S4_DEMO\",\"S5_PROOF\",\"S6_DETAIL\",\"S7_LIFESTYLE\",\"GENERAL\"].includes(read(\"segmentType\"))) stop(\"segmentType枚举无效\");",
+                  "pm.request.body.update(JSON.stringify({ids:[\"__ID__\"],segmentType:read(\"segmentType\")}).replace(/\"__ID__\"/,video));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M15 可用视频分段统计",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-video/segment-summary?libraryId={{libraryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-video",
+                "segment-summary"
+              ],
+              "query": [
+                {
+                  "key": "libraryId",
+                  "value": "{{libraryId}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M16 删除视频（默认跳过）",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-video/delete?id={{videoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-video",
+                "delete"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{{videoId}}"
+                }
+              ]
+            },
+            "description": "仅清理已确认的测试视频，会删除视频/封面文件；不自动执行。"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "id(\"videoId\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M17 批量删除视频（默认跳过）",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-video/delete-batch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-video",
+                "delete-batch"
+              ]
+            },
+            "description": "最小示例仅处理videoId；确需多个时自行核对全部ID。不自动清理已有业务资源。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"ids\":[{{videoId}}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "const video = id(\"videoId\"); pm.request.body.update(\"{\\\"ids\\\":[\" + video + \"]}\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M18 删除空素材库（默认跳过）",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/material-library/delete?id={{libraryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "material-library",
+                "delete"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{{libraryId}}"
+                }
+              ]
+            },
+            "description": "仅允许空库。应先清理明确属于本次测试的视频；不自动级联清空。"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "id(\"libraryId\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M19 取消上传会话（默认跳过）",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "tenant-id",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin-api/tk/upload/material-video/session/{{uploadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin-api",
+                "tk",
+                "upload",
+                "material-video",
+                "session",
+                "{{uploadId}}"
+              ]
+            },
+            "description": "仅用于中止未完成会话，不等于删除已创建的视频。"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function stop(message) { pm.execution.skipRequest(); throw new Error(message); }",
+                  "if (pm.environment.get(\"allowMaterialWrite\") !== \"true\") stop(\"默认跳过素材写入。核对目标与参数后，仅在本机设置 allowMaterialWrite=true；每次只允许一次。\");",
+                  "pm.environment.set(\"allowMaterialWrite\", \"false\");",
+                  "const read = (key) => String(pm.environment.get(key) || \"\").trim();",
+                  "const id = (key) => { const value = read(key); if (!/^[1-9][0-9]*$/.test(value)) stop(key + \"必须使用查询或创建响应的正整数ID\"); return value; };",
+                  "if (!read(\"accessToken\") || !read(\"tenantId\")) stop(\"请先完成登录并取得tenantId/accessToken\");",
+                  "if (!read(\"uploadId\")) stop(\"没有uploadId\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP successful\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "const result = pm.response.json();",
+                  "pm.test(\"Business code is 0\", () => pm.expect(result.code, result.msg).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
     }
   ]
 }
