@@ -49,9 +49,13 @@ class TkTiktokShopTenantContextTest {
 
     @Test void sellerEndpointsUseTheSameExplicitTenantBoundary() {
         TkTiktokShopSellerAuthService seller=context.getBean(TkTiktokShopSellerAuthService.class);
+        TkTiktokShopSellerCatalogService catalog=context.getBean(TkTiktokShopSellerCatalogService.class);
         when(seller.listAccounts(null)).thenAnswer(call->{assertEquals(165L,TenantContextHolder.getTenantId());assertFalse(TenantContextHolder.isIgnore());return Collections.emptyList();});
+        when(catalog.listProducts(eq(8L),isNull(),isNull(),isNull())).thenAnswer(call->{assertEquals(165L,TenantContextHolder.getTenantId());assertFalse(TenantContextHolder.isIgnore());return mock(cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAuthVO.SellerProductPage.class);});
         assertTrue(controller.sellerAccounts(null).getData().isEmpty());assertNull(TenantContextHolder.getTenantId());
+        assertNotNull(controller.sellerProducts(8L,null,null,null).getData());assertNull(TenantContextHolder.getTenantId());
         TenantContextHolder.setTenantId(999L);assertThrows(IllegalArgumentException.class,()->controller.sellerShops(null));verify(seller,never()).listShops(any());
+        assertThrows(IllegalArgumentException.class,()->controller.sellerOrders(8L,null,null,null));verify(catalog,never()).listOrders(any(),any(),any(),any());
     }
 
     @Test void matchingExistingContextIsPreserved() {
@@ -98,6 +102,7 @@ class TkTiktokShopTenantContextTest {
     static class Config {
         @Bean TkDataScopeService scope(){return mock(TkDataScopeService.class);}
         @Bean TkTiktokShopSellerAuthService sellerAuth(){return mock(TkTiktokShopSellerAuthService.class);}
+        @Bean TkTiktokShopSellerCatalogService sellerCatalog(){return mock(TkTiktokShopSellerCatalogService.class);}
         @Bean TkTiktokShopAccountMapper accounts(){return mock(TkTiktokShopAccountMapper.class);}
         @Bean TkTiktokShopAuthService auth(TkDataScopeService scope,TkTiktokShopAccountMapper accounts){
             return new TkTiktokShopAuthService(TkTiktokShopTokenCipherTest.properties(),

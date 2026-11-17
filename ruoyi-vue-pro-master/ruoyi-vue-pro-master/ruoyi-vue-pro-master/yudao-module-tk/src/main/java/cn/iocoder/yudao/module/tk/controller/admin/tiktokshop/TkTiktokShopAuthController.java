@@ -7,6 +7,7 @@ import cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAut
 import cn.iocoder.yudao.module.tk.framework.config.TkTiktokShopProperties;
 import cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopAuthService;
 import cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerAuthService;
+import cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerCatalogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.*;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -20,6 +21,7 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 @RequestMapping("/tk/tiktok-shop")
 public class TkTiktokShopAuthController {
     @org.springframework.beans.factory.annotation.Autowired private TkTiktokShopSellerAuthService sellerAuth;
+    @org.springframework.beans.factory.annotation.Autowired private TkTiktokShopSellerCatalogService sellerCatalog;
     private final TkTiktokShopAuthService auth;
     private final TkTiktokShopProperties properties;
     private final ObjectMapper json;
@@ -52,6 +54,13 @@ public class TkTiktokShopAuthController {
     @DeleteMapping("/seller/accounts/{id}")
     @PreAuthorize("@ss.hasPermission('tk:tiktok-shop-account:authorize')")
     public CommonResult<Boolean> disconnectSeller(@PathVariable("id") Long id){sellerAuth.disconnect(id);return success(true);}
+
+    @GetMapping("/seller/shops/{id}/products")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-shop-account:query')")
+    public CommonResult<SellerProductPage> sellerProducts(@PathVariable("id") Long id,@RequestParam(value="companyId",required=false) Long company,@RequestParam(value="pageSize",required=false) Integer pageSize,@RequestParam(value="pageToken",required=false) String pageToken){return success(sellerCatalog.listProducts(id,company,pageSize,pageToken));}
+    @GetMapping("/seller/shops/{id}/orders")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-shop-account:query')")
+    public CommonResult<SellerOrderPage> sellerOrders(@PathVariable("id") Long id,@RequestParam(value="companyId",required=false) Long company,@RequestParam(value="pageSize",required=false) Integer pageSize,@RequestParam(value="pageToken",required=false) String pageToken){return success(sellerCatalog.listOrders(id,company,pageSize,pageToken));}
 
     @GetMapping(value="/auth/callback",produces=MediaType.TEXT_HTML_VALUE)
     @PermitAll

@@ -62,7 +62,7 @@ public final class TkTiktokShopAuthVO {
         private final String displayName,market,authStatus,environment,grantedScopes;
         private final boolean canReadProducts,canReadOrders;
         private final LocalDateTime accessTokenExpireTime,refreshTokenExpireTime;
-        public SellerAccountResponse(TkTiktokShopSellerAccountDO a){id=a.getId();companyId=a.getCompanyId();displayName=a.getDisplayName();market=a.getMarket();authStatus=a.getAuthStatus();environment=a.getEnvironment();grantedScopes=a.getGrantedScopes();accessTokenExpireTime=a.getAccessTokenExpireTime();refreshTokenExpireTime=a.getRefreshTokenExpireTime();canReadProducts="AUTHORIZED".equals(authStatus)&&hasScope(grantedScopes,"seller.product.basic");canReadOrders="AUTHORIZED".equals(authStatus)&&hasScope(grantedScopes,"seller.order.info");}
+        public SellerAccountResponse(TkTiktokShopSellerAccountDO a){id=a.getId();companyId=a.getCompanyId();displayName=a.getDisplayName();market=a.getMarket();authStatus=a.getAuthStatus();environment=a.getEnvironment();grantedScopes=a.getGrantedScopes();accessTokenExpireTime=a.getAccessTokenExpireTime();refreshTokenExpireTime=a.getRefreshTokenExpireTime();canReadProducts="AUTHORIZED".equals(authStatus)&&cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerApiClient.hasGrantedScope(grantedScopes,"seller.product.basic");canReadOrders="AUTHORIZED".equals(authStatus)&&cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerApiClient.hasOrderScope(grantedScopes);}
         private static boolean hasScope(String raw,String scope){try{return cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopApiClient.TokenBundle.hasScope(new com.fasterxml.jackson.databind.ObjectMapper().readTree(raw),scope);}catch(Exception ignored){return false;}}
     }
     @Getter public static class SellerShopResponse {
@@ -71,4 +71,28 @@ public final class TkTiktokShopAuthVO {
         public SellerShopResponse(TkTiktokShopSellerShopDO s){id=s.getId();accountId=s.getAccountId();companyId=s.getCompanyId();shopId=s.getShopId();name=s.getName();region=s.getRegion();status=s.getStatus();environment=s.getEnvironment();}
     }
 
+    @Getter public static class SellerProductPage {
+        private final java.util.List<SellerProduct> products; private final Long total; private final String nextPageToken;
+        public SellerProductPage(cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerApiClient.CatalogPage<cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerApiClient.ProductSummary> page){
+            java.util.List<SellerProduct> rows=new java.util.ArrayList<>();
+            for(cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerApiClient.ProductSummary item:page.getItems())rows.add(new SellerProduct(item));
+            products=java.util.Collections.unmodifiableList(rows);total=page.getTotal();nextPageToken=page.getNextPageToken();
+        }
+    }
+    @Getter public static class SellerProduct {
+        private final String id,title,status;
+        public SellerProduct(cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerApiClient.ProductSummary item){id=item.getId();title=item.getTitle();status=item.getStatus();}
+    }
+    @Getter public static class SellerOrderPage {
+        private final java.util.List<SellerOrder> orders; private final Long total; private final String nextPageToken;
+        public SellerOrderPage(cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerApiClient.CatalogPage<cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerApiClient.OrderSummary> page){
+            java.util.List<SellerOrder> rows=new java.util.ArrayList<>();
+            for(cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerApiClient.OrderSummary item:page.getItems())rows.add(new SellerOrder(item));
+            orders=java.util.Collections.unmodifiableList(rows);total=page.getTotal();nextPageToken=page.getNextPageToken();
+        }
+    }
+    @Getter public static class SellerOrder {
+        private final String id,status,totalAmount,currency; private final long createTime;
+        public SellerOrder(cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerApiClient.OrderSummary item){id=item.getId();status=item.getStatus();createTime=item.getCreateTime();totalAmount=item.getTotalAmount();currency=item.getCurrency();}
+    }
 }
