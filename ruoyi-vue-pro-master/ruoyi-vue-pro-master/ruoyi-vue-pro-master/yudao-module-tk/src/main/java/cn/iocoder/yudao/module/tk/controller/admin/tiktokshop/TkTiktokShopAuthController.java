@@ -6,6 +6,7 @@ import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAuthVO.*;
 import cn.iocoder.yudao.module.tk.framework.config.TkTiktokShopProperties;
 import cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopAuthService;
+import cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopSellerAuthService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.*;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -18,6 +19,7 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 @RestController
 @RequestMapping("/tk/tiktok-shop")
 public class TkTiktokShopAuthController {
+    @org.springframework.beans.factory.annotation.Autowired private TkTiktokShopSellerAuthService sellerAuth;
     private final TkTiktokShopAuthService auth;
     private final TkTiktokShopProperties properties;
     private final ObjectMapper json;
@@ -31,7 +33,7 @@ public class TkTiktokShopAuthController {
     @PostMapping("/auth/sessions")
     @PreAuthorize("@ss.hasPermission('tk:tiktok-shop-account:authorize')")
     @ApiAccessLog(enable=false)
-    public CommonResult<SessionResponse> createSession(@RequestBody(required=false) SessionRequest body){return success(auth.createSession(body==null?null:body.getCompanyId()));}
+    public CommonResult<SessionResponse> createSession(@RequestBody(required=false) SessionRequest body){return success(auth.createSession(body==null?null:body.getCompanyId(),body==null?null:body.getAuthType()));}
 
     @GetMapping("/accounts")
     @PreAuthorize("@ss.hasPermission('tk:tiktok-shop-account:query')")
@@ -40,6 +42,16 @@ public class TkTiktokShopAuthController {
     @DeleteMapping("/accounts/{id}")
     @PreAuthorize("@ss.hasPermission('tk:tiktok-shop-account:authorize')")
     public CommonResult<Boolean> disconnect(@PathVariable("id") Long id){auth.disconnect(id);return success(true);}
+
+    @GetMapping("/seller/accounts")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-shop-account:query')")
+    public CommonResult<List<SellerAccountResponse>> sellerAccounts(@RequestParam(value="companyId",required=false) Long company){return success(sellerAuth.listAccounts(company));}
+    @GetMapping("/seller/shops")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-shop-account:query')")
+    public CommonResult<List<SellerShopResponse>> sellerShops(@RequestParam(value="companyId",required=false) Long company){return success(sellerAuth.listShops(company));}
+    @DeleteMapping("/seller/accounts/{id}")
+    @PreAuthorize("@ss.hasPermission('tk:tiktok-shop-account:authorize')")
+    public CommonResult<Boolean> disconnectSeller(@PathVariable("id") Long id){sellerAuth.disconnect(id);return success(true);}
 
     @GetMapping(value="/auth/callback",produces=MediaType.TEXT_HTML_VALUE)
     @PermitAll
@@ -53,13 +65,13 @@ public class TkTiktokShopAuthController {
         byte[] nonceBytes=new byte[18];random.nextBytes(nonceBytes);String nonce=Base64.getEncoder().encodeToString(nonceBytes);
         String script="";
         // Incomplete configuration produces a static page with no cross-window message.
-        if(properties.isConfigured()){
-            Map<String,Object> message=new LinkedHashMap<>();message.put("type","tiktok-shop-auth");message.put("sessionId",result.getSessionId());message.put("status",result.getStatus());
+        if(result.getSessionId()!=null && (properties.isConfigured() || properties.isSellerConfigured())){
+            Map<String,Object> message=new LinkedHashMap<>();message.put("type","tiktok-shop-auth");message.put("sessionId",result.getSessionId());message.put("status",result.getStatus());message.put("authType",result.getAuthType());message.put("errorCode",result.getErrorCode());message.put("message",result.getMessage());
             try {script="<script nonce=\""+nonce+"\">if(window.opener){window.opener.postMessage("+safeJson(message)+","+safeJson(properties.getFrontendOrigin())+");}</script>";}
             catch(Exception ignored){/* No secrets or untrusted error text is reflected. */}
         }
         String html="<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>TikTok Shop 授权</title></head><body><p>"
-                +("SUCCESS".equals(result.getStatus())?"授权完成，请返回发布中心。":"授权未完成，请返回发布中心重新授权。")+"</p>"+script+"</body></html>";
+                +result.getMessage()+"</p>"+script+"</body></html>";
         return ResponseEntity.ok().contentType(new MediaType("text","html",java.nio.charset.StandardCharsets.UTF_8))
                 .header("Content-Security-Policy","default-src 'none'; script-src 'nonce-"+nonce+"'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
                 .header("Referrer-Policy","no-referrer").header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff").body(html);

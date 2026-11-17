@@ -47,6 +47,13 @@ class TkTiktokShopTenantContextTest {
         assertFalse(TenantContextHolder.isIgnore());
     }
 
+    @Test void sellerEndpointsUseTheSameExplicitTenantBoundary() {
+        TkTiktokShopSellerAuthService seller=context.getBean(TkTiktokShopSellerAuthService.class);
+        when(seller.listAccounts(null)).thenAnswer(call->{assertEquals(165L,TenantContextHolder.getTenantId());assertFalse(TenantContextHolder.isIgnore());return Collections.emptyList();});
+        assertTrue(controller.sellerAccounts(null).getData().isEmpty());assertNull(TenantContextHolder.getTenantId());
+        TenantContextHolder.setTenantId(999L);assertThrows(IllegalArgumentException.class,()->controller.sellerShops(null));verify(seller,never()).listShops(any());
+    }
+
     @Test void matchingExistingContextIsPreserved() {
         TenantContextHolder.setTenantId(165L);
         assertTrue(controller.accounts().getData().isEmpty());
@@ -90,6 +97,7 @@ class TkTiktokShopTenantContextTest {
             includeFilters=@ComponentScan.Filter(type=FilterType.REGEX,pattern=".*TkTiktokShopTenantAspect"))
     static class Config {
         @Bean TkDataScopeService scope(){return mock(TkDataScopeService.class);}
+        @Bean TkTiktokShopSellerAuthService sellerAuth(){return mock(TkTiktokShopSellerAuthService.class);}
         @Bean TkTiktokShopAccountMapper accounts(){return mock(TkTiktokShopAccountMapper.class);}
         @Bean TkTiktokShopAuthService auth(TkDataScopeService scope,TkTiktokShopAccountMapper accounts){
             return new TkTiktokShopAuthService(TkTiktokShopTokenCipherTest.properties(),

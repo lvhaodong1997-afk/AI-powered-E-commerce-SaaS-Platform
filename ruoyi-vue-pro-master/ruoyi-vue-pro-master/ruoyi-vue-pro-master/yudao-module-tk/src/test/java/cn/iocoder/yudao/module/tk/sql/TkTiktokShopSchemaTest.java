@@ -28,6 +28,7 @@ class TkTiktokShopSchemaTest {
                 String create = sql.substring(sql.indexOf("create table if not exists " + table.getKey()));
                 create = create.substring(0, create.indexOf(";\n"));
                 for (Field field : table.getValue().getDeclaredFields()) {
+                    if(table.getValue()==TkTiktokShopAuthSessionDO.class && java.util.Arrays.asList("authType","appKey","environment","configurationHash").contains(field.getName()))continue; // Separate repeat-safe seller upgrade.
                     String column = field.getName().replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase();
                     String type = field.getType() == Long.class ? "bigint" : field.getType() == Integer.class ? "int"
                             : field.getType() == LocalDateTime.class ? "datetime" : field.getType() == Boolean.class ? "bit" : "(?:varchar|text|mediumtext|json)";
@@ -92,6 +93,21 @@ class TkTiktokShopSchemaTest {
         try (InputStream stream = getClass().getResourceAsStream("/sql/tk_tiktok_shop_publish_mysql.sql")) {
             assertNotNull(stream);
             return new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase().replace("\r\n", "\n");
+        }
+    }
+
+    @Test
+    void sellerUpgradeIsRepeatSafeAndPreservesScopeAndIdentityIndexes() throws Exception {
+        try(InputStream stream=getClass().getResourceAsStream("/sql/tk_tiktok_shop_seller_upgrade_mysql.sql")){
+            assertNotNull(stream);String sql=new String(stream.readAllBytes(),StandardCharsets.UTF_8).toLowerCase();
+            assertTrue(sql.contains("information_schema.columns"));assertTrue(sql.contains("prepare tk_seller_stmt"));assertFalse(sql.contains("add column if not exists"));
+            for(String column:new String[]{"auth_type","app_key","environment","configuration_hash"})assertTrue(sql.contains("column_name='"+column+"'"));
+            assertTrue(sql.contains("default ''creator''"));assertTrue(sql.contains("default ''production''"));
+            assertTrue(sql.contains("unique key uk_seller_account (tenant_id, app_key, environment, open_id)"));assertTrue(sql.contains("unique key uk_seller_shop (tenant_id, account_id, shop_id)"));
+            assertFalse(sql.contains("insert into system_role_menu"));assertFalse(sql.contains("insert into system_menu"));
+            for(Class<?> type:new Class<?>[]{TkTiktokShopSellerAccountDO.class,TkTiktokShopSellerShopDO.class}){
+                assertTrue(TenantBaseDO.class.isAssignableFrom(type));for(Field field:type.getDeclaredFields()){String column=field.getName().replaceAll("([a-z0-9])([A-Z])","$1_$2").toLowerCase();assertTrue(Pattern.compile("(?m)^\\s*"+column+"\\s+").matcher(sql).find(),column);}
+            }
         }
     }
 

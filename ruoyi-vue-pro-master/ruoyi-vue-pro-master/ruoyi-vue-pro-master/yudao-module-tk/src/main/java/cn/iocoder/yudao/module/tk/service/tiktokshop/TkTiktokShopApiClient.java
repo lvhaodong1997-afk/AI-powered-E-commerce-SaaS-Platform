@@ -19,6 +19,8 @@ public class TkTiktokShopApiClient {
     private final OkHttpClient client;
     private final Clock clock;
     private final String apiBase, authBase;
+    private int expectedUserType=1;
+    private String requiredScope=REQUIRED_SCOPE;
 
     @Autowired
     public TkTiktokShopApiClient(TkTiktokShopProperties properties, ObjectMapper json) {
@@ -28,6 +30,13 @@ public class TkTiktokShopApiClient {
     TkTiktokShopApiClient(TkTiktokShopProperties properties,ObjectMapper json,OkHttpClient supplied,Clock clock,String apiBase,String authBase) {
         this.properties=properties;this.json=json;this.clock=clock;this.apiBase=apiBase;this.authBase=authBase;
         this.client=TkTiktokShopHttpTransport.createClient(supplied);
+    }
+    TkTiktokShopApiClient(TkTiktokShopProperties properties,ObjectMapper json,OkHttpClient supplied,Clock clock,String apiBase,String authBase,int userType,String scope) {
+        this(properties,json,supplied,clock,apiBase,authBase);expectedUserType=userType;requiredScope=scope;
+    }
+    public Result post(String path,String token,Map<String,String> query,Object body) {
+        byte[] exact;try {exact=json.writeValueAsBytes(body);}catch(Exception ignored){throw new IllegalArgumentException("Invalid Shop request body");}
+        return signed("POST",path,token,query,exact);
     }
     public Result get(String path,String token,Map<String,String> query) { return signed("GET",path,token,query,null); }
     public Result post(String path,String token,Object body) {
@@ -59,7 +68,7 @@ public class TkTiktokShopApiClient {
                 .addQueryParameter("app_key",properties.getAppKey()).addQueryParameter("app_secret",properties.getAppSecret())
                 .addQueryParameter(parameter,value).addQueryParameter("grant_type",grant).build();
         Result result=execute(new Request.Builder().url(url).get().build());
-        try {return TokenBundle.parse(result.getData(),clock);}catch(TkTiktokShopApiException ignored){throw new TkTiktokShopApiException("INVALID_TOKEN",result.getRequestId());}
+        try {return TokenBundle.parse(result.getData(),clock,expectedUserType,requiredScope);}catch(TkTiktokShopApiException ignored){throw new TkTiktokShopApiException("INVALID_TOKEN",result.getRequestId());}
     }
     public CreatorProfile getCreatorProfile(String token) {
         Result result=get("/affiliate_creator/202508/profiles",token,Collections.emptyMap());JsonNode data=result.getData();
@@ -102,16 +111,20 @@ public class TkTiktokShopApiClient {
         private final LocalDateTime accessExpireTime,refreshExpireTime;
         private TokenBundle(String a,String r,String open,String scopes,LocalDateTime ae,LocalDateTime re){accessToken=a;refreshToken=r;openId=open;grantedScopes=scopes;accessExpireTime=ae;refreshExpireTime=re;}
         static TokenBundle parse(JsonNode data,Clock clock) {
+            return parse(data,clock,1,REQUIRED_SCOPE);
+        }
+        static TokenBundle parse(JsonNode data,Clock clock,int userType,String scope) {
             try {
                 String a=text(data,"access_token"),r=text(data,"refresh_token"),open=text(data,"open_id");
-                if(a==null || r==null || open==null || !data.path("user_type").isIntegralNumber() || data.path("user_type").asInt()!=1 || !hasScope(data.path("granted_scopes")))throw new IllegalArgumentException();
+                if(a==null || r==null || open==null || !data.path("user_type").isIntegralNumber() || data.path("user_type").asInt()!=userType || !hasScope(data.path("granted_scopes"),scope))throw new IllegalArgumentException();
                 if(!data.path("access_token_expire_in").isIntegralNumber() || !data.path("refresh_token_expire_in").isIntegralNumber())throw new IllegalArgumentException();
                 long ae=data.path("access_token_expire_in").asLong(),re=data.path("refresh_token_expire_in").asLong();
                 if(ae<=clock.instant().getEpochSecond() || re<=clock.instant().getEpochSecond())throw new IllegalArgumentException();
                 return new TokenBundle(a,r,open,data.path("granted_scopes").toString(),LocalDateTime.ofInstant(Instant.ofEpochSecond(ae),ZoneOffset.UTC),LocalDateTime.ofInstant(Instant.ofEpochSecond(re),ZoneOffset.UTC));
             }catch(Exception ignored){throw new TkTiktokShopApiException("INVALID_TOKEN",null);}
         }
-        public static boolean hasScope(JsonNode scopes){if(!scopes.isArray())return false;for(JsonNode scope:scopes)if(scope.isTextual() && REQUIRED_SCOPE.equals(scope.asText()))return true;return false;}
+        public static boolean hasScope(JsonNode scopes){return hasScope(scopes,REQUIRED_SCOPE);}
+        public static boolean hasScope(JsonNode scopes,String required){if(!scopes.isArray())return false;for(JsonNode scope:scopes)if(scope.isTextual() && required.equals(scope.asText()))return true;return false;}
         public String getAccessToken(){return accessToken;}public String getRefreshToken(){return refreshToken;}public String getOpenId(){return openId;}public String getGrantedScopes(){return grantedScopes;}
         public LocalDateTime getAccessExpireTime(){return accessExpireTime;}public LocalDateTime getRefreshExpireTime(){return refreshExpireTime;}
     }

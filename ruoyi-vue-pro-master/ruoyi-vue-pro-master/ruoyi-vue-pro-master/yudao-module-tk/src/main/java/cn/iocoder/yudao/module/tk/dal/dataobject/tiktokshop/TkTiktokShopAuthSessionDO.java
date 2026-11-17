@@ -19,6 +19,10 @@ public class TkTiktokShopAuthSessionDO extends TenantBaseDO {
     private Long id;
     private Long companyId;
     private Long userId;
+    private String authType;
+    private String appKey;
+    private String environment;
+    private String configurationHash;
     private String stateHash;
     private String status;
     private LocalDateTime expireTime;

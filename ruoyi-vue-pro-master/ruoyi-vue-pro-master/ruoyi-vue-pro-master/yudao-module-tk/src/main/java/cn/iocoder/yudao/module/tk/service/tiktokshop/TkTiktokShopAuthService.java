@@ -30,6 +30,7 @@ public class TkTiktokShopAuthService {
     private final TkTiktokShopTokenCipher cipher;
     private final TransactionTemplate transaction;
     private final Clock clock;
+    @Autowired private TkTiktokShopSellerAuthService sellerAuth;
     private final SecureRandom random=new SecureRandom();
     @Autowired
     public TkTiktokShopAuthService(TkTiktokShopProperties p,TkTiktokShopAuthSessionMapper sessions,TkTiktokShopAccountMapper accounts,TkDataScopeService scope,TkTiktokShopApiClient api,TkTiktokShopTokenCipher cipher,ObjectMapper json,PlatformTransactionManager tx) {
@@ -38,37 +39,61 @@ public class TkTiktokShopAuthService {
     TkTiktokShopAuthService(TkTiktokShopProperties p,TkTiktokShopAuthSessionMapper sessions,TkTiktokShopAccountMapper accounts,TkDataScopeService scope,TkTiktokShopApiClient api,TkTiktokShopTokenCipher cipher,ObjectMapper json,PlatformTransactionManager tx,Clock clock) {
         properties=p;this.sessions=sessions;this.accounts=accounts;this.scope=scope;this.api=api;this.cipher=cipher;this.transaction=new TransactionTemplate(tx);this.clock=clock;
     }
-    public SessionResponse createSession(Long requestedCompany) {
-        properties.requireConfigured();TkUserScope current=current();Long company=scope.getWritableCompanyId(requestedCompany);
+    public SessionResponse createSession(Long requestedCompany) {return createSession(requestedCompany,null);}
+    public SessionResponse createSession(Long requestedCompany,String requestedType) {
+        String type=requestedType==null?"CREATOR":requestedType;
+        if(!"CREATOR".equals(type) && !"SELLER".equals(type))throw new IllegalArgumentException("Unsupported authorization type");
+        boolean seller="SELLER".equals(type);if(seller)properties.requireSellerConfigured();else properties.requireConfigured();TkUserScope current=current();Long company=scope.getWritableCompanyId(requestedCompany);
         if(company==null || (requestedCompany!=null && !requestedCompany.equals(company)))throw denied();
         scope.validateWritable(current.getTenantId(),company);
         byte[] bytes=new byte[32];random.nextBytes(bytes);String state=Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         TkTiktokShopAuthSessionDO session=new TkTiktokShopAuthSessionDO();session.setTenantId(current.getTenantId());session.setCompanyId(company);session.setUserId(current.getUserId());session.setCreator(current.getUserIdString());session.setUpdater(current.getUserIdString());
+        session.setAuthType(type);session.setAppKey(seller?properties.getSeller().getAppKey():properties.getAppKey());session.setEnvironment(seller?properties.getSeller().getEnvironment():properties.getEnvironment());session.setConfigurationHash(configurationHash(seller));
         session.setStateHash(hash(state));session.setStatus("WAITING");session.setExpireTime(LocalDateTime.now(clock).plusMinutes(10));sessions.insert(session);
-        String url=HttpUrl.parse("https://shop.tiktok.com/alliance/creator/auth").newBuilder().addQueryParameter("app_key",properties.getAppKey()).addQueryParameter("state",state).build().toString();
+        HttpUrl.Builder builder=HttpUrl.parse(seller?properties.getSeller().getAuthorizationUrl():"https://shop.tiktok.com/alliance/creator/auth").newBuilder();
+        if(!seller)builder.addQueryParameter("app_key",properties.getAppKey());
+        String url=builder.addQueryParameter("state",state).build().toString();
         return new SessionResponse(session.getId(),url,session.getExpireTime());
     }
     public CallbackResult callback(String code,String state,String error) {
-        if(!properties.isConfigured() || state==null || !state.matches("[A-Za-z0-9_-]{43}"))return new CallbackResult(null,false);
+        if(state==null || !state.matches("[A-Za-z0-9_-]{43}"))return new CallbackResult(null,false);
         // The only global read/write is a random state hash claim. No caller-supplied tenant/account key bypass.
         TkTiktokShopAuthSessionDO session;
         try {session=TenantUtils.executeIgnore(()->{String digest=hash(state);if(sessions.claim(digest,LocalDateTime.now(clock))!=1)return null;return sessions.findClaimed(digest);});}
         catch(RuntimeException ignored){return new CallbackResult(null,false);}
         if(session==null || session.getTenantId()==null || session.getTenantId()<=0)return new CallbackResult(null,false);
         return TenantUtils.execute(session.getTenantId(),()->{
+            String type=session.getAuthType()==null?"CREATOR":session.getAuthType();String errorCode="AUTHORIZATION_FAILED";
             try {
+                boolean seller="SELLER".equals(type);
+                if(!seller && !"CREATOR".equals(type))throw new IllegalStateException();
+                if(seller)properties.requireSellerConfigured();else properties.requireConfigured();
+                if((session.getConfigurationHash()==null && (seller || session.getAppKey()!=null)) || (session.getConfigurationHash()!=null && (!Objects.equals(session.getConfigurationHash(),configurationHash(seller)) || !Objects.equals(session.getAppKey(),seller?properties.getSeller().getAppKey():properties.getAppKey()) || !Objects.equals(session.getEnvironment(),seller?properties.getSeller().getEnvironment():properties.getEnvironment())))) {
+                    errorCode="CONFIGURATION_CHANGED";throw new IllegalStateException();
+                }
                 if(error!=null || code==null || code.trim().isEmpty() || "null".equals(code))throw new IllegalArgumentException();
+                if(seller){
+                    TkTiktokShopApiClient.TokenBundle sellerToken=sellerAuth.exchangeCode(code);
+                    List<TkTiktokShopSellerApiClient.AuthorizedShop> shops=sellerAuth.fetchShops(sellerToken.getAccessToken());
+                    transaction.execute(tx->{sellerAuth.bind(session,sellerToken,shops);if(sessions.finish(session.getId(),session.getTenantId(),"SUCCESS",LocalDateTime.now(clock))!=1)throw new IllegalStateException();return null;});
+                    return new CallbackResult(session.getId(),true,type,null);
+                }
                 // Remote calls complete before beginning the local transaction.
                 TkTiktokShopApiClient.TokenBundle token=api.exchangeCode(code);
                 TkTiktokShopApiClient.CreatorProfile profile=api.getCreatorProfile(token.getAccessToken());
                 if(!"US".equals(profile.getSelectionRegion()))throw new IllegalArgumentException();
                 transaction.execute(tx->{bind(session,token,profile);if(sessions.finish(session.getId(),session.getTenantId(),"SUCCESS",LocalDateTime.now(clock))!=1)throw new IllegalStateException();return null;});
-                return new CallbackResult(session.getId(),true);
+                return new CallbackResult(session.getId(),true,type,null);
             }catch(RuntimeException ignored){
-                try {sessions.finish(session.getId(),session.getTenantId(),"FAILED",LocalDateTime.now(clock));}catch(RuntimeException ignoredAgain){/* Single-use PROCESSING remains closed on storage failure. */}
-                return new CallbackResult(session.getId(),false);
+                try {sessions.recordFailure(session.getId(),session.getTenantId(),errorCode);sessions.finish(session.getId(),session.getTenantId(),"FAILED",LocalDateTime.now(clock));}catch(RuntimeException ignoredAgain){/* Single-use PROCESSING remains closed on storage failure. */}
+                return new CallbackResult(session.getId(),false,type,errorCode);
             }
         });
+    }
+    private String configurationHash(boolean seller) {
+        String app=seller?properties.getSeller().getAppKey():properties.getAppKey();String secret=seller?properties.getSeller().getAppSecret():properties.getAppSecret();
+        String env=seller?properties.getSeller().getEnvironment():properties.getEnvironment();String url=seller?properties.getSeller().getAuthorizationUrl():"CREATOR";
+        return hash(java.util.Arrays.asList(seller?"SELLER":"CREATOR",app,secret,env,url,properties.getRedirectUri(),properties.getFrontendOrigin(),properties.getTokenEncryptionKey()).stream().map(v->v==null?"-1:":v.length()+":"+v).collect(Collectors.joining()));
     }
     private void bind(TkTiktokShopAuthSessionDO session,TkTiktokShopApiClient.TokenBundle token,TkTiktokShopApiClient.CreatorProfile profile) {
         TkTiktokShopAccountDO existing=accounts.findIdentity(session.getTenantId(),properties.getAppKey(),token.getOpenId());

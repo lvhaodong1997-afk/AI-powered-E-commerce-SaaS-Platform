@@ -13,6 +13,36 @@ import java.net.URI;
 @ConfigurationProperties(prefix = "tk.tiktok-shop")
 public class TkTiktokShopProperties {
     private boolean enabled = false;
+    private String environment = "PRODUCTION";
+    private Seller seller = new Seller();
+    @Getter @Setter public static class Seller {
+        private boolean enabled;
+        private String appKey, appSecret, authorizationUrl;
+        private String environment = "PRODUCTION";
+    }
+    public boolean isSellerConfigured() {
+        return seller != null && seller.isEnabled() && hasText(seller.getAppKey()) && hasText(seller.getAppSecret())
+            && validEnvironment(seller.getEnvironment()) && validSellerAuthorizationUrl(seller.getAuthorizationUrl())
+            && validUrl(redirectUri,true) && validUrl(frontendOrigin,false) && hasValidEncryptionKey();
+    }
+    public void requireSellerConfigured() { if (!isSellerConfigured()) throw new IllegalStateException("TikTok Shop seller configuration is disabled or incomplete"); }
+    public static boolean validEnvironment(String value) { return "TEST".equals(value) || "PRODUCTION".equals(value); }
+    public static boolean validSellerAuthorizationUrl(String value) {
+        try {
+            okhttp3.HttpUrl url=okhttp3.HttpUrl.parse(value);
+            if(url==null || !"https".equals(url.scheme()) || url.port()!=443 || !url.username().isEmpty() || !url.password().isEmpty() || url.fragment()!=null
+                || !("services.us.tiktokshop.com".equals(url.host()) || "services.tiktokshop.com".equals(url.host()))
+                || !"/open/authorize".equals(url.encodedPath()) || url.queryParameterValues("service_id").size()!=1
+                || url.queryParameter("service_id").trim().isEmpty()) return false;
+            return url.queryParameterNames().stream().allMatch(k->"service_id".equals(k));
+        } catch(Exception ignored) { return false; }
+    }
+    /** Internal credential view; never expose through controllers. */
+    public TkTiktokShopProperties sellerClientProperties() {
+        requireSellerConfigured();
+        TkTiktokShopProperties p=new TkTiktokShopProperties();p.setEnabled(true);p.setAppKey(seller.getAppKey());p.setAppSecret(seller.getAppSecret());
+        p.setRedirectUri(redirectUri);p.setFrontendOrigin(frontendOrigin);p.setTokenEncryptionKey(tokenEncryptionKey);p.setEnvironment(seller.getEnvironment());return p;
+    }
     private String appKey;
     private String appSecret;
     private String redirectUri;
@@ -32,7 +62,7 @@ public class TkTiktokShopProperties {
     public boolean isConfigured() {
         return enabled && hasText(appKey) && hasText(appSecret)
                 && validUrl(redirectUri, true) && validUrl(frontendOrigin, false)
-                && "US".equals(market) && hasValidEncryptionKey();
+                && validEnvironment(environment) && "US".equals(market) && hasValidEncryptionKey();
     }
 
     public boolean hasValidEncryptionKey() {
