@@ -6,7 +6,7 @@
       <p class="updated">Last updated: November 12, 2026</p>
 
       <article>
-        <p>ClipForge Studio is operated by 山西闻智科技有限公司. The company is the service provider under these Terms of Service.</p>
+        <p>These Terms of Service govern your use of ClipForge Studio.</p>
         <h2>1. Service Description</h2>
         <p>
           ClipForge Studio provides tools for short-form video analysis, script generation, video

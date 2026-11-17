@@ -6,7 +6,7 @@
       <p class="updated">Last updated: November 12, 2026</p>
 
       <article>
-        <p>ClipForge Studio is operated by 山西闻智科技有限公司. In this policy, “we”, “us”, and “our” refer to this company.</p>
+        <p>In this policy, “we”, “us”, and “our” refer to ClipForge Studio.</p>
         <h2>1. Overview</h2>
         <p>
           ClipForge Studio is a web-based video creation and publishing tool for creators and
