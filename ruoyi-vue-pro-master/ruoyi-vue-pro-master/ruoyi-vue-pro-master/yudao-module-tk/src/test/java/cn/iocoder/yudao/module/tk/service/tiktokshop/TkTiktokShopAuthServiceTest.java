@@ -31,7 +31,9 @@ class TkTiktokShopAuthServiceTest {
     @AfterEach void clear(){TenantContextHolder.clear();}
     @Test void stateIsRandomOnlyHashPersistedAndCreatorUrlUsed() {
         doAnswer(i->{((TkTiktokShopAuthSessionDO)i.getArgument(0)).setId(10L);return 1;}).when(sessions).insert(any(TkTiktokShopAuthSessionDO.class));
-        String first=auth.createSession(null).getAuthorizationUrl();String second=auth.createSession(null).getAuthorizationUrl();
+        cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAuthVO.SessionResponse firstSession=auth.createSession(null);
+        assertEquals(600,firstSession.getExpiresInSeconds());
+        String first=firstSession.getAuthorizationUrl();String second=auth.createSession(null).getAuthorizationUrl();
         assertNotEquals(first,second);assertTrue(first.startsWith("https://shop.tiktok.com/alliance/creator/auth?app_key="));assertFalse(first.contains("service_id"));
         ArgumentCaptor<TkTiktokShopAuthSessionDO> c=ArgumentCaptor.forClass(TkTiktokShopAuthSessionDO.class);verify(sessions,times(2)).insert(c.capture());
         String state=okhttp3.HttpUrl.parse(first).queryParameter("state"); assertEquals(43,state.length());

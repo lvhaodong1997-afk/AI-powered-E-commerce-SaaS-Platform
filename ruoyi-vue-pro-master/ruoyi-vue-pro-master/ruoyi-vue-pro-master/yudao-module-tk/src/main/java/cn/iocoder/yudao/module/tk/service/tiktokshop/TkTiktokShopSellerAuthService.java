@@ -57,8 +57,12 @@ public class TkTiktokShopSellerAuthService {
     }
     public List<SellerShopResponse> listShops(Long requestedCompany) {
         List<SellerShopResponse> result=new ArrayList<>();
-        for(SellerAccountResponse a:listAccounts(requestedCompany))for(TkTiktokShopSellerShopDO shop:shops.findByAccount(TenantContextHolder.getTenantId(),a.getId())){
-            validateShop(shop,requireReadable(a.getId()));result.add(new SellerShopResponse(shop));
+        for(SellerAccountResponse a:listAccounts(requestedCompany)){
+            List<TkTiktokShopSellerShopDO> found=shops.findByAccount(TenantContextHolder.getTenantId(),a.getId());
+            if(!found.isEmpty()){
+                TkTiktokShopSellerAccountDO parent=requireReadable(a.getId());
+                for(TkTiktokShopSellerShopDO shop:found){validateShop(shop,parent);result.add(new SellerShopResponse(shop));}
+            }
         }
         return result;
     }

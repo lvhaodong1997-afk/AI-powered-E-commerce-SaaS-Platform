@@ -53,7 +53,7 @@ public class TkTiktokShopAuthService {
         HttpUrl.Builder builder=HttpUrl.parse(seller?properties.getSeller().getAuthorizationUrl():"https://shop.tiktok.com/alliance/creator/auth").newBuilder();
         if(!seller)builder.addQueryParameter("app_key",properties.getAppKey());
         String url=builder.addQueryParameter("state",state).build().toString();
-        return new SessionResponse(session.getId(),url,session.getExpireTime());
+        return new SessionResponse(session.getId(),url,session.getExpireTime(),Math.max(0,java.time.Duration.between(LocalDateTime.now(clock),session.getExpireTime()).getSeconds()));
     }
     public CallbackResult callback(String code,String state,String error) {
         if(state==null || !state.matches("[A-Za-z0-9_-]{43}"))return new CallbackResult(null,false);
@@ -63,7 +63,7 @@ public class TkTiktokShopAuthService {
         catch(RuntimeException ignored){return new CallbackResult(null,false);}
         if(session==null || session.getTenantId()==null || session.getTenantId()<=0)return new CallbackResult(null,false);
         return TenantUtils.execute(session.getTenantId(),()->{
-            String type=session.getAuthType()==null?"CREATOR":session.getAuthType();String errorCode="AUTHORIZATION_FAILED";
+            String type=session.getAuthType()==null?"CREATOR":session.getAuthType();String errorCode="AUTHORIZATION_FAILED";String requestId=null;
             try {
                 boolean seller="SELLER".equals(type);
                 if(!seller && !"CREATOR".equals(type))throw new IllegalStateException();
@@ -84,9 +84,15 @@ public class TkTiktokShopAuthService {
                 if(!"US".equals(profile.getSelectionRegion()))throw new IllegalArgumentException();
                 transaction.execute(tx->{bind(session,token,profile);if(sessions.finish(session.getId(),session.getTenantId(),"SUCCESS",LocalDateTime.now(clock))!=1)throw new IllegalStateException();return null;});
                 return new CallbackResult(session.getId(),true,type,null);
-            }catch(RuntimeException ignored){
-                try {sessions.recordFailure(session.getId(),session.getTenantId(),errorCode);sessions.finish(session.getId(),session.getTenantId(),"FAILED",LocalDateTime.now(clock));}catch(RuntimeException ignoredAgain){/* Single-use PROCESSING remains closed on storage failure. */}
-                return new CallbackResult(session.getId(),false,type,errorCode);
+            }catch(RuntimeException failure){
+                if(!"CONFIGURATION_CHANGED".equals(errorCode) && failure instanceof TkTiktokShopApiException){
+                    TkTiktokShopApiException upstream=(TkTiktokShopApiException)failure;
+                    errorCode="WRONG_ACCOUNT_TYPE".equals(upstream.getCode())?"WRONG_ACCOUNT_TYPE":"INSUFFICIENT_SCOPE".equals(upstream.getCode())?"INSUFFICIENT_SCOPE":"PROVIDER_ERROR";
+                    requestId=upstream.getRequestId();
+                }
+                String safeFailure=requestId==null?errorCode:errorCode+":"+requestId;
+                try {sessions.recordFailure(session.getId(),session.getTenantId(),safeFailure);sessions.finish(session.getId(),session.getTenantId(),"FAILED",LocalDateTime.now(clock));}catch(RuntimeException ignoredAgain){/* Single-use PROCESSING remains closed on storage failure. */}
+                return new CallbackResult(session.getId(),false,type,errorCode,requestId);
             }
         });
     }

@@ -66,12 +66,12 @@ public class TkTiktokShopAuthController {
         String script="";
         // Incomplete configuration produces a static page with no cross-window message.
         if(result.getSessionId()!=null && (properties.isConfigured() || properties.isSellerConfigured())){
-            Map<String,Object> message=new LinkedHashMap<>();message.put("type","tiktok-shop-auth");message.put("sessionId",result.getSessionId());message.put("status",result.getStatus());message.put("authType",result.getAuthType());message.put("errorCode",result.getErrorCode());message.put("message",result.getMessage());
+            Map<String,Object> message=new LinkedHashMap<>();message.put("type","tiktok-shop-auth");message.put("sessionId",result.getSessionId());message.put("status",result.getStatus());message.put("authType",result.getAuthType());message.put("errorCode",result.getErrorCode());message.put("message",result.getMessage());message.put("requestId",result.getRequestId());
             try {script="<script nonce=\""+nonce+"\">if(window.opener){window.opener.postMessage("+safeJson(message)+","+safeJson(properties.getFrontendOrigin())+");}</script>";}
             catch(Exception ignored){/* No secrets or untrusted error text is reflected. */}
         }
         String html="<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>TikTok Shop 授权</title></head><body><p>"
-                +result.getMessage()+"</p>"+script+"</body></html>";
+                +result.getMessage()+(result.getRequestId()==null?"":" 请求 ID："+result.getRequestId())+"</p>"+script+"</body></html>";
         return ResponseEntity.ok().contentType(new MediaType("text","html",java.nio.charset.StandardCharsets.UTF_8))
                 .header("Content-Security-Policy","default-src 'none'; script-src 'nonce-"+nonce+"'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
                 .header("Referrer-Policy","no-referrer").header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff").body(html);

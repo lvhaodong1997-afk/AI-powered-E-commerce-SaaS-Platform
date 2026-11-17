@@ -62,6 +62,26 @@ class TkTiktokShopApiClientTest {
         for (String invalid:new String[]{raw.replace("\"user_type\":1","\"user_type\":0"),raw.replace("creator.video.write","creator.other"),raw.replace("\"open_id\":\"open\"","\"open_id\":\"\""),raw.replace("1800003600","3600")})
             assertThrows(TkTiktokShopApiException.class,()->TkTiktokShopApiClient.TokenBundle.parse(json.readTree(invalid),CLOCK));
     }
+    @Test void accountTypeAndScopeRemainDistinctForCreatorAndSeller() throws Exception {
+        ObjectMapper json=new ObjectMapper();
+        String seller="{\"access_token\":\"a\",\"refresh_token\":\"r\",\"open_id\":\"open\",\"user_type\":0,\"granted_scopes\":[\"seller.authorization.info\"],\"access_token_expire_in\":1800003600,\"refresh_token_expire_in\":1800100000}";
+        assertEquals("WRONG_ACCOUNT_TYPE",assertThrows(TkTiktokShopApiException.class,()->TkTiktokShopApiClient.TokenBundle.parse(json.readTree(seller),CLOCK)).getCode());
+        assertEquals("WRONG_ACCOUNT_TYPE",assertThrows(TkTiktokShopApiException.class,()->TkTiktokShopApiClient.TokenBundle.parse(json.readTree(seller.replace("\"user_type\":0","\"user_type\":1")),CLOCK,0,"seller.authorization.info")).getCode());
+        assertEquals("INSUFFICIENT_SCOPE",assertThrows(TkTiktokShopApiException.class,()->TkTiktokShopApiClient.TokenBundle.parse(json.readTree(seller.replace("seller.authorization.info","seller.other")),CLOCK,0,"seller.authorization.info")).getCode());
+        assertEquals("INSUFFICIENT_SCOPE",assertThrows(TkTiktokShopApiException.class,()->TkTiktokShopApiClient.TokenBundle.parse(json.readTree(seller.replace("\"user_type\":0","\"user_type\":1")),CLOCK)).getCode());
+        assertEquals("INVALID_TOKEN",assertThrows(TkTiktokShopApiException.class,()->TkTiktokShopApiClient.TokenBundle.parse(json.readTree(seller.replace("\"open_id\":\"open\"","\"open_id\":\"\"")),CLOCK,0,"seller.authorization.info")).getCode());
+        assertTrue(new TkTiktokShopApiException("WRONG_ACCOUNT_TYPE",null).isReauthorizationRequired());
+        assertTrue(new TkTiktokShopApiException("INSUFFICIENT_SCOPE",null).isReauthorizationRequired());
+    }
+    @Test void exchangeRetainsTypedReasonAndSanitizesRequestId() throws Exception {
+        HttpServer server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        AtomicReference<String> id=new AtomicReference<>("safe-id:12");
+        server.createContext("/api/v2/token/get",e->{byte[] out=("{\"code\":0,\"request_id\":\""+id.get()+"\",\"data\":{\"access_token\":\"a\",\"refresh_token\":\"r\",\"open_id\":\"open\",\"user_type\":0,\"granted_scopes\":[\"seller.authorization.info\"],\"access_token_expire_in\":1800003600,\"refresh_token_expire_in\":1800100000}}").getBytes(StandardCharsets.UTF_8);e.sendResponseHeaders(200,out.length);e.getResponseBody().write(out);e.close();});server.start();
+        try {String base="http://127.0.0.1:"+server.getAddress().getPort();TkTiktokShopApiClient client=new TkTiktokShopApiClient(TkTiktokShopTokenCipherTest.properties(),new ObjectMapper(),new OkHttpClient(),CLOCK,base,base);
+            TkTiktokShopApiException failure=assertThrows(TkTiktokShopApiException.class,()->client.exchangeCode("raw-code"));assertEquals("WRONG_ACCOUNT_TYPE",failure.getCode());assertEquals("safe-id:12",failure.getRequestId());
+            id.set("<script>secret</script>");failure=assertThrows(TkTiktokShopApiException.class,()->client.exchangeCode("raw-code"));assertNull(failure.getRequestId());assertFalse(failure.toString().contains("secret"));
+        }finally{server.stop(0);}
+    }
     @Test void tokenEndpointsUseExactGetContractAndProfileCategoryStaysAString() throws Exception {
         AtomicReference<String> request=new AtomicReference<>();
         HttpServer server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);

@@ -31,6 +31,14 @@ class TkTiktokShopControllerTest {
         for(Method m:TkTiktokShopAuthController.class.getDeclaredMethods())if(java.lang.reflect.Modifier.isPublic(m.getModifiers()) && !m.getName().equals("callback"))assertNotNull(m.getAnnotation(PreAuthorize.class),m.getName());
         assertFalse(TkTiktokShopAuthController.class.getMethod("createSession",SessionRequest.class).getAnnotation(ApiAccessLog.class).enable());
     }
+    @Test void callbackHtmlAndMessageExposeSafeDiagnosticsOnly() {
+        TkTiktokShopAuthService auth=mock(TkTiktokShopAuthService.class);
+        when(auth.callback(anyString(),anyString(),anyString())).thenReturn(new CallbackResult(5L,false,"SELLER","WRONG_ACCOUNT_TYPE","safe-request:1"));
+        TkTiktokShopAuthController controller=new TkTiktokShopAuthController(auth,TkTiktokShopTokenCipherTest.properties(),new ObjectMapper());
+        String html=controller.callback("raw-code","raw-state","raw-provider-secret").getBody();
+        assertTrue(html.contains("WRONG_ACCOUNT_TYPE"));assertTrue(html.contains("<p>") && html.contains("请求 ID：safe-request:1</p>"));assertTrue(html.contains("账号类型"));
+        assertFalse(html.contains("raw-code"));assertFalse(html.contains("raw-state"));assertFalse(html.contains("raw-provider-secret"));
+    }
     @Test void safeCapabilitiesExcludeSettingsAndExposeCallbackOriginOnly() throws Exception {
         String json=new ObjectMapper().writeValueAsString(new Capabilities(TkTiktokShopTokenCipherTest.properties()));
         assertTrue(json.contains("https://callback.example"));assertFalse(json.contains("/auth/callback"));

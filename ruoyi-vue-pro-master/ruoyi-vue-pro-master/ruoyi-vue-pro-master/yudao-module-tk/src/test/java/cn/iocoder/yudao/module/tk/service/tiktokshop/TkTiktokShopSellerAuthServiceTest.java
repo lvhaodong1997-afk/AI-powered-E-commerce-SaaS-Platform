@@ -63,6 +63,18 @@ class TkTiktokShopSellerAuthServiceTest {
         String state=start();when(api.exchangeCode(anyString())).thenThrow(new RuntimeException("raw-secret-code access-token https://private"));
         cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAuthVO.CallbackResult result=auth.callback("raw-secret-code",state,null);assertEquals("AUTHORIZATION_FAILED",result.getErrorCode());assertFalse(result.getMessage().contains("raw-secret"));verify(sessions).recordFailure(5L,1L,"AUTHORIZATION_FAILED");
     }
+    @Test void callbackKeepsOnlyAllowlistedDiagnosticsAndSafeRequestId() {
+        for(String reason:new String[]{"WRONG_ACCOUNT_TYPE","INSUFFICIENT_SCOPE","105005"}){
+            reset(api,sessions);setup();String state=start();when(api.exchangeCode(anyString())).thenThrow(new TkTiktokShopApiException(reason,"safe-id:123"));
+            cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAuthVO.CallbackResult result=auth.callback("raw-secret-code",state,null);
+            String expected="105005".equals(reason)?"PROVIDER_ERROR":reason;
+            assertEquals(expected,result.getErrorCode());assertEquals("safe-id:123",result.getRequestId());
+            assertFalse(result.getMessage().contains("raw-secret"));verify(sessions).recordFailure(5L,1L,expected+":safe-id:123");
+        }
+        reset(api,sessions);setup();String state=start();when(api.exchangeCode(anyString())).thenThrow(new TkTiktokShopApiException("<script>private</script>","<script>secret</script>"));
+        cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAuthVO.CallbackResult result=auth.callback("raw-secret-code",state,null);
+        assertEquals("PROVIDER_ERROR",result.getErrorCode());assertNull(result.getRequestId());verify(sessions).recordFailure(5L,1L,"PROVIDER_ERROR");
+    }
     @Test void removedShopsAreInvalidatedAndExistingIdsRetainedOnReauthorization() throws Exception {
         start();TkTiktokShopSellerAccountDO a=account();when(accounts.findIdentity(1L,"seller-key","PRODUCTION","seller-open")).thenReturn(a);when(accounts.reauthorize(any(),eq(2L))).thenReturn(1);
         TkTiktokShopSellerShopDO old=shop(20L,"kept");when(shops.findByAccount(1L,10L)).thenReturn(List.of(old,shop(21L,"removed")));
@@ -72,6 +84,14 @@ class TkTiktokShopSellerAuthServiceTest {
     @Test void differentOwnerCannotRebindSellerIdentity() throws Exception {
         start();TkTiktokShopSellerAccountDO a=account();a.setCompanyId(2L);when(accounts.findIdentity(anyLong(),anyString(),anyString(),anyString())).thenReturn(a);
         assertThrows(IllegalArgumentException.class,()->seller.bind(saved,token(),Collections.emptyList()));verify(shops,never()).invalidate(anyLong(),anyLong());
+    }
+    @Test void listingTwoShopsReusesOneValidatedAccountAndChecksEachShop() {
+        TkTiktokShopSellerAccountDO a=account();when(accounts.selectList(any(cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX.class))).thenReturn(List.of(a));
+        when(accounts.selectById(10L)).thenReturn(a);when(shops.findByAccount(1L,10L)).thenReturn(List.of(shop(20L,"one"),shop(21L,"two")));
+        assertEquals(2,seller.listShops(1L).size());verify(accounts,times(1)).selectById(10L);
+        reset(shops);TkTiktokShopSellerShopDO foreign=shop(21L,"two");foreign.setEnvironment("TEST");
+        when(shops.findByAccount(1L,10L)).thenReturn(List.of(shop(20L,"one"),foreign));
+        assertThrows(IllegalArgumentException.class,()->seller.listShops(1L));
     }
     @Test void scopedShopLookupRejectsCrossTenantCompanyEnvironmentOrUnavailableShop() {
         TkTiktokShopSellerAccountDO a=account();TkTiktokShopSellerShopDO s=shop(20L,"shop");when(accounts.selectById(10L)).thenReturn(a);when(shops.selectById(20L)).thenReturn(s);

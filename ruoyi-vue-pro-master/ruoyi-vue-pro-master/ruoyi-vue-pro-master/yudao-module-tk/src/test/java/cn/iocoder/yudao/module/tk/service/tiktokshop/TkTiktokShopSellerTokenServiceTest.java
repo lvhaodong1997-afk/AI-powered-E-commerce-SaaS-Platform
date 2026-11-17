@@ -42,6 +42,13 @@ class TkTiktokShopSellerTokenServiceTest {
         when(accounts.selectById(3L)).thenReturn(account());when(api.refreshToken("refresh")).thenThrow(new TkTiktokShopApiException("105001","r"));
         assertThrows(TkTiktokShopApiException.class,()->service.getAccessToken(1L,1L,3L));verify(accounts).markReauthorization(3L,1L,4L);
     }
+    @Test void typedRefreshRejectionRequiresFreshAuthorization() {
+        for(String reason:new String[]{"WRONG_ACCOUNT_TYPE","INSUFFICIENT_SCOPE"}){
+            reset(api,accounts);when(accounts.selectById(3L)).thenReturn(account());when(api.refreshToken("refresh")).thenThrow(new TkTiktokShopApiException(reason,"request-1"));
+            assertEquals(reason,assertThrows(TkTiktokShopApiException.class,()->service.getAccessToken(1L,1L,3L)).getCode());
+            verify(accounts).markReauthorization(3L,1L,4L);
+        }
+    }
     @Test void wrongRefreshIdentityIsRejectedAndLockContentionNeverCallsProvider() throws Exception {
         when(accounts.selectById(3L)).thenReturn(account());when(api.refreshToken("refresh")).thenReturn(bundle("different"));
         assertThrows(TkTiktokShopApiException.class,()->service.getAccessToken(1L,1L,3L));verify(accounts,never()).replaceTokens(any(),anyLong());

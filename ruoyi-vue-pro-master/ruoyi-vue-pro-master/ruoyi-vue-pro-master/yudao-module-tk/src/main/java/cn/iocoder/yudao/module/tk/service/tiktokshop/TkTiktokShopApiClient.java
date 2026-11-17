@@ -68,7 +68,7 @@ public class TkTiktokShopApiClient {
                 .addQueryParameter("app_key",properties.getAppKey()).addQueryParameter("app_secret",properties.getAppSecret())
                 .addQueryParameter(parameter,value).addQueryParameter("grant_type",grant).build();
         Result result=execute(new Request.Builder().url(url).get().build());
-        try {return TokenBundle.parse(result.getData(),clock,expectedUserType,requiredScope);}catch(TkTiktokShopApiException ignored){throw new TkTiktokShopApiException("INVALID_TOKEN",result.getRequestId());}
+        try {return TokenBundle.parse(result.getData(),clock,expectedUserType,requiredScope);}catch(TkTiktokShopApiException e){throw new TkTiktokShopApiException(e.getCode(),result.getRequestId());}
     }
     public CreatorProfile getCreatorProfile(String token) {
         Result result=get("/affiliate_creator/202508/profiles",token,Collections.emptyMap());JsonNode data=result.getData();
@@ -116,12 +116,14 @@ public class TkTiktokShopApiClient {
         static TokenBundle parse(JsonNode data,Clock clock,int userType,String scope) {
             try {
                 String a=text(data,"access_token"),r=text(data,"refresh_token"),open=text(data,"open_id");
-                if(a==null || r==null || open==null || !data.path("user_type").isIntegralNumber() || data.path("user_type").asInt()!=userType || !hasScope(data.path("granted_scopes"),scope))throw new IllegalArgumentException();
+                if(a==null || r==null || open==null || !data.path("user_type").isIntegralNumber())throw new IllegalArgumentException();
+                if(data.path("user_type").asInt()!=userType)throw new TkTiktokShopApiException("WRONG_ACCOUNT_TYPE",null);
+                if(!hasScope(data.path("granted_scopes"),scope))throw new TkTiktokShopApiException("INSUFFICIENT_SCOPE",null);
                 if(!data.path("access_token_expire_in").isIntegralNumber() || !data.path("refresh_token_expire_in").isIntegralNumber())throw new IllegalArgumentException();
                 long ae=data.path("access_token_expire_in").asLong(),re=data.path("refresh_token_expire_in").asLong();
                 if(ae<=clock.instant().getEpochSecond() || re<=clock.instant().getEpochSecond())throw new IllegalArgumentException();
                 return new TokenBundle(a,r,open,data.path("granted_scopes").toString(),LocalDateTime.ofInstant(Instant.ofEpochSecond(ae),ZoneOffset.UTC),LocalDateTime.ofInstant(Instant.ofEpochSecond(re),ZoneOffset.UTC));
-            }catch(Exception ignored){throw new TkTiktokShopApiException("INVALID_TOKEN",null);}
+            }catch(TkTiktokShopApiException e){throw e;}catch(Exception ignored){throw new TkTiktokShopApiException("INVALID_TOKEN",null);}
         }
         public static boolean hasScope(JsonNode scopes){return hasScope(scopes,REQUIRED_SCOPE);}
         public static boolean hasScope(JsonNode scopes,String required){if(!scopes.isArray())return false;for(JsonNode scope:scopes)if(scope.isTextual() && required.equals(scope.asText()))return true;return false;}

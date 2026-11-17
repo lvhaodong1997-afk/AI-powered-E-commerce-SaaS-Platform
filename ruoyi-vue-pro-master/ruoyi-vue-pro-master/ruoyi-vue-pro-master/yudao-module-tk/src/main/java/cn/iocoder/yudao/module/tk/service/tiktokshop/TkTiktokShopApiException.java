@@ -16,6 +16,7 @@ public class TkTiktokShopApiException extends RuntimeException {
     public String getRequestId() { return requestId; }
     public boolean isReauthorizationRequired() {
         return "105001".equals(code) || "105002".equals(code) || "105005".equals(code)
-                || "101000".equals(code) || "INVALID_IDENTITY".equals(code) || "INVALID_TOKEN".equals(code);
+                || "101000".equals(code) || "INVALID_IDENTITY".equals(code) || "INVALID_TOKEN".equals(code)
+                || "WRONG_ACCOUNT_TYPE".equals(code) || "INSUFFICIENT_SCOPE".equals(code);
     }
 }

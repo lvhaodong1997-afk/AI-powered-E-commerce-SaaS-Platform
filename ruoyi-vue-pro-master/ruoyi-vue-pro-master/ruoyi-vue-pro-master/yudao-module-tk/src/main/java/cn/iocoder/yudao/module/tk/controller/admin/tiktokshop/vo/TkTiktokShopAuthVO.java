@@ -12,12 +12,35 @@ public final class TkTiktokShopAuthVO {
     @Getter @Setter public static class SessionRequest { private Long companyId; private String authType; }
     @Getter public static class SessionResponse {
         private final Long sessionId; private final String authorizationUrl; private final LocalDateTime expireTime;
-        public SessionResponse(Long id,String url,LocalDateTime expiry){sessionId=id;authorizationUrl=url;expireTime=expiry;}
+        private final long expiresInSeconds;
+        public SessionResponse(Long id,String url,LocalDateTime expiry){this(id,url,expiry,0);}
+        public SessionResponse(Long id,String url,LocalDateTime expiry,long seconds){sessionId=id;authorizationUrl=url;expireTime=expiry;expiresInSeconds=Math.max(0,Math.min(600,seconds));}
     }
     @Getter public static class CallbackResult {
-        private final Long sessionId; private final String status,authType,errorCode,message;
-        public CallbackResult(Long id,boolean success){this(id,success,"CREATOR",success?null:"INVALID_STATE");}
-        public CallbackResult(Long id,boolean success,String type,String error){sessionId=id;status=success?"SUCCESS":"FAILED";authType="SELLER".equals(type)?"SELLER":"CREATOR";errorCode=error;message=success?"授权完成，请返回授权页面。":"CONFIGURATION_CHANGED".equals(error)?"授权配置已变更，请重新发起授权。":id==null?"授权会话无效、已过期或已使用，请重新发起授权。":"授权未完成，请确认账号、权限和应用配置后重试。";}
+        private final Long sessionId; private final String status,authType,errorCode,message,requestId;
+        public CallbackResult(Long id,boolean success){this(id,success,"CREATOR",success?null:"INVALID_STATE",null);}
+        public CallbackResult(Long id,boolean success,String type,String error){this(id,success,type,error,null);}
+        public CallbackResult(Long id,boolean success,String type,String error,String requestId){
+            sessionId=id;status=success?"SUCCESS":"FAILED";authType="SELLER".equals(type)?"SELLER":"CREATOR";
+            errorCode=success?null:safeCode(error,id);
+            this.requestId=success||id==null?null:requestId!=null&&requestId.matches("[A-Za-z0-9_:-]{1,128}")?requestId:null;
+            message=success?"授权完成，请返回授权页面。":messageFor(errorCode);
+        }
+        private static String safeCode(String code,Long id){
+            if(id==null)return "INVALID_STATE";
+            if("CONFIGURATION_CHANGED".equals(code)||"WRONG_ACCOUNT_TYPE".equals(code)||"INSUFFICIENT_SCOPE".equals(code)||"PROVIDER_ERROR".equals(code))return code;
+            return "AUTHORIZATION_FAILED";
+        }
+        private static String messageFor(String code){
+            switch(code){
+                case "INVALID_STATE":return "授权会话无效、已过期或已使用，请重新发起授权。";
+                case "CONFIGURATION_CHANGED":return "授权配置已变更，请重新发起授权。";
+                case "WRONG_ACCOUNT_TYPE":return "账号类型不匹配，请选择正确的创作者或卖家账号重新授权。";
+                case "INSUFFICIENT_SCOPE":return "账号授权权限不足，请检查应用权限并重新授权。";
+                case "PROVIDER_ERROR":return "平台授权暂未完成，请稍后重试，必要时联系管理员并提供请求 ID。";
+                default:return "授权未完成，请确认账号、权限和应用配置后重试。";
+            }
+        }
     }
     @Getter public static class Capabilities {
         private final boolean enabled,configured,publishingConfigured,supportsProducts,supportsPrecheck;
