@@ -4,6 +4,8 @@ import cn.iocoder.yudao.module.tk.framework.config.TkTiktokShopProperties;
 import com.fasterxml.jackson.databind.*;
 import okhttp3.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import java.io.*;
 import java.time.*;
@@ -11,6 +13,7 @@ import java.util.*;
 
 @Component
 public class TkTiktokShopApiClient {
+    private static final Logger log=LoggerFactory.getLogger(TkTiktokShopApiClient.class);
     public static final String REQUIRED_SCOPE = "creator.video.write";
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
     private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -89,7 +92,10 @@ public class TkTiktokShopApiClient {
             String requestId=text(root,"request_id");
             if(!root.path("code").isIntegralNumber())throw new TkTiktokShopApiException("INVALID_RESPONSE",requestId);
             long code=root.path("code").asLong();
-            if(code!=0 || !response.isSuccessful())throw new TkTiktokShopApiException(code==0?"HTTP_ERROR":Long.toString(code),requestId);
+            if(code!=0 || !response.isSuccessful()){
+                log.warn("TikTok Shop request failed endpoint={} httpStatus={} tiktokCode={} requestId={}", request.url().encodedPath(), response.code(), code, requestId);
+                throw new TkTiktokShopApiException(code==0?"HTTP_ERROR":Long.toString(code),requestId);
+            }
             if(!root.path("data").isObject())throw new TkTiktokShopApiException("INVALID_RESPONSE",requestId);
             return new Result(root.path("data"),new TkTiktokShopApiException("0",requestId).getRequestId());
         }catch(TkTiktokShopApiException e){throw e;}catch(Exception ignored){throw new TkTiktokShopApiException("TRANSPORT_ERROR",null);}

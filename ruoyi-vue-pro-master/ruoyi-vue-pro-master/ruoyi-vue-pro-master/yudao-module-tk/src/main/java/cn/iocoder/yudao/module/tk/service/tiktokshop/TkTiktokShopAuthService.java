@@ -22,6 +22,9 @@ import java.util.stream.Collectors;
 
 @Service
 public class TkTiktokShopAuthService {
+    public static final ZoneId SESSION_ZONE=ZoneId.of("Asia/Shanghai");
+    public static final int SESSION_TTL_MINUTES=30;
+    public static final int SESSION_TTL_SECONDS=SESSION_TTL_MINUTES*60;
     private final TkTiktokShopProperties properties;
     private final TkTiktokShopAuthSessionMapper sessions;
     private final TkTiktokShopAccountMapper accounts;
@@ -34,7 +37,7 @@ public class TkTiktokShopAuthService {
     private final SecureRandom random=new SecureRandom();
     @Autowired
     public TkTiktokShopAuthService(TkTiktokShopProperties p,TkTiktokShopAuthSessionMapper sessions,TkTiktokShopAccountMapper accounts,TkDataScopeService scope,TkTiktokShopApiClient api,TkTiktokShopTokenCipher cipher,ObjectMapper json,PlatformTransactionManager tx) {
-        this(p,sessions,accounts,scope,api,cipher,json,tx,Clock.systemUTC());
+        this(p,sessions,accounts,scope,api,cipher,json,tx,Clock.system(SESSION_ZONE));
     }
     TkTiktokShopAuthService(TkTiktokShopProperties p,TkTiktokShopAuthSessionMapper sessions,TkTiktokShopAccountMapper accounts,TkDataScopeService scope,TkTiktokShopApiClient api,TkTiktokShopTokenCipher cipher,ObjectMapper json,PlatformTransactionManager tx,Clock clock) {
         properties=p;this.sessions=sessions;this.accounts=accounts;this.scope=scope;this.api=api;this.cipher=cipher;this.transaction=new TransactionTemplate(tx);this.clock=clock;
@@ -49,7 +52,7 @@ public class TkTiktokShopAuthService {
         byte[] bytes=new byte[32];random.nextBytes(bytes);String state=Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         TkTiktokShopAuthSessionDO session=new TkTiktokShopAuthSessionDO();session.setTenantId(current.getTenantId());session.setCompanyId(company);session.setUserId(current.getUserId());session.setCreator(current.getUserIdString());session.setUpdater(current.getUserIdString());
         session.setAuthType(type);session.setAppKey(seller?properties.getSeller().getAppKey():properties.getAppKey());session.setEnvironment(seller?properties.getSeller().getEnvironment():properties.getEnvironment());session.setConfigurationHash(configurationHash(seller));
-        session.setStateHash(hash(state));session.setStatus("WAITING");session.setExpireTime(LocalDateTime.now(clock).plusMinutes(10));sessions.insert(session);
+        session.setStateHash(hash(state));session.setStatus("WAITING");session.setExpireTime(LocalDateTime.now(clock).plusMinutes(SESSION_TTL_MINUTES));sessions.insert(session);
         HttpUrl.Builder builder=HttpUrl.parse(seller?properties.getSeller().getAuthorizationUrl():"https://shop.tiktok.com/alliance/creator/auth").newBuilder();
         if(!seller)builder.addQueryParameter("app_key",properties.getAppKey());
         String url=builder.addQueryParameter("state",state).build().toString();
@@ -58,11 +61,25 @@ public class TkTiktokShopAuthService {
     public CallbackResult callback(String code,String state,String error) {
         if(state==null || !state.matches("[A-Za-z0-9_-]{43}"))return new CallbackResult(null,false);
         // The only global read/write is a random state hash claim. No caller-supplied tenant/account key bypass.
-        TkTiktokShopAuthSessionDO session;
-        try {session=TenantUtils.executeIgnore(()->{String digest=hash(state);if(sessions.claim(digest,LocalDateTime.now(clock))!=1)return null;return sessions.findClaimed(digest);});}
-        catch(RuntimeException ignored){return new CallbackResult(null,false);}
+        try {
+            return TenantUtils.executeIgnore(()->{
+                String digest=hash(state);
+                if(sessions.claim(digest,LocalDateTime.now(clock))!=1)return replayedCallback(digest);
+                TkTiktokShopAuthSessionDO session=sessions.findClaimed(digest);
+                if(session==null || session.getTenantId()==null || session.getTenantId()<=0)return new CallbackResult(null,false);
+                return TenantUtils.execute(session.getTenantId(),()->completeCallback(session,code,error));
+            });
+        }catch(RuntimeException ignored){return new CallbackResult(null,false);}
+    }
+    private CallbackResult replayedCallback(String digest) {
+        TkTiktokShopAuthSessionDO session=sessions.findByStateHash(digest);
         if(session==null || session.getTenantId()==null || session.getTenantId()<=0)return new CallbackResult(null,false);
-        return TenantUtils.execute(session.getTenantId(),()->{
+        String type=session.getAuthType()==null?"CREATOR":session.getAuthType();
+        if("SUCCESS".equals(session.getStatus()))return new CallbackResult(session.getId(),true,type,null);
+        if("FAILED".equals(session.getStatus()) || "PROCESSING".equals(session.getStatus()))return CallbackResult.fromStoredFailure(session.getId(),type,session.getFailReason());
+        return new CallbackResult(null,false);
+    }
+    private CallbackResult completeCallback(TkTiktokShopAuthSessionDO session,String code,String error) {
             String type=session.getAuthType()==null?"CREATOR":session.getAuthType();String errorCode="AUTHORIZATION_FAILED";String requestId=null;
             try {
                 boolean seller="SELLER".equals(type);
@@ -90,11 +107,11 @@ public class TkTiktokShopAuthService {
                     errorCode="WRONG_ACCOUNT_TYPE".equals(upstream.getCode())?"WRONG_ACCOUNT_TYPE":"INSUFFICIENT_SCOPE".equals(upstream.getCode())?"INSUFFICIENT_SCOPE":"PROVIDER_ERROR";
                     requestId=upstream.getRequestId();
                 }
-                String safeFailure=requestId==null?errorCode:errorCode+":"+requestId;
+                String upstreamCode=failure instanceof TkTiktokShopApiException?((TkTiktokShopApiException)failure).getCode():null;
+                String safeFailure=persistFailure(errorCode,upstreamCode,requestId);
                 try {sessions.recordFailure(session.getId(),session.getTenantId(),safeFailure);sessions.finish(session.getId(),session.getTenantId(),"FAILED",LocalDateTime.now(clock));}catch(RuntimeException ignoredAgain){/* Single-use PROCESSING remains closed on storage failure. */}
                 return new CallbackResult(session.getId(),false,type,errorCode,requestId);
             }
-        });
     }
     private String configurationHash(boolean seller) {
         String app=seller?properties.getSeller().getAppKey():properties.getAppKey();String secret=seller?properties.getSeller().getAppSecret():properties.getAppSecret();
@@ -132,6 +149,13 @@ public class TkTiktokShopAuthService {
         scope.validateReadable(a.getTenantId(),a.getCompanyId(),a.getCreator());
     }
     private static IllegalArgumentException denied(){return new IllegalArgumentException("Shop account unavailable or access denied");}
+    static String persistFailure(String errorCode,String upstreamCode,String requestId) {
+        boolean numeric=upstreamCode!=null && upstreamCode.matches("[0-9]{1,32}");
+        if(numeric && requestId!=null)return errorCode+":"+upstreamCode+":"+requestId;
+        if(requestId!=null)return errorCode+":"+requestId;
+        if(numeric)return errorCode+":"+upstreamCode;
+        return errorCode;
+    }
     public static String hash(String state) {
         try {byte[] bytes=MessageDigest.getInstance("SHA-256").digest(state.getBytes(StandardCharsets.UTF_8));StringBuilder hex=new StringBuilder();for(byte b:bytes)hex.append(String.format("%02x",b&255));return hex.toString();}
         catch(NoSuchAlgorithmException ignored){throw new IllegalStateException("State hashing unavailable");}

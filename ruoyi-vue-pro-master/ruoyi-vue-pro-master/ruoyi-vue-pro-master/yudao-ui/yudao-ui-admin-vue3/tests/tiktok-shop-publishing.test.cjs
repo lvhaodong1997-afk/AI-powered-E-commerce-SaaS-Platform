@@ -16,7 +16,7 @@ function load(relative, imports = {}) {
 }
 
 test('OAuth message guard accepts only the exact popup origin source and session', () => {
-  const { acceptShopOAuthMessage } = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
+  const { acceptShopOAuthMessage, shopAuthErrorKey } = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
   const popup = {}
   const expected = { callbackOrigin: 'https://shop.example', sessionId: 42 }
   assert.equal(acceptShopOAuthMessage({ origin: 'https://shop.example', source: popup, data: { type: 'tiktok-shop-auth', sessionId: 42, status: 'SUCCESS' } }, expected, popup), true)
@@ -26,6 +26,12 @@ test('OAuth message guard accepts only the exact popup origin source and session
   assert.equal(acceptShopOAuthMessage({ origin: 'https://shop.example', source: {}, data: { type: 'tiktok-shop-auth', sessionId: 42, status: 'SUCCESS' } }, expected, popup), false)
   assert.equal(acceptShopOAuthMessage({ origin: 'https://shop.example', source: popup, data: { type: 'tiktok-shop-auth', sessionId: 41, status: 'SUCCESS' } }, expected, popup), false)
   assert.equal(acceptShopOAuthMessage({ origin: 'https://shop.example', source: popup, data: { type: 'other', sessionId: 42, status: 'SUCCESS' } }, expected, popup), false)
+assert.equal(shopAuthErrorKey('INVALID_STATE'), 'shop.authorizationInvalid')
+assert.equal(shopAuthErrorKey('PROVIDER_ERROR'), 'shop.authorizationProviderError')
+assert.equal(shopAuthErrorKey('CONFIGURATION_CHANGED'), 'shop.authorizationConfigChanged')
+assert.equal(shopAuthErrorKey('WRONG_ACCOUNT_TYPE'), 'shop.authorizationWrongAccount')
+assert.equal(shopAuthErrorKey('INSUFFICIENT_SCOPE'), 'shop.authorizationInsufficientScope')
+assert.equal(shopAuthErrorKey('OTHER'), 'shop.authorizationFailed')
 })
 
 test('changing immutable form inputs invalidates confirmation and idempotency', () => {
@@ -330,8 +336,9 @@ test('actual panel history resumes polling and uses the immutable task account',
 test('OAuth timeout uses returned session lifetime instead of a fixed five minutes', () => {
   const { shopOAuthTimeoutMs } = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
   assert.equal(shopOAuthTimeoutMs({ expiresInSeconds: 180 }), 180_000)
+assert.equal(shopOAuthTimeoutMs({ expiresInSeconds: 1800 }), 1_800_000)
   assert.equal(shopOAuthTimeoutMs({ expireTime: '2026-11-17T14:20:00.000Z' }, Date.parse('2026-11-17T14:10:00.000Z')), 600_000)
-  assert.equal(shopOAuthTimeoutMs({}, 0), 600_000)
+  assert.equal(shopOAuthTimeoutMs({}, 0), 1_800_000)
 })
 
 test('catalog cursor keeps a previous-page stack and resets independently', () => {

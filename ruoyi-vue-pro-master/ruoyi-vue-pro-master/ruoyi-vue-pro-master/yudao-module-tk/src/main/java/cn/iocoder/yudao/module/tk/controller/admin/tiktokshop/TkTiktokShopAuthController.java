@@ -76,7 +76,11 @@ public class TkTiktokShopAuthController {
         // Incomplete configuration produces a static page with no cross-window message.
         if(result.getSessionId()!=null && (properties.isConfigured() || properties.isSellerConfigured())){
             Map<String,Object> message=new LinkedHashMap<>();message.put("type","tiktok-shop-auth");message.put("sessionId",result.getSessionId());message.put("status",result.getStatus());message.put("authType",result.getAuthType());message.put("errorCode",result.getErrorCode());message.put("message",result.getMessage());message.put("requestId",result.getRequestId());
-            try {script="<script nonce=\""+nonce+"\">if(window.opener){window.opener.postMessage("+safeJson(message)+","+safeJson(properties.getFrontendOrigin())+");}</script>";}
+            try {
+                String landing=landingUrl(result);
+                script="<script nonce=\""+nonce+"\">if(window.opener){window.opener.postMessage("+safeJson(message)+","+safeJson(properties.getFrontendOrigin())+");}"
+                    +(landing==null?"":"location.replace("+safeJson(landing)+");")+"</script>";
+            }
             catch(Exception ignored){/* No secrets or untrusted error text is reflected. */}
         }
         String html="<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>TikTok Shop 授权</title></head><body><p>"
@@ -84,6 +88,17 @@ public class TkTiktokShopAuthController {
         return ResponseEntity.ok().contentType(new MediaType("text","html",java.nio.charset.StandardCharsets.UTF_8))
                 .header("Content-Security-Policy","default-src 'none'; script-src 'nonce-"+nonce+"'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
                 .header("Referrer-Policy","no-referrer").header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff").body(html);
+    }
+    String landingUrl(CallbackResult result){
+        if(result==null || (!properties.isConfigured() && !properties.isSellerConfigured()))return null;
+        okhttp3.HttpUrl base=okhttp3.HttpUrl.parse(properties.getFrontendOrigin());
+        if(base==null)return null;
+        okhttp3.HttpUrl.Builder url=base.newBuilder().setQueryParameter("tiktok_shop_auth","1").setQueryParameter("status",result.getStatus());
+        if(result.getAuthType()!=null)url.setQueryParameter("authType",result.getAuthType());
+        if(result.getSessionId()!=null)url.setQueryParameter("sessionId",String.valueOf(result.getSessionId()));
+        if(result.getErrorCode()!=null)url.setQueryParameter("errorCode",result.getErrorCode());
+        if(result.getRequestId()!=null)url.setQueryParameter("requestId",result.getRequestId());
+        return url.build().toString();
     }
     private String safeJson(Object value) throws Exception{return json.writeValueAsString(value).replace("<","\\u003c").replace(">","\\u003e").replace("&","\\u0026").replace("\u2028","\\u2028").replace("\u2029","\\u2029");}
 }

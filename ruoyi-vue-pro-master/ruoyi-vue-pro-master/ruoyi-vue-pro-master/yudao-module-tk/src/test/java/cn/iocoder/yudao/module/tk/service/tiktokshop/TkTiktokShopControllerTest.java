@@ -24,7 +24,7 @@ class TkTiktokShopControllerTest {
         assertEquals(java.nio.charset.StandardCharsets.UTF_8,response.getHeaders().getContentType().getCharset());
         assertEquals("no-referrer",response.getHeaders().getFirst("Referrer-Policy"));
         String csp=response.getHeaders().getFirst("Content-Security-Policy");assertTrue(csp.contains("default-src 'none'"));assertTrue(csp.contains("script-src 'nonce-"));assertFalse(csp.contains("unsafe-inline"));
-        String html=response.getBody();assertTrue(html.contains("tiktok-shop-auth"));assertTrue(html.contains("https://ui.example"));assertTrue(html.contains("sessionId"));
+        String html=response.getBody();assertTrue(html.contains("tiktok-shop-auth"));assertTrue(html.contains("https://ui.example"));assertTrue(html.contains("sessionId"));assertTrue(html.contains("tiktok_shop_auth"));assertTrue(html.contains("location.replace"));
         assertFalse(html.contains("raw-code"));assertFalse(html.contains("raw-state"));assertFalse(html.contains("raw-error"));assertFalse(html.contains("fake-secret"));assertFalse(html.contains("postMessage('*'"));
         Method callback=TkTiktokShopAuthController.class.getMethod("callback",String.class,String.class,String.class);
         assertNotNull(callback.getAnnotation(PermitAll.class));assertNotNull(callback.getAnnotation(TenantIgnore.class));assertFalse(callback.getAnnotation(ApiAccessLog.class).enable());

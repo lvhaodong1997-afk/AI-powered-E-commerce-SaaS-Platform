@@ -14,7 +14,7 @@ public final class TkTiktokShopAuthVO {
         private final Long sessionId; private final String authorizationUrl; private final LocalDateTime expireTime;
         private final long expiresInSeconds;
         public SessionResponse(Long id,String url,LocalDateTime expiry){this(id,url,expiry,0);}
-        public SessionResponse(Long id,String url,LocalDateTime expiry,long seconds){sessionId=id;authorizationUrl=url;expireTime=expiry;expiresInSeconds=Math.max(0,Math.min(600,seconds));}
+        public SessionResponse(Long id,String url,LocalDateTime expiry,long seconds){sessionId=id;authorizationUrl=url;expireTime=expiry;expiresInSeconds=Math.max(0,Math.min(cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopAuthService.SESSION_TTL_SECONDS,seconds));}
     }
     @Getter public static class CallbackResult {
         private final Long sessionId; private final String status,authType,errorCode,message,requestId;
@@ -30,6 +30,17 @@ public final class TkTiktokShopAuthVO {
             if(id==null)return "INVALID_STATE";
             if("CONFIGURATION_CHANGED".equals(code)||"WRONG_ACCOUNT_TYPE".equals(code)||"INSUFFICIENT_SCOPE".equals(code)||"PROVIDER_ERROR".equals(code))return code;
             return "AUTHORIZATION_FAILED";
+        }
+        public static CallbackResult fromStoredFailure(Long id,String type,String reason){
+            if(reason==null || reason.isEmpty())return new CallbackResult(id,false,type,"AUTHORIZATION_FAILED",null);
+            String[] parts=reason.split(":",3);
+            String code=parts[0];
+            String requestId=null;
+            if("PROVIDER_ERROR".equals(code)){
+                if(parts.length==3)requestId=parts[2];
+                else if(parts.length==2)requestId=parts[1];
+            }
+            return new CallbackResult(id,false,type,code,requestId);
         }
         private static String messageFor(String code){
             switch(code){

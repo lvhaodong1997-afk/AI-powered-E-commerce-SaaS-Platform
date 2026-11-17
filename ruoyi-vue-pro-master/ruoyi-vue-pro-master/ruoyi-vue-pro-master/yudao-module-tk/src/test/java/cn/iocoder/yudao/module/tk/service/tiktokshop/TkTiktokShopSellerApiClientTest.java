@@ -63,6 +63,12 @@ class TkTiktokShopSellerApiClientTest {
             assertEquals("INVALID_RESPONSE",bad.getCode());assertEquals("req-p",bad.getRequestId());
         }finally{server.stop(0);}
     }
+    @Test void officialBasesAreUsedForTestAndProduction() {
+        assertEquals("https://open-api.tiktokglobalshop.com",TkTiktokShopSellerApiClient.apiBaseFor("TEST"));
+        assertEquals("https://open-api.tiktokglobalshop.com",TkTiktokShopSellerApiClient.apiBaseFor("PRODUCTION"));
+        assertEquals("https://auth.tiktok-shops.com",TkTiktokShopSellerApiClient.authBaseFor("TEST"));
+        assertEquals("https://auth.tiktok-shops.com",TkTiktokShopSellerApiClient.authBaseFor("PRODUCTION"));
+    }
     @Test void sellerPageBoundsAndOrderScopeAliasAreEnforced() {
         assertEquals(20,TkTiktokShopSellerApiClient.normalizePageSize(null));
         assertEquals(1,TkTiktokShopSellerApiClient.normalizePageSize(1));

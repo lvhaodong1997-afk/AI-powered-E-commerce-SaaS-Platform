@@ -14,13 +14,24 @@ export function acceptShopOAuthMessage(
 /** Prefer the server-returned session lifetime instead of a fixed five-minute window. */
 export function shopOAuthTimeoutMs(session: { expireTime?: string; expiresInSeconds?: number } = {}, now = Date.now()) {
   if (typeof session.expiresInSeconds === 'number' && Number.isFinite(session.expiresInSeconds) && session.expiresInSeconds > 0) {
-    return Math.max(1_000, Math.min(600_000, Math.floor(session.expiresInSeconds * 1000)))
+    return Math.max(1_000, Math.min(1_800_000, Math.floor(session.expiresInSeconds * 1000)))
   }
   if (session.expireTime) {
     const at = Date.parse(session.expireTime)
-    if (Number.isFinite(at)) return Math.max(1_000, Math.min(600_000, at - now))
+    if (Number.isFinite(at)) return Math.max(1_000, Math.min(1_800_000, at - now))
   }
-  return 10 * 60_000
+  return 30 * 60_000
+}
+
+export function shopAuthErrorKey(errorCode?: string) {
+  switch (errorCode) {
+    case 'INVALID_STATE': return 'shop.authorizationInvalid'
+    case 'CONFIGURATION_CHANGED': return 'shop.authorizationConfigChanged'
+    case 'WRONG_ACCOUNT_TYPE': return 'shop.authorizationWrongAccount'
+    case 'INSUFFICIENT_SCOPE': return 'shop.authorizationInsufficientScope'
+    case 'PROVIDER_ERROR': return 'shop.authorizationProviderError'
+    default: return 'shop.authorizationFailed'
+  }
 }
 
 export function shopEnvironmentLabel(value?: string) {
