@@ -2,6 +2,7 @@ import request from '@/config/axios'
 import type { TkChunkUploadSession } from '@/utils/tkChunkUpload'
 
 export type ShopProductSource = 'SHOP' | 'SHOWCASE'
+export type ShopAuthType = 'CREATOR' | 'SELLER'
 export interface ShopCapabilities {
   enabled: boolean
   configured: boolean
@@ -13,7 +14,41 @@ export interface ShopCapabilities {
   maxVideoBytes: number
   supportedVideoFormats: string[]
   callbackOrigin: string
+  sellerEnabled?: boolean
+  sellerConfigured?: boolean
+  sellerEnvironment?: string
+  creatorEnvironment?: string
+  sellerConfigurationMessage?: string
+  sellerRequiredScopes?: string[]
 }
+export interface SellerAccount {
+  id: number
+  companyId: number
+  displayName?: string
+  market: string
+  authStatus: string
+  environment?: string
+  grantedScopes: string
+  accessTokenExpireTime?: string
+  refreshTokenExpireTime?: string
+  canReadProducts: boolean
+  canReadOrders: boolean
+}
+export interface SellerShop {
+  id: number
+  accountId: number
+  companyId: number
+  shopId: string
+  name?: string
+  region?: string
+  status?: string
+  environment?: string
+}
+export interface SellerProduct { id: string; title?: string; status?: string }
+export interface SellerOrder { id: string; status?: string; createTime?: string; totalAmount?: string; currency?: string }
+export interface SellerProductPage { products: SellerProduct[]; total?: number; nextPageToken?: string }
+export interface SellerOrderPage { orders: SellerOrder[]; total?: number; nextPageToken?: string }
+export interface ShopAuthSession { sessionId: number; authorizationUrl: string; expireTime?: string; expiresInSeconds?: number }
 export interface ShopAccount {
   id: number
   companyId: number
@@ -78,7 +113,7 @@ const base = '/tk/tiktok-shop'
 export const TiktokShopApi = {
   capabilities: () => request.get<ShopCapabilities>({ url: `${base}/capabilities` }),
   accounts: () => request.get<ShopAccount[]>({ url: `${base}/accounts` }),
-  authorize: () => request.post<{ sessionId: number; authorizationUrl: string; expireTime: string }>({ url: `${base}/auth/sessions`, data: {} }),
+  authorize: (data: { companyId?: number; authType?: ShopAuthType } = {}) => request.post<ShopAuthSession>({ url: `${base}/auth/sessions`, data }),
   disconnect: (id: number) => request.delete<boolean>({ url: `${base}/accounts/${id}` }),
   products: (id: number, params: { source: ShopProductSource; pageSize: number; pageToken?: string; titleKeyword?: string }) =>
     request.get<{ products: ShopProduct[]; nextPageToken?: string }>({ url: `${base}/accounts/${id}/products`, params }),
@@ -94,5 +129,12 @@ export const TiktokShopApi = {
       onUploadProgress: (event: { loaded: number; total?: number }) => onProgress?.(event.loaded, event.total || chunk.size) })
   },
   completeMedia: (id: string, signal: AbortSignal) => request.post<ShopMedia>({ url: `${base}/media/sessions/${encodeURIComponent(id)}/complete`, signal, timeout: 120_000 }),
-  cancelMedia: (id: string) => request.delete({ url: `${base}/media/sessions/${encodeURIComponent(id)}` })
+  cancelMedia: (id: string) => request.delete({ url: `${base}/media/sessions/${encodeURIComponent(id)}` }),
+  sellerAccounts: (params?: { companyId?: number }) => request.get<SellerAccount[]>({ url: `${base}/seller/accounts`, params }),
+  sellerShops: (params?: { companyId?: number }) => request.get<SellerShop[]>({ url: `${base}/seller/shops`, params }),
+  disconnectSeller: (id: number) => request.delete<boolean>({ url: `${base}/seller/accounts/${id}` }),
+  sellerProducts: (id: number, params: { companyId?: number; pageSize?: number; pageToken?: string } = {}) =>
+    request.get<SellerProductPage>({ url: `${base}/seller/shops/${id}/products`, params }),
+  sellerOrders: (id: number, params: { companyId?: number; pageSize?: number; pageToken?: string } = {}) =>
+    request.get<SellerOrderPage>({ url: `${base}/seller/shops/${id}/orders`, params }),
 }

@@ -20,6 +20,8 @@ test('OAuth message guard accepts only the exact popup origin source and session
   const popup = {}
   const expected = { callbackOrigin: 'https://shop.example', sessionId: 42 }
   assert.equal(acceptShopOAuthMessage({ origin: 'https://shop.example', source: popup, data: { type: 'tiktok-shop-auth', sessionId: 42, status: 'SUCCESS' } }, expected, popup), true)
+  assert.equal(acceptShopOAuthMessage({ origin: 'https://shop.example', source: popup, data: { type: 'tiktok-shop-auth', sessionId: 42, status: 'SUCCESS', authType: 'SELLER' } }, { ...expected, authType: 'CREATOR' }, popup), false)
+  assert.equal(acceptShopOAuthMessage({ origin: 'https://shop.example', source: popup, data: { type: 'tiktok-shop-auth', sessionId: 42, status: 'SUCCESS', authType: 'SELLER' } }, { ...expected, authType: 'SELLER' }, popup), true)
   assert.equal(acceptShopOAuthMessage({ origin: 'https://evil.example', source: popup, data: { type: 'tiktok-shop-auth', sessionId: 42, status: 'SUCCESS' } }, expected, popup), false)
   assert.equal(acceptShopOAuthMessage({ origin: 'https://shop.example', source: {}, data: { type: 'tiktok-shop-auth', sessionId: 42, status: 'SUCCESS' } }, expected, popup), false)
   assert.equal(acceptShopOAuthMessage({ origin: 'https://shop.example', source: popup, data: { type: 'tiktok-shop-auth', sessionId: 41, status: 'SUCCESS' } }, expected, popup), false)
@@ -305,9 +307,9 @@ test('actual panel authorizes twice, rejects unknown callback statuses and dispo
   for (let session = 1; session <= 2; session++) {
     await panel.connect()
     assert.equal(panel.listeners.size, 1)
-    panel.onOAuth({ origin: 'https://shop.example', source: popups.at(-1), data: { type: 'tiktok-shop-auth', sessionId: session, status: 'PROCESSING' } })
+    panel.onOAuth({ origin: 'https://shop.example', source: popups.at(-1), data: { type: 'tiktok-shop-auth', sessionId: session, status: 'PROCESSING', authType: 'CREATOR' } })
     assert.equal(panel.listeners.size, 1)
-    panel.onOAuth({ origin: 'https://shop.example', source: popups.at(-1), data: { type: 'tiktok-shop-auth', sessionId: session, status: 'SUCCESS' } })
+    panel.onOAuth({ origin: 'https://shop.example', source: popups.at(-1), data: { type: 'tiktok-shop-auth', sessionId: session, status: 'SUCCESS', authType: 'CREATOR' } })
     assert.equal(panel.listeners.size, 0)
   }
   panel.stop()
@@ -323,4 +325,159 @@ test('actual panel history resumes polling and uses the immutable task account',
   assert.ok(panel.timers.size > 0)
   assert.equal(panel.selectedAccount.value.id, 1) // Editing account remains independent.
   panel.stop()
+})
+
+test('OAuth timeout uses returned session lifetime instead of a fixed five minutes', () => {
+  const { shopOAuthTimeoutMs } = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
+  assert.equal(shopOAuthTimeoutMs({ expiresInSeconds: 180 }), 180_000)
+  assert.equal(shopOAuthTimeoutMs({ expireTime: '2026-11-17T14:20:00.000Z' }, Date.parse('2026-11-17T14:10:00.000Z')), 600_000)
+  assert.equal(shopOAuthTimeoutMs({}, 0), 600_000)
+})
+
+test('catalog cursor keeps a previous-page stack and resets independently', () => {
+  const { createCatalogCursor } = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
+  const cursor = createCatalogCursor()
+  assert.equal(cursor.token(), undefined)
+  assert.equal(cursor.canBack(), false)
+  cursor.next('p2')
+  cursor.next('p3')
+  assert.equal(cursor.token(), 'p3')
+  cursor.back()
+  assert.equal(cursor.token(), 'p2')
+  cursor.reset()
+  assert.equal(cursor.token(), undefined)
+  assert.equal(cursor.canBack(), false)
+})
+
+test('Shop API seller catalog uses official seller paths only', async () => {
+  const calls = []
+  const request = Object.fromEntries(['get', 'post', 'delete'].map(method => [method, async args => { calls.push({ method, ...args }); return {} }]))
+  const { TiktokShopApi: api } = load('src/api/tk/tiktokShop/index.ts', { '@/config/axios': { __esModule: true, default: request } })
+  await api.authorize({ authType: 'SELLER', companyId: 9 })
+  await api.sellerAccounts({ companyId: 9 })
+  await api.sellerProducts(8, { companyId: 9, pageSize: 20, pageToken: 'n1' })
+  await api.sellerOrders(8, { companyId: 9, pageSize: 20 })
+  await api.disconnectSeller(3)
+  assert.deepEqual(calls[0], { method: 'post', url: '/tk/tiktok-shop/auth/sessions', data: { authType: 'SELLER', companyId: 9 } })
+  assert.equal(calls[1].url, '/tk/tiktok-shop/seller/accounts')
+  assert.equal(calls[2].url, '/tk/tiktok-shop/seller/shops/8/products')
+  assert.deepEqual(calls[2].params, { companyId: 9, pageSize: 20, pageToken: 'n1' })
+  assert.equal(calls[3].url, '/tk/tiktok-shop/seller/shops/8/orders')
+  assert.deepEqual(calls[4], { method: 'delete', url: '/tk/tiktok-shop/seller/accounts/3' })
+})
+
+function sellerHarness(overrides = {}, grants = ['*']) {
+  const vue = require('vue'), timers = new Map(), listeners = new Set(), cleanups = [], calls = []
+  let timerId = 0
+  const window = {
+    setTimeout: fn => { timers.set(++timerId, fn); return timerId },
+    clearTimeout: id => timers.delete(id),
+    addEventListener: (_type, fn) => listeners.add(fn),
+    removeEventListener: (_type, fn) => listeners.delete(fn),
+    open: () => ({ location: { href: 'about:blank' }, closed: false, close() { this.closed = true } })
+  }
+  const configured = { enabled: true, configured: true, publishingConfigured: true, sellerEnabled: true, sellerConfigured: true, sellerEnvironment: 'PRODUCTION', callbackOrigin: 'https://shop.example' }
+  const api = {
+    capabilities: async () => configured,
+    sellerAccounts: async () => { calls.push('sellerAccounts'); return [] },
+    sellerShops: async () => { calls.push('sellerShops'); return [] },
+    sellerProducts: async () => { calls.push('sellerProducts'); return { products: [], total: 0 } },
+    sellerOrders: async () => { calls.push('sellerOrders'); return { orders: [], total: 0 } },
+    authorize: async data => { calls.push(['authorize', data]); return { sessionId: 42, authorizationUrl: 'https://auth.tiktok-shops.com/open/authorize', expiresInSeconds: 120 } },
+    disconnectSeller: async () => { calls.push('disconnectSeller') },
+    ...overrides
+  }
+  const helper = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
+  const exposed = componentScript('TiktokShopSellerPanel.vue', [
+    'capabilities', 'accounts', 'shops', 'products', 'orders', 'accountId', 'shopId', 'error', 'productHint', 'orderHint',
+    'load', 'refreshLists', 'selectAccount', 'selectShop', 'connect', 'onOAuth', 'pageProducts', 'pageOrders', 'resetSelection',
+    'selectedAccount', 'selectedShop', 'productCursor', 'orderCursor'
+  ], {
+    vue: { ...vue, onMounted: () => {}, onBeforeUnmount: fn => cleanups.push(fn) },
+    'element-plus': { ElMessageBox: { confirm: async () => {} } },
+    '@/api/tk/tiktokShop': { TiktokShopApi: api },
+    './tiktokShopBehavior': helper,
+    '@/hooks/web/useTkI18n': { useTkI18n: () => ({ tt: key => key }) },
+    '@/directives/permission/hasPermi': { hasPermission: requested => grants.includes('*') || requested.some(p => grants.includes(p)) }
+  }, { window })
+  if (!overrides.capabilities) exposed.capabilities.value = configured
+  return { ...exposed, window, timers, listeners, calls, api, configured, stop: () => cleanups.forEach(fn => fn()) }
+}
+
+test('actual seller panel does not fetch shops when seller configuration is missing', async () => {
+  const panel = sellerHarness({ capabilities: async () => ({ sellerConfigured: false, sellerConfigurationMessage: 'seller missing', callbackOrigin: 'https://shop.example' }) }, ['tk:tiktok-shop-account:query'])
+  await panel.load()
+  assert.equal(panel.calls.includes('sellerAccounts'), false)
+  assert.equal(panel.calls.includes('sellerShops'), false)
+  await panel.connect()
+  assert.equal(panel.listeners.size, 0)
+  assert.equal(panel.calls.some(item => Array.isArray(item) && item[0] === 'authorize'), false)
+  panel.stop()
+})
+
+test('actual seller panel drops a stale catalog page after the shop changes', async () => {
+  const pending = deferred()
+  const panel = sellerHarness({
+    sellerAccounts: async () => [{ id: 1, companyId: 9, displayName: 'A', authStatus: 'AUTHORIZED', grantedScopes: 'seller.product.basic,seller.order.info', canReadProducts: true, canReadOrders: true }],
+    sellerShops: async () => [{ id: 8, accountId: 1, companyId: 9, shopId: 'S8' }, { id: 9, accountId: 1, companyId: 9, shopId: 'S9' }],
+    sellerProducts: async (id, params) => {
+      if (id === 8) return pending.promise
+      return { products: [{ id: 'p-new', title: 'fresh', status: 'ACTIVATE' }], nextPageToken: 'n2' }
+    },
+    sellerOrders: async () => ({ orders: [] })
+  })
+  panel.accounts.value = await panel.api.sellerAccounts()
+  panel.shops.value = await panel.api.sellerShops()
+  panel.accountId.value = 1
+  panel.selectShop({ id: 8, accountId: 1, companyId: 9, shopId: 'S8' })
+  panel.selectShop({ id: 9, accountId: 1, companyId: 9, shopId: 'S9' })
+  pending.resolve({ products: [{ id: 'stale', title: 'old', status: 'ACTIVATE' }] })
+  await new Promise(setImmediate)
+  await new Promise(setImmediate)
+  assert.equal(panel.shopId.value, 9)
+  assert.equal(panel.products.value[0]?.id, 'p-new')
+  assert.equal(panel.products.value.some(item => item.id === 'stale'), false)
+  panel.stop()
+})
+
+test('actual seller panel authorizes with seller type, ignores creator callbacks and disposes OAuth', async () => {
+  const panel = sellerHarness()
+  const popups = []; panel.window.open = () => { const popup = { location: { href: '' }, close() {} }; popups.push(popup); return popup }
+  await panel.connect()
+  assert.deepEqual(panel.calls.find(item => Array.isArray(item) && item[0] === 'authorize')[1], { authType: 'SELLER' })
+  assert.equal(panel.timers.size, 1)
+  panel.onOAuth({ origin: 'https://shop.example', source: popups[0], data: { type: 'tiktok-shop-auth', sessionId: 42, status: 'SUCCESS', authType: 'CREATOR' } })
+  assert.equal(panel.listeners.size, 1)
+  panel.onOAuth({ origin: 'https://shop.example', source: popups[0], data: { type: 'tiktok-shop-auth', sessionId: 42, status: 'SUCCESS', authType: 'SELLER' } })
+  assert.equal(panel.listeners.size, 0)
+  panel.stop()
+  assert.equal(panel.timers.size, 0)
+})
+
+test('actual seller panel skips catalog reads without product or order scopes', async () => {
+  const panel = sellerHarness({
+    sellerAccounts: async () => [{ id: 1, companyId: 9, displayName: 'A', authStatus: 'AUTHORIZED', grantedScopes: 'seller.authorization.info', canReadProducts: false, canReadOrders: false }],
+    sellerShops: async () => [{ id: 8, accountId: 1, companyId: 9, shopId: 'S8' }]
+  })
+  panel.accounts.value = await panel.api.sellerAccounts()
+  panel.shops.value = await panel.api.sellerShops()
+  panel.accountId.value = 1
+  panel.calls.length = 0
+  panel.selectShop({ id: 8, accountId: 1, companyId: 9, shopId: 'S8' })
+  await new Promise(setImmediate)
+  assert.equal(panel.productHint.value, 'shop.sellerMissingProductScope')
+  assert.equal(panel.orderHint.value, 'shop.sellerMissingOrderScope')
+  assert.equal(panel.calls.includes('sellerProducts'), false)
+  assert.equal(panel.calls.includes('sellerOrders'), false)
+  panel.stop()
+})
+
+test('publishing workspace keeps creator as the default entry', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/views/tk/video-publish-center/components/TiktokShopWorkspace.vue'), 'utf8')
+  assert.match(source, /value="creator"/)
+  assert.match(source, /value="seller"/)
+  assert.match(source, /mode = ref<'creator' \| 'seller'>\('creator'\)/)
+  const index = fs.readFileSync(path.join(__dirname, '../src/views/tk/video-publish-center/index.vue'), 'utf8')
+  assert.match(index, /TiktokShopWorkspace/)
+  assert.doesNotMatch(index, /<TiktokShopPublishPanel/)
 })

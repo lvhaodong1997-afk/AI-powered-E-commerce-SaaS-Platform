@@ -85,7 +85,7 @@
           <el-tab-pane label="发布任务" name="tasks" />
           <el-tab-pane label="发布明细" name="details" />
           <el-tab-pane v-if="hasPermission(['tk:social-publish:query'])" :label="tt('meta.title')" name="meta" />
-          <el-tab-pane v-if="shopAvailable" :label="tt('shop.title')" name="shop" />
+          <el-tab-pane v-if="shopAvailable" :label="tt('shop.tab')" name="shop" />
         </el-tabs>
         <div v-if="activeTab !== 'meta' && activeTab !== 'shop'" class="toolbar-actions">
           <el-button @click="refreshAll"><Icon icon="ep:refresh" class="mr-5px" /> 刷新</el-button>
@@ -104,7 +104,7 @@
 
 
     <MetaPublishPanel v-if="activeTab === 'meta' && hasPermission(['tk:social-publish:query'])" />
-    <TiktokShopPublishPanel v-if="activeTab === 'shop' && shopAvailable" />
+    <TiktokShopWorkspace v-if="activeTab === 'shop' && shopAvailable" />
 
     <ContentWrap v-if="activeTab === 'videos'">
       <el-form :model="videoQuery" ref="videoQueryFormRef" :inline="true" label-width="90px" class="-mb-15px">
@@ -738,7 +738,7 @@
 
 <script setup lang="ts">
 import MetaPublishPanel from './components/MetaPublishPanel.vue'
-import TiktokShopPublishPanel from './components/TiktokShopPublishPanel.vue'
+import TiktokShopWorkspace from './components/TiktokShopWorkspace.vue'
 import { shopStartup } from './components/tiktokShopBehavior'
 import { hasPermission } from '@/directives/permission/hasPermi'
 import { Qrcode } from '@/components/Qrcode'

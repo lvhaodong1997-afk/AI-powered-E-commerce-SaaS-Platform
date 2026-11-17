@@ -1,6 +1,6 @@
 <template>
   <ContentWrap class="shop-panel">
-    <div class="section-head"><div><h3>{{ tt('shop.title') }}</h3><span class="sub-text">{{ tt('shop.description') }}</span></div><el-button @click="load" :loading="loading">{{ tt('common.refresh') }}</el-button></div>
+    <div class="section-head"><div><h3>{{ tt('shop.title') }} <el-tag size="small" :type="creatorEnvironment === 'shop.envTest' ? 'warning' : 'success'">{{ tt(creatorEnvironment) }}</el-tag></h3><span class="sub-text">{{ tt('shop.description') }}</span></div><el-button @click="load" :loading="loading">{{ tt('common.refresh') }}</el-button></div>
     <el-alert v-if="!loading && !capabilities?.configured" :title="tt('shop.notConfigured')" type="warning" :closable="false" />
     <el-alert v-else-if="capabilities && !capabilities.publishingConfigured" :title="tt('shop.publishingNotConfigured')" type="info" :closable="false" />
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
@@ -25,7 +25,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { TiktokShopApi, type ShopAccount, type ShopCapabilities, type ShopCreate, type ShopProduct, type ShopTask } from '@/api/tk/tiktokShop'
 import { TkGenerationApi } from '@/api/tk/generation'
-import { acceptShopOAuthMessage, createShopPoller, createShopRevision, createShopSubmitter, validateShopForm } from './tiktokShopBehavior'
+import { acceptShopOAuthMessage, createShopPoller, createShopRevision, createShopSubmitter, shopEnvironmentLabel, shopOAuthTimeoutMs, validateShopForm } from './tiktokShopBehavior'
 import { createShopUpload } from '@/utils/tiktokShopUpload'
 import TiktokShopProductPicker from './TiktokShopProductPicker.vue'
 import TiktokShopPublishConfirm from './TiktokShopPublishConfirm.vue'
@@ -35,7 +35,7 @@ const { tt } = useTkI18n(), capabilities = ref<ShopCapabilities>(), accounts = r
 const accountId = ref<number>(), mediaMode = ref<'generated' | 'upload'>('generated'), generatedVideos = ref<any[]>([]), history = ref<ShopTask[]>([]), activeTask = ref<ShopTask>(), creating = ref(false), confirming = ref(false), submitted = ref(false), uploadPercent = ref(0), uploading = ref(false)
 const form = reactive<Partial<ShopCreate>>({ title: '', productLinkTitle: '', productSource: 'SHOWCASE', isAiGenerated: true })
 let uploadHandle: ReturnType<typeof createShopUpload> | undefined, popup: Window | undefined, oauthSession: number | undefined, oauthTimer: number | undefined
-const revision = createShopRevision(), selectedAccount = computed(() => accounts.value.find((account) => account.id === accountId.value))
+const revision = createShopRevision(), selectedAccount = computed(() => accounts.value.find((account) => account.id === accountId.value)), creatorEnvironment = computed(() => shopEnvironmentLabel(capabilities.value?.creatorEnvironment))
 const confirmationAccount = computed(() => accounts.value.find((account) => account.id === activeTask.value?.accountId) || selectedAccount.value)
 const submitter = createShopSubmitter({ create: (data) => TiktokShopApi.create(data), confirm: (id, data) => TiktokShopApi.confirm(id, data), get: (id) => TiktokShopApi.get(id) })
 const poller = createShopPoller(async () => { const task = activeTask.value; const requestRevision = revision.begin(); if (!task || ['SUCCESS', 'FAILED', 'RECOVERY_REQUIRED'].includes(task.stage)) return false; const fresh = await TiktokShopApi.get(task.id); if (!revision.current(requestRevision) || activeTask.value?.id !== task.id) return false; activeTask.value = fresh; return !['SUCCESS', 'FAILED', 'RECOVERY_REQUIRED'].includes(fresh.stage) }, () => { error.value = tt('shop.operationFailed') }, { set: window.setTimeout, clear: window.clearTimeout })
@@ -43,8 +43,8 @@ async function load() { loading.value = true; error.value = ''; try { capabiliti
 async function loadAccounts() { accounts.value = await TiktokShopApi.accounts(); if (!accountId.value) accountId.value = accounts.value[0]?.id }
 async function loadHistory() { const page = await TiktokShopApi.tasks({ pageNo: 1, pageSize: 20 }); history.value = page.list || [] }
 function clearOAuth() { window.removeEventListener('message', onOAuth); if (oauthTimer) window.clearTimeout(oauthTimer); oauthTimer = undefined; popup?.close(); popup = undefined; oauthSession = undefined }
-async function connect() { const origin = capabilities.value?.callbackOrigin; if (!origin || !/^https:\/\/[^/]+$/i.test(origin)) { error.value = tt('shop.invalidCapability'); return }; clearOAuth(); popup = window.open('about:blank', 'tiktok-shop-auth', 'width=520,height=720') || undefined; if (!popup) { error.value = tt('shop.popupBlocked'); return }; window.addEventListener('message', onOAuth); try { const session = await TiktokShopApi.authorize(); oauthSession = session.sessionId; popup.location.href = session.authorizationUrl; oauthTimer = window.setTimeout(() => { clearOAuth() }, 5 * 60_000) } catch (reason) { clearOAuth(); error.value = reason instanceof Error ? reason.message : tt('shop.authorizationFailed') } }
-function onOAuth(event: MessageEvent) { if (!popup || oauthSession === undefined || !acceptShopOAuthMessage(event, { callbackOrigin: capabilities.value?.callbackOrigin || '', sessionId: oauthSession }, popup)) return; const status = event.data.status; clearOAuth(); if (status === 'SUCCESS') void loadAccounts(); else error.value = tt('shop.authorizationFailed') }
+async function connect() { const origin = capabilities.value?.callbackOrigin; if (!origin || !/^https:\/\/[^/]+$/i.test(origin)) { error.value = tt('shop.invalidCapability'); return }; clearOAuth(); popup = window.open('about:blank', 'tiktok-shop-auth', 'width=520,height=720') || undefined; if (!popup) { error.value = tt('shop.popupBlocked'); return }; window.addEventListener('message', onOAuth); try { const session = await TiktokShopApi.authorize({ authType: 'CREATOR' }); oauthSession = session.sessionId; popup.location.href = session.authorizationUrl; oauthTimer = window.setTimeout(() => { clearOAuth() }, shopOAuthTimeoutMs(session)) } catch (reason) { clearOAuth(); error.value = reason instanceof Error ? reason.message : tt('shop.authorizationFailed') } }
+function onOAuth(event: MessageEvent) { if (!popup || oauthSession === undefined || !acceptShopOAuthMessage(event, { callbackOrigin: capabilities.value?.callbackOrigin || '', sessionId: oauthSession, authType: 'CREATOR' }, popup)) return; const status = event.data.status; clearOAuth(); if (status === 'SUCCESS') void loadAccounts(); else error.value = tt('shop.authorizationFailed') }
 async function disconnect(account: ShopAccount) { await ElMessageBox.confirm(tt('shop.disconnectConfirm'), tt('shop.disconnect')); await TiktokShopApi.disconnect(account.id); await loadAccounts() }
 function resetDependent() { cancelUpload(); form.productId = undefined; form.selectionProof = undefined; form.generationTaskId = mediaMode.value === 'generated' ? undefined : form.generationTaskId; form.mediaId = undefined; invalidate() }
 function resetProduct() { form.productId = undefined; form.selectionProof = undefined; invalidate() }

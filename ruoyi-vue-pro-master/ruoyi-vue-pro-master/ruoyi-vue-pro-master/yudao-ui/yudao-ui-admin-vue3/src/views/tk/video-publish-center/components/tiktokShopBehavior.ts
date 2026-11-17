@@ -2,12 +2,49 @@ import type { ShopCreate, ShopTask } from '@/api/tk/tiktokShop'
 
 export function acceptShopOAuthMessage(
   event: Pick<MessageEvent, 'origin' | 'source' | 'data'>,
-  expected: { callbackOrigin: string; sessionId: number | string },
+  expected: { callbackOrigin: string; sessionId: number | string; authType?: 'CREATOR' | 'SELLER' },
   popup: Window
 ) {
   return event.origin === expected.callbackOrigin && event.source === popup &&
     event.data?.type === 'tiktok-shop-auth' && event.data.sessionId === expected.sessionId &&
-    ['SUCCESS', 'FAILED'].includes(event.data.status)
+    ['SUCCESS', 'FAILED'].includes(event.data.status) &&
+    (!expected.authType || event.data.authType === expected.authType)
+}
+
+/** Prefer the server-returned session lifetime instead of a fixed five-minute window. */
+export function shopOAuthTimeoutMs(session: { expireTime?: string; expiresInSeconds?: number } = {}, now = Date.now()) {
+  if (typeof session.expiresInSeconds === 'number' && Number.isFinite(session.expiresInSeconds) && session.expiresInSeconds > 0) {
+    return Math.max(1_000, Math.min(600_000, Math.floor(session.expiresInSeconds * 1000)))
+  }
+  if (session.expireTime) {
+    const at = Date.parse(session.expireTime)
+    if (Number.isFinite(at)) return Math.max(1_000, Math.min(600_000, at - now))
+  }
+  return 10 * 60_000
+}
+
+export function shopEnvironmentLabel(value?: string) {
+  const environment = (value || '').toUpperCase()
+  if (environment === 'SANDBOX' || environment === 'TEST') return 'shop.envTest'
+  return 'shop.envProduction'
+}
+
+/** Cursor pagination with a previous-page stack so Back/Next cannot mix shop or company pages. */
+export function createCatalogCursor() {
+  let tokens: Array<string | undefined> = [undefined]
+  let index = 0
+  return {
+    token: () => tokens[index],
+    canBack: () => index > 0,
+    reset() { tokens = [undefined]; index = 0 },
+    next(nextToken?: string) {
+      if (!nextToken) return
+      tokens = tokens.slice(0, index + 1)
+      tokens.push(nextToken)
+      index++
+    },
+    back() { if (index > 0) index-- }
+  }
 }
 
 export function shopKey(cryptoSource: Crypto = globalThis.crypto): string {
