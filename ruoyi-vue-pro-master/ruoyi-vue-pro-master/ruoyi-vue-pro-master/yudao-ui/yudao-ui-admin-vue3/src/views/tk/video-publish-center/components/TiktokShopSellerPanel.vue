@@ -45,7 +45,7 @@
       <div class="section-head">
         <strong>{{ tt('shop.sellerProducts') }}</strong>
         <div>
-          <span v-if="productTotal != null" class="sub-text">{{ tt('shop.totalRows').replace('{{total}}', String(productTotal)) }}</span>
+          <span v-if="productTotal != null" class="sub-text">{{ totalRowsLabel(productTotal) }}</span>
           <el-button :disabled="!productCursor.canBack()" @click="pageProducts('back')">{{ tt('shop.previousPage') }}</el-button>
           <el-button :disabled="!productNext" @click="pageProducts('next')">{{ tt('shop.nextProducts') }}</el-button>
         </div>
@@ -62,7 +62,7 @@
       <div class="section-head">
         <strong>{{ tt('shop.sellerOrders') }}</strong>
         <div>
-          <span v-if="orderTotal != null" class="sub-text">{{ tt('shop.totalRows').replace('{{total}}', String(orderTotal)) }}</span>
+          <span v-if="orderTotal != null" class="sub-text">{{ totalRowsLabel(orderTotal) }}</span>
           <el-button :disabled="!orderCursor.canBack()" @click="pageOrders('back')">{{ tt('shop.previousPage') }}</el-button>
           <el-button :disabled="!orderNext" @click="pageOrders('next')">{{ tt('shop.nextProducts') }}</el-button>
         </div>
@@ -113,6 +113,10 @@ const visibleShops = computed(() => shops.value.filter((shop) => !accountId.valu
 const environmentLabel = computed(() => shopEnvironmentLabel(selectedAccount.value?.environment || capabilities.value?.sellerEnvironment))
 const environmentType = computed(() => environmentLabel.value === 'shop.envTest' ? 'warning' : 'success')
 const needsReauth = computed(() => !!selectedAccount.value && selectedAccount.value.authStatus !== 'AUTHORIZED')
+function totalRowsLabel(total?: number) {
+  if (total == null) return ''
+  return tt('shop.totalRows').replace(/\{\{total\}\}/g, String(total))
+}
 function clearCatalog() {
   products.value = []; orders.value = []; productHint.value = ''; orderHint.value = ''
   productTotal.value = undefined; orderTotal.value = undefined; productNext.value = undefined; orderNext.value = undefined
