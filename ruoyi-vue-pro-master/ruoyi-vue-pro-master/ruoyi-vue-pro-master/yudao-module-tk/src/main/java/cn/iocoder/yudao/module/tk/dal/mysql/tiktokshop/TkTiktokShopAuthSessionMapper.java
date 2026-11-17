@@ -17,6 +17,9 @@ public interface TkTiktokShopAuthSessionMapper extends BaseMapperX<TkTiktokShopA
     @Select("SELECT * FROM tk_tiktok_shop_auth_session WHERE state_hash=#{hash} AND status='PROCESSING' AND deleted=0")
     TkTiktokShopAuthSessionDO findClaimed(@Param("hash") String hash);
 
+    @Select("SELECT * FROM tk_tiktok_shop_auth_session WHERE state_hash=#{hash} AND deleted=0 ORDER BY id DESC LIMIT 1")
+    TkTiktokShopAuthSessionDO findByStateHash(@Param("hash") String hash);
+
     @Update("UPDATE tk_tiktok_shop_auth_session SET fail_reason=#{reason} WHERE id=#{id} AND tenant_id=#{tenant} AND status='PROCESSING' AND deleted=0")
     int recordFailure(@Param("id") Long id,@Param("tenant") Long tenant,@Param("reason") String reason);
 

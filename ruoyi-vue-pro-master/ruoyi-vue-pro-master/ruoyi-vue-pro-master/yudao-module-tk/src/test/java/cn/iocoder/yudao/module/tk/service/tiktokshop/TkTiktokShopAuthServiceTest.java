@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.tiktokshop;
 
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+import cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAuthVO.CallbackResult;
 import cn.iocoder.yudao.module.tk.dal.dataobject.tiktokshop.*;
 import cn.iocoder.yudao.module.tk.dal.mysql.tiktokshop.*;
 import cn.iocoder.yudao.module.tk.service.scope.*;
@@ -32,21 +33,47 @@ class TkTiktokShopAuthServiceTest {
     @Test void stateIsRandomOnlyHashPersistedAndCreatorUrlUsed() {
         doAnswer(i->{((TkTiktokShopAuthSessionDO)i.getArgument(0)).setId(10L);return 1;}).when(sessions).insert(any(TkTiktokShopAuthSessionDO.class));
         cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAuthVO.SessionResponse firstSession=auth.createSession(null);
-        assertEquals(600,firstSession.getExpiresInSeconds());
+        assertEquals(1800,firstSession.getExpiresInSeconds());
         String first=firstSession.getAuthorizationUrl();String second=auth.createSession(null).getAuthorizationUrl();
         assertNotEquals(first,second);assertTrue(first.startsWith("https://shop.tiktok.com/alliance/creator/auth?app_key="));assertFalse(first.contains("service_id"));
         ArgumentCaptor<TkTiktokShopAuthSessionDO> c=ArgumentCaptor.forClass(TkTiktokShopAuthSessionDO.class);verify(sessions,times(2)).insert(c.capture());
         String state=okhttp3.HttpUrl.parse(first).queryParameter("state"); assertEquals(43,state.length());
         assertEquals(TkTiktokShopAuthService.hash(state),c.getAllValues().get(0).getStateHash());
         assertFalse(c.getAllValues().get(0).toString().contains(state));
-        assertEquals(LocalDateTime.now(clock).plusMinutes(10),c.getValue().getExpireTime());
+        assertEquals(LocalDateTime.now(clock).plusMinutes(30),c.getValue().getExpireTime());
     }
     @Test void missingExpiredAndReplayedStateNeverExchangeCode() {
-        assertEquals("FAILED",auth.callback("code",null,null).getStatus());
-        assertEquals("FAILED",auth.callback("code","short",null).getStatus());
+        assertEquals("INVALID_STATE",auth.callback("code",null,null).getErrorCode());
+        assertEquals("INVALID_STATE",auth.callback("code","short",null).getErrorCode());
         String state=state();when(sessions.claim(eq(TkTiktokShopAuthService.hash(state)),any())).thenReturn(0);
-        assertEquals("FAILED",auth.callback("code",state,null).getStatus());verifyNoInteractions(api);
+        assertEquals("INVALID_STATE",auth.callback("code",state,null).getErrorCode());verifyNoInteractions(api);
         verify(sessions,never()).findClaimed(anyString());
+        verify(sessions).findByStateHash(TkTiktokShopAuthService.hash(state));
+    }
+    @Test void alreadyConsumedCallbackReturnsOriginalResultAndDoesNotExchangeAgain() {
+        String state=state();TkTiktokShopAuthSessionDO failed=session();failed.setAuthType("SELLER");failed.setStatus("FAILED");failed.setFailReason("PROVIDER_ERROR:36009022:req-123");
+        when(sessions.claim(anyString(),any())).thenReturn(0);when(sessions.findByStateHash(TkTiktokShopAuthService.hash(state))).thenReturn(failed);
+        CallbackResult replayed=auth.callback("code",state,null);
+        assertEquals("FAILED",replayed.getStatus());assertEquals("SELLER",replayed.getAuthType());assertEquals("PROVIDER_ERROR",replayed.getErrorCode());assertEquals("req-123",replayed.getRequestId());
+        assertTrue(replayed.getMessage().contains("平台授权暂未完成"));
+        failed.setStatus("SUCCESS");failed.setFailReason(null);
+        CallbackResult success=auth.callback("code",state,null);
+        assertEquals("SUCCESS",success.getStatus());assertEquals("SELLER",success.getAuthType());assertNull(success.getErrorCode());
+        verifyNoInteractions(api);
+    }
+    @Test void shanghaiClockPersistsChinaLocalExpiry() {
+        Clock shanghai=Clock.fixed(Instant.ofEpochSecond(1800000000),ZoneId.of("Asia/Shanghai"));
+        PlatformTransactionManager tx=mock(PlatformTransactionManager.class);when(tx.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        auth=new TkTiktokShopAuthService(TkTiktokShopTokenCipherTest.properties(),sessions,accounts,scope,api,new TkTiktokShopTokenCipher(TkTiktokShopTokenCipherTest.properties()),new ObjectMapper(),tx,shanghai);
+        doAnswer(i->{((TkTiktokShopAuthSessionDO)i.getArgument(0)).setId(11L);return 1;}).when(sessions).insert(any(TkTiktokShopAuthSessionDO.class));
+        auth.createSession(null);
+        ArgumentCaptor<TkTiktokShopAuthSessionDO> c=ArgumentCaptor.forClass(TkTiktokShopAuthSessionDO.class);verify(sessions).insert(c.capture());
+        assertEquals(LocalDateTime.of(2027,1,15,16,0).plusMinutes(30),c.getValue().getExpireTime());
+    }
+    @Test void persistFailureKeepsProviderCodeAndRequestId() {
+        assertEquals("PROVIDER_ERROR:36009022:req-1",TkTiktokShopAuthService.persistFailure("PROVIDER_ERROR","36009022","req-1"));
+        assertEquals("PROVIDER_ERROR:req-1",TkTiktokShopAuthService.persistFailure("PROVIDER_ERROR","HTTP_ERROR","req-1"));
+        assertEquals("CONFIGURATION_CHANGED",TkTiktokShopAuthService.persistFailure("CONFIGURATION_CHANGED",null,null));
     }
     @Test void denialConsumesValidStateAndRestoresAnonymousIgnoreContext() {
         String state=state();TkTiktokShopAuthSessionDO session=session();

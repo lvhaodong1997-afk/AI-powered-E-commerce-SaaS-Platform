@@ -10,6 +10,8 @@ import java.util.*;
 /** Seller credentials and token identity remain separate from creator publishing. */
 @Component
 public class TkTiktokShopSellerApiClient {
+    public static final String PRODUCTION_API_BASE="https://open-api.tiktokglobalshop.com";
+    public static final String PRODUCTION_AUTH_BASE="https://auth.tiktok-shops.com";
     public static final String REQUIRED_SCOPE="seller.authorization.info";
     public static final String PRODUCT_SCOPE="seller.product.basic";
     public static final String ORDER_SCOPE="seller.order.info";
@@ -24,11 +26,14 @@ public class TkTiktokShopSellerApiClient {
     private final String apiBase,authBase;
     @org.springframework.beans.factory.annotation.Autowired
     public TkTiktokShopSellerApiClient(TkTiktokShopProperties p,ObjectMapper json) {
-        this(p,json,new OkHttpClient(),Clock.systemUTC(),"https://open-api.tiktokglobalshop.com","https://auth.tiktok-shops.com");
+        this(p,json,new OkHttpClient(),Clock.systemUTC(),apiBaseFor(p.getSeller()==null?null:p.getSeller().getEnvironment()),authBaseFor(p.getSeller()==null?null:p.getSeller().getEnvironment()));
     }
     TkTiktokShopSellerApiClient(TkTiktokShopProperties p,ObjectMapper json,OkHttpClient supplied,Clock clock,String apiBase,String authBase) {
         this.properties=p;this.json=json;this.supplied=supplied;this.clock=clock;this.apiBase=apiBase;this.authBase=authBase;
     }
+    /** Official Methods and Endpoints currently document a single production API domain. Development Shop calls use the same official hosts; do not invent a sandbox host. */
+    public static String apiBaseFor(String environment){return PRODUCTION_API_BASE;}
+    public static String authBaseFor(String environment){return PRODUCTION_AUTH_BASE;}
     private TkTiktokShopApiClient client(){return new TkTiktokShopApiClient(properties.sellerClientProperties(),json,supplied,clock,apiBase,authBase,0,REQUIRED_SCOPE);}
     public TkTiktokShopApiClient.TokenBundle exchangeCode(String code){return client().exchangeCode(code);}
     public TkTiktokShopApiClient.TokenBundle refreshToken(String value){return client().refreshToken(value);}

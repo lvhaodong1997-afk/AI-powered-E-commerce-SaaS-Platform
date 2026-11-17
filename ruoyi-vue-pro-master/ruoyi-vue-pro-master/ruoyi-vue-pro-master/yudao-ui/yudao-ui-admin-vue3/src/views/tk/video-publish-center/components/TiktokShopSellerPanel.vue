@@ -82,7 +82,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { TiktokShopApi, type SellerAccount, type SellerOrder, type SellerProduct, type SellerShop, type ShopCapabilities } from '@/api/tk/tiktokShop'
-import { acceptShopOAuthMessage, createCatalogCursor, createShopRevision, shopEnvironmentLabel, shopOAuthTimeoutMs } from './tiktokShopBehavior'
+import { acceptShopOAuthMessage, createCatalogCursor, createShopRevision, shopAuthErrorKey, shopEnvironmentLabel, shopOAuthTimeoutMs } from './tiktokShopBehavior'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import { hasPermission } from '@/directives/permission/hasPermi'
 const { tt } = useTkI18n()
@@ -243,7 +243,7 @@ function onOAuth(event: MessageEvent) {
   const status = event.data.status
   clearOAuth()
   if (status === 'SUCCESS') void refreshLists()
-  else error.value = tt('shop.authorizationFailed')
+  else error.value = tt(shopAuthErrorKey(event.data.errorCode))
 }
 async function disconnect(account: SellerAccount) {
   await ElMessageBox.confirm(tt('shop.disconnectConfirm'), tt('shop.disconnect'))
