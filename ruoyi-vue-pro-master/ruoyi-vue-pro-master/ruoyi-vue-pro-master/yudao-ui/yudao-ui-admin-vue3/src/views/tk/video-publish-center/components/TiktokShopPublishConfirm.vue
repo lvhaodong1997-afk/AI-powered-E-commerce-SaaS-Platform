@@ -27,7 +27,7 @@ const props = defineProps<{ task?: ShopTask; account?: ShopAccount; submitting?:
 defineEmits<{ submit: [] }>()
 const { tt } = useTkI18n(), confirmed = ref(false)
 const precheck = computed(() => normalizeShopPrecheck(props.task?.precheckResult))
-const canConfirm = computed(() => canConfirmShopTask(props.task))
+const canConfirm = computed(() => props.account?.authStatus === 'AUTHORIZED' && canConfirmShopTask(props.task))
 const accountLabel = computed(() => props.account ? `${props.account.displayName || props.account.username || 'Account'} (#${props.account.id})` : `#${props.task?.accountId || '-'}`)
 const snapshotLabel = computed(() => `${props.task?.generationTaskId ? `generation #${props.task.generationTaskId}` : `media #${props.task?.mediaId || '-'}`} · ${props.task?.fileSize || 0} bytes`)
 const videoLink = computed(() => props.task?.videoId && /^\d+$/.test(props.task.videoId) ? `https://www.tiktok.com/video/${props.task.videoId}` : '')

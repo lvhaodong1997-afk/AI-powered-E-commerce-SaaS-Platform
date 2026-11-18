@@ -8,8 +8,7 @@
       </el-select>
       <el-button :disabled="submitting || reviewing" @click="initialize">{{ tt('shop.refreshAccounts') }}</el-button>
     </div>
-    <el-empty v-if="!accountId" :description="tt('shop.photoNoAccount')" />
-    <el-form v-if="canCreate && ready" label-position="top" :disabled="submitting || reviewing">
+    <el-form v-if="canCreate" label-position="top" :disabled="submitting || reviewing">
       <el-form-item :label="tt('shop.photoFiles')">
         <el-upload accept="image/jpeg,image/png" multiple :auto-upload="false" :show-file-list="false" :limit="9" :on-change="addFile" :on-exceed="invalidImages" v-model:file-list="uploadFiles">
           <el-button>{{ tt('shop.photoPick') }}</el-button>
@@ -24,7 +23,8 @@
       </el-form-item>
       <el-form-item :label="tt('shop.photoCaption')"><el-input v-model="title" type="textarea" :rows="3" maxlength="5000" show-word-limit /></el-form-item>
       <el-form-item :label="tt('shop.product')">
-        <TiktokShopProductPicker :key="accountId" :account-id="accountId" @select="selectProduct" @changed="product = undefined" />
+        <TiktokShopProductPicker v-if="ready" :key="accountId" :account-id="accountId" @select="selectProduct" @changed="product = undefined" />
+        <span v-else-if="!authorizedAccount">{{ tt('shop.accountRequired') }}</span>
       </el-form-item>
       <el-form-item :label="tt('shop.photoLinkTitle')"><el-input v-model="linkTitle" maxlength="29" show-word-limit /></el-form-item>
       <el-form-item><el-checkbox v-model="isAiGenerated">{{ tt('shop.photoAi') }}</el-checkbox></el-form-item>
@@ -60,7 +60,8 @@ const { tt } = useTkI18n()
 const canCreate = computed(() => hasPermission(['tk:tiktok-shop-publish:create']) && hasPermission(['tk:tiktok-shop-publish:confirm']))
 const canRead = computed(() => hasPermission(['tk:tiktok-shop-publish:query']))
 const capabilities = ref<ShopCapabilities>(), accounts = ref<ShopAccount[]>([]), accountId = ref<number>()
-const ready = computed(() => capabilities.value?.publishingConfigured && accounts.value.some((a) => a.id === accountId.value && a.authStatus === 'AUTHORIZED'))
+const authorizedAccount = computed(() => accounts.value.some((a) => a.id === accountId.value && a.authStatus === 'AUTHORIZED'))
+const ready = computed(() => capabilities.value?.publishingConfigured && authorizedAccount.value)
 const title = ref(''), linkTitle = ref(''), isAiGenerated = ref(false)
 const product = ref<ShopProduct>(), source = ref<ShopProductSource>('SHOWCASE')
 const images = ref<{ file: File; url: string; uid: number }[]>([]), uploadFiles = ref<UploadUserFile[]>([])
@@ -72,7 +73,10 @@ let key = '', revision = 0, historyRevision = 0
 onMounted(initialize)
 onUnmounted(() => { revision++; historyRevision++; clearImages() })
 watch([title, linkTitle, isAiGenerated, product, source, images], () => { key = ''; result.value = undefined })
-watch(accountId, () => { product.value = undefined; pageNo.value = 1; history.value = []; total.value = 0; void loadHistory() })
+watch([accountId, ready], ([account, canPublish], [previousAccount]) => {
+  if (account !== previousAccount || !canPublish) { product.value = undefined; key = ''; result.value = undefined }
+  if (account !== previousAccount) { pageNo.value = 1; history.value = []; total.value = 0; void loadHistory() }
+})
 
 function fail(reason: unknown) { error.value = reason instanceof Error ? reason.message : tt('shop.operationFailed') }
 function statusLabel(row: ShopPhoto) {
@@ -132,12 +136,13 @@ async function refreshStatus(row: ShopPhoto) {
 }
 async function review() {
   const account = accountId.value, selected = product.value
-  if (!valid.value || !account || !selected?.selectionProof || submitting.value || reviewing.value || result.value) return
+  if (!canCreate.value || !valid.value || !account || !selected?.selectionProof || submitting.value || reviewing.value || result.value) return
   error.value = ''; reviewing.value = true
   try {
     const name = accounts.value.find((item) => item.id === account)?.displayName || account
     await ElMessageBox.confirm(`${name} · ${selected.title || selected.id} · ${images.value.length} ${tt('shop.photoFiles')}`, tt('shop.photoConfirm'), { type: 'warning' })
   } catch { return } finally { reviewing.value = false }
+  if (!canCreate.value || !valid.value || account !== accountId.value || selected !== product.value) return
   submitting.value = true
   try {
     key ||= globalThis.crypto.randomUUID()

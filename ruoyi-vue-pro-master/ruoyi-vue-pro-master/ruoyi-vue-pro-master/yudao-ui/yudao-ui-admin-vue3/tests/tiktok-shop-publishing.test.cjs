@@ -252,7 +252,7 @@ function panelHarness(overrides = {}, grants = ['*'], props = {}) {
 }
 
 test('workspace handoff locks the selected product to its original creator account', async () => {
-  const panel = panelHarness({ accounts: async () => [{ id: 1 }, { id: 2 }] }, ['*'], {
+  const panel = panelHarness({ accounts: async () => [{ id: 1, authStatus: 'AUTHORIZED' }, { id: 2, authStatus: 'AUTHORIZED' }] }, ['*'], {
     initialSelection: { accountId: 2, product: { id: 'p', title: 'Tea', selectionProof: 'proof' } }
   })
   await panel.loadAccounts()
@@ -283,6 +283,7 @@ test('actual panel does not query disabled capabilities or send unauthorized mut
 
 test('actual panel clears parent product proof and ignores create after a draft edit', async () => {
   const pending = deferred(), panel = panelHarness({ create: () => pending.promise })
+  panel.accounts.value = [{ id: 1, authStatus: 'AUTHORIZED' }]
   panel.accountId.value = 1
   Object.assign(panel.form, { mediaId: 4, title: 'hi', productId: 'p', selectionProof: 'proof', productLinkTitle: 'Mug', isAiGenerated: false })
   const creating = panel.createTask()
@@ -310,16 +311,45 @@ test('actual panel stops and fences a pending poll when the draft is invalidated
   panel.stop()
 })
 
-test('actual panel cancels old upload on account/media change and cannot restore its media', async () => {
+test('actual panel cancels old upload on media mode change and cannot restore its media', async () => {
   const pending = deferred(); let canceled = 0
   const panel = panelHarness({ createShopUpload: () => ({ result: pending.promise, cancel() { canceled++ } }) })
   panel.mediaMode.value = 'upload'
   const uploading = panel.upload({ target: { files: [{ name: 'a.mp4', size: 3, type: 'video/mp4' }] } })
-  panel.resetDependent()
+  panel.resetMedia()
   assert.equal(canceled, 1)
   pending.resolve({ id: 99, status: 'READY' }); await uploading
   assert.equal(panel.form.mediaId, undefined)
   panel.stop()
+})
+
+test('actual panel keeps an in-flight upload on account change but clears the product and task', async () => {
+  const pending = deferred()
+  const panel = panelHarness({ createShopUpload: () => ({ result: pending.promise, cancel() { assert.fail('upload canceled') } }) })
+  panel.mediaMode.value = 'upload'
+  const uploading = panel.upload({ target: { files: [{ name: 'a.mp4', size: 3 }] } })
+  panel.form.title = 'Prepared title'
+  panel.form.selectionProof = 'old proof'
+  panel.activeTask.value = { id: 7, stage: 'AWAITING_CONFIRMATION' }
+  panel.resetDependent()
+  pending.resolve({ id: 99 }); await uploading
+  assert.equal(panel.form.mediaId, 99)
+  assert.equal(panel.form.title, 'Prepared title')
+  assert.equal(panel.form.selectionProof, undefined)
+  assert.equal(panel.activeTask.value, undefined)
+  panel.stop()
+})
+
+test('actual panel cannot precheck with an expired account or without create permission', async () => {
+  for (const [authStatus, grants] of [['EXPIRED', ['*']], ['AUTHORIZED', ['tk:tiktok-shop-account:query']]]) {
+    const panel = panelHarness({}, grants)
+    panel.accounts.value = [{ id: 1, authStatus }]
+    panel.accountId.value = 1
+    Object.assign(panel.form, { mediaId: 4, title: 'hi', productId: 'p', selectionProof: 'proof', productLinkTitle: 'Mug', isAiGenerated: false })
+    await panel.createTask()
+    assert.equal(panel.calls.includes('create'), false)
+    panel.stop()
+  }
 })
 
 test('actual panel authorizes twice, rejects unknown callback statuses and disposes pending OAuth', async () => {
@@ -347,6 +377,67 @@ test('actual panel history resumes polling and uses the immutable task account',
   assert.ok(panel.timers.size > 0)
   assert.equal(panel.selectedAccount.value.id, 1) // Editing account remains independent.
   panel.stop()
+})
+
+test('creator selection keeps input without an authorized account and drops an obsolete response', async () => {
+  const vue = require('vue'), calls = [], pending = deferred()
+  let accounts = []
+  const creator = componentScript('../../tiktok-shop/TiktokShopCreatorPanel.vue', [
+    'initialize', 'resetPage', 'search', 'publish', 'view', 'keyword', 'rows', 'nextCursor'
+  ], {
+    vue: { ...vue, onMounted: () => {}, onBeforeUnmount: () => {} },
+    'element-plus': {},
+    '../video-publish-center/components/tiktokShopBehavior': load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts'),
+    '@/api/tk/tiktokShop': { TiktokShopApi: { accounts: async () => accounts, creatorPage: (...args) => { calls.push(args); return pending.promise } } },
+    '@/hooks/web/useTkI18n': { useTkI18n: () => ({ tt: key => key }) },
+    '@/directives/permission/hasPermi': { hasPermission: () => true }
+  }, { defineEmits: () => () => assert.fail('published without authorization') })
+  creator.keyword.value = 'tea'
+  creator.view.value = 'samples'
+  await creator.initialize()
+  await creator.search()
+  creator.publish({ available: true, selectionProof: 'old' })
+  assert.deepEqual(calls, [])
+  accounts = [{ id: 1, authStatus: 'AUTHORIZED' }]
+  const querying = creator.initialize()
+  await Promise.resolve()
+  assert.deepEqual(calls[0].slice(0, 2), [1, 'samples'])
+  accounts = [{ id: 1, authStatus: 'EXPIRED' }]
+  await creator.initialize()
+  pending.resolve({ rows: [{ id: 'stale' }], nextPageToken: 'stale' })
+  await querying
+  assert.deepEqual(creator.rows.value, [])
+  assert.equal(creator.nextCursor.value, undefined)
+  assert.equal(creator.keyword.value, 'tea')
+})
+
+test('photo draft keeps caption and images across accounts and cannot review without authorization', async () => {
+  const vue = require('vue')
+  const photo = componentScript('../../tiktok-shop/TiktokShopPhotoPanel.vue', [
+    'accounts', 'accountId', 'capabilities', 'title', 'linkTitle', 'images', 'product', 'result', 'review'
+  ], {
+    vue: { ...vue, onMounted: () => {}, onUnmounted: () => {} },
+    'element-plus': { ElMessageBox: { confirm: () => assert.fail('opened review without authorization') } },
+    '@/api/tk/tiktokShop': { TiktokShopApi: { photoHistory: async () => ({ list: [], total: 0 }) } },
+    '@/hooks/web/useTkI18n': { useTkI18n: () => ({ tt: key => key }) },
+    '@/directives/permission/hasPermi': { hasPermission: () => true }
+  })
+  photo.capabilities.value = { publishingConfigured: true }
+  photo.title.value = 'Prepared caption'
+  photo.linkTitle.value = 'Mug'
+  photo.images.value = [{ uid: 1 }]
+  photo.product.value = { selectionProof: 'old' }
+  await photo.review()
+  photo.accounts.value = [{ id: 1, authStatus: 'AUTHORIZED' }]
+  photo.accountId.value = 1
+  await vue.nextTick()
+  assert.equal(photo.product.value, undefined)
+  assert.equal(photo.title.value, 'Prepared caption')
+  assert.equal(photo.images.value[0].uid, 1)
+  photo.result.value = { id: 3 }
+  photo.accountId.value = undefined
+  await vue.nextTick()
+  assert.equal(photo.result.value, undefined)
 })
 
 test('OAuth timeout uses returned session lifetime instead of a fixed five minutes', () => {

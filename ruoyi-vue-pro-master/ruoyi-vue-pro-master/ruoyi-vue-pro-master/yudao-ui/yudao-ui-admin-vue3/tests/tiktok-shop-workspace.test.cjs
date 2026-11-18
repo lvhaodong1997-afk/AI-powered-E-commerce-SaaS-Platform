@@ -39,6 +39,24 @@ test('a signed showcase selection opens a publishing draft for the same account'
   const panel = read('src/views/tk/video-publish-center/components/TiktokShopPublishPanel.vue')
   assert.match(view, /@publish="openPublish"/)
   assert.match(view, /:initial-selection="selection"/)
-  assert.match(panel, /accounts\.value\.some\(\(account\) => account\.id === selection\.accountId\)/)
+  assert.match(panel, /accounts\.value\.some\(\(account\) => account\.id === selection\.accountId && account\.authStatus === 'AUTHORIZED'\)/)
   assert.match(panel, /selectProduct\(selection\.product, 'SHOWCASE'\)/)
+})
+
+test('creator tabs and search are visible without an account while search needs authorization', () => {
+  const creator = read('src/views/tk/tiktok-shop/TiktokShopCreatorPanel.vue')
+  assert.doesNotMatch(creator, /<template v-if="accountId">/)
+  assert.match(creator, /<el-tabs v-model="view"/)
+  assert.match(creator, /<el-input v-model="keyword"/)
+  assert.match(creator, /native-type="submit"[^>]*:disabled="!selectedAccount"/)
+})
+
+test('video and photo publishing forms are visible with publishing permission before account selection', () => {
+  const video = read('src/views/tk/video-publish-center/components/TiktokShopPublishPanel.vue')
+  const photo = read('src/views/tk/tiktok-shop/TiktokShopPhotoPanel.vue')
+  assert.match(video, /<el-form v-if="canCreate"/)
+  assert.match(video, /:disabled="!readyToCreate \|\| uploading" @click="createTask"/)
+  assert.match(photo, /<el-form v-if="canCreate"/)
+  assert.match(photo, /<TiktokShopProductPicker v-if="ready"/)
+  assert.match(photo, /const valid = computed\(\(\) => ready\.value &&/)
 })

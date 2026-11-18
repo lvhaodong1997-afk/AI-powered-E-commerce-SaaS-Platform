@@ -12,7 +12,7 @@
         </el-button>
       </el-tooltip>
     </div>
-    <template v-if="accountId">
+    <div>
       <el-tabs v-model="view" @tab-change="resetPage">
         <el-tab-pane :label="tt('shop.creatorMarketplace')" name="marketplace" />
         <el-tab-pane :label="tt('shop.showcase')" name="showcase" />
@@ -21,9 +21,9 @@
       </el-tabs>
       <form v-if="view === 'marketplace'" class="creator-toolbar" @submit.prevent="search">
         <el-input v-model="keyword" maxlength="200" :placeholder="tt('shop.searchProducts')" :aria-label="tt('shop.searchProducts')" clearable />
-        <el-button type="primary" native-type="submit" :loading="loading">{{ tt('shop.searchProducts') }}</el-button>
+        <el-button type="primary" native-type="submit" :loading="loading" :disabled="!selectedAccount">{{ tt('shop.searchProducts') }}</el-button>
       </form>
-      <el-table :data="rows" v-loading="loading" row-key="id" size="small">
+      <el-table :data="rows" :empty-text="selectedAccount ? undefined : tt('shop.accountRequired')" v-loading="loading" row-key="id" size="small">
         <el-table-column prop="id" label="ID" min-width="170" show-overflow-tooltip />
         <el-table-column v-if="isProduct" prop="title" :label="tt('shop.product')" min-width="210" show-overflow-tooltip />
         <el-table-column v-if="isProduct" :label="tt('shop.creatorPrice')" min-width="110">
@@ -53,11 +53,10 @@
         </el-table-column>
       </el-table>
       <div class="creator-pager">
-        <el-button :disabled="loading || cursors.length <= 1" @click="previousPage">{{ tt('shop.creatorPrevious') }}</el-button>
-        <el-button :disabled="loading || !nextCursor" @click="nextPage">{{ tt('shop.nextProducts') }}</el-button>
+        <el-button :disabled="!selectedAccount || loading || cursors.length <= 1" @click="previousPage">{{ tt('shop.creatorPrevious') }}</el-button>
+        <el-button :disabled="!selectedAccount || loading || !nextCursor" @click="nextPage">{{ tt('shop.nextProducts') }}</el-button>
       </div>
-    </template>
-    <el-empty v-else-if="!initializing && !error" :description="tt('shop.accountRequired')" />
+    </div>
   </section>
 </template>
 
@@ -76,6 +75,7 @@ const canManageShowcase = computed(() => hasPermission(['tk:tiktok-shop-creator:
 const changingShowcase = ref(false)
 const accounts = ref<ShopAccount[]>([])
 const accountId = ref<number>()
+const selectedAccount = computed(() => accounts.value.find((account) => account.id === accountId.value))
 const view = ref<ShopCreatorView | 'showcase'>('marketplace')
 const isProduct = computed(() => view.value === 'marketplace' || view.value === 'showcase')
 const keyword = ref('')
@@ -108,7 +108,7 @@ async function initialize() {
 
 async function loadPage(stack: (string | undefined)[]) {
   const requestRevision = revision.begin()
-  const account = accountId.value
+  const account = selectedAccount.value?.id
   const dataset = view.value
   const pageToken = stack[stack.length - 1]
   rows.value = []
@@ -137,17 +137,17 @@ async function loadPage(stack: (string | undefined)[]) {
 function errorText(reason: unknown) { return reason instanceof Error ? reason.message : tt('shop.operationFailed') }
 function formatDate(seconds: number) { return new Date(seconds * 1000).toLocaleString(locale.value) }
 function resetPage() { cursors.value = [undefined]; return loadPage(cursors.value) }
-function search() { appliedKeyword.value = keyword.value.trim(); return resetPage() }
+function search() { if (!selectedAccount.value) return; appliedKeyword.value = keyword.value.trim(); return resetPage() }
 function previousPage() { if (cursors.value.length > 1) return loadPage(cursors.value.slice(0, -1)) }
 function nextPage() { if (nextCursor.value) return loadPage([...cursors.value, nextCursor.value]) }
 function publish(product: ShopProduct) {
-  if (accountId.value && canPublish.value && product.available && product.selectionProof) {
-    emit('publish', { accountId: accountId.value, product })
+  if (selectedAccount.value && canPublish.value && product.available && product.selectionProof) {
+    emit('publish', { accountId: selectedAccount.value.id, product })
   }
 }
 
 async function changeShowcase(row: ShopCreatorRow, add: boolean) {
-  const account = accounts.value.find((item) => item.id === accountId.value)
+  const account = selectedAccount.value
   const dataset = view.value
   if (!account || !canManageShowcase.value || changingShowcase.value) return
   const action = tt(add ? 'shop.creatorShowcaseAdd' : 'shop.creatorShowcaseRemove')
@@ -158,7 +158,7 @@ async function changeShowcase(row: ShopCreatorRow, add: boolean) {
     } catch {
       return
     }
-    if (account.id !== accountId.value || dataset !== view.value || !canManageShowcase.value) return
+    if (account.id !== selectedAccount.value?.id || dataset !== view.value || !canManageShowcase.value) return
     if (add) await TiktokShopApi.addToShowcase(account.id, row.id)
     else await TiktokShopApi.removeFromShowcase(account.id, row.id)
     if (account.id === accountId.value && dataset === view.value) {

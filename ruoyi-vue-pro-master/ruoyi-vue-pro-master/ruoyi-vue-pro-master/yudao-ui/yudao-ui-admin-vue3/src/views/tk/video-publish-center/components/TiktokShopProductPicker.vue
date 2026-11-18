@@ -22,7 +22,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { TiktokShopApi, type ShopProduct, type ShopProductSource } from '@/api/tk/tiktokShop'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 const props = defineProps<{ accountId?: number; disabled?: boolean }>()
@@ -32,6 +32,8 @@ const source = ref<ShopProductSource>('SHOWCASE'), keyword = ref(''), loading = 
 const products = ref<ShopProduct[]>([]), nextPageToken = ref(''), selected = ref<ShopProduct>()
 let revision = 0
 watch(() => props.accountId, reset)
+onMounted(() => { void load() })
+onBeforeUnmount(() => { revision++ })
 function reset() { revision++; products.value = []; nextPageToken.value = ''; selected.value = undefined; emit('changed'); if (props.accountId) void load() }
 async function load(append = false) {
   if (!props.accountId || props.disabled) return
