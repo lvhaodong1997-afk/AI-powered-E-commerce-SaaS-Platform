@@ -65,6 +65,10 @@ public class TkTiktokShopSellerApiClient {
     public CatalogPage<OrderSummary> searchOrders(String token,String shopCipher,int pageSize,String pageToken) {
         TkTiktokShopApiClient.Result result=post("/order/202309/orders/search",token,query(shopCipher,pageSize,pageToken,true),Collections.emptyMap());
         JsonNode data=result.getData();JsonNode rows=data.path("orders");
+        // TikTok omits the orders array when an empty search has no next page.
+        if(rows.isMissingNode() && Long.valueOf(0).equals(total(data))
+                && emptyPageToken(data.path("next_page_token")) && emptyPageToken(data.path("page_token")))
+            return new CatalogPage<>(Collections.emptyList(),0L,null);
         if(!rows.isArray())throw invalid(result);
         List<OrderSummary> orders=new ArrayList<>();
         for(JsonNode row:rows){
@@ -106,6 +110,7 @@ public class TkTiktokShopSellerApiClient {
         JsonNode total=data.path("total_count");
         return total.isIntegralNumber() && total.canConvertToLong() && total.longValue()>=0?total.longValue():null;
     }
+    private static boolean emptyPageToken(JsonNode token) {return token.isMissingNode() || token.isTextual() && token.textValue().isEmpty();}
     private static String nextToken(JsonNode data) {
         String token=text(data,"next_page_token");
         if(token==null)token=text(data,"page_token");

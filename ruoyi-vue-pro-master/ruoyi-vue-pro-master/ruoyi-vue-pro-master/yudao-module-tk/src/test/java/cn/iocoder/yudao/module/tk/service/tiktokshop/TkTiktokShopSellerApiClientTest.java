@@ -63,6 +63,25 @@ class TkTiktokShopSellerApiClientTest {
             assertEquals("INVALID_RESPONSE",bad.getCode());assertEquals("req-p",bad.getRequestId());
         }finally{server.stop(0);}
     }
+    @Test void emptyOrderSearchMayOmitOrdersOnlyWhenTotalIsZero() throws Exception {
+        AtomicReference<String> payload=new AtomicReference<>("{\"total_count\":0,\"next_page_token\":\"\"}");
+        HttpServer server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        server.createContext("/order/202309/orders/search",e->{byte[] out=("{\"code\":0,\"request_id\":\"req-empty\",\"data\":"+payload.get()+"}").getBytes(StandardCharsets.UTF_8);e.sendResponseHeaders(200,out.length);e.getResponseBody().write(out);e.close();});server.start();
+        try {
+            String base="http://127.0.0.1:"+server.getAddress().getPort();
+            TkTiktokShopSellerApiClient client=new TkTiktokShopSellerApiClient(TkTiktokShopSellerPropertiesTest.configuredSeller(),new ObjectMapper(),new OkHttpClient(),Clock.fixed(Instant.ofEpochSecond(1800000000),ZoneOffset.UTC),base,base);
+            TkTiktokShopSellerApiClient.CatalogPage<TkTiktokShopSellerApiClient.OrderSummary> page=client.searchOrders("seller-access","stored-cipher",20,null);
+            assertTrue(page.getItems().isEmpty());assertEquals(0L,page.getTotal());assertNull(page.getNextPageToken());
+            payload.set("{\"total_count\":0}");assertTrue(client.searchOrders("seller-access","stored-cipher",20,null).getItems().isEmpty());
+            for(String bad:new String[]{"{}","{\"total_count\":1}","{\"total_count\":0,\"orders\":{}}","{\"total_count\":0,\"orders\":null}","{\"total_count\":0,\"next_page_token\":\"NEXT\"}",
+                    "{\"total_count\":0,\"next_page_token\":{}}","{\"total_count\":0,\"next_page_token\":null}","{\"total_count\":0,\"next_page_token\":\" \"}",
+                    "{\"total_count\":0,\"next_page_token\":\""+"x".repeat(4097)+"\"}","{\"total_count\":0,\"next_page_token\":\"\u4e2d\"}","{\"total_count\":0,\"page_token\":\"NEXT\"}"}) {
+                payload.set(bad);
+                TkTiktokShopApiException error=assertThrows(TkTiktokShopApiException.class,()->client.searchOrders("seller-access","stored-cipher",20,null));
+                assertEquals("INVALID_RESPONSE",error.getCode());assertEquals("req-empty",error.getRequestId());
+            }
+        }finally{server.stop(0);}
+    }
     @Test void officialBasesAreUsedForTestAndProduction() {
         assertEquals("https://open-api.tiktokglobalshop.com",TkTiktokShopSellerApiClient.apiBaseFor("TEST"));
         assertEquals("https://open-api.tiktokglobalshop.com",TkTiktokShopSellerApiClient.apiBaseFor("PRODUCTION"));

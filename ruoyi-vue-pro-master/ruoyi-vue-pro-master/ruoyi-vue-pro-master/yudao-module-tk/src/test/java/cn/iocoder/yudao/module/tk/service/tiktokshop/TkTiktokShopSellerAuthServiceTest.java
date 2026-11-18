@@ -68,8 +68,9 @@ class TkTiktokShopSellerAuthServiceTest {
             reset(api,sessions);setup();String state=start();when(api.exchangeCode(anyString())).thenThrow(new TkTiktokShopApiException(reason,"safe-id:123"));
             cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAuthVO.CallbackResult result=auth.callback("raw-secret-code",state,null);
             String expected="105005".equals(reason)?"PROVIDER_ERROR":reason;
+            String storedReason="105005".equals(reason)?expected+":"+reason:expected;
             assertEquals(expected,result.getErrorCode());assertEquals("safe-id:123",result.getRequestId());
-            assertFalse(result.getMessage().contains("raw-secret"));verify(sessions).recordFailure(5L,1L,expected+":safe-id:123");
+            assertFalse(result.getMessage().contains("raw-secret"));verify(sessions).recordFailure(5L,1L,storedReason+":safe-id:123");
         }
         reset(api,sessions);setup();String state=start();when(api.exchangeCode(anyString())).thenThrow(new TkTiktokShopApiException("<script>private</script>","<script>secret</script>"));
         cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.vo.TkTiktokShopAuthVO.CallbackResult result=auth.callback("raw-secret-code",state,null);
