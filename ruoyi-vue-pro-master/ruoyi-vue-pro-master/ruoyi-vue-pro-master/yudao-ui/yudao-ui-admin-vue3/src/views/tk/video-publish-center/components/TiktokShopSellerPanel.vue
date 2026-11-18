@@ -42,6 +42,7 @@
       <p v-if="selectedAccount && !visibleShops.length" class="sub-text">{{ tt('shop.noSellerShops') }}</p>
     </section>
     <section v-if="selectedShop" class="catalog">
+      <TiktokShopSellerProductActions v-if="canAuthorize()" :key="selectedShop.id" :shop="selectedShop" :products="products" :scopes="accounts.find((row) => row.id === selectedShop?.accountId)?.grantedScopes" @changed="loadCatalog" @reconnect="connect" />
       <div class="section-head">
         <strong>{{ tt('shop.sellerProducts') }}</strong>
         <div>
@@ -85,6 +86,7 @@ import { TiktokShopApi, type SellerAccount, type SellerOrder, type SellerProduct
 import { acceptShopOAuthMessage, createCatalogCursor, createShopRevision, shopAuthErrorKey, shopEnvironmentLabel, shopOAuthTimeoutMs } from './tiktokShopBehavior'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import { hasPermission } from '@/directives/permission/hasPermi'
+import TiktokShopSellerProductActions from './TiktokShopSellerProductActions.vue'
 const { tt } = useTkI18n()
 const capabilities = ref<ShopCapabilities>()
 const accounts = ref<SellerAccount[]>([])
@@ -107,6 +109,7 @@ const orderCursor = createCatalogCursor()
 const revision = createShopRevision()
 let popup: Window | undefined, oauthSession: number | undefined, oauthTimer: number | undefined
 const canQuery = () => hasPermission(['tk:tiktok-shop-account:query'])
+const canAuthorize = () => hasPermission(['tk:tiktok-shop-account:authorize'])
 const selectedAccount = computed(() => accounts.value.find((account) => account.id === accountId.value))
 const selectedShop = computed(() => shops.value.find((shop) => shop.id === shopId.value))
 const visibleShops = computed(() => shops.value.filter((shop) => !accountId.value || shop.accountId === accountId.value))

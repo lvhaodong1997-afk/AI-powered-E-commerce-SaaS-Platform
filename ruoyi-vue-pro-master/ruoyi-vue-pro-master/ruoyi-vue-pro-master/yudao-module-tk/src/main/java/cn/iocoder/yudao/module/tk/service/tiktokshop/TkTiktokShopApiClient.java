@@ -48,6 +48,16 @@ public class TkTiktokShopApiClient {
         return signed("POST",path,token,Collections.emptyMap(),exact);
     }
     private Result signed(String method,String path,String token,Map<String,String> query,byte[] exact) {
+        return signed(method,path,token,query,exact,null,false);
+    }
+    Result postWithEmptyData(String path,String token,Map<String,String> query,Object body) {
+        byte[] exact;try {exact=json.writeValueAsBytes(body);}catch(Exception ignored){throw new IllegalArgumentException("Invalid Shop request body");}
+        return signed("POST",path,token,query,exact,null,true);
+    }
+    Result postMultipart(String path,String token,MultipartBody body) {
+        return signed("POST",path,token,Collections.emptyMap(),null,body,false);
+    }
+    private Result signed(String method,String path,String token,Map<String,String> query,byte[] exact,MultipartBody multipart,boolean allowEmptyData) {
         properties.requireConfigured();
         if (path==null || !path.matches("/(?!/)[A-Za-z0-9_/-]+") || token==null || token.isEmpty()
                 || token.length()>16384 || !token.chars().allMatch(c->c>=32 && c<=126))
@@ -56,11 +66,12 @@ public class TkTiktokShopApiClient {
         if (query!=null) params.putAll(query);
         if (params.containsKey("access_token") || params.containsKey("sign") || params.containsKey("app_secret")) throw new IllegalArgumentException("Invalid Shop query");
         params.put("app_key",properties.getAppKey());params.put("timestamp",Long.toString(clock.instant().getEpochSecond()));
-        params.put("sign",TkTiktokShopRequestSigner.sign(path,params,exact,"application/json",properties.getAppSecret()));
+        String contentType=multipart==null?"application/json":multipart.contentType().toString();
+        params.put("sign",TkTiktokShopRequestSigner.sign(path,params,exact,contentType,properties.getAppSecret()));
         HttpUrl.Builder url=HttpUrl.parse(apiBase+path).newBuilder(); params.forEach(url::addQueryParameter);
-        Request.Builder request=new Request.Builder().url(url.build()).header("x-tts-access-token",token).header("Content-Type","application/json");
-        request.method(method,exact==null?null:RequestBody.create(JSON,exact));
-        return execute(request.build());
+        Request.Builder request=new Request.Builder().url(url.build()).header("x-tts-access-token",token).header("Content-Type",contentType);
+        request.method(method,multipart!=null?multipart:exact==null?null:RequestBody.create(JSON,exact));
+        return execute(request.build(),allowEmptyData);
     }
     public TokenBundle exchangeCode(String code) {return token("get","auth_code",code,"authorized_code");}
     public TokenBundle refreshToken(String refresh) {return token("refresh","refresh_token",refresh,"refresh_token");}
@@ -81,6 +92,9 @@ public class TkTiktokShopApiClient {
         return new CreatorProfile(username,market,open);
     }
     private Result execute(Request request) {
+        return execute(request,false);
+    }
+    private Result execute(Request request,boolean allowEmptyData) {
         try(Response response=client.newCall(request).execute()) {
             if(response.body()==null)throw new TkTiktokShopApiException("INVALID_RESPONSE",null);
             if(response.body().contentLength()>MAX_RESPONSE_BYTES)throw new TkTiktokShopApiException("RESPONSE_TOO_LARGE",null);
@@ -96,8 +110,10 @@ public class TkTiktokShopApiClient {
                 log.warn("TikTok Shop request failed endpoint={} httpStatus={} tiktokCode={} requestId={}", request.url().encodedPath(), response.code(), code, requestId);
                 throw new TkTiktokShopApiException(code==0?"HTTP_ERROR":Long.toString(code),requestId);
             }
-            if(!root.path("data").isObject())throw new TkTiktokShopApiException("INVALID_RESPONSE",requestId);
-            return new Result(root.path("data"),new TkTiktokShopApiException("0",requestId).getRequestId());
+            JsonNode data=root.path("data");
+            if(allowEmptyData && (data.isMissingNode() || data.isNull()))data=json.createObjectNode();
+            if(!data.isObject())throw new TkTiktokShopApiException("INVALID_RESPONSE",requestId);
+            return new Result(data,new TkTiktokShopApiException("0",requestId).getRequestId());
         }catch(TkTiktokShopApiException e){throw e;}catch(Exception ignored){throw new TkTiktokShopApiException("TRANSPORT_ERROR",null);}
     }
     private static String text(JsonNode node,String key) {JsonNode value=node.path(key);return value.isTextual() && !value.asText().trim().isEmpty()?value.asText():null;}

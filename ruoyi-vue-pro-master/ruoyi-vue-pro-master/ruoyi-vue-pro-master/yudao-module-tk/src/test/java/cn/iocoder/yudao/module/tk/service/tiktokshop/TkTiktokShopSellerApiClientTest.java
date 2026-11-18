@@ -12,6 +12,28 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TkTiktokShopSellerApiClientTest {
+    @Test void sellerWritePathsAreShopScoped() throws Exception {
+        AtomicReference<String> request = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", e -> {
+            request.set(e.getRequestMethod() + " " + e.getRequestURI() + " " + e.getRequestHeaders().getFirst("x-tts-access-token") + " " + body(e));
+            byte[] out = "{\"code\":0,\"request_id\":\"write-1\",\"data\":{}}".getBytes(StandardCharsets.UTF_8);
+            e.sendResponseHeaders(200, out.length); e.getResponseBody().write(out); e.close();
+        });
+        server.start();
+        try {
+            String base = "http://127.0.0.1:" + server.getAddress().getPort();
+            TkTiktokShopSellerApiClient client = new TkTiktokShopSellerApiClient(TkTiktokShopSellerPropertiesTest.configuredSeller(), new ObjectMapper(), new OkHttpClient(), Clock.systemUTC(), base, base);
+            assertEquals("write-1", client.createProduct("seller", "cipher", Collections.singletonMap("idempotency_key", "request-1")).getRequestId());
+            assertTrue(request.get().startsWith("POST /product/202309/products?"));
+            assertTrue(request.get().contains("shop_cipher=cipher"));
+            assertTrue(request.get().endsWith(" seller {\"idempotency_key\":\"request-1\"}"));
+            client.updatePrice("seller", "cipher", "123", Collections.emptyMap());
+            assertTrue(request.get().startsWith("POST /product/202309/products/123/prices/update?"));
+            assertThrows(IllegalArgumentException.class, () -> client.updatePrice("seller", "cipher", "1/2", Collections.emptyMap()));
+        } finally { server.stop(0); }
+    }
+
     @Test void sellerCredentialsSignAuthorizedShopsAndRejectMalformedShopLists() throws Exception {
         AtomicReference<String> payload=new AtomicReference<>("{\"shops\":[{\"id\":\"123\",\"name\":\"Store\",\"region\":\"US\",\"cipher\":\"private\",\"seller_type\":\"LOCAL\",\"code\":\"C\"}]}");
         AtomicReference<String> query=new AtomicReference<>(),header=new AtomicReference<>();

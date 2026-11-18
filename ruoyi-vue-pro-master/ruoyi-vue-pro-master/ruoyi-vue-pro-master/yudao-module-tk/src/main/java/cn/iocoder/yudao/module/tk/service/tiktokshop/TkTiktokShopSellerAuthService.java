@@ -71,6 +71,11 @@ public class TkTiktokShopSellerAuthService {
         TkTiktokShopSellerShopDO shop=shops.selectById(id);if(shop==null)throw denied();TkTiktokShopSellerAccountDO a=requireReadable(shop.getAccountId());validateShop(shop,a);
         if(!"AUTHORIZED".equals(shop.getStatus()) || !"AUTHORIZED".equals(a.getAuthStatus()) || shop.getShopCipher()==null)throw denied();return shop;
     }
+    public TkTiktokShopSellerShopDO requireWritableShop(Long id){
+        TkTiktokShopSellerShopDO shop=requireReadableShop(id);
+        scope.validateWritable(shop.getTenantId(),shop.getCompanyId());
+        return shop;
+    }
     @Transactional
     public void disconnect(Long id){TkTiktokShopSellerAccountDO a=requireReadable(id);scope.validateWritable(a.getTenantId(),a.getCompanyId());accounts.disconnect(id,a.getTenantId());shops.invalidate(a.getTenantId(),id);}
     private void validateShop(TkTiktokShopSellerShopDO shop,TkTiktokShopSellerAccountDO a){if(!Objects.equals(shop.getTenantId(),a.getTenantId()) || !Objects.equals(shop.getCompanyId(),a.getCompanyId()) || !Objects.equals(shop.getAccountId(),a.getId()) || !Objects.equals(shop.getEnvironment(),a.getEnvironment()))throw denied();}

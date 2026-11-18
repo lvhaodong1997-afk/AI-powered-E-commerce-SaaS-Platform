@@ -25,6 +25,12 @@ MiniMax 百度 BCE 配音的进程配置、增量迁移及验收要求见 [MINIM
 - Noto CJK 字体：`NotoSansCJK-Regular.ttc`、`NotoSansCJK-Bold.ttc`、
   `NotoSerifCJK-Regular.ttc`、`NotoSerifCJK-Bold.ttc`，四个文件必须完整安装到字体目录并注册到 fontconfig
 
+## TikTok Shop 沙盒商品写入
+
+默认关闭。保持 `TIKTOK_SHOP_SELLER_ENVIRONMENT=TEST`，将 `TIKTOK_SHOP_SELLER_PRODUCT_WRITE_TEST_SHOP_ID` 设置为 Development Shops 显示的美国测试店铺 Shop ID。服务只接受这个店铺的商品写入。应用需要 Product Basic (`seller.product.basic`) 和 Product Modify (`seller.product.write`)，店铺需重新授权并确认实际获得权限。仓库列表只使用已授予的 `seller.logistics`；也可手填测试店铺仓库 ID。
+
+本土测试店使用店铺商品接口。跨境测试店的本地刊登模式经 Partner Center 或 API 测试工具确认后，才设置 `TIKTOK_SHOP_SELLER_PRODUCT_WRITE_LOCAL_LISTING=true` 开放建品。部署后选择常规类目创建一个单 SKU 测试商品并记录商品 ID，再选择在售且无促销锁定的测试 SKU 改价并回查。产品和价格操作的用户、店铺和平台请求号记录在后端日志中。
+
 ## 目录约定
 
 ```bash

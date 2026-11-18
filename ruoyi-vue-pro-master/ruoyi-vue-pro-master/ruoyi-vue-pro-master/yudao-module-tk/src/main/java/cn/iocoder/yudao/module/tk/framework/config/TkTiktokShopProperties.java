@@ -19,6 +19,13 @@ public class TkTiktokShopProperties {
         private boolean enabled;
         private String appKey, appSecret, authorizationUrl;
         private String environment = "PRODUCTION";
+        private String productWriteTestShopId;
+        private boolean productWriteLocalListing;
+        public boolean permitsProductWrite(String shopId, String shopEnvironment, String region) {
+            return "TEST".equals(environment) && "TEST".equals(shopEnvironment) && "US".equals(region)
+                    && productWriteTestShopId != null && !productWriteTestShopId.trim().isEmpty()
+                    && productWriteTestShopId.equals(shopId);
+        }
     }
     public boolean isSellerConfigured() {
         return seller != null && seller.isEnabled() && hasText(seller.getAppKey()) && hasText(seller.getAppSecret())

@@ -14,6 +14,8 @@ public class TkTiktokShopSellerApiClient {
     public static final String PRODUCTION_AUTH_BASE="https://auth.tiktok-shops.com";
     public static final String REQUIRED_SCOPE="seller.authorization.info";
     public static final String PRODUCT_SCOPE="seller.product.basic";
+    public static final String PRODUCT_WRITE_SCOPE="seller.product.write";
+    private static final String PRODUCT_API="/product/202309";
     public static final String ORDER_SCOPE="seller.order.info";
     public static final String ORDER_FS_SCOPE="seller.fs.order&fufillment.management";
     public static final int DEFAULT_PAGE_SIZE=20;
@@ -39,6 +41,42 @@ public class TkTiktokShopSellerApiClient {
     public TkTiktokShopApiClient.TokenBundle refreshToken(String value){return client().refreshToken(value);}
     public TkTiktokShopApiClient.Result get(String path,String token,Map<String,String> query){return client().get(path,token,query);}
     public TkTiktokShopApiClient.Result post(String path,String token,Map<String,String> query,Object body){return client().post(path,token,query,body);}
+    public TkTiktokShopApiClient.Result createProduct(String token, String cipher, Object body) {
+        return post(PRODUCT_API+"/products", token, Collections.singletonMap("shop_cipher", cipher), body);
+    }
+    public TkTiktokShopApiClient.Result updatePrice(String token, String cipher, String productId, Object body) {
+        return client().postWithEmptyData(PRODUCT_API+"/products/"+numericId(productId)+"/prices/update", token,
+                Collections.singletonMap("shop_cipher", cipher), body);
+    }
+    public TkTiktokShopApiClient.Result product(String token, String cipher, String productId) {
+        return get(PRODUCT_API+"/products/"+numericId(productId), token, Collections.singletonMap("shop_cipher", cipher));
+    }
+    public JsonNode categories(String token, String cipher, String keyword) {
+        Map<String,String> query=categoryQuery(cipher);
+        query.put("keyword", keyword);
+        return get(PRODUCT_API+"/categories", token, query).getData().path("categories");
+    }
+    public JsonNode categoryAttributes(String token, String cipher, String categoryId) {
+        return get(PRODUCT_API+"/categories/"+numericId(categoryId)+"/attributes", token, categoryQuery(cipher)).getData().path("attributes");
+    }
+    public JsonNode categoryRules(String token, String cipher, String categoryId) {
+        return get(PRODUCT_API+"/categories/"+numericId(categoryId)+"/rules", token, categoryQuery(cipher)).getData();
+    }
+    public TkTiktokShopApiClient.Result uploadProductImage(String token, byte[] image, String mime) {
+        return client().postMultipart(PRODUCT_API+"/images/upload", token, new okhttp3.MultipartBody.Builder()
+                .setType(okhttp3.MultipartBody.FORM).addFormDataPart("use_case", "MAIN_IMAGE")
+                .addFormDataPart("data", "product."+("image/png".equals(mime)?"png":"jpg"),
+                        okhttp3.RequestBody.create(okhttp3.MediaType.parse(mime), image)).build());
+    }
+    private Map<String,String> categoryQuery(String cipher) {
+        Map<String,String> query=new LinkedHashMap<>();
+        query.put("shop_cipher", cipher);query.put("category_version", "v2");query.put("locale", "en-US");
+        return query;
+    }
+    static String numericId(String value) {
+        if(value==null || !value.matches("[0-9]{1,32}"))throw new IllegalArgumentException("Invalid TikTok Shop ID");
+        return value;
+    }
     public List<AuthorizedShop> getAuthorizedShops(String token) {
         JsonNode shops=get("/authorization/202309/shops",token,Collections.emptyMap()).getData().path("shops");
         if(!shops.isArray())throw invalid();

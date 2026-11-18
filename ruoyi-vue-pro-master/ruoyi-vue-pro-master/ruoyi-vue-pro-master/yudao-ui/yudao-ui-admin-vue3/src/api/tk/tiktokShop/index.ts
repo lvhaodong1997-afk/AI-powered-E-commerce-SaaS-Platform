@@ -45,6 +45,25 @@ export interface SellerShop {
   environment?: string
 }
 export interface SellerProduct { id: string; title?: string; status?: string }
+export interface SellerWriteCapabilities { sandbox: boolean; granted: boolean; canCreate: boolean }
+export interface SellerChoice { id: string; name: string }
+export interface SellerCategory {
+  supported: boolean
+  attributes: { id: string; name: string; required: boolean; custom: boolean; options: SellerChoice[] }[]
+}
+export interface SellerProductWriteResult {
+  productId: string
+  result?: 'VERIFIED' | 'SUBMITTED' | 'UNVERIFIED'
+  requestId?: string
+  status?: string
+  auditStatus?: string
+  skus?: { id: string; sellerSku: string; price: string; currency: string }[]
+}
+export interface SellerCreateProduct {
+  title: string; description: string; categoryId: string; sellerSku: string; warehouseId: string
+  price: string; weight: string; length: string; width: string; height: string; quantity: number
+  draft: boolean; images: string[]; attributes: Record<string, string>; idempotencyKey: string
+}
 export interface SellerOrder { id: string; status?: string; createTime?: string; totalAmount?: string; currency?: string }
 export interface SellerProductPage { products: SellerProduct[]; total?: number; nextPageToken?: string }
 export interface SellerOrderPage { orders: SellerOrder[]; total?: number; nextPageToken?: string }
@@ -110,6 +129,7 @@ export interface ShopTask {
 }
 export interface ShopMedia { id: number; fileSize: number; fileName: string; mimeType: string; status: string }
 const base = '/tk/tiktok-shop'
+const sellerWrite = (id: number) => `${base}/seller/shops/${id}/product-writing`
 export const TiktokShopApi = {
   capabilities: () => request.get<ShopCapabilities>({ url: `${base}/capabilities` }),
   accounts: () => request.get<ShopAccount[]>({ url: `${base}/accounts` }),
@@ -137,4 +157,23 @@ export const TiktokShopApi = {
     request.get<SellerProductPage>({ url: `${base}/seller/shops/${id}/products`, params }),
   sellerOrders: (id: number, params: { companyId?: number; pageSize?: number; pageToken?: string } = {}) =>
     request.get<SellerOrderPage>({ url: `${base}/seller/shops/${id}/orders`, params }),
+  sellerWriteCapabilities: (id: number) => request.get<SellerWriteCapabilities>({ url: `${sellerWrite(id)}/capabilities` }),
+  sellerCategories: (id: number, keyword: string) =>
+    request.get<SellerChoice[]>({ url: `${sellerWrite(id)}/categories`, params: { keyword } }),
+  sellerCategory: (id: number, categoryId: string) =>
+    request.get<SellerCategory>({ url: `${sellerWrite(id)}/categories/${encodeURIComponent(categoryId)}`, timeout: 65_000 }),
+  sellerWarehouses: (id: number) => request.get<SellerChoice[]>({ url: `${sellerWrite(id)}/warehouses` }),
+  sellerUploadImage: (id: number, file: File) => {
+    const data = new FormData()
+    data.append('file', file)
+    return request.post<{ uri: string }>({ url: `${sellerWrite(id)}/images`, data, timeout: 45_000, skipAuthReplay: true })
+  },
+  sellerCreateProduct: (id: number, data: SellerCreateProduct) => request.post<SellerProductWriteResult>({
+    url: `${sellerWrite(id)}/products`, data, timeout: 150_000, skipAuthReplay: true
+  }),
+  sellerProductDetail: (id: number, productId: string) => request.get<SellerProductWriteResult>({
+    url: `${sellerWrite(id)}/products/${encodeURIComponent(productId)}`, timeout: 40_000
+  }),
+  sellerUpdatePrice: (id: number, productId: string, data: { skuId: string; currency: string; expected: string; price: string }) =>
+    request.post<SellerProductWriteResult>({ url: `${sellerWrite(id)}/products/${encodeURIComponent(productId)}/price`, data, timeout: 110_000, skipAuthReplay: true }),
 }

@@ -181,6 +181,8 @@ tk:
       app-secret: ${TIKTOK_SHOP_SELLER_APP_SECRET:}
       authorization-url: ${TIKTOK_SHOP_SELLER_AUTHORIZATION_URL:}
       environment: ${TIKTOK_SHOP_SELLER_ENVIRONMENT:PRODUCTION}
+      product-write-test-shop-id: ${TIKTOK_SHOP_SELLER_PRODUCT_WRITE_TEST_SHOP_ID:}
+      product-write-local-listing: ${TIKTOK_SHOP_SELLER_PRODUCT_WRITE_LOCAL_LISTING:false}
     enabled: ${TIKTOK_SHOP_ENABLED:false}
     app-key: ${TIKTOK_SHOP_APP_KEY:}
     app-secret: ${TIKTOK_SHOP_APP_SECRET:}
