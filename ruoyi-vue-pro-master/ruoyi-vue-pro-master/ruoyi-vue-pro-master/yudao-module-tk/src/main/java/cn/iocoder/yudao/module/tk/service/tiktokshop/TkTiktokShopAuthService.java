@@ -126,6 +126,11 @@ public class TkTiktokShopAuthService {
         a.setAccessTokenCipher(cipher.encrypt(token.getAccessToken(),a.getTenantId(),a.getAppKey(),a.getOpenId()));a.setRefreshTokenCipher(cipher.encrypt(token.getRefreshToken(),a.getTenantId(),a.getAppKey(),a.getOpenId()));a.setAccessTokenExpireTime(token.getAccessExpireTime());a.setRefreshTokenExpireTime(token.getRefreshExpireTime());
         if(existing==null){a.setTokenVersion(1L);accounts.insert(a);}else if(accounts.reauthorize(a,version)!=1)throw new IllegalStateException("Shop account authorization changed");
     }
+    public TkTiktokShopAccountDO requireWritable(Long id) {
+        TkTiktokShopAccountDO account = requireReadable(id);
+        scope.validateWritable(account.getTenantId(), account.getCompanyId());
+        return account;
+    }
     public List<AccountResponse> listAccounts() {
         TkUserScope current=current();Long company=scope.getWritableCompanyId(null);
         LambdaQueryWrapperX<TkTiktokShopAccountDO> query=new LambdaQueryWrapperX<TkTiktokShopAccountDO>().eq(TkTiktokShopAccountDO::getTenantId,current.getTenantId()).eq(TkTiktokShopAccountDO::getAppKey,properties.getAppKey());

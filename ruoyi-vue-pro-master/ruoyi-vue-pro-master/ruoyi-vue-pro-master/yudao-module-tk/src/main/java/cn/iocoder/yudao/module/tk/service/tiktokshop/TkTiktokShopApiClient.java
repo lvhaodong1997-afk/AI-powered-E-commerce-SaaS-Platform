@@ -42,6 +42,16 @@ public class TkTiktokShopApiClient {
         return signed("POST",path,token,query,exact);
     }
     public Result get(String path,String token,Map<String,String> query) { return signed("GET",path,token,query,null); }
+    public Result delete(String path,String token,Object body) {
+        byte[] exact;
+        try { exact=json.writeValueAsBytes(body); } catch(Exception ignored) { throw new IllegalArgumentException("Invalid Shop request body"); }
+        return signed("DELETE",path,token,Collections.emptyMap(),exact,null,true);
+    }
+    Result uploadPhoto(String token,RequestBody image,String mime) {
+        MultipartBody body=new MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("data","image/png".equals(mime)?"photo.png":"photo.jpg",image).build();
+        return postMultipart("/affiliate_creator/202511/photos/photo_files",token,body);
+    }
     public Result post(String path,String token,Object body) {
         byte[] exact;
         try { exact=json.writeValueAsBytes(body); } catch (Exception ignored) { throw new IllegalArgumentException("Invalid Shop request body"); }

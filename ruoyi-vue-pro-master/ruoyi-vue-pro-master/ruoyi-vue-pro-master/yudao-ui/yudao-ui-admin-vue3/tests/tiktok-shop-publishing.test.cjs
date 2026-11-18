@@ -213,7 +213,7 @@ function componentScript(name, names, imports = {}, globals = {}) {
   return module.exports
 }
 
-function panelHarness(overrides = {}, grants = ['*']) {
+function panelHarness(overrides = {}, grants = ['*'], props = {}) {
   const vue = require('vue'), timers = new Map(), listeners = new Set(), cleanups = [], calls = []
   let timerId = 0
   const window = {
@@ -235,7 +235,7 @@ function panelHarness(overrides = {}, grants = ['*']) {
   const helper = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
   const exposed = componentScript('TiktokShopPublishPanel.vue', [
     'capabilities', 'accountId', 'accounts', 'activeTask', 'form', 'mediaMode', 'history', 'submitted', 'error',
-    'load', 'loadAccounts', 'loadHistory', 'connect', 'onOAuth', 'resetDependent', 'resetProduct', 'invalidate',
+    'load', 'loadAccounts', 'loadHistory', 'connect', 'onOAuth', 'resetDependent', 'resetMedia', 'resetProduct', 'invalidate',
     'createTask', 'confirmTask', 'selectHistory', 'upload', 'cancelUpload', 'poller', 'selectedAccount'
   ], {
     vue: { ...vue, onMounted: () => {}, onBeforeUnmount: fn => cleanups.push(fn) },
@@ -246,10 +246,26 @@ function panelHarness(overrides = {}, grants = ['*']) {
     '@/utils/tiktokShopUpload': { createShopUpload: overrides.createShopUpload || (() => { throw new Error('unexpected upload') }) },
     '@/hooks/web/useTkI18n': { useTkI18n: () => ({ tt: key => key }) },
     '@/directives/permission/hasPermi': { hasPermission: requested => grants.includes('*') || requested.some(p => grants.includes(p)) }
-  }, { window })
+  }, { window, defineProps: () => props, defineEmits: () => () => {} })
   if (!overrides.capabilities) exposed.capabilities.value = configured
   return { ...exposed, window, timers, listeners, calls, api, configured, stop: () => cleanups.forEach(fn => fn()) }
 }
+
+test('workspace handoff locks the selected product to its original creator account', async () => {
+  const panel = panelHarness({ accounts: async () => [{ id: 1 }, { id: 2 }] }, ['*'], {
+    initialSelection: { accountId: 2, product: { id: 'p', title: 'Tea', selectionProof: 'proof' } }
+  })
+  await panel.loadAccounts()
+  assert.equal(panel.accountId.value, 2)
+  assert.equal(panel.form.productId, 'p')
+  panel.mediaMode.value = 'upload'
+  panel.resetMedia()
+  assert.equal(panel.form.selectionProof, 'proof')
+  panel.accountId.value = 1
+  panel.resetDependent()
+  assert.equal(panel.form.selectionProof, undefined)
+  panel.stop()
+})
 
 test('actual panel does not query disabled capabilities or send unauthorized mutations', async () => {
   let reads = 0

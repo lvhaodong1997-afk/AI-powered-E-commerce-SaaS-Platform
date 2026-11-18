@@ -3,6 +3,27 @@ import type { TkChunkUploadSession } from '@/utils/tkChunkUpload'
 
 export type ShopProductSource = 'SHOP' | 'SHOWCASE'
 export type ShopAuthType = 'CREATOR' | 'SELLER'
+export type ShopCreatorView = 'marketplace' | 'samples' | 'orders'
+export type ShopSellerView = 'PRODUCTS' | 'ORDERS' | 'PACKAGES' | 'RETURNS' | 'STATEMENTS' | 'PROMOTIONS'
+export type ShopAnalyticsView = 'VIDEOS' | 'LIVES'
+export interface ShopSellerPage { rows: Record<string, string>[]; nextPageToken?: string; latestAvailableDate?: string }
+export interface ShopSellerParams { shopId: number; cursor?: string }
+export interface ShopPhotoCreate {
+  accountId: number; title: string; productId: string; productSource: ShopProductSource; selectionProof: string;
+  linkTitle: string; idempotencyKey: string; confirm: true; isAiGenerated: boolean
+}
+export interface ShopPhoto {
+  id: number; title: string; productId: string; stage: string; photoId?: string; postStatus?: string; failCode?: string; requestId?: string
+}
+export interface ShopCreatorRow {
+  id: string
+  title?: string
+  status?: string
+  productId?: string
+  price?: string
+  currency?: string
+  createdAt?: number
+}
 export interface ShopCapabilities {
   enabled: boolean
   configured: boolean
@@ -90,6 +111,7 @@ export interface ShopProduct {
   available: boolean
   selectionProof?: string
 }
+export interface ShopPublishSelection { accountId: number; product: ShopProduct }
 export interface ShopCreate {
   accountId: number
   generationTaskId?: number
@@ -135,6 +157,27 @@ export const TiktokShopApi = {
   accounts: () => request.get<ShopAccount[]>({ url: `${base}/accounts` }),
   authorize: (data: { companyId?: number; authType?: ShopAuthType } = {}) => request.post<ShopAuthSession>({ url: `${base}/auth/sessions`, data }),
   disconnect: (id: number) => request.delete<boolean>({ url: `${base}/accounts/${id}` }),
+  sellerOperations: (params: ShopSellerParams & { view: ShopSellerView }) =>
+    request.get<ShopSellerPage>({ url: `${base}/seller/operations`, params }),
+  sellerAnalytics: (params: ShopSellerParams & { view: ShopAnalyticsView; start: string; end: string; liveAccountType?: string }) =>
+    request.get<ShopSellerPage>({ url: `${base}/seller/analytics`, params }),
+  publishPhotos: (value: ShopPhotoCreate, files: File[]) => {
+    const data = new FormData()
+    data.append('request', new Blob([JSON.stringify(value)], { type: 'application/json' }))
+    files.forEach((file) => data.append('files', file))
+    return request.post<ShopPhoto>({ url: `${base}/photos`, data, timeout: 300_000, skipAuthReplay: true })
+  },
+  photoHistory: (accountId: number, pageNo: number) =>
+    request.get<{ list: ShopPhoto[]; total: number }>({ url: `${base}/photos`, params: { accountId, pageNo } }),
+  photoStatus: (accountId: number, id: number) => request.get<ShopPhoto>({ url: `${base}/photos/${id}/status`, params: { accountId } }),
+  creatorPage: (id: number, view: ShopCreatorView, params: { pageToken?: string; keyword?: string }) =>
+    request.get<{ rows: ShopCreatorRow[]; nextPageToken?: string }>({ url: `${base}/accounts/${id}/creator/${view}`, params }),
+  addToShowcase: (id: number, productId: string) => request.post<boolean>({
+    url: `${base}/accounts/${id}/creator/showcase/${encodeURIComponent(productId)}`, skipAuthReplay: true
+  }),
+  removeFromShowcase: (id: number, productId: string) => request.delete<boolean>({
+    url: `${base}/accounts/${id}/creator/showcase/${encodeURIComponent(productId)}`, skipAuthReplay: true
+  }),
   products: (id: number, params: { source: ShopProductSource; pageSize: number; pageToken?: string; titleKeyword?: string }) =>
     request.get<{ products: ShopProduct[]; nextPageToken?: string }>({ url: `${base}/accounts/${id}/products`, params }),
   create: (data: ShopCreate) => request.post<ShopTask>({ url: `${base}/publish/tasks`, data, timeout: 120_000, skipAuthReplay: true }),

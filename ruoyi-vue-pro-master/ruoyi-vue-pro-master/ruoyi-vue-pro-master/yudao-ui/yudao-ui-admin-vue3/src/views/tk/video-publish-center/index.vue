@@ -104,7 +104,10 @@
 
 
     <MetaPublishPanel v-if="activeTab === 'meta' && hasPermission(['tk:social-publish:query'])" />
-    <TiktokShopWorkspace v-if="activeTab === 'shop' && shopAvailable" />
+    <ContentWrap v-if="activeTab === 'shop' && shopAvailable && shopWorkspacePath">
+      <RouterLink :to="shopWorkspacePath">{{ tt('shop.workspaceOpen') }}</RouterLink>
+    </ContentWrap>
+    <TiktokShopWorkspace v-else-if="activeTab === 'shop' && shopAvailable" />
 
     <ContentWrap v-if="activeTab === 'videos'">
       <el-form :model="videoQuery" ref="videoQueryFormRef" :inline="true" label-width="90px" class="-mb-15px">
@@ -771,7 +774,8 @@ defineOptions({ name: 'TkVideoPublishCenter' })
 
 const message = useMessage()
 const { tt, tText } = useTkI18n()
-const { currentRoute } = useRouter()
+const router = useRouter()
+const { currentRoute } = router
 const TIKTOK_AUTH_MESSAGE_TYPE = 'TK_TIKTOK_AUTH_RESULT'
 const MAX_TIKTOK_VIDEO_SIZE = 1_000_000_000
 
@@ -794,6 +798,11 @@ type TkTiktokAuthMessage = {
 
 const activeTab = ref<'videos' | 'accounts' | 'tasks' | 'details' | 'meta' | 'shop'>('videos')
 const shopAvailable = computed(() => hasPermission(['tk:tiktok-shop-account:query']) && hasPermission(['tk:video-publish-center:query']))
+const shopWorkspacePath = computed(() =>
+  hasPermission(['tk:tiktok-shop-workspace:query']) && router.hasRoute('TkTiktokShopWorkspace')
+    ? { name: 'TkTiktokShopWorkspace' }
+    : undefined
+)
 const shopOnlyStartup = computed(() => shopStartup((permissions) => hasPermission(permissions)).shopOnly)
 const overview = reactive({
   authorizedAccountCount: 0,
@@ -1796,6 +1805,10 @@ const loadRouteGeneration = async () => {
 onMounted(async () => {
   window.addEventListener('message', handleRedirectAuthResult)
   if (shopOnlyStartup.value) {
+    if (shopWorkspacePath.value) {
+      await router.replace(shopWorkspacePath.value)
+      return
+    }
     activeTab.value = 'shop'
   } else {
     await Promise.all([getOverview(), loadQueue(), getVideoList(), getAccountList(), getGroupList()])
