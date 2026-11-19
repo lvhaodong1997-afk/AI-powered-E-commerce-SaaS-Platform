@@ -18,6 +18,11 @@ public class TkSocialPublishTaskDO extends TenantBaseDO {
     private String title;
     private String instagramCaption;
     private String facebookMessage;
+    private String channel;
+    private String channelText;
+    private String channelPrivacy;
+    private Boolean channelForKids;
+    private Boolean channelSynthetic;
     private String status;
     private String idempotencyKey;
     private String requestHash;

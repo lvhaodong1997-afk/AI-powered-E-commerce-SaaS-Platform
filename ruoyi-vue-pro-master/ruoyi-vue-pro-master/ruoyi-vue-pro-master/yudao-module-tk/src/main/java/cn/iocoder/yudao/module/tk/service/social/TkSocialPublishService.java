@@ -136,6 +136,7 @@ public class TkSocialPublishService {
                 .eqIfPresent(TkSocialPublishTaskDO::getTenantId, current.isGlobalPlatformView() ? null : current.getTenantId())
                 .eqIfPresent(TkSocialPublishTaskDO::getCreator, current.canReadAllTenantRecords() ? null : current.getUserIdString())
                 .eqIfPresent(TkSocialPublishTaskDO::getStatus, request.getStatus())
+                .isNull(TkSocialPublishTaskDO::getChannel)
                 .orderByDesc(TkSocialPublishTaskDO::getId));
     }
 
@@ -151,7 +152,7 @@ public class TkSocialPublishService {
         requireEnabled();
         if (id == null) throw new IllegalArgumentException("请提供发布任务编号");
         TkSocialPublishTaskDO task = tasks.selectById(id);
-        if (task == null) throw new IllegalArgumentException("发布任务不存在");
+        if (task == null || task.getChannel()!=null) throw new IllegalArgumentException("发布任务不存在");
         scope.validateReadable(task.getTenantId(), task.getCompanyId(), task.getCreator());
         return task;
     }

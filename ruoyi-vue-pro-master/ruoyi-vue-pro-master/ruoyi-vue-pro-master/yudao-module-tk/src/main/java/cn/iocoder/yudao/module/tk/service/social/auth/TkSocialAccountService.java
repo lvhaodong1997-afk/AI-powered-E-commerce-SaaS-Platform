@@ -30,7 +30,8 @@ public class TkSocialAccountService {
     public TkSocialAccountDO requireReadable(Long id) {
         properties.requireEnabled();
         TkSocialAccountDO account=accounts.selectById(id);
-        if (account==null) throw new IllegalArgumentException("Meta 账号不存在或无权访问");
+        if (account==null || !Arrays.asList("INSTAGRAM","FACEBOOK_PAGE").contains(account.getPlatform()))
+            throw new IllegalArgumentException("Meta 账号不存在或无权访问");
         scope.validateReadable(account.getTenantId(),account.getCompanyId(),account.getCreator());
         return account;
     }

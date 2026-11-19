@@ -74,7 +74,8 @@ public class TkSocialStatsService {
     private TkSocialPublishDetailDO requireDetail(Long id) {
         if(id==null) throw new IllegalArgumentException("请提供发布明细编号");
         TkSocialPublishDetailDO detail=details.selectById(id);
-        if(detail==null) throw new IllegalArgumentException("发布明细不存在或无权访问");
+        if(detail==null || cn.iocoder.yudao.module.tk.service.channel.TkChannelProperties.supports(detail.getPlatform()))
+            throw new IllegalArgumentException("发布明细不存在或无权访问");
         scope.validateReadable(detail.getTenantId(),detail.getCompanyId(),detail.getCreator());
         TkSocialPublishTaskDO task=tasks.selectById(detail.getPublishTaskId());
         if(task==null || !Objects.equals(task.getTenantId(),detail.getTenantId()) || !Objects.equals(task.getCompanyId(),detail.getCompanyId()))

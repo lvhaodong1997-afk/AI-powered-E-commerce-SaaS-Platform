@@ -163,6 +163,17 @@ yudao:
 debug: false
 
 tk:
+  channel-publish:
+    x:
+      enabled: ${TK_X_PUBLISH_ENABLED:false}
+      client-id: ${TK_X_CLIENT_ID:}
+      client-secret: ${TK_X_CLIENT_SECRET:}
+      redirect-uri: ${TK_X_REDIRECT_URI:}
+    youtube:
+      enabled: ${TK_YOUTUBE_PUBLISH_ENABLED:false}
+      client-id: ${TK_YOUTUBE_CLIENT_ID:}
+      client-secret: ${TK_YOUTUBE_CLIENT_SECRET:}
+      redirect-uri: ${TK_YOUTUBE_REDIRECT_URI:}
   registration:
     enabled: ${TK_REGISTRATION_ENABLED:false}
     default-package-id: ${TK_REGISTRATION_DEFAULT_PACKAGE_ID:0}

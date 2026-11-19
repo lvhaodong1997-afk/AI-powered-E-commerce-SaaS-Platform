@@ -24,6 +24,10 @@ public class TkSocialPublishDetailDO extends TenantBaseDO {
     private String externalMediaId;
     private String externalPostId;
     private String publishUrl;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @lombok.ToString.Exclude
+    private String uploadSessionCiphertext;
+    private Long uploadOffset;
     private String leaseToken;
     private String errorCode;
     private String errorMessage;

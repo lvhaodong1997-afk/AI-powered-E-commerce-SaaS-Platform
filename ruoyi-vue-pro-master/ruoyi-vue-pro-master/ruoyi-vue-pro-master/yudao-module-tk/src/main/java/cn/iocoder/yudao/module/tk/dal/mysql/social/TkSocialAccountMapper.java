@@ -21,6 +21,7 @@ public interface TkSocialAccountMapper extends BaseMapperX<TkSocialAccountDO> {
                 .eqIfPresent(TkSocialAccountDO::getTenantId,scope.isGlobalPlatformView()?null:scope.getTenantId())
                 .eqIfPresent(TkSocialAccountDO::getCreator,scope.canReadAllTenantRecords()?null:scope.getUserIdString())
                 .eqIfPresent(TkSocialAccountDO::getPlatform,platform)
+                .in(TkSocialAccountDO::getPlatform,"INSTAGRAM","FACEBOOK_PAGE")
                 .ne(TkSocialAccountDO::getStatus,"DELETED")
                 .orderByDesc(TkSocialAccountDO::getId));
     }

@@ -2,7 +2,9 @@ package cn.iocoder.yudao.module.tk.service.social;
 
 import cn.iocoder.yudao.module.tk.dal.dataobject.social.*;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.*;
+import cn.iocoder.yudao.module.tk.service.channel.*;
 import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAccountService;
+import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialTokenCipher;
 import cn.iocoder.yudao.module.tk.service.social.platform.*;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,9 @@ public class TkSocialPublishWorker {
     private final TkSocialMediaService urls;
     private final TkSocialPlatformClient platform;
     private final TkSocialPublishService publisher;
+    @javax.annotation.Resource private TkChannelAccountService channelAccounts;
+    @javax.annotation.Resource private TkChannelVideoClient channelVideos;
+    @javax.annotation.Resource private TkSocialTokenCipher cipher;
     public TkSocialPublishWorker(TkSocialPublishDetailMapper details,TkSocialPublishTaskMapper tasks,
             TkSocialAccountMapper accounts,TkSocialMediaMapper media,TkSocialAccountService tokens,
             TkSocialMediaService urls,TkSocialPlatformClient platform,TkSocialPublishService publisher) {
@@ -48,9 +53,11 @@ public class TkSocialPublishWorker {
                 .set("lease_token",null).set("lease_until",null).set("last_sync_time",now);
         boolean sent=false;
         String usedToken=null;
+        boolean newChannel=TkChannelProperties.supports(detail.getPlatform());
+        TkSocialAccountDO account=null;
         try {
             TkSocialPublishTaskDO task=tasks.selectById(detail.getPublishTaskId());
-            TkSocialAccountDO account=accounts.selectById(detail.getSocialAccountId());
+            account=accounts.selectById(detail.getSocialAccountId());
             if (task==null || account==null || !sameScope(detail,task.getTenantId(),task.getCompanyId())
                     || !sameScope(detail,account.getTenantId(),account.getCompanyId())
                     || !Objects.equals(detail.getPlatform(),account.getPlatform())) {
@@ -61,9 +68,32 @@ public class TkSocialPublishWorker {
                     || !sameScope(detail,source.getTenantId(),source.getCompanyId()))) {
                 throw new IllegalArgumentException("发布媒体不可用");
             }
-            String token=tokens.getValidToken(account);
+            String token=newChannel ? channelAccounts.token(account) : tokens.getValidToken(account);
             usedToken=token;
             String url=urls.readUrl(source);
+            if (newChannel) {
+                if (source==null || !detail.getPlatform().equals(task.getChannel())) throw new IllegalArgumentException("Missing channel video");
+                String context="channel:upload:"+tenantId+":"+id;
+                String session=detail.getUploadSessionCiphertext()==null ? null : cipher.decrypt(detail.getUploadSessionCiphertext(),context);
+                sent=true;
+                TkChannelVideoClient.Checkpoint step=channelVideos.advance(task,detail,token,url,source.getFileSize(),session);
+                String postId=step.getPostId();
+                outcome.set("external_container_id",step.getContainerId()).set("external_post_id",postId)
+                        .set("platform_status",step.getStage()).set("upload_offset",step.getOffset()).set("retry_count",0)
+                        .set("error_code",null).set("error_message",null);
+                if (!Objects.equals(session,step.getUploadUrl())) outcome.set("upload_session_ciphertext",
+                        step.getUploadUrl()==null ? null : cipher.encrypt(step.getUploadUrl(),context));
+                if ("PUBLISHED".equals(step.getStage())) {
+                    outcome.set("publish_url",(TkChannelProperties.X.equals(detail.getPlatform())
+                            ? "https://x.com/i/web/status/" : "https://www.youtube.com/watch?v=")+postId)
+                            .set("status","SUCCESS").set("published_time",LocalDateTime.now()).set("next_retry_time",null);
+                } else {
+                    int polls=number(detail.getPollCount())+1;
+                    outcome.set("poll_count",polls);
+                    if (polls>=360) terminal(outcome,"UNKNOWN","POLL_TIMEOUT","平台处理时间过长，请到平台核实发布结果");
+                    else outcome.set("status","PENDING").set("next_retry_time",LocalDateTime.now().plusSeconds(step.getDelay()));
+                }
+            } else {
             String text="INSTAGRAM".equals(detail.getPlatform()) ? task.getInstagramCaption() : task.getFacebookMessage();
             sent=true;
             TkSocialPlatformClient.PublishResult result=platform.advance(detail.getPlatform(),account.getExternalAccountId(),
@@ -80,11 +110,15 @@ public class TkSocialPublishWorker {
                 if (polls>=240) terminal(outcome,"UNKNOWN","POLL_TIMEOUT","平台处理时间过长，请到平台核实发布结果");
                 else outcome.set("status","PENDING").set("next_retry_time",LocalDateTime.now().plusSeconds(15));
             } else throw new IllegalStateException("无法识别平台状态");
+            }
         } catch (TkSocialPlatformException ex) {
             if (ex.isUncertain()) terminal(outcome,"UNKNOWN",ex.getCode(),"平台请求结果不确定，请到平台核实，避免重复发布");
             else if (ex.isReauthRequired()) {
                 if (sent && usedToken!=null) {
-                    try { tokens.reportRejectedToken(detail.getSocialAccountId(),usedToken); }
+                    try {
+                        if (newChannel) channelAccounts.rejected(account,usedToken);
+                        else tokens.reportRejectedToken(detail.getSocialAccountId(),usedToken);
+                    }
                     catch (RuntimeException ignored) { /* The detail still exposes reauthorization, without losing its checkpoint. */ }
                 }
                 terminal(outcome,"REAUTH_REQUIRED",ex.getCode(),"账号授权或权限已失效，请检查权限并重新授权");
@@ -111,6 +145,7 @@ public class TkSocialPublishWorker {
 
     /** UNKNOWN can only enter this read-only path, never advance() or another publish mutation. */
     private void reconcile(TkSocialPublishDetailDO candidate) {
+        if (TkChannelProperties.supports(candidate.getPlatform())) return;
         if (candidate.getExternalContainerId()==null) return;
         String lease=UUID.randomUUID().toString();
         if (details.update(null,new UpdateWrapper<TkSocialPublishDetailDO>()

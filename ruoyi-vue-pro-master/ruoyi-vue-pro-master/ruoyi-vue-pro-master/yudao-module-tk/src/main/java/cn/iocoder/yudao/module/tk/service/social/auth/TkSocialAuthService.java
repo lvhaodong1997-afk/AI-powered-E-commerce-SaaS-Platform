@@ -153,6 +153,7 @@ public class TkSocialAuthService {
         TkSocialAuthSessionDO session=sessions.findBySessionId(sessionId);
         TkUserScope owner=scope.getCurrentScope();
         if (session==null || !Objects.equals(session.getTenantId(),owner.getTenantId())
+                || !Arrays.asList("INSTAGRAM","FACEBOOK_PAGE").contains(session.getPlatform())
                 || !Objects.equals(session.getCreator(),owner.getUserIdString())
                 || (target!=null && !target.equals(session.getPlatform())))
             throw new IllegalArgumentException("授权会话不存在或无权访问");
