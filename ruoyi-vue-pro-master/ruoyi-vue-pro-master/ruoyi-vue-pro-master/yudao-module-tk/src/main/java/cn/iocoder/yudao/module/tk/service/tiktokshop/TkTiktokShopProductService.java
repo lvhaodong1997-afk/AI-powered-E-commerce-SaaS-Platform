@@ -15,6 +15,7 @@ import java.util.*;
 /** One official page per request. Signed selections are scoped to account, auth version and user. */
 @Service
 public class TkTiktokShopProductService {
+    private static final int PRODUCT_PAGE_SIZE = 20;
     private final TkTiktokShopAuthService auth; private final TkTiktokShopTokenService tokens;
     private final TkTiktokShopApiClient api; private final TkTiktokShopProperties properties;
     private final ObjectMapper json; private final Clock clock;
@@ -51,7 +52,9 @@ public class TkTiktokShopProductService {
     }
     private ProductPage fetch(TkTiktokShopAccountDO a,String source,int size,String cursor,String keyword) {
         boolean shop="SHOP".equals(source);
-        if((!shop&&!"SHOWCASE".equals(source)) || size<1 || size>(shop?100:20) || (cursor!=null&&cursor.length()>4096) || (keyword!=null&&keyword.length()>200))throw new IllegalArgumentException("Invalid product page");
+        if((!shop&&!"SHOWCASE".equals(source)) || size<1 || size>(shop?100:PRODUCT_PAGE_SIZE) || (cursor!=null&&cursor.length()>4096) || (keyword!=null&&keyword.length()>200))throw new IllegalArgumentException("Invalid product page");
+        // Keep legacy SHOP sizes accepted locally, but use the SDK-recommended size upstream.
+        size=Math.min(size,PRODUCT_PAGE_SIZE);
         Map<String,String> q=new LinkedHashMap<>();q.put("page_size",Integer.toString(size));if(cursor!=null&&!cursor.isEmpty())q.put("page_token",cursor);
         if(shop){q.put("sort_field","PRODUCT_ID");q.put("sort_order","DESC");if(keyword!=null&&!keyword.isEmpty())q.put("title_keyword",keyword);}else q.put("origin","SHOWCASE");
         TkTiktokShopTokenService.AccessToken token=tokens.getAccessToken(a.getTenantId(),a.getCompanyId(),a.getId());

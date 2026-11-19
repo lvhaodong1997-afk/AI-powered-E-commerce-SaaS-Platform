@@ -236,6 +236,26 @@ function componentScript(name, names, imports = {}, globals = {}) {
   return module.exports
 }
 
+test('the publishing product picker uses a shop page size of 20 across pages', async () => {
+  const vue = require('vue'), calls = []
+  const picker = componentScript('TiktokShopProductPicker.vue', ['source', 'keyword', 'load'], {
+    vue: { ...vue, onMounted: () => {}, onBeforeUnmount: () => {} },
+    '@element-plus/icons-vue': {},
+    '@/api/tk/tiktokShop': { TiktokShopApi: { products: async (_id, params) => {
+      calls.push(params)
+      return { products: [], nextPageToken: 'next' }
+    } } },
+    '@/hooks/web/useTkI18n': { useTkI18n: () => ({ tt: key => key }) }
+  }, { defineProps: () => ({ accountId: 3 }), defineEmits: () => () => {} })
+  picker.source.value = 'SHOP'
+  picker.keyword.value = 'Tea'
+  await picker.load()
+  await picker.load(true)
+  assert.deepEqual(calls.map(({ source, pageSize, pageToken, titleKeyword }) => [source, pageSize, pageToken, titleKeyword]), [
+    ['SHOP', 20, undefined, 'Tea'], ['SHOP', 20, 'next', 'Tea']
+  ])
+})
+
 function panelHarness(overrides = {}, grants = ['*'], props = {}) {
   const vue = require('vue'), timers = new Map(), listeners = new Set(), cleanups = [], calls = []
   let timerId = 0

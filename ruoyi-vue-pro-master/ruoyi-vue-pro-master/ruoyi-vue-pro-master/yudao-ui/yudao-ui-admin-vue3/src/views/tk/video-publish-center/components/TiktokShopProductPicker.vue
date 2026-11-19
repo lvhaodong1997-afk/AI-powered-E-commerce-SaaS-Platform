@@ -48,7 +48,7 @@ async function load(append = false) {
   const requestRevision = revision
   loading.value = true; error.value = ''
   try {
-    const page = await TiktokShopApi.products(props.accountId, { source: source.value, pageSize: source.value === 'SHOP' ? 100 : 20, pageToken: append ? nextPageToken.value : undefined, titleKeyword: source.value === 'SHOP' ? keyword.value || undefined : undefined })
+    const page = await TiktokShopApi.products(props.accountId, { source: source.value, pageSize: 20, pageToken: append ? nextPageToken.value : undefined, titleKeyword: source.value === 'SHOP' ? keyword.value || undefined : undefined })
     if (requestRevision !== revision) return
     products.value = append ? [...products.value, ...page.products] : page.products
     nextPageToken.value = page.nextPageToken || ''

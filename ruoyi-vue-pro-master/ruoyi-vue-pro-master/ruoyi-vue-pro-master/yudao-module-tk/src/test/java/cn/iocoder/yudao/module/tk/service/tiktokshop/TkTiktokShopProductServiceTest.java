@@ -46,4 +46,14 @@ class TkTiktokShopProductServiceTest {
         assertTrue(s.list(1L,"SHOP",100,null,"Tea","4").getProducts().get(0).isAvailable());
         assertFalse(s.list(1L,"SHOWCASE",20,null,null,"4").getProducts().get(0).isAvailable());
     }
+    @Test void shopCapsLegacyPageSizeAndRevalidatesWithTheSameCursorAndFilters() throws Exception {
+        TkTiktokShopProductService s=service();
+        String endpoint="/affiliate_creator/202509/shop_products";
+        when(api.get(eq(endpoint),eq("fake"),anyMap())).thenReturn(new TkTiktokShopApiClient.Result(
+                json.readTree("{\"products\":[{\"id\":\"123\",\"added_status\":\"ADDABLE\"}]}"),"r"));
+        TkTiktokShopProductService.Product row=s.list(1L,"SHOP",100,"cursor","Tea","4").getProducts().get(0);
+        assertEquals("123",s.revalidate(account,s.verifySelection(account,"4","123","SHOP",row.getSelectionProof())).getId());
+        verify(api,times(2)).get(endpoint,"fake",Map.of("page_size","20","page_token","cursor",
+                "title_keyword","Tea","sort_field","PRODUCT_ID","sort_order","DESC"));
+    }
 }
