@@ -1,8 +1,12 @@
 package cn.iocoder.yudao.module.tk.service.tiktokshop;
 
+import cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.TkTiktokShopExceptionHandler;
+import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.module.tk.dal.dataobject.tiktokshop.TkTiktokShopAccountDO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 import java.util.Collections;
 
@@ -33,6 +37,40 @@ class TkTiktokShopCreatorBrowseTest {
         assertEquals("9007199254740993", page.getRows().get(0).getId());
         assertEquals("3.20", page.getRows().get(0).getPrice());
         assertFalse(json.writeValueAsString(page).contains("do not expose"));
+    }
+
+    @Test
+    void marketplaceAccessDenialDoesNotInvalidatePublishingAuthorization() {
+        stubMarketplaceError("105005");
+        TkTiktokShopApiException error = assertThrows(TkTiktokShopApiException.class,
+                () -> service.list(1L, "marketplace", null, "Tea"));
+        assertEquals("r", error.getRequestId());
+        assertFalse(error.isReauthorizationRequired());
+        verify(tokens, never()).reportRejectedToken(anyLong(), anyLong(), anyLong(), anyLong(), any());
+        ResponseEntity<CommonResult<Object>> response = new TkTiktokShopExceptionHandler().upstream(error);
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        assertEquals(105005, response.getBody().getCode().intValue());
+    }
+
+    @Test
+    void marketplaceInvalidTokenStillRequiresReauthorization() {
+        TkTiktokShopApiException rejected = stubMarketplaceError("INVALID_TOKEN");
+        assertSame(rejected, assertThrows(TkTiktokShopApiException.class,
+                () -> service.list(1L, "marketplace", null, "Tea")));
+        verify(tokens).reportRejectedToken(2L, 3L, 1L, 4, rejected);
+    }
+
+    private TkTiktokShopApiException stubMarketplaceError(String code) {
+        TkTiktokShopAccountDO account = new TkTiktokShopAccountDO();
+        account.setId(1L);
+        account.setTenantId(2L);
+        account.setCompanyId(3L);
+        when(auth.requireReadable(1L)).thenReturn(account);
+        when(tokens.getAccessToken(2L, 3L, 1L)).thenReturn(new TkTiktokShopTokenService.AccessToken("fixture", 4));
+        TkTiktokShopApiException error = new TkTiktokShopApiException(code, "r");
+        when(api.post(eq("/affiliate_creator/202405/open_collaborations/products/search"), eq("fixture"), anyMap(), anyMap()))
+                .thenThrow(error);
+        return error;
     }
 
     @Test

@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.tk.service.tiktokshop;
 
 /** Never carries response text, a request URL, or a cause containing credentials. */
 public class TkTiktokShopApiException extends RuntimeException {
+    public static final String CREATOR_MARKETPLACE_ACCESS_DENIED = "CREATOR_MARKETPLACE_ACCESS_DENIED";
     private final String code;
     private final String requestId;
     public TkTiktokShopApiException(String code, String requestId) {

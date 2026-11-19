@@ -55,6 +55,9 @@ public class TkTiktokShopCreatorBrowseService {
             String next = text(data, "next_page_token");
             return new Page(rows, next == null || next.length() > 4096 ? null : next);
         } catch (TkTiktokShopApiException e) {
+            if (dataset == Dataset.MARKETPLACE && "105005".equals(e.getCode())) {
+                throw new TkTiktokShopApiException(TkTiktokShopApiException.CREATOR_MARKETPLACE_ACCESS_DENIED, e.getRequestId());
+            }
             tokens.reportRejectedToken(account.getTenantId(), account.getCompanyId(), account.getId(), token.getVersion(), e);
             throw e;
         }
