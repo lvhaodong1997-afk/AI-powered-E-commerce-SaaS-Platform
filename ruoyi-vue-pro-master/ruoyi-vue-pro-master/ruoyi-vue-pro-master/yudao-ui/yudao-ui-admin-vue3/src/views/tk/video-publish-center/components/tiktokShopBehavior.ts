@@ -81,7 +81,7 @@ export function createShopFormGuard() {
 export interface ShopIssue { code?: string; risk?: string; suggestions?: string }
 export function normalizeShopPrecheck(value?: string | Record<string, any>) {
   let parsed: Record<string, any> = {}
-  try { parsed = typeof value === 'string' ? JSON.parse(value) : value || {} } catch { /* Old or incomplete result fails closed. */ }
+  try { parsed = (typeof value === 'string' ? JSON.parse(value) : value) || {} } catch { /* Old or incomplete result fails closed. */ }
   const passed = parsed.violationStatus === 'SUCCESS' && (!parsed.qualityPresent || ['SUCCESS', 'FAIL'].includes(parsed.qualityStatus))
   return {
     passed, failed: parsed.violationStatus === 'FAIL',
@@ -90,6 +90,14 @@ export function normalizeShopPrecheck(value?: string | Record<string, any>) {
     violationIssues: (Array.isArray(parsed.violationIssues) ? parsed.violationIssues.slice(0, 20) : []) as ShopIssue[],
     qualityIssues: (Array.isArray(parsed.qualityIssues) ? parsed.qualityIssues.slice(0, 20) : []) as ShopIssue[]
   }
+}
+
+export function shopPrecheckNotice(task?: Pick<ShopTask, 'stage' | 'precheckResult'>) {
+  if (!task) return
+  const precheck = normalizeShopPrecheck(task.precheckResult)
+  if (precheck.failed) return 'shop.violationBlocked'
+  if (['CREATED', 'UPLOADING', 'PRECHECKING'].includes(task.stage)) return 'shop.precheckPending'
+  if (task.stage === 'AWAITING_CONFIRMATION' && !precheck.passed) return 'shop.precheckUnavailable'
 }
 
 export function isShopTerminal(stage: string) { return ['SUCCESS', 'FAILED', 'RECOVERY_REQUIRED'].includes(stage) }

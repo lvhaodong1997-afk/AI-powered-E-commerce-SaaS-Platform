@@ -15,6 +15,16 @@ function load(relative, imports = {}) {
   return module.exports
 }
 
+test('workspace shows distinct account and task states and readable timestamps', () => {
+  const { shopAccountState, shopTaskState, formatShopDate } = load('src/views/tk/tiktok-shop/shopPresentation.ts')
+  assert.deepEqual(shopAccountState('REAUTH_REQUIRED'), { label: 'shop.accountState.REAUTH_REQUIRED', type: 'warning' })
+  assert.deepEqual(shopTaskState('SUCCESS'), { label: 'shop.taskState.SUCCESS', type: 'success' })
+  assert.equal(shopTaskState('AUTHORIZED').label, 'shop.stateUnknown')
+  assert.equal(formatShopDate(1795047926, 'en-US'), formatShopDate('1795047926000', 'en-US'))
+  assert.notEqual(formatShopDate('1795047926000', 'en-US'), '1795047926000')
+  assert.equal(formatShopDate('not a date', 'en-US'), '-')
+})
+
 test('OAuth message guard accepts only the exact popup origin source and session', () => {
   const { acceptShopOAuthMessage, shopAuthErrorKey } = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
   const popup = {}
@@ -72,6 +82,19 @@ test('precheck quality failure is advisory while violation failure blocks', () =
   const blocked = normalizeShopPrecheck({ violationStatus: 'FAIL', qualityStatus: 'SUCCESS', violationIssues: [{ code: 'BAD', risk: 'high', suggestions: 'remove' }] })
   assert.equal(blocked.passed, false)
   assert.equal(blocked.failed, true)
+})
+
+test('precheck notices distinguish pending, unavailable and actual violations without allowing confirmation', () => {
+  const { shopPrecheckNotice, canConfirmShopTask } = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
+  const pending = { stage: 'PRECHECKING' }
+  const unavailable = { stage: 'AWAITING_CONFIRMATION' }
+  const failed = { stage: 'FAILED', precheckResult: '{"violationStatus":"FAIL"}' }
+  const published = { stage: 'SUCCESS', precheckResult: '{"violationStatus":"SUCCESS"}' }
+  assert.equal(shopPrecheckNotice(pending), 'shop.precheckPending')
+  assert.equal(shopPrecheckNotice(unavailable), 'shop.precheckUnavailable')
+  assert.equal(shopPrecheckNotice(failed), 'shop.violationBlocked')
+  assert.equal(shopPrecheckNotice(published), undefined)
+  for (const task of [pending, unavailable, failed, published]) assert.equal(canConfirmShopTask(task), false)
 })
 
 test('products reject an earlier account response after account source or filter changes', async () => {
@@ -209,7 +232,7 @@ function componentScript(name, names, imports = {}, globals = {}) {
   }).outputText
   const module = { exports: {} }
   new Function('require', 'module', 'exports', ...Object.keys(globals), output)(
-    name => imports[name] || (name.endsWith('.vue') ? {} : require(name)), module, module.exports, ...Object.values(globals))
+    name => imports[name] || (name.endsWith('.vue') || name.endsWith('.css') ? {} : require(name)), module, module.exports, ...Object.values(globals))
   return module.exports
 }
 
@@ -243,6 +266,7 @@ function panelHarness(overrides = {}, grants = ['*'], props = {}) {
     '@/api/tk/tiktokShop': { TiktokShopApi: api },
     '@/api/tk/generation': { TkGenerationApi: { getGenerationPage: async () => { calls.push('generation'); return { list: [] } } } },
     './tiktokShopBehavior': helper,
+    '../../tiktok-shop/shopPresentation': load('src/views/tk/tiktok-shop/shopPresentation.ts'),
     '@/utils/tiktokShopUpload': { createShopUpload: overrides.createShopUpload || (() => { throw new Error('unexpected upload') }) },
     '@/hooks/web/useTkI18n': { useTkI18n: () => ({ tt: key => key }) },
     '@/directives/permission/hasPermi': { hasPermission: requested => grants.includes('*') || requested.some(p => grants.includes(p)) }

@@ -1,12 +1,14 @@
 <template>
-  <main class="shop-workspace">
+  <main class="shop-workspace shop-workbench">
     <header class="workspace-heading">
-      <Icon icon="ep:shop" />
+      <el-icon><Shop /></el-icon>
       <h1>TikTok Shop</h1>
     </header>
     <template v-if="tabs.length">
-      <el-tabs v-if="tabs.length > 1" v-model="activeTab">
-        <el-tab-pane v-for="tab in tabs" :key="tab.name" :label="tt(tab.label)" :name="tab.name" />
+      <el-tabs v-if="tabs.length > 1" v-model="activeTab" class="workspace-nav">
+        <el-tab-pane v-for="tab in tabs" :key="tab.name" :name="tab.name">
+          <template #label><span class="shop-icon-label"><el-icon><component :is="tab.icon" /></el-icon>{{ tt(tab.label) }}</span></template>
+        </el-tab-pane>
       </el-tabs>
       <TiktokShopCreatorPanel v-if="activeTab === 'creator' && canReadCreator" @publish="openPublish" />
       <TiktokShopPublishPanel v-else-if="activeTab === 'publish' && canReadAccount" :initial-selection="selection" @selection-consumed="selection = undefined" />
@@ -20,10 +22,12 @@
 
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { DataAnalysis, Document, Goods, Picture, Shop, VideoCamera } from '@element-plus/icons-vue'
 import type { ShopPublishSelection } from '@/api/tk/tiktokShop'
 import { hasPermission } from '@/directives/permission/hasPermi'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import TiktokShopPublishPanel from '../video-publish-center/components/TiktokShopPublishPanel.vue'
+import './shopWorkbench.css'
 
 defineOptions({ name: 'TkTiktokShopWorkspace' })
 const { tt } = useTkI18n()
@@ -32,12 +36,12 @@ const canReadCreator = computed(() => canReadAccount.value && hasPermission(['tk
 const canUsePhotos = computed(() => canReadAccount.value && (hasPermission(['tk:tiktok-shop-publish:query']) || (
   hasPermission(['tk:tiktok-shop-publish:create']) && hasPermission(['tk:tiktok-shop-publish:confirm']))))
 const tabs = computed(() => [
-  { name: 'publish', label: 'shop.workspacePublish', visible: canReadAccount.value },
-  { name: 'creator', label: 'shop.workspaceCreator', visible: canReadCreator.value },
-  { name: 'photos', label: 'shop.workspacePhotos', visible: canUsePhotos.value },
-  { name: 'seller-access', label: 'shop.sellerEntry', visible: canReadAccount.value },
-  { name: 'seller', label: 'shop.workspaceSeller', visible: canReadAccount.value && hasPermission(['tk:tiktok-shop-seller:query']) },
-  { name: 'analytics', label: 'shop.workspaceAnalytics', visible: canReadAccount.value && hasPermission(['tk:tiktok-shop-analytics:query']) }
+  { name: 'publish', label: 'shop.workspacePublish', icon: VideoCamera, visible: canReadAccount.value },
+  { name: 'creator', label: 'shop.workspaceCreator', icon: Goods, visible: canReadCreator.value },
+  { name: 'photos', label: 'shop.workspacePhotos', icon: Picture, visible: canUsePhotos.value },
+  { name: 'seller-access', label: 'shop.sellerEntry', icon: Shop, visible: canReadAccount.value },
+  { name: 'seller', label: 'shop.workspaceSeller', icon: Document, visible: canReadAccount.value && hasPermission(['tk:tiktok-shop-seller:query']) },
+  { name: 'analytics', label: 'shop.workspaceAnalytics', icon: DataAnalysis, visible: canReadAccount.value && hasPermission(['tk:tiktok-shop-analytics:query']) }
 ].filter((tab) => tab.visible))
 const activeTab = ref('')
 watch(tabs, (value) => {
@@ -55,6 +59,13 @@ function openPublish(value: ShopPublishSelection) {
 </script>
 
 <style scoped>
+.shop-workspace {
+  padding: 16px clamp(12px, 2vw, 28px) 24px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-light);
+}
+.workspace-nav :deep(.el-tabs__header) { margin-bottom: 8px; }
+.workspace-nav :deep(.el-tabs__item) { padding-inline: 12px; }
 .workspace-heading {
   display: flex;
   align-items: center;

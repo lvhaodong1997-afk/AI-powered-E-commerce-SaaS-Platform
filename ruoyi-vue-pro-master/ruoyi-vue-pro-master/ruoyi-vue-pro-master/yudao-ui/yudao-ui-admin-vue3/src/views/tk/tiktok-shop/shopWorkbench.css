@@ -1,0 +1,41 @@
+.shop-workbench { min-width: 0; color: var(--el-text-color-primary); container-type: inline-size; }
+.shop-workbench .shop-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 0;
+}
+.shop-workbench .shop-toolbar > * { min-width: 0; max-width: 100%; }
+.shop-workbench .shop-toolbar > .el-select { width: min(260px, 100%); }
+.shop-workbench .shop-toolbar .el-button + .el-button { margin-left: 0; }
+.shop-workbench .shop-heading { font-size: 16px; font-weight: 600; margin: 0; }
+.shop-workbench .shop-band { border-top: 1px solid var(--el-border-color-light); padding: 16px 0; }
+.shop-workbench .shop-muted { color: var(--el-text-color-secondary); font-size: 13px; overflow-wrap: anywhere; }
+.shop-workbench .shop-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.85fr);
+  column-gap: 28px;
+  row-gap: 16px;
+  max-width: 1200px;
+}
+.shop-workbench .shop-editor > * { min-width: 0; }
+.shop-workbench .shop-editor .el-form-item { margin-bottom: 16px; }
+.shop-workbench .shop-editor .el-form-item__content { min-width: 0; }
+.shop-workbench .shop-editor .el-input, .shop-workbench .shop-editor .el-select { width: 100%; }
+.shop-workbench .shop-details { padding: 8px 0; min-width: 0; }
+.shop-workbench .shop-details > summary { cursor: pointer; width: fit-content; max-width: 100%; color: var(--el-text-color-secondary); }
+.shop-workbench .shop-details[open] > summary { margin-bottom: 12px; }
+.shop-workbench .shop-icon-label { display: inline-flex; align-items: center; gap: 7px; }
+.shop-workbench .shop-spacer { flex: 1; }
+.shop-workbench .shop-results { font-variant-numeric: tabular-nums; }
+.shop-workbench .shop-status { display: inline-flex; max-width: 100%; }
+
+@container (max-width: 825px) {
+  .shop-workbench .shop-editor { grid-template-columns: minmax(0, 1fr); max-width: 720px; }
+}
+
+@container (max-width: 410px) {
+  .shop-workbench .shop-editor .el-radio-button__inner { white-space: normal; }
+  .shop-workbench .shop-editor .el-checkbox__label { white-space: normal; }
+}

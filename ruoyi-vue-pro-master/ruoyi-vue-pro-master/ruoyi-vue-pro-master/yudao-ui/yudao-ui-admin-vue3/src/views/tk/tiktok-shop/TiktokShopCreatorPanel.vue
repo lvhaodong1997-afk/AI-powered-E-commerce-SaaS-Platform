@@ -1,31 +1,33 @@
 <template>
   <section class="creator-panel" v-loading="initializing">
-    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
-    <div class="creator-toolbar">
+    <div class="shop-toolbar"><h2 class="shop-heading">{{ tt('shop.workspaceCreator') }}</h2></div>
+    <div class="shop-toolbar">
       <el-select v-model="accountId" :placeholder="tt('shop.account')" :aria-label="tt('shop.account')" @change="resetPage">
         <el-option v-for="account in accounts" :key="account.id" :value="account.id"
           :label="`${account.displayName || account.username || account.id} · ${account.market}`" />
       </el-select>
+      <el-tag v-if="currentAccount" :type="shopAccountState(currentAccount.authStatus).type">{{ tt(shopAccountState(currentAccount.authStatus).label) }}</el-tag>
       <el-tooltip :content="tt('common.refresh')">
-        <el-button :aria-label="tt('common.refresh')" :loading="initializing || loading" @click="initialize">
-          <Icon icon="ep:refresh" />
-        </el-button>
+        <el-button :aria-label="tt('common.refresh')" :loading="initializing || loading" :icon="Refresh" @click="initialize" />
       </el-tooltip>
     </div>
-    <div>
+    <div class="shop-band">
       <el-tabs v-model="view" @tab-change="resetPage">
         <el-tab-pane :label="tt('shop.creatorMarketplace')" name="marketplace" />
         <el-tab-pane :label="tt('shop.showcase')" name="showcase" />
         <el-tab-pane :label="tt('shop.creatorSamples')" name="samples" />
         <el-tab-pane :label="tt('shop.creatorOrders')" name="orders" />
       </el-tabs>
-      <form v-if="view === 'marketplace'" class="creator-toolbar" @submit.prevent="search">
+      <form v-if="view === 'marketplace'" class="shop-toolbar creator-search" @submit.prevent="search">
         <el-input v-model="keyword" maxlength="200" :placeholder="tt('shop.searchProducts')" :aria-label="tt('shop.searchProducts')" clearable />
         <el-button type="primary" native-type="submit" :loading="loading" :disabled="!selectedAccount">{{ tt('shop.searchProducts') }}</el-button>
       </form>
-      <el-table :data="rows" :empty-text="selectedAccount ? undefined : tt('shop.accountRequired')" v-loading="loading" row-key="id" size="small">
-        <el-table-column prop="id" label="ID" min-width="170" show-overflow-tooltip />
-        <el-table-column v-if="isProduct" prop="title" :label="tt('shop.product')" min-width="210" show-overflow-tooltip />
+      <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
+      <el-table :data="rows" :empty-text="tt(selectedAccount ? 'shop.sellerNoRows' : currentAccount ? shopAccountState(currentAccount.authStatus).label : 'shop.noSelection')" v-loading="loading" row-key="id" size="small">
+        <el-table-column v-if="isProduct" :label="tt('shop.product')" min-width="235">
+          <template #default="{ row }"><strong>{{ row.title || row.id }}</strong><div v-if="row.title" class="shop-muted">{{ row.id }}</div></template>
+        </el-table-column>
+        <el-table-column v-else prop="id" label="ID" min-width="170" show-overflow-tooltip />
         <el-table-column v-if="isProduct" :label="tt('shop.creatorPrice')" min-width="110">
           <template #default="{ row }">{{ row.price ? [row.price, row.currency].filter(Boolean).join(' ') : '–' }}</template>
         </el-table-column>
@@ -63,10 +65,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
+import { isAxiosError } from 'axios'
 import { TiktokShopApi, type ShopAccount, type ShopCreatorRow, type ShopCreatorView, type ShopProduct, type ShopPublishSelection } from '@/api/tk/tiktokShop'
 import { hasPermission } from '@/directives/permission/hasPermi'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import { createShopRevision } from '../video-publish-center/components/tiktokShopBehavior'
+import { shopAccountState } from './shopPresentation'
 
 const { tt, locale } = useTkI18n()
 const emit = defineEmits<{ publish: [selection: ShopPublishSelection] }>()
@@ -75,7 +80,8 @@ const canManageShowcase = computed(() => hasPermission(['tk:tiktok-shop-creator:
 const changingShowcase = ref(false)
 const accounts = ref<ShopAccount[]>([])
 const accountId = ref<number>()
-const selectedAccount = computed(() => accounts.value.find((account) => account.id === accountId.value))
+const currentAccount = computed(() => accounts.value.find((account) => account.id === accountId.value))
+const selectedAccount = computed(() => currentAccount.value?.authStatus === 'AUTHORIZED' ? currentAccount.value : undefined)
 const view = ref<ShopCreatorView | 'showcase'>('marketplace')
 const isProduct = computed(() => view.value === 'marketplace' || view.value === 'showcase')
 const keyword = ref('')
@@ -96,8 +102,8 @@ async function initialize() {
   try {
     const data = await TiktokShopApi.accounts()
     if (!accountRevision.current(requestRevision)) return
-    accounts.value = data.filter((account) => account.authStatus === 'AUTHORIZED')
-    if (!accounts.value.some((account) => account.id === accountId.value)) accountId.value = accounts.value[0]?.id
+    accounts.value = data
+    if (!currentAccount.value) accountId.value = (data.find((account) => account.authStatus === 'AUTHORIZED') || data[0])?.id
     await resetPage()
   } catch (reason) {
     if (accountRevision.current(requestRevision)) error.value = errorText(reason)
@@ -128,7 +134,11 @@ async function loadPage(stack: (string | undefined)[]) {
     cursors.value = stack
     if (result.nextPageToken && !stack.includes(result.nextPageToken)) nextCursor.value = result.nextPageToken
   } catch (reason) {
-    if (revision.current(requestRevision)) error.value = errorText(reason)
+    if (revision.current(requestRevision)) {
+      const accessDenied = dataset === 'marketplace' && isAxiosError<{ code?: number }>(reason) &&
+        reason.response?.status === 403 && reason.response.data?.code === 105005
+      error.value = accessDenied ? tt('shop.creatorMarketplaceAccessDenied') : errorText(reason)
+    }
   } finally {
     if (revision.current(requestRevision)) loading.value = false
   }
@@ -178,8 +188,9 @@ onBeforeUnmount(() => { accountRevision.invalidate(); revision.invalidate() })
 
 <style scoped>
 .creator-panel { min-width: 0; padding: 4px 0 16px; }
-.creator-toolbar, .creator-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
-.creator-toolbar :is(.el-select, .el-input) { width: min(100%, 300px); }
+.creator-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.creator-search .el-input { width: min(100%, 320px); }
+.creator-panel .el-alert { margin-bottom: 10px; }
 .creator-pager { justify-content: flex-end; }
 .creator-pager :deep(.el-button + .el-button) { margin-left: 0; }
 </style>

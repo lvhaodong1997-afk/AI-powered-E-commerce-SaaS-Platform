@@ -1,22 +1,22 @@
 <template>
   <section v-loading="loadingAccounts">
+    <div class="shop-toolbar"><h2 class="shop-heading">{{ tt(analytics ? 'shop.workspaceAnalytics' : 'shop.workspaceSeller') }}</h2></div>
     <div class="shop-toolbar">
       <el-select v-model="accountId" :placeholder="tt('shop.sellerAccount')" :aria-label="tt('shop.sellerAccount')">
         <el-option v-for="account in accounts" :key="account.id" :value="account.id"
-          :label="`${account.displayName || account.id} · ${account.authStatus}`" />
+          :label="`${account.displayName || account.id} · ${tt(shopAccountState(account.authStatus).label)}`" />
       </el-select>
-      <el-button @click="loadAccounts">{{ tt('shop.refreshAccounts') }}</el-button>
+      <el-select v-model="shopId" :loading="loadingShops" :disabled="!authorized" :placeholder="tt('shop.sellerStore')" :aria-label="tt('shop.sellerStore')">
+          <el-option v-for="shop in shops" :key="shop.id" :value="shop.id" :label="`${shop.name} (#${shop.id})`" />
+      </el-select>
+      <el-tooltip :content="tt('shop.refreshAccounts')"><el-button :aria-label="tt('shop.refreshAccounts')" :icon="Refresh" @click="loadAccounts" /></el-tooltip>
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-empty v-if="!authorized" :description="tt('shop.sellerNoAccount')" />
-    <template v-else>
+    <section class="shop-band shop-results">
+      <el-tabs v-model="view" :aria-label="tt('shop.sellerReport')">
+        <el-tab-pane v-for="item in views" :key="item" :name="item" :label="tt(`shop.sellerView.${item}`)" />
+      </el-tabs>
       <div class="shop-toolbar">
-        <el-select v-model="shopId" :loading="loadingShops" :placeholder="tt('shop.sellerStore')" :aria-label="tt('shop.sellerStore')">
-          <el-option v-for="shop in shops" :key="shop.id" :value="shop.id" :label="`${shop.name} (#${shop.id})`" />
-        </el-select>
-        <el-select v-model="view" :aria-label="tt('shop.sellerReport')">
-          <el-option v-for="item in views" :key="item" :value="item" :label="tt(`shop.sellerView.${item}`)" />
-        </el-select>
         <template v-if="analytics">
           <el-date-picker v-model="range" type="daterange" value-format="YYYY-MM-DD" :clearable="false" unlink-panels
             :start-placeholder="tt('shop.sellerStart')" :end-placeholder="tt('shop.sellerEnd')" />
@@ -24,30 +24,34 @@
             <el-option v-for="item in liveTypes" :key="item" :value="item" :label="tt(`shop.sellerView.${item}`)" />
           </el-select>
         </template>
-        <el-button type="primary" :loading="loading" :disabled="!shopId" @click="query()">{{ tt('shop.sellerQuery') }}</el-button>
+        <el-button type="primary" :loading="loading" :disabled="!authorized || !shopId" @click="query()">{{ tt('shop.sellerQuery') }}</el-button>
+        <span v-if="page?.latestAvailableDate" class="shop-muted">{{ tt('shop.sellerDataThrough') }} {{ page.latestAvailableDate }}</span>
       </div>
-      <el-table v-loading="loading" :data="page?.rows || []" :empty-text="tt(!shopId ? 'shop.sellerNoStore' : 'shop.sellerNoRows')" size="small">
-        <el-table-column v-for="key in fields[view]" :key="key" :label="tt(`shop.sellerField.${analytics && key === 'amount' ? 'gmv' : key}`)" :min-width="key === 'title' ? 200 : 114" show-overflow-tooltip>
+      <el-table v-loading="loading" :data="page?.rows || []" :empty-text="tt(!authorized ? 'shop.sellerNoAccount' : !shopId ? 'shop.sellerNoStore' : !page ? 'shop.sellerAwaitingQuery' : 'shop.sellerNoRows')" size="small">
+        <el-table-column v-for="key in fields[view]" :key="key" :label="tt(`shop.sellerField.${analytics && key === 'amount' ? 'gmv' : key}`)" :min-width="key === 'title' ? 210 : 114"
+          :align="numericFields.has(key) ? 'right' : 'left'" show-overflow-tooltip>
           <template #default="{ row }">{{ display(row, key) }}</template>
         </el-table-column>
       </el-table>
-      <footer class="shop-toolbar page-controls">
-        <span v-if="page?.latestAvailableDate">{{ tt('shop.sellerDataThrough') }} {{ page.latestAvailableDate }}</span>
+      <footer v-if="page && (cursors.length > 1 || page.nextPageToken)" class="shop-toolbar page-controls">
         <el-button :disabled="loading || cursors.length < 2" @click="previous">{{ tt('shop.creatorPrevious') }}</el-button>
         <el-button :disabled="loading || !page?.nextPageToken" @click="next">{{ tt('shop.nextProducts') }}</el-button>
       </footer>
-    </template>
+    </section>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { Refresh } from '@element-plus/icons-vue'
 import { TiktokShopApi, type SellerAccount, type SellerShop, type ShopAnalyticsView, type ShopSellerPage, type ShopSellerView } from '@/api/tk/tiktokShop'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
+import { formatShopDate, shopAccountState } from './shopPresentation'
 
 type View = ShopSellerView | ShopAnalyticsView
 const props = defineProps<{ analytics: boolean }>()
-const { tt } = useTkI18n()
+const { tt, locale } = useTkI18n()
+const numericFields = new Set(['views', 'impressions', 'clicks', 'sold', 'amount'])
 const views = computed<View[]>(() => props.analytics ? ['VIDEOS', 'LIVES'] : ['PRODUCTS', 'ORDERS', 'PACKAGES', 'RETURNS', 'STATEMENTS', 'PROMOTIONS'])
 const fields: Record<View, string[]> = {
   PRODUCTS: ['id', 'title', 'status', 'time'], ORDERS: ['id', 'status', 'time', 'amount'],
@@ -111,16 +115,13 @@ function display(row: Record<string, string>, key: string) {
   const value = row[key]
   if (!value) return '-'
   if (key === 'amount') return [value, row.currency].filter(Boolean).join(' ')
-  if ((key === 'time' || key === 'endTime') && /^\d{10}$/.test(value)) return new Date(Number(value) * 1000).toLocaleString()
+  if ((key === 'time' || key === 'endTime') && /^\d{10}(?:\d{3})?$/.test(value)) return formatShopDate(value, locale.value)
   return value
 }
 </script>
 
 <style scoped>
-.shop-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
-.shop-toolbar :deep(.el-button) { margin-left: 0; }
-.shop-toolbar :deep(.el-select) { width: min(235px, 100%); }
 .shop-toolbar :deep(.el-date-editor) { max-width: 100%; }
-.page-controls { justify-content: flex-end; margin-top: 12px; color: var(--el-text-color-secondary); font-size: 12px; }
+.page-controls { justify-content: flex-end; }
 .el-alert { margin-bottom: 12px; }
 </style>

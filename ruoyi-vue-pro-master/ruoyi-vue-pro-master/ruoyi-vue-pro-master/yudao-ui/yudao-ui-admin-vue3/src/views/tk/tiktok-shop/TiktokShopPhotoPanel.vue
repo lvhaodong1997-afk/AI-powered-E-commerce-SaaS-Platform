@@ -1,14 +1,18 @@
 <template>
   <section v-loading="loading">
+    <div class="shop-toolbar"><h2 class="shop-heading">{{ tt('shop.workspacePhotos') }}</h2></div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
     <el-alert v-if="capabilities && !capabilities.publishingConfigured" type="warning" :title="tt('shop.publishingNotConfigured')" :closable="false" />
-    <div class="photo-toolbar">
+    <div class="shop-toolbar">
       <el-select v-model="accountId" :placeholder="tt('shop.account')" :aria-label="tt('shop.account')" :disabled="submitting || reviewing">
-        <el-option v-for="item in accounts" :key="item.id" :value="item.id" :label="`${item.displayName || item.id} · ${item.authStatus}`" />
+        <el-option v-for="item in accounts" :key="item.id" :value="item.id" :label="`${item.displayName || item.username || item.id} · ${item.market}`" />
       </el-select>
-      <el-button :disabled="submitting || reviewing" @click="initialize">{{ tt('shop.refreshAccounts') }}</el-button>
+      <el-tag v-if="selectedAccount" :type="shopAccountState(selectedAccount.authStatus).type">{{ tt(shopAccountState(selectedAccount.authStatus).label) }}</el-tag>
+      <el-tooltip :content="tt('shop.refreshAccounts')"><el-button :aria-label="tt('shop.refreshAccounts')" :disabled="submitting || reviewing" :icon="Refresh" @click="initialize" /></el-tooltip>
     </div>
-    <el-form v-if="canCreate" label-position="top" :disabled="submitting || reviewing">
+    <el-form v-if="canCreate" label-position="top" class="shop-editor shop-band" :disabled="submitting || reviewing">
+      <section>
+      <h3 class="shop-heading photo-heading">{{ tt('shop.contentSection') }}</h3>
       <el-form-item :label="tt('shop.photoFiles')">
         <el-upload accept="image/jpeg,image/png" multiple :auto-upload="false" :show-file-list="false" :limit="9" :on-change="addFile" :on-exceed="invalidImages" v-model:file-list="uploadFiles">
           <el-button>{{ tt('shop.photoPick') }}</el-button>
@@ -22,45 +26,50 @@
         </div>
       </el-form-item>
       <el-form-item :label="tt('shop.photoCaption')"><el-input v-model="title" type="textarea" :rows="3" maxlength="5000" show-word-limit /></el-form-item>
-      <el-form-item :label="tt('shop.product')">
-        <TiktokShopProductPicker v-if="ready" :key="accountId" :account-id="accountId" @select="selectProduct" @changed="product = undefined" />
-        <span v-else-if="!authorizedAccount">{{ tt('shop.accountRequired') }}</span>
-      </el-form-item>
-      <el-form-item :label="tt('shop.photoLinkTitle')"><el-input v-model="linkTitle" maxlength="29" show-word-limit /></el-form-item>
       <el-form-item><el-checkbox v-model="isAiGenerated">{{ tt('shop.photoAi') }}</el-checkbox></el-form-item>
+      </section>
+      <section>
+      <h3 class="shop-heading photo-heading">{{ tt('shop.productSection') }}</h3>
+      <TiktokShopProductPicker v-if="ready" :key="accountId" :account-id="accountId" :disabled="submitting || reviewing" @select="selectProduct" @changed="product = undefined" />
+      <p v-else-if="!authorizedAccount" class="shop-muted">{{ tt(selectedAccount ? shopAccountState(selectedAccount.authStatus).label : 'shop.noSelection') }}</p>
+      <el-form-item :label="tt('shop.photoLinkTitle')" class="photo-heading"><el-input v-model="linkTitle" maxlength="29" show-word-limit /></el-form-item>
       <el-button type="primary" :disabled="!valid || Boolean(result)" :loading="submitting" @click="review">{{ tt('shop.photoReview') }}</el-button>
+      </section>
     </el-form>
     <el-alert v-if="result" :title="statusLabel(result)" :description="[result.photoId, result.failCode, result.requestId].filter(Boolean).join(' · ')" :type="result.stage === 'SUBMITTED' ? 'success' : 'warning'" :closable="false" />
-    <template v-if="canRead && accountId">
-      <div class="photo-toolbar history-heading"><strong>{{ tt('shop.photoHistory') }}</strong><el-button @click="loadHistory">{{ tt('common.refresh') }}</el-button></div>
+    <section v-if="canRead && accountId" class="shop-band shop-results">
+      <div class="shop-toolbar"><h3 class="shop-heading">{{ tt('shop.photoHistory') }}</h3><span class="shop-spacer" /><el-button @click="loadHistory">{{ tt('common.refresh') }}</el-button></div>
       <el-table v-loading="loadingHistory" :data="history" size="small">
         <el-table-column prop="title" :label="tt('shop.photoCaption')" min-width="160" show-overflow-tooltip />
         <el-table-column prop="productId" :label="tt('shop.product')" min-width="130" />
         <el-table-column prop="photoId" :label="tt('shop.photoId')" min-width="145" />
-        <el-table-column :label="tt('common.status')" min-width="150"><template #default="{ row }">{{ statusLabel(row) }}</template></el-table-column>
+        <el-table-column :label="tt('common.status')" min-width="160"><template #default="{ row }"><el-tag size="small" :type="photoTone(row)">{{ statusLabel(row) }}</el-tag></template></el-table-column>
         <el-table-column prop="failCode" :label="tt('shop.photoCode')" min-width="120" />
         <el-table-column min-width="135"><template #default="{ row }">
           <el-button v-if="row.photoId && ready" link type="primary" :loading="refreshing === row.id" :disabled="Boolean(refreshing) && refreshing !== row.id" @click="refreshStatus(row)">{{ tt('shop.photoStatus') }}</el-button>
         </template></el-table-column>
       </el-table>
       <el-pagination v-if="total > 20" v-model:current-page="pageNo" :total="total" :page-size="20" layout="prev, pager, next" @current-change="loadHistory" />
-    </template>
+    </section>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessageBox, type UploadFile, type UploadUserFile } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
 import { TiktokShopApi, type ShopAccount, type ShopCapabilities, type ShopPhoto, type ShopProduct, type ShopProductSource } from '@/api/tk/tiktokShop'
 import { hasPermission } from '@/directives/permission/hasPermi'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import TiktokShopProductPicker from '../video-publish-center/components/TiktokShopProductPicker.vue'
+import { shopAccountState } from './shopPresentation'
 
 const { tt } = useTkI18n()
 const canCreate = computed(() => hasPermission(['tk:tiktok-shop-publish:create']) && hasPermission(['tk:tiktok-shop-publish:confirm']))
 const canRead = computed(() => hasPermission(['tk:tiktok-shop-publish:query']))
 const capabilities = ref<ShopCapabilities>(), accounts = ref<ShopAccount[]>([]), accountId = ref<number>()
-const authorizedAccount = computed(() => accounts.value.some((a) => a.id === accountId.value && a.authStatus === 'AUTHORIZED'))
+const selectedAccount = computed(() => accounts.value.find((a) => a.id === accountId.value))
+const authorizedAccount = computed(() => selectedAccount.value?.authStatus === 'AUTHORIZED')
 const ready = computed(() => capabilities.value?.publishingConfigured && authorizedAccount.value)
 const title = ref(''), linkTitle = ref(''), isAiGenerated = ref(false)
 const product = ref<ShopProduct>(), source = ref<ShopProductSource>('SHOWCASE')
@@ -82,6 +91,11 @@ function fail(reason: unknown) { error.value = reason instanceof Error ? reason.
 function statusLabel(row: ShopPhoto) {
   if (row.postStatus) return row.postStatus
   return tt(`shop.photoStage.${row.stage}`)
+}
+function photoTone(row: ShopPhoto) {
+  if (row.stage === 'FAILED') return 'danger'
+  if (!row.postStatus && row.stage === 'SUBMITTED') return 'primary'
+  return row.stage === 'UNKNOWN' ? 'warning' : 'info'
 }
 async function initialize() {
   const current = ++revision
@@ -155,15 +169,12 @@ async function review() {
 </script>
 
 <style scoped>
-.photo-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
-.photo-toolbar :deep(.el-select) { width: min(265px, 100%); }
-.photo-toolbar :deep(.el-button) { margin-left: 0; }
-.history-heading { justify-content: space-between; margin-top: 20px; }
+.photo-heading { margin: 0 0 14px; }
+.el-form-item.photo-heading { margin-top: 12px; }
 .photo-grid { flex: 0 0 100%; display: grid; grid-template-columns: repeat(auto-fill,minmax(108px,1fr)); gap: 8px; margin-top: 8px; }
 .photo-grid figure { min-width: 0; margin: 0; border: 1px solid var(--el-border-color); border-radius: 6px; overflow: hidden; }
 .photo-grid img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: var(--el-fill-color-light); }
 .photo-grid figcaption { padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 .el-alert { margin: 12px 0; }
-.el-form { max-width: 920px; }
 .el-pagination { justify-content: flex-end; margin-top: 12px; }
 </style>

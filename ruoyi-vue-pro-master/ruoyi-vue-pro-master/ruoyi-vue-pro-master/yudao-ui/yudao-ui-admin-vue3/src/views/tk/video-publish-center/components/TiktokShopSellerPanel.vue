@@ -1,47 +1,47 @@
 <template>
-  <ContentWrap class="shop-panel">
-    <div class="section-head">
-      <div>
-        <h3>{{ tt('shop.sellerTitle') }} <el-tag size="small" :type="environmentType">{{ tt(environmentLabel) }}</el-tag></h3>
-        <span class="sub-text">{{ tt('shop.sellerDescription') }}</span>
-      </div>
-      <el-button @click="load" :loading="loading">{{ tt('shop.refreshSeller') }}</el-button>
+  <section class="shop-workbench seller-access" v-loading="loading">
+    <div class="shop-toolbar">
+      <h2 class="shop-heading">{{ tt('shop.sellerEntry') }}</h2>
+      <el-tag size="small" :type="environmentType">{{ tt(environmentLabel) }}</el-tag>
     </div>
     <el-alert v-if="!loading && !capabilities?.sellerConfigured" :title="capabilities?.sellerConfigurationMessage || tt('shop.sellerNotConfigured')" type="warning" :closable="false" />
     <el-alert v-else-if="needsReauth" :title="tt('shop.sellerReauthorize')" type="warning" :closable="false" />
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
-    <section class="accounts">
-      <div class="section-head">
-        <strong>{{ tt('shop.sellerAccount') }}</strong>
-        <div>
-          <el-button v-hasPermi="['tk:tiktok-shop-account:authorize']" type="primary" plain :disabled="!capabilities?.sellerConfigured" @click="connect">{{ tt('shop.connectSeller') }}</el-button>
-          <el-button :disabled="!capabilities?.sellerConfigured" @click="refreshLists">{{ tt('shop.refreshAccounts') }}</el-button>
-        </div>
-      </div>
-      <el-table :data="accounts" size="small" highlight-current-row @current-change="selectAccount">
+    <div class="shop-toolbar">
+      <el-select :model-value="accountId" :placeholder="tt('shop.sellerAccount')" :aria-label="tt('shop.sellerAccount')" @change="selectAccountById">
+        <el-option v-for="account in accounts" :key="account.id" :value="account.id" :label="`${account.displayName || account.id} · ${account.market}`" />
+      </el-select>
+      <el-select :model-value="shopId" :placeholder="tt('shop.selectShop')" :aria-label="tt('shop.selectShop')" @change="selectShopById">
+        <el-option v-for="shop in visibleShops" :key="shop.id" :value="shop.id" :label="`${shop.name || shop.shopId} · ${shop.region}`" />
+      </el-select>
+      <el-tag v-if="selectedAccount" :type="shopAccountState(selectedAccount.authStatus).type">{{ tt(shopAccountState(selectedAccount.authStatus).label) }}</el-tag>
+      <el-button v-hasPermi="['tk:tiktok-shop-account:authorize']" plain :disabled="!capabilities?.sellerConfigured" @click="connect">{{ tt('shop.connectSeller') }}</el-button>
+      <el-tooltip :content="tt('shop.refreshSeller')"><el-button :aria-label="tt('shop.refreshSeller')" :icon="Refresh" @click="load" /></el-tooltip>
+    </div>
+    <p v-if="!loading && capabilities?.sellerConfigured && !accounts.length" class="shop-muted">{{ tt('shop.noSellerAccounts') }}</p>
+    <p v-if="selectedAccount && !visibleShops.length" class="shop-muted">{{ tt('shop.noSellerShops') }}</p>
+    <details v-if="accounts.length" class="shop-details">
+      <summary>{{ tt('shop.accountDetails') }}</summary>
+      <el-table :data="accounts" size="small">
         <el-table-column prop="id" label="ID" width="90" />
         <el-table-column :label="tt('shop.sellerAccount')"><template #default="{ row }">{{ row.displayName || '-' }}</template></el-table-column>
         <el-table-column prop="market" :label="tt('shop.market')" width="90" />
         <el-table-column :label="tt('shop.environment')" width="110"><template #default="{ row }">{{ tt(shopEnvironmentLabel(row.environment)) }}</template></el-table-column>
-        <el-table-column prop="authStatus" :label="tt('common.status')" />
+        <el-table-column :label="tt('common.status')" min-width="130"><template #default="{ row }">{{ tt(shopAccountState(row.authStatus).label) }}</template></el-table-column>
         <el-table-column prop="grantedScopes" :label="tt('shop.scopes')" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="accessTokenExpireTime" :label="tt('shop.accessExpiry')" width="170" />
+        <el-table-column :label="tt('shop.accessExpiry')" width="170"><template #default="{ row }">{{ formatShopDate(row.accessTokenExpireTime, locale) }}</template></el-table-column>
         <el-table-column width="130"><template #default="{ row }"><el-button v-hasPermi="['tk:tiktok-shop-account:authorize']" link type="danger" @click.stop="disconnect(row)">{{ tt('shop.disconnect') }}</el-button></template></el-table-column>
       </el-table>
-      <p v-if="!loading && capabilities?.sellerConfigured && !accounts.length" class="sub-text">{{ tt('shop.noSellerAccounts') }}</p>
-    </section>
-    <section class="accounts">
-      <div class="section-head"><strong>{{ tt('shop.sellerShops') }}</strong></div>
-      <el-table :data="visibleShops" size="small" highlight-current-row @current-change="selectShop">
+      <h3 class="shop-heading">{{ tt('shop.sellerShops') }}</h3>
+      <el-table :data="visibleShops" size="small">
         <el-table-column prop="shopId" :label="tt('shop.shop')" min-width="160" />
         <el-table-column :label="tt('shop.selectShop')"><template #default="{ row }">{{ row.name || row.shopId }}</template></el-table-column>
         <el-table-column prop="region" :label="tt('shop.market')" width="90" />
-        <el-table-column prop="status" :label="tt('common.status')" width="110" />
+        <el-table-column :label="tt('common.status')" min-width="130"><template #default="{ row }">{{ tt(shopAccountState(row.status).label) }}</template></el-table-column>
         <el-table-column :label="tt('shop.environment')" width="110"><template #default="{ row }">{{ tt(shopEnvironmentLabel(row.environment)) }}</template></el-table-column>
       </el-table>
-      <p v-if="selectedAccount && !visibleShops.length" class="sub-text">{{ tt('shop.noSellerShops') }}</p>
-    </section>
-    <section v-if="selectedShop" class="catalog">
+    </details>
+    <section v-if="selectedShop" class="shop-band catalog">
       <TiktokShopSellerProductActions v-if="canAuthorize()" :key="selectedShop.id" :shop="selectedShop" :products="products" :scopes="accounts.find((row) => row.id === selectedShop?.accountId)?.grantedScopes" @changed="loadCatalog" @reconnect="connect" />
       <div class="section-head">
         <strong>{{ tt('shop.sellerProducts') }}</strong>
@@ -59,7 +59,7 @@
       </el-table>
       <p v-if="!productHint && !products.length && !catalogLoading" class="sub-text">{{ tt('shop.noSellerProducts') }}</p>
     </section>
-    <section v-if="selectedShop" class="catalog">
+    <section v-if="selectedShop" class="shop-band catalog">
       <div class="section-head">
         <strong>{{ tt('shop.sellerOrders') }}</strong>
         <div>
@@ -77,7 +77,7 @@
       </el-table>
       <p v-if="!orderHint && !orders.length && !catalogLoading" class="sub-text">{{ tt('shop.noSellerOrders') }}</p>
     </section>
-  </ContentWrap>
+  </section>
 </template>
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -85,9 +85,12 @@ import { ElMessageBox } from 'element-plus'
 import { TiktokShopApi, type SellerAccount, type SellerOrder, type SellerProduct, type SellerShop, type ShopCapabilities } from '@/api/tk/tiktokShop'
 import { acceptShopOAuthMessage, createCatalogCursor, createShopRevision, shopAuthErrorKey, shopEnvironmentLabel, shopOAuthTimeoutMs } from './tiktokShopBehavior'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
+import { Refresh } from '@element-plus/icons-vue'
+import { formatShopDate, shopAccountState } from '../../tiktok-shop/shopPresentation'
+import '../../tiktok-shop/shopWorkbench.css'
 import { hasPermission } from '@/directives/permission/hasPermi'
 import TiktokShopSellerProductActions from './TiktokShopSellerProductActions.vue'
-const { tt } = useTkI18n()
+const { tt, locale } = useTkI18n()
 const capabilities = ref<ShopCapabilities>()
 const accounts = ref<SellerAccount[]>([])
 const shops = ref<SellerShop[]>([])
@@ -160,6 +163,8 @@ function selectAccount(account?: SellerAccount) {
   accountId.value = account.id
   resetSelection()
 }
+function selectAccountById(id: number) { selectAccount(accounts.value.find((account) => account.id === id)) }
+function selectShopById(id: number) { selectShop(visibleShops.value.find((shop) => shop.id === id)) }
 function selectShop(shop?: SellerShop) {
   if (!shop) return
   if (shop.id === shopId.value) return
@@ -257,4 +262,9 @@ async function disconnect(account: SellerAccount) {
 onMounted(() => { void load() })
 onBeforeUnmount(() => { revision.invalidate(); clearOAuth() })
 </script>
-<style scoped>.shop-panel { min-height: 400px; }.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.accounts, .catalog { margin-top: 16px; }.sub-text { color: var(--el-text-color-secondary); font-size: 12px; }</style>
+<style scoped>
+.section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.shop-details > .shop-heading { margin: 16px 0 8px; }
+.seller-access > .el-alert { margin: 8px 0; }
+.sub-text { color: var(--el-text-color-secondary); font-size: 12px; }
+</style>
