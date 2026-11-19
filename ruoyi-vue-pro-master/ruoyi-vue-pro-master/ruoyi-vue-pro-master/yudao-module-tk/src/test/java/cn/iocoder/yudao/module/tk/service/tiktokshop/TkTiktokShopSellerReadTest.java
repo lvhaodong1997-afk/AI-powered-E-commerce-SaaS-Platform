@@ -1,7 +1,10 @@
 package cn.iocoder.yudao.module.tk.service.tiktokshop;
 
+import cn.iocoder.yudao.module.tk.controller.admin.tiktokshop.TkTiktokShopExceptionHandler;
+import cn.iocoder.yudao.module.tk.dal.dataobject.tiktokshop.TkTiktokShopSellerShopDO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 
 import java.time.LocalDate;
 import java.util.Map;
@@ -33,5 +36,28 @@ class TkTiktokShopSellerReadTest {
         TkTiktokShopSellerReadService.Page page=service.read(TkTiktokShopSellerReadService.View.VIDEOS,"token","cipher",null,LocalDate.of(2026,6,1),LocalDate.of(2026,6,2),null);
         assertEquals(Map.of("id","v","views","20","impressions","5","clicks","0","amount","1.23","currency","USD"),page.getRows().get(0));
         assertEquals("next",page.getNextPageToken());assertEquals("2026-06-01",page.getLatestAvailableDate());
+    }
+
+    @Test void analyticsDenialDoesNotInvalidateSellerAuthorizationButTokenRejectionStillDoes() {
+        TkTiktokShopSellerAuthService auth=mock(TkTiktokShopSellerAuthService.class);
+        TkTiktokShopSellerTokenService tokens=mock(TkTiktokShopSellerTokenService.class);
+        TkTiktokShopSellerShopDO shop=new TkTiktokShopSellerShopDO();
+        shop.setTenantId(1L);shop.setCompanyId(2L);shop.setAccountId(3L);shop.setShopCipher("cipher");
+        when(auth.requireReadableShop(4L)).thenReturn(shop);
+        when(tokens.getAccessToken(1L,2L,3L)).thenReturn(new TkTiktokShopSellerTokenService.AccessToken("token",5L));
+        TkTiktokShopSellerReadService reader=new TkTiktokShopSellerReadService(api,auth,tokens);
+        LocalDate start=LocalDate.of(2026,6,1);
+        TkTiktokShopApiException denied=new TkTiktokShopApiException("105005","request-1");
+        TkTiktokShopApiException invalid=new TkTiktokShopApiException("105001","request-2");
+        when(api.get(eq("/analytics/202605/shop_videos/performance"),eq("token"),anyMap())).thenThrow(denied,invalid);
+
+        TkTiktokShopApiException result=assertThrows(TkTiktokShopApiException.class,
+                () -> reader.query(4L,TkTiktokShopSellerReadService.View.VIDEOS,null,start,start.plusDays(1),null));
+        verify(tokens,never()).reportRejectedToken(anyLong(),anyLong(),anyLong(),anyLong(),any());
+        assertEquals("request-1",result.getRequestId());
+        assertEquals(HttpStatus.FORBIDDEN,new TkTiktokShopExceptionHandler().upstream(result).getStatusCode());
+        assertSame(invalid,assertThrows(TkTiktokShopApiException.class,
+                () -> reader.query(4L,TkTiktokShopSellerReadService.View.VIDEOS,null,start,start.plusDays(1),null)));
+        verify(tokens).reportRejectedToken(1L,2L,3L,5L,invalid);
     }
 }

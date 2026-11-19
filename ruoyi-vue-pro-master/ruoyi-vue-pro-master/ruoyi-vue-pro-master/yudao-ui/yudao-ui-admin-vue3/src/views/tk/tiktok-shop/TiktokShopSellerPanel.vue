@@ -44,6 +44,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
+import { isAxiosError } from 'axios'
 import { TiktokShopApi, type SellerAccount, type SellerShop, type ShopAnalyticsView, type ShopSellerPage, type ShopSellerView } from '@/api/tk/tiktokShop'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import { formatShopDate, shopAccountState } from './shopPresentation'
@@ -106,7 +107,13 @@ async function query(trail: (string | undefined)[] = [undefined]) {
       ? await TiktokShopApi.sellerAnalytics({ ...params, view: view.value as ShopAnalyticsView, start: range.value[0], end: range.value[1], liveAccountType: view.value === 'LIVES' ? liveAccountType.value : undefined })
       : await TiktokShopApi.sellerOperations({ ...params, view: view.value as ShopSellerView })
     if (revision === pageRevision) { page.value = result; cursors.value = trail }
-  } catch (reason) { if (revision === pageRevision) failure(reason) }
+  } catch (reason) {
+    if (revision === pageRevision) {
+      if (props.analytics && isAxiosError<{ code?: number }>(reason) && reason.response?.status === 403 && reason.response.data?.code === 105005) {
+        error.value = tt('shop.sellerAnalyticsDenied')
+      } else failure(reason)
+    }
+  }
   finally { if (revision === pageRevision) loading.value = false }
 }
 function next() { const token = page.value?.nextPageToken; if (token) void query([...cursors.value, token]) }

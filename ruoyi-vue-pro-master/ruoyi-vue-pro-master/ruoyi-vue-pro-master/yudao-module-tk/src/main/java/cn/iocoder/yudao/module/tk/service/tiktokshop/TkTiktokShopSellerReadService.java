@@ -38,7 +38,13 @@ public class TkTiktokShopSellerReadService {
         TkTiktokShopSellerShopDO shop=auth.requireReadableShop(shopId);
         TkTiktokShopSellerTokenService.AccessToken token=tokens.getAccessToken(shop.getTenantId(),shop.getCompanyId(),shop.getAccountId());
         try {return read(view,token.getValue(),shop.getShopCipher(),cursor,start,end,liveAccountType);}
-        catch(TkTiktokShopApiException e){tokens.reportRejectedToken(shop.getTenantId(),shop.getCompanyId(),shop.getAccountId(),token.getVersion(),e);throw e;}
+        catch(TkTiktokShopApiException e){
+            if(view.isAnalytics() && "105005".equals(e.getCode())) {
+                throw new TkTiktokShopApiException(TkTiktokShopApiException.SELLER_ANALYTICS_ACCESS_DENIED,e.getRequestId());
+            }
+            tokens.reportRejectedToken(shop.getTenantId(),shop.getCompanyId(),shop.getAccountId(),token.getVersion(),e);
+            throw e;
+        }
     }
 
     Page read(View view, String token, String cipher, String cursor, LocalDate start, LocalDate end, String liveAccountType) {

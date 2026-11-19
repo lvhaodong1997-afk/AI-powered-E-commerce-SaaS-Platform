@@ -20,6 +20,10 @@ public class TkTiktokShopExceptionHandler {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(CommonResult.error(105005,
                     "TikTok Shop denied creator product search. Check app access to this API; publishing authorization was not changed."));
         }
+        if (TkTiktokShopApiException.SELLER_ANALYTICS_ACCESS_DENIED.equals(e.getCode())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(CommonResult.error(105005,
+                    "TikTok Shop denied analytics access. Seller authorization was not changed."));
+        }
         return error(e.isReauthorizationRequired()?HttpStatus.CONFLICT:HttpStatus.BAD_GATEWAY,e.isReauthorizationRequired()?"TikTok Shop requires creator authorization again; reconnect the account":"TikTok Shop could not complete this request; check the saved task status before attempting another publication");
     }
     private ResponseEntity<CommonResult<Object>> error(HttpStatus status,String message){return ResponseEntity.status(status).body(CommonResult.error(status.value(),message));}

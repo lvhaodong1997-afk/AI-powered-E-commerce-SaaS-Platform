@@ -630,6 +630,26 @@ test('actual seller panel skips catalog reads without product or order scopes', 
   panel.stop()
 })
 
+test('seller reauthorization keeps the shop binding visible but blocks catalog reads until reconnected', async () => {
+  let account = { id: 1, authStatus: 'REAUTH_REQUIRED', canReadProducts: true, canReadOrders: true }
+  const shop = { id: 8, accountId: 1, status: 'AUTHORIZED' }
+  const panel = sellerHarness({ sellerAccounts: async () => [account], sellerShops: async () => [shop] })
+  await panel.refreshLists()
+  panel.selectShop(shop)
+  await new Promise(setImmediate)
+  assert.equal(panel.shopId.value, undefined)
+  assert.equal(panel.shops.value[0]?.id, 8)
+  assert.equal(panel.calls.includes('sellerProducts'), false)
+  assert.equal(panel.calls.includes('sellerOrders'), false)
+  account = { ...account, authStatus: 'AUTHORIZED' }
+  await panel.refreshLists()
+  panel.selectShop(shop)
+  await new Promise(setImmediate)
+  assert.equal(panel.calls.includes('sellerProducts'), true)
+  assert.equal(panel.calls.includes('sellerOrders'), true)
+  panel.stop()
+})
+
 test('publishing workspace keeps creator as the default entry', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/views/tk/video-publish-center/components/TiktokShopWorkspace.vue'), 'utf8')
   assert.match(source, /value="creator"/)
