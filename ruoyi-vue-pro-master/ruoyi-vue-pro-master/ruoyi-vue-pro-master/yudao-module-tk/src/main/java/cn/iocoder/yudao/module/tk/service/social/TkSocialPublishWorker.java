@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.tk.service.social;
 import cn.iocoder.yudao.module.tk.dal.dataobject.social.*;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.*;
 import cn.iocoder.yudao.module.tk.service.channel.*;
+import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiException;
 import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAccountService;
 import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialTokenCipher;
 import cn.iocoder.yudao.module.tk.service.social.platform.*;
@@ -25,6 +26,7 @@ public class TkSocialPublishWorker {
     private final TkSocialPublishService publisher;
     @javax.annotation.Resource private TkChannelAccountService channelAccounts;
     @javax.annotation.Resource private TkChannelVideoClient channelVideos;
+    @javax.annotation.Resource private TkOpenXPublishService openX;
     @javax.annotation.Resource private TkSocialTokenCipher cipher;
     public TkSocialPublishWorker(TkSocialPublishDetailMapper details,TkSocialPublishTaskMapper tasks,
             TkSocialAccountMapper accounts,TkSocialMediaMapper media,TkSocialAccountService tokens,
@@ -63,6 +65,16 @@ public class TkSocialPublishWorker {
                     || !Objects.equals(detail.getPlatform(),account.getPlatform())) {
                 throw new IllegalArgumentException("发布目标不存在或归属已改变");
             }
+            if (task.getOpenXConnectionId()!=null) {
+                openX.assertRunnable(task, account);
+                if (task.getMediaId()==null) {
+                    openX.prepareMedia(task);
+                    outcome.set("status", "PENDING").set("platform_status", "MEDIA_READY")
+                            .set("next_retry_time", LocalDateTime.now());
+                    publisher.recordOutcome(detail.getPublishTaskId(),tenantId,outcome);
+                    return;
+                }
+            }
             TkSocialMediaDO source=task.getMediaId()==null ? null : media.selectById(task.getMediaId());
             if (task.getMediaId()!=null && (source==null || !"READY".equals(source.getStatus())
                     || !sameScope(detail,source.getTenantId(),source.getCompanyId()))) {
@@ -75,6 +87,7 @@ public class TkSocialPublishWorker {
                 if (source==null || !detail.getPlatform().equals(task.getChannel())) throw new IllegalArgumentException("Missing channel video");
                 String context="channel:upload:"+tenantId+":"+id;
                 String session=detail.getUploadSessionCiphertext()==null ? null : cipher.decrypt(detail.getUploadSessionCiphertext(),context);
+                if (task.getOpenXConnectionId()!=null) openX.assertRunnable(task, accounts.selectById(account.getId()));
                 sent=true;
                 TkChannelVideoClient.Checkpoint step=channelVideos.advance(task,detail,token,url,source.getFileSize(),session);
                 String postId=step.getPostId();
@@ -111,6 +124,8 @@ public class TkSocialPublishWorker {
                 else outcome.set("status","PENDING").set("next_retry_time",LocalDateTime.now().plusSeconds(15));
             } else throw new IllegalStateException("无法识别平台状态");
             }
+        } catch (TkOpenApiException ex) {
+            terminal(outcome,"FAILED",ex.getCode(),"OpenAPI publishing permission or media is no longer available");
         } catch (TkSocialPlatformException ex) {
             if (ex.isUncertain()) terminal(outcome,"UNKNOWN",ex.getCode(),"平台请求结果不确定，请到平台核实，避免重复发布");
             else if (ex.isReauthRequired()) {

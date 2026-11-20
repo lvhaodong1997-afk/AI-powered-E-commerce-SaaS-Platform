@@ -15,6 +15,9 @@ public class TkSocialPublishTaskDO extends TenantBaseDO {
     private Long id;
     private Long companyId;
     private Long mediaId;
+    private Long openXConnectionId;
+    private Long openXGenerationTaskId;
+    private String openXTaskId;
     private String title;
     private String instagramCaption;
     private String facebookMessage;

@@ -146,7 +146,7 @@ public class TkChannelPublishService {
         }
     }
 
-    private static void verifyVideo(String channel, TkSocialMediaDO source) {
+    static void verifyVideo(String channel, TkSocialMediaDO source) {
         if (!"VIDEO".equals(source.getMediaType()) || !"READY".equals(source.getStatus())
                 || !"VERIFIED".equals(source.getMetadataStatus()) || source.getFileSize() == null
                 || source.getFileSize() <= 0 || source.getPublishObjectKey() == null) throw new IllegalArgumentException("Verified MP4 required");

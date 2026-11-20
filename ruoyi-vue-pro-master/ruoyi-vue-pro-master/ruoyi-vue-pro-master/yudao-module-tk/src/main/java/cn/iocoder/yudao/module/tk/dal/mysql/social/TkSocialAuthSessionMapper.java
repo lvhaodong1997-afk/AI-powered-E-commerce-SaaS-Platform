@@ -17,6 +17,11 @@ public interface TkSocialAuthSessionMapper extends BaseMapperX<TkSocialAuthSessi
     @InterceptorIgnore(tenantLine="true")
     TkSocialAuthSessionDO findByStateHash(@Param("hash") String hash);
 
+    @Select("SELECT * FROM tk_social_auth_session WHERE session_id=#{id} AND platform='x' "
+            + "AND open_client_id IS NOT NULL AND deleted=0 LIMIT 1")
+    @InterceptorIgnore(tenantLine="true")
+    TkSocialAuthSessionDO findOpenXConsent(@Param("id") String id);
+
     @Update("UPDATE tk_social_auth_session SET status=#{next},update_time=#{now} "
             + "WHERE id=#{id} AND status=#{expected} AND expire_time > #{now} AND deleted=0")
     int claim(@Param("id") Long id,@Param("expected") String expected,@Param("next") String next,@Param("now") LocalDateTime now);
@@ -26,8 +31,8 @@ public interface TkSocialAuthSessionMapper extends BaseMapperX<TkSocialAuthSessi
     int finish(@Param("id") Long id,@Param("expected") String expected,@Param("next") String next,
                @Param("payload") String payload,@Param("reason") String reason,@Param("now") LocalDateTime now);
 
-    @Update("UPDATE tk_social_auth_session SET status='EXPIRED',payload_ciphertext=NULL,fail_reason='授权会话已过期',update_time=#{now} "
-            + "WHERE expire_time <= #{now} AND deleted=0 AND status IN ('PENDING','PROCESSING','PAGES_READY')")
+    @Update("UPDATE tk_social_auth_session SET status='EXPIRED',payload_ciphertext=NULL,open_consent_hash=NULL,fail_reason='授权会话已过期',update_time=#{now} "
+            + "WHERE expire_time <= #{now} AND deleted=0 AND status IN ('CONSENT_PENDING','PENDING','PROCESSING','PAGES_READY')")
     @InterceptorIgnore(tenantLine="true")
     int expire(@Param("now") LocalDateTime now);
 }

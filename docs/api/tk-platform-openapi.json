@@ -69,6 +69,79 @@
     }
   ],
   "paths": {
+    "/admin-api/tk/open/v1/x/auth/sessions": {
+      "post": {
+        "operationId": "createXAuthorizationSession",
+        "tags": ["X Publish"],
+        "description": "Requires x.auth. Open the returned authorizeUrl in the account owner's browser. Authorization links expire in 10 minutes.",
+        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/XSessionResult"},
+          "default": {"$ref": "#/components/responses/XErrorResult"}
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/x/auth/sessions/{sessionId}": {
+      "get": {
+        "operationId": "getXAuthorizationSession",
+        "tags": ["X Publish"],
+        "description": "Requires x.auth. The connectionId is returned only on SUCCESS.",
+        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
+        "parameters": [{"name": "sessionId", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/XSessionResult"},
+          "default": {"$ref": "#/components/responses/XErrorResult"}
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/x/connections/{connectionId}": {
+      "delete": {
+        "operationId": "revokeXConnection",
+        "tags": ["X Publish"],
+        "description": "Requires x.auth. Revokes this client connection; requests already sent to X cannot be recalled.",
+        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
+        "parameters": [{"name": "connectionId", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "data is true", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OpenApiResponse"}}}},
+          "default": {"$ref": "#/components/responses/XErrorResult"}
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/x/publish/tasks": {
+      "post": {
+        "operationId": "createXPublishTask",
+        "tags": ["X Publish"],
+        "description": "Requires x.publish. Submits one generated video. A repeated key with the same input returns the original task; changed input returns 409.",
+        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
+        "parameters": [{"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "pattern": "^[!-~]{1,128}$"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object", "required": ["connectionId", "generationTaskId", "text"],
+          "properties": {
+            "connectionId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+            "generationTaskId": {"type": "string", "pattern": "^[1-9][0-9]{0,18}$", "example": "123456"},
+            "text": {"type": "string", "maxLength": 280, "description": "Maximum 280 UTF-16 code units; use an empty string for no caption."}
+          }
+        }}}},
+        "responses": {
+          "200": {"$ref": "#/components/responses/XTaskResult"},
+          "409": {"$ref": "#/components/responses/XErrorResult"},
+          "default": {"$ref": "#/components/responses/XErrorResult"}
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/x/publish/tasks/{taskId}": {
+      "get": {
+        "operationId": "getXPublishTask",
+        "tags": ["X Publish"],
+        "description": "Requires x.publish. UNKNOWN must be checked on X; do not submit a replacement automatically.",
+        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
+        "parameters": [{"name": "taskId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^xtask_[a-f0-9]{32}$"}}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/XTaskResult"},
+          "default": {"$ref": "#/components/responses/XErrorResult"}
+        }
+      }
+    },
     "/admin-api/tk/open/v1/tiktok/auth/sessions": {
       "post": {
         "tags": [
@@ -8539,6 +8612,35 @@
       }
     },
     "responses": {
+      "XSessionResult": {
+        "description": "Authorization session",
+        "content": {"application/json": {"schema": {"allOf": [
+          {"$ref": "#/components/schemas/OpenApiResponse"},
+          {"type": "object", "properties": {"data": {"type": "object", "required": ["sessionId", "status"], "properties": {
+            "sessionId": {"type": "string"},
+            "status": {"type": "string", "enum": ["CONSENT_PENDING", "PENDING", "PROCESSING", "SUCCESS", "FAILED", "EXPIRED", "REVOKED"]},
+            "authorizeUrl": {"type": "string", "format": "uri"},
+            "connectionId": {"type": "string"}
+          }}}}
+        ]}}}
+      },
+      "XTaskResult": {
+        "description": "Current publish task state",
+        "content": {"application/json": {"schema": {"allOf": [
+          {"$ref": "#/components/schemas/OpenApiResponse"},
+          {"type": "object", "properties": {"data": {"type": "object", "required": ["taskId", "status"], "properties": {
+            "taskId": {"type": "string"},
+            "status": {"type": "string", "enum": ["PENDING", "PROCESSING", "SUCCEEDED", "FAILED", "REAUTH_REQUIRED", "UNKNOWN"]},
+            "postId": {"type": "string"},
+            "postUrl": {"type": "string", "format": "uri"},
+            "errorCode": {"type": "string"}
+          }}}}
+        ]}}}
+      },
+      "XErrorResult": {
+        "description": "HMAC, permission, input, resource, conflict, quota or platform error",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OpenApiResponse"}}}
+      },
       "BadRequest": {
         "description": "参数错误或业务状态不允许（400）",
         "content": {

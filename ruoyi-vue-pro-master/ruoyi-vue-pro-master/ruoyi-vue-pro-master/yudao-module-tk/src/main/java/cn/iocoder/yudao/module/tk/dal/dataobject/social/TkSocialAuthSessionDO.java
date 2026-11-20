@@ -14,6 +14,9 @@ public class TkSocialAuthSessionDO extends TenantBaseDO {
     private String sessionId,platform;
     @ToString.Exclude private String stateHash;
     private String status;
+    private String openClientId;
+    private Long openAccountId;
+    @ToString.Exclude private String openConsentHash;
     @ToString.Exclude
     @TableField(updateStrategy=FieldStrategy.ALWAYS) private String payloadCiphertext;
     @TableField(updateStrategy=FieldStrategy.ALWAYS) private String failReason;

@@ -14,3 +14,5 @@ Both channels are disabled by default. Use the protected server environment to c
 Register the exact public HTTPS callback on each provider. The standard paths are `/admin-api/tk/channel-publish/x/callback` and `/admin-api/tk/channel-publish/youtube/callback`. Do not log callback query strings at the reverse proxy. Keep the existing `tk.social.encryption-key` stable; the new channels reuse this 32-byte Base64 key for the refresh credentials and upload session URLs. Meta does not have to be enabled.
 
 Before enabling customer roles, bind a test account for each provider. Verify an X video post, a private YouTube upload and processing completion, and a fresh-token publication after expiry. Check browser and provider channel identity before confirmation. Do not automatically retry a record marked UNKNOWN. See the provider channel first to confirm what happened.
+
+For X OpenAPI, apply the additive `tk_open_x_upgrade_mysql.sql` after the channel migration before restarting the backend. See the [client provisioning and verification instructions](../docs/api/x-publishing.md). The OpenAPI switch is separate and defaults to off.

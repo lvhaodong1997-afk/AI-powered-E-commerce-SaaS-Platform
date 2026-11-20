@@ -40,6 +40,11 @@ public class TkOpenApiAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String uri = request.getRequestURI();
+        if (uri != null && uri.startsWith("/admin-api/tk/open/v1/x/")) {
+            return "OPTIONS".equalsIgnoreCase(request.getMethod()) || (uri.matches(
+                    "/admin-api/tk/open/v1/x/auth/sessions/[A-Za-z0-9_-]{43}/consent")
+                    && ("GET".equals(request.getMethod()) || "POST".equals(request.getMethod())));
+        }
         return uri == null || !uri.contains("/tk/open/v1/tiktok/")
                 || uri.endsWith("/auth/callback") || isPublicLaunchUri(uri)
                 || "OPTIONS".equalsIgnoreCase(request.getMethod());
@@ -146,6 +151,9 @@ public class TkOpenApiAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private String requiredPermission(String uri) {
+        if (uri.startsWith("/admin-api/tk/open/v1/x/")) {
+            return uri.startsWith("/admin-api/tk/open/v1/x/publish/") ? "x.publish" : "x.auth";
+        }
         if (uri.contains("/media/")) {
             return "media";
         }

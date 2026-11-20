@@ -100,8 +100,9 @@ public class TkChannelPublishController {
     @GetMapping(value = "/callback", produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> callback(@PathVariable("channel") String channel,
             @RequestParam(value = "code", required = false) String code, @RequestParam(value = "state", required = false) String state,
-            @RequestParam(value = "error", required = false) String error) {
-        boolean ok = auth.callback(channel, code, state, error);
+            @RequestParam(value = "error", required = false) String error,
+            @CookieValue(value = "__Host-TKXConsent", required = false) String browserToken) {
+        boolean ok = auth.callback(channel, code, state, error, browserToken);
         return ResponseEntity.ok().contentType(new MediaType("text", "html", java.nio.charset.StandardCharsets.UTF_8))
                 .header("Referrer-Policy", "no-referrer").cacheControl(CacheControl.noStore())
                 .body("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>OAuth</title><p>"

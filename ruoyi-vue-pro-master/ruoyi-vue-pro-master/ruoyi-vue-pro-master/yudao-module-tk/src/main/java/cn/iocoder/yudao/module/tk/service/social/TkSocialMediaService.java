@@ -1,5 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.social;
 
+import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+
 import cn.iocoder.yudao.module.infra.api.file.FileApi;
 import cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadCompleteReqVO;
 import cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadSessionRespVO;
@@ -206,6 +208,24 @@ public class TkSocialMediaService {
             throw new IllegalArgumentException("请先完成视频生成");
         }
         scope.validateReadable(task.getTenantId(), task.getCompanyId(), task.getCreator());
+        TkUserScope current = scope.getCurrentScope();
+        Long companyId = scope.getWritableCompanyId(null);
+        if (!current.hasTenantScope() || companyId == null) throw new IllegalArgumentException("Select a company first");
+        return importGenerated(task, current.getTenantId(), companyId, current.getUserIdString(), MAX_VIDEO_BYTES);
+    }
+
+    public TkSocialMediaDO importGeneratedForOwner(TkGenerationTaskDO task, Long tenantId, Long companyId,
+            String creator, long maxBytes) {
+        if (TenantContextHolder.isIgnore() || !Objects.equals(tenantId, TenantContextHolder.getTenantId())
+                || task == null || !Objects.equals(task.getTenantId(), tenantId) || !Objects.equals(task.getCompanyId(), companyId)
+                || !Objects.equals(task.getCreator(), creator) || !"SUCCESS".equals(task.getStatus()) || task.getOutputUrl() == null) {
+            throw new IllegalArgumentException("Generated video is unavailable");
+        }
+        return importGenerated(task, tenantId, companyId, creator, maxBytes);
+    }
+
+    private TkSocialMediaDO importGenerated(TkGenerationTaskDO task, Long targetTenant, Long targetCompany,
+            String creator, long maxBytes) {
         validateOssUploadConfig();
         TkOssObjectStorageService owner = ossObjectStorageService.storageForUrl(task.getOutputUrl());
         String key = owner.requireOwnedObjectKey(task.getOutputUrl(), task.getTenantId(), task.getCompanyId());
@@ -213,9 +233,10 @@ public class TkSocialMediaService {
         try (TkSocialVideoInspector.Workspace workspace = videoInspector.openWorkspace()) {
             Path source = workspace.getDirectory().resolve("source.mp4");
             ObjectMetadata identity = owner.headObject(key);
-            owner.downloadToFile(key, source, identity, MAX_VIDEO_BYTES);
+            owner.downloadToFile(key, source, identity, maxBytes);
             TkOssObjectStorageService.requireIdentity(identity, owner.headObject(key));
-            return saveVideoPath(source, "generation-" + taskId + ".mp4", workspace.getDirectory());
+            return saveVideoPath(source, "generation-" + task.getId() + ".mp4", workspace.getDirectory(),
+                    targetTenant, targetCompany, creator);
         } catch (IOException ex) {
             throw new IllegalStateException("读取生成视频失败，请稍后重试");
         } finally {
@@ -235,19 +256,24 @@ public class TkSocialMediaService {
     }
 
     private TkSocialMediaDO saveVideoPath(Path source, String name, Path workspace) throws IOException {
+        TkUserScope current = scope.getCurrentScope();
+        Long companyId = scope.getWritableCompanyId(null);
+        if (!current.hasTenantScope() || companyId == null) throw new IllegalArgumentException("Select a company first");
+        return saveVideoPath(source, name, workspace, current.getTenantId(), companyId, current.getUserIdString());
+    }
+
+    private TkSocialMediaDO saveVideoPath(Path source, String name, Path workspace, Long tenantId, Long companyId,
+            String creator) throws IOException {
         try (InputStream input = Files.newInputStream(source)) {
             byte[] header = new byte[12];
             if (input.read(header) != 12 || !"ftyp".equals(new String(header, 4, 4, StandardCharsets.US_ASCII)))
                 throw new IllegalArgumentException("文件不是有效的 MP4 视频");
         }
         validateOssUploadConfig();
-        TkUserScope current = scope.getCurrentScope();
-        Long companyId = scope.getWritableCompanyId(null);
-        if (!current.hasTenantScope() || companyId == null) throw new IllegalArgumentException("请先选择租户");
         TkSocialMediaDO media = new TkSocialMediaDO();
-        media.setTenantId(current.getTenantId()); media.setCompanyId(companyId); media.setCreator(current.getUserIdString());
+        media.setTenantId(tenantId); media.setCompanyId(companyId); media.setCreator(creator);
         media.setFileName(name.substring(0, Math.min(255, name.length()))); media.setMediaType("VIDEO"); media.setContentType("video/mp4");
-        media.setObjectKey(socialObjectKey(current.getTenantId(), companyId, UUID.randomUUID().toString().replace("-", "")));
+        media.setObjectKey(socialObjectKey(tenantId, companyId, UUID.randomUUID().toString().replace("-", "")));
         try {
             ObjectMetadata original = ossObjectStorageService.uploadFile(media.getObjectKey(), source, MAX_VIDEO_BYTES);
             media.setSourceFileSize(original.getContentLength()); media.setSourceEtag(original.getEtag()); media.setSourceVersionId(original.getVersionId());

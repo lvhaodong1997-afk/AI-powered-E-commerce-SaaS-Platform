@@ -141,7 +141,8 @@ yudao:
     license-url: https://opensource.org/licenses/MIT
   tenant: # 多租户相关配置项
     enable: true
-    ignore-urls: []
+    ignore-urls:
+      - /admin-api/tk/open/v1/x/**
     ignore-visit-urls:
       - /admin-api/system/user/profile/**
       - /admin-api/system/auth/**

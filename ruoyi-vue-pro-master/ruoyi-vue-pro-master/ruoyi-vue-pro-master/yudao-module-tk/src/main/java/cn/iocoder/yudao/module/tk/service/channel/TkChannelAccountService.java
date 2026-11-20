@@ -6,6 +6,7 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialAccountDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialAuthSessionDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialAccountMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialAuthSessionMapper;
+import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiException;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAuthService;
@@ -38,6 +39,7 @@ public class TkChannelAccountService {
     private final TkDataScopeService scope;
     private final TkSocialTokenCipher cipher;
     private final PlatformTransactionManager transactions;
+    private final TkOpenXAccess openAccess;
     private final SecureRandom random = new SecureRandom();
 
     public boolean ready(String channel) {
@@ -66,10 +68,42 @@ public class TkChannelAccountService {
         return TkChannelOAuthClient.params("authorizeUrl", url, "sessionId", session.getSessionId());
     }
 
-    public boolean callback(String channel, String code, String state, String error) {
+    public TkSocialAuthSessionDO openSession(TkOpenXProperties.Grant grant) {
+        if (!ready(TkChannelProperties.X)) throw TkOpenApiException.unavailable("X_NOT_CONFIGURED", "X publishing is not configured");
+        TkSocialAuthSessionDO row = new TkSocialAuthSessionDO();
+        row.setSessionId(secret());
+        row.setStateHash(TkSocialAuthService.hash(secret()));
+        row.setTenantId(grant.getTenantId());
+        row.setCompanyId(grant.getCompanyId());
+        row.setCreator(String.valueOf(grant.getOwnerUserId()));
+        row.setPlatform(TkChannelProperties.X);
+        row.setOpenClientId(grant.getClientId());
+        row.setStatus("CONSENT_PENDING");
+        row.setExpireTime(LocalDateTime.now().plusMinutes(10));
+        sessions.insert(row);
+        return row;
+    }
+
+    public String openConsent(TkSocialAuthSessionDO row, String browserToken) {
+        openAccess.requireSessionGrant(row, "x.auth");
+        String state = secret(), verifier = secret();
+        String url = oauth.authorization(TkChannelProperties.X, properties.require(TkChannelProperties.X), state, verifier);
+        int updated = sessions.update(null, new UpdateWrapper<TkSocialAuthSessionDO>()
+                .eq("id", row.getId()).eq("tenant_id", row.getTenantId()).eq("status", "CONSENT_PENDING")
+                .gt("expire_time", LocalDateTime.now()).set("status", "PENDING")
+                .set("state_hash", TkSocialAuthService.hash(state))
+                .set("open_consent_hash", TkSocialAuthService.hash(browserToken))
+                .set("payload_ciphertext", cipher.encrypt(verifier, TkSocialAuthService.sessionContext(row))));
+        if (updated != 1) throw TkOpenApiException.conflict("X_CONSENT_NOT_PENDING", "Authorization link is no longer available");
+        return url;
+    }
+
+    public boolean callback(String channel, String code, String state, String error, String browserToken) {
         if (!ready(channel) || state == null || !state.matches("[A-Za-z0-9_-]{43}")) return false;
         TkSocialAuthSessionDO session = sessions.findByStateHash(TkSocialAuthService.hash(state));
         if (session == null || !channel.equals(session.getPlatform()) || session.getTenantId() == null) return false;
+        if (session.getOpenClientId() != null && (browserToken == null || !browserToken.matches("[0-9a-f]{64}")
+                || !TkSocialAuthService.hash(browserToken).equals(session.getOpenConsentHash()))) return false;
         return TenantUtils.execute(session.getTenantId(), () -> {
             if (sessions.claim(session.getId(), "PENDING", "PROCESSING", LocalDateTime.now()) != 1) return false;
             String stage = "CALLBACK_PARAMS";
@@ -84,6 +118,10 @@ public class TkChannelAccountService {
                 JsonNode profile = oauth.account(channel, access);
                 String external = required(profile, "id");
                 if (!external.matches("[A-Za-z0-9_-]{1,128}")) throw new IllegalArgumentException();
+                if (session.getOpenClientId() != null && (!TkChannelProperties.X.equals(channel)
+                        || !external.equals(openAccess.requireSessionGrant(session, "x.auth").getXUserId()))) {
+                    throw new IllegalArgumentException("Unexpected X account");
+                }
                 stage = "SAVE_ACCOUNT";
                 new TransactionTemplate(transactions).executeWithoutResult(status -> {
                     TkSocialAccountDO account = accounts.findExternal(session.getTenantId(), channel, external);
@@ -106,6 +144,11 @@ public class TkChannelAccountService {
                     account.setTokenType("OAUTH2"); account.setTokenExpiresAt(expires(token));
                     account.setStatus("AUTHORIZED"); account.setFailReason(null); account.setLastAuthTime(LocalDateTime.now());
                     if (existing) accounts.updateById(account); else accounts.insert(account);
+                    if (session.getOpenClientId() != null) {
+                        sessions.update(null, new UpdateWrapper<TkSocialAuthSessionDO>().eq("id", session.getId())
+                                .eq("tenant_id", session.getTenantId()).set("open_account_id", account.getId())
+                                .set("open_consent_hash", null));
+                    }
                     if (sessions.finish(session.getId(), "PROCESSING", "SUCCESS", null, null, LocalDateTime.now()) != 1)
                         throw new IllegalStateException("OAuth session expired");
                 });
@@ -167,8 +210,14 @@ public class TkChannelAccountService {
 
     public void disconnect(String channel, Long id) {
         TkSocialAccountDO a = owned(channel, id);
-        accounts.update(null, new UpdateWrapper<TkSocialAccountDO>().eq("id", id).eq("tenant_id", a.getTenantId())
-                .set("status", "DELETED").set("access_token_ciphertext", null).set("token_expires_at", null));
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            accounts.update(null, new UpdateWrapper<TkSocialAccountDO>().eq("id", id).eq("tenant_id", a.getTenantId())
+                    .set("status", "DELETED").set("access_token_ciphertext", null).set("token_expires_at", null));
+            if (TkChannelProperties.X.equals(channel)) {
+                sessions.update(null, new UpdateWrapper<TkSocialAuthSessionDO>().eq("tenant_id", a.getTenantId())
+                        .eq("platform", channel).eq("open_account_id", id).eq("status", "SUCCESS").set("status", "REVOKED"));
+            }
+        });
     }
 
     public String token(TkSocialAccountDO requested) {

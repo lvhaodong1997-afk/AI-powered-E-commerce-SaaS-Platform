@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS tk_social_account (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='TK 社交平台账号';
 
 CREATE TABLE IF NOT EXISTS tk_social_auth_session (
+  open_client_id varchar(128) DEFAULT NULL,
+  open_account_id bigint DEFAULT NULL,
+  open_consent_hash char(64) DEFAULT NULL,
   id bigint NOT NULL AUTO_INCREMENT COMMENT '主键编号',
   tenant_id bigint NOT NULL COMMENT '租户编号',
   company_id bigint NOT NULL COMMENT '公司编号',
@@ -48,6 +51,7 @@ CREATE TABLE IF NOT EXISTS tk_social_auth_session (
   PRIMARY KEY (id),
   UNIQUE KEY uk_social_session (session_id),
   UNIQUE KEY uk_social_state (state_hash),
+  KEY idx_social_open_account (tenant_id, platform, open_account_id, status),
   KEY idx_social_session_expiry (status, expire_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='TK 社交平台授权会话';
 
@@ -100,6 +104,9 @@ CREATE TABLE IF NOT EXISTS tk_social_media (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='TK 社交媒体素材';
 
 CREATE TABLE IF NOT EXISTS tk_social_publish_task (
+  open_x_task_id varchar(48) DEFAULT NULL,
+  open_x_connection_id bigint DEFAULT NULL,
+  open_x_generation_task_id bigint DEFAULT NULL,
   id bigint NOT NULL AUTO_INCREMENT COMMENT '主键编号',
   tenant_id bigint NOT NULL COMMENT '租户编号',
   company_id bigint NOT NULL COMMENT '公司编号',
@@ -126,6 +133,7 @@ CREATE TABLE IF NOT EXISTS tk_social_publish_task (
   deleted bit(1) NOT NULL DEFAULT b'0' COMMENT '是否删除',
   PRIMARY KEY (id),
   UNIQUE KEY uk_social_idempotency (tenant_id, creator, idempotency_key),
+  UNIQUE KEY uk_social_open_x_task (open_x_task_id),
   KEY idx_social_task_scope (tenant_id, creator, create_time),
   KEY idx_social_task_media (media_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='TK 社交平台发布任务';

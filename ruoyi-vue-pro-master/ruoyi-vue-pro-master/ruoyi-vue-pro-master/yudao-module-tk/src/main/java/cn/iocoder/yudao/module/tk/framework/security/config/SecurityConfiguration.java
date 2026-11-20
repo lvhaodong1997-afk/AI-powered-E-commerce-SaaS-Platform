@@ -19,6 +19,7 @@ public class SecurityConfiguration {
                         .requestMatchers(buildAdminApi("/tk/open/copywriting/**")).permitAll()
                         .requestMatchers(buildAdminApi("/tk/open/v1/ocr/**")).permitAll()
                         .requestMatchers(buildAdminApi("/tk/open/v1/tiktok/**")).permitAll()
+                        .requestMatchers("/admin-api/tk/open/v1/x/**").permitAll()
                         .requestMatchers("/tk/open/v1/tiktok/**").permitAll()
                         .requestMatchers("/tk/open/v1/ocr/**").permitAll()
                         .requestMatchers("/tk/open/copywriting/**").permitAll()

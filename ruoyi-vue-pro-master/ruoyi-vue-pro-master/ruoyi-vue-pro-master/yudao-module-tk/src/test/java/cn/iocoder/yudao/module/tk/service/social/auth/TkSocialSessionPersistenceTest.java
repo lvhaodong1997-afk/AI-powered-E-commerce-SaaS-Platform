@@ -43,7 +43,7 @@ class TkSocialSessionPersistenceTest {
         try(Connection c=source.getConnection(); Statement s=c.createStatement()) {
             s.execute("DROP TABLE IF EXISTS tk_social_auth_session");
             s.execute("CREATE TABLE tk_social_auth_session(id BIGINT PRIMARY KEY,status VARCHAR(32),expire_time TIMESTAMP,"
-                    +"payload_ciphertext VARCHAR(4096),fail_reason VARCHAR(500),update_time TIMESTAMP,deleted INT DEFAULT 0)");
+                    +"payload_ciphertext VARCHAR(4096),open_consent_hash CHAR(64),fail_reason VARCHAR(500),update_time TIMESTAMP,deleted INT DEFAULT 0)");
             s.execute("INSERT INTO tk_social_auth_session(id,status,expire_time,payload_ciphertext) VALUES"
                     +"(1,'PENDING',DATEADD('MINUTE',10,CURRENT_TIMESTAMP),'cipher'),"
                     +"(2,'PAGES_READY',DATEADD('MINUTE',-10,CURRENT_TIMESTAMP),'cipher')");
