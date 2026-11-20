@@ -16,6 +16,7 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -28,6 +29,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TkChannelAccountService {
     private final TkChannelProperties properties;
     private final TkChannelOAuthClient oauth;
@@ -70,14 +72,19 @@ public class TkChannelAccountService {
         if (session == null || !channel.equals(session.getPlatform()) || session.getTenantId() == null) return false;
         return TenantUtils.execute(session.getTenantId(), () -> {
             if (sessions.claim(session.getId(), "PENDING", "PROCESSING", LocalDateTime.now()) != 1) return false;
+            String stage = "CALLBACK_PARAMS";
             try {
                 if (error != null || code == null || code.length() > 4096 || code.isEmpty()) throw new IllegalArgumentException();
+                stage = "DECRYPT_VERIFIER";
                 String verifier = cipher.decrypt(session.getPayloadCiphertext(), TkSocialAuthService.sessionContext(session));
+                stage = "EXCHANGE_TOKEN";
                 JsonNode token = oauth.exchange(channel, properties.require(channel), code, verifier);
                 String access = required(token, "access_token"), refresh = required(token, "refresh_token");
+                stage = "READ_ACCOUNT";
                 JsonNode profile = oauth.account(channel, access);
                 String external = required(profile, "id");
                 if (!external.matches("[A-Za-z0-9_-]{1,128}")) throw new IllegalArgumentException();
+                stage = "SAVE_ACCOUNT";
                 new TransactionTemplate(transactions).executeWithoutResult(status -> {
                     TkSocialAccountDO account = accounts.findExternal(session.getTenantId(), channel, external);
                     boolean existing = account != null;
@@ -104,10 +111,25 @@ public class TkChannelAccountService {
                 });
                 return true;
             } catch (RuntimeException ex) {
+                if (TkChannelProperties.X.equals(channel)) {
+                    log.warn("X OAuth callback failed: stage={}, reason={}", stage, callbackFailureReason(ex));
+                }
                 sessions.finish(session.getId(), "PROCESSING", "FAILED", null, "Authorization failed", LocalDateTime.now());
                 return false;
             }
         });
+    }
+
+    private static String callbackFailureReason(RuntimeException ex) {
+        if (ex instanceof TkSocialPlatformException) {
+            String code = ((TkSocialPlatformException) ex).getCode();
+            if ("CHANNEL_HTTP_0".equals(code)) return "TRANSPORT_OR_RESPONSE_ERROR";
+            if (code != null && code.matches("CHANNEL_HTTP_[1-5][0-9]{2}")) return code;
+            return "PLATFORM_ERROR";
+        }
+        if (ex instanceof IllegalArgumentException) return "INVALID_INPUT_OR_RESPONSE";
+        if (ex instanceof IllegalStateException) return "INVALID_STATE_OR_CONFIGURATION";
+        return "INTERNAL_ERROR";
     }
 
     public String session(String channel, String sessionId) {

@@ -1,28 +1,46 @@
 package cn.iocoder.yudao.module.tk.service.channel;
 
+import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialProperties;
+import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialHttpTransport;
 import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
 import java.net.HttpURLConnection;
+import java.net.Proxy;
 import java.net.URI;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Map;
 
 @Component
+@RequiredArgsConstructor
 class TkChannelHttp {
     static final ObjectMapper JSON = new ObjectMapper();
     static final String JSON_TYPE = "application/json";
     static final String FORM = "application/x-www-form-urlencoded";
+    private final TkSocialProperties social;
+
+    Proxy proxyFor(URI target) {
+        if ("https".equalsIgnoreCase(target.getScheme()) && "api.x.com".equalsIgnoreCase(target.getHost())
+                && (target.getPort() == -1 || target.getPort() == 443) && target.getUserInfo() == null) {
+            return TkSocialHttpTransport.proxy(social);
+        }
+        return Proxy.NO_PROXY;
+    }
 
     Response send(String method, String url, String authorization, String contentType, byte[] body,
                   Map<String, String> headers, boolean uncertainWrite) {
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
+            URI target = URI.create(url);
+            Proxy proxy = proxyFor(target);
+            URL endpoint = target.toURL();
+            connection = (HttpURLConnection) (proxy == Proxy.NO_PROXY ? endpoint.openConnection() : endpoint.openConnection(proxy));
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(30000);

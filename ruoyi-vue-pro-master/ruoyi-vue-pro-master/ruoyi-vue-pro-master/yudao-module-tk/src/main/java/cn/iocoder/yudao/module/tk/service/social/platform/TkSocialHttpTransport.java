@@ -24,7 +24,7 @@ public class TkSocialHttpTransport implements TkSocialPlatformClient.Transport {
     }
     TkSocialHttpTransport(ConnectionFactory connections) { this.connections=connections; }
 
-    static Proxy proxy(TkSocialProperties properties) {
+    public static Proxy proxy(TkSocialProperties properties) {
         TkSocialProperties.ProxySettings settings=properties.getProxy();
         if (settings==null || !settings.isEnabled()) return Proxy.NO_PROXY;
         String host=settings.getHost()==null?"":settings.getHost().trim();
