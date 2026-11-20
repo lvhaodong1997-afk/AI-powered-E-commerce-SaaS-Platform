@@ -45,6 +45,7 @@ class TkOpenXPublishServiceTest {
     private final TkOpenXPublishTaskMapper tasks = mock(TkOpenXPublishTaskMapper.class);
     private final TkOpenApiClientMapper clients = mock(TkOpenApiClientMapper.class);
     private final TkSocialAuthSessionMapper socialSessions = mock(TkSocialAuthSessionMapper.class);
+    private final TkOpenXTokenService tokens = mock(TkOpenXTokenService.class);
     private final PlatformTransactionManager tx = mock(PlatformTransactionManager.class);
     private TkOpenXPublishService service;
 
@@ -53,7 +54,17 @@ class TkOpenXPublishServiceTest {
         properties.setEnabled(true);
         TkOpenApiContext.set(new TkOpenApiPrincipal("client-a", "A", "x.auth,x.publish"), "req");
         when(tx.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        service = new TkOpenXPublishService(access, auth, media, connections, tasks, clients, socialSessions, tx);
+        service = new TkOpenXPublishService(access, auth, media, connections, tasks, clients, socialSessions, tokens, tx);
+        doAnswer(invocation -> {
+            TkOpenXConnectionDO row = invocation.getArgument(0);
+            if (row != null) {
+                row.setAccessTokenCipher(null);
+                row.setRefreshTokenCipher(null);
+                row.setTokenExpiresAt(null);
+                row.setSourceSocialAccountId(null);
+            }
+            return null;
+        }).when(tokens).clearSecrets(any());
         when(connections.selectByClientAndConnectionIdForUpdate("client-a", CONN)).thenReturn(authorized());
         when(media.requireReady("client-a", MEDIA)).thenReturn(new TkOpenXMediaDO().setMediaId(MEDIA).setStatus("READY")
                 .setClientId("client-a").setExpireTime(LocalDateTime.now().plusHours(1)).setFileSize(12L));
@@ -165,12 +176,52 @@ class TkOpenXPublishServiceTest {
 
 
     @Test
+    void leftoverAuthorizedSocialTaskIsStoppedWithoutCancellingTheRow() {
+        TkSocialPublishTaskDO leftover = new TkSocialPublishTaskDO();
+        leftover.setOpenXConnectionId(8L);
+        leftover.setStatus("PENDING");
+        TkSocialAuthSessionDO row = new TkSocialAuthSessionDO();
+        row.setId(8L);
+        row.setOpenClientId("client-a");
+        row.setStatus("SUCCESS");
+        when(socialSessions.selectById(8L)).thenReturn(row);
+        when(clients.selectByClientId("client-a")).thenReturn(new TkOpenApiClientDO()
+                .setClientId("client-a").setStatus(0).setPermissions("x.publish"));
+        when(connections.selectBySourceSocialSessionId("client-a", 8L)).thenReturn(authorized());
+        assertEquals("X_LEGACY_OPEN_X_TASK_UNSUPPORTED", assertThrows(TkOpenApiException.class,
+                () -> service.assertRunnable(leftover, new TkSocialAccountDO().setStatus("AUTHORIZED").setExternalAccountId("123"))).getCode());
+        assertEquals("PENDING", leftover.getStatus());
+    }
+
+    @Test
+    void leftoverTaskIsRejectedWhenDedicatedConnectionWasRevoked() {
+        TkSocialPublishTaskDO leftover = new TkSocialPublishTaskDO();
+        leftover.setOpenXConnectionId(8L);
+        leftover.setStatus("PENDING");
+        TkSocialAuthSessionDO row = new TkSocialAuthSessionDO();
+        row.setId(8L);
+        row.setOpenClientId("client-a");
+        row.setStatus("SUCCESS");
+        when(socialSessions.selectById(8L)).thenReturn(row);
+        when(clients.selectByClientId("client-a")).thenReturn(new TkOpenApiClientDO()
+                .setClientId("client-a").setStatus(0).setPermissions("x.publish"));
+        when(connections.selectBySourceSocialSessionId("client-a", 8L)).thenReturn(authorized().setAuthStatus("REVOKED"));
+        assertEquals("X_CONNECTION_DISABLED", assertThrows(TkOpenApiException.class,
+                () -> service.assertRunnable(leftover, new TkSocialAccountDO().setStatus("AUTHORIZED").setExternalAccountId("123"))).getCode());
+        assertEquals("PENDING", leftover.getStatus());
+    }
+
+    @Test
     void revokeOnlyUpdatesTheAuthenticatedClientsRowAndLeavesOthersAlone() {
-        TkOpenXConnectionDO owned = authorized();
+        TkOpenXConnectionDO owned = authorized().setId(11L).setAccessTokenCipher("cipher-a").setSourceSocialAccountId(88L);
         when(connections.selectByClientAndConnectionIdForUpdate("client-a", CONN)).thenReturn(owned);
+        when(connections.selectListByClientAndExternalAccountIdForUpdate("client-a", "123")).thenReturn(Collections.singletonList(owned));
         assertTrue(service.revoke(CONN));
+        verify(tokens).clearSecrets(owned);
+        verify(auth).collapseDuplicates("client-a", "123", 11L);
         verify(connections).updateById(ArgumentMatchers.<TkOpenXConnectionDO>argThat(row -> "REVOKED".equals(row.getAuthStatus())
-                && "client-a".equals(row.getClientId()) && CONN.equals(row.getConnectionId())));
+                && "client-a".equals(row.getClientId()) && CONN.equals(row.getConnectionId())
+                && row.getAccessTokenCipher() == null && row.getSourceSocialAccountId() == null));
         when(connections.selectByClientAndConnectionIdForUpdate("client-a", "xconn_other")).thenReturn(null);
         assertEquals("X_CONNECTION_NOT_FOUND", assertThrows(TkOpenApiException.class,
                 () -> service.revoke("xconn_other")).getCode());

@@ -1,9 +1,7 @@
 package cn.iocoder.yudao.module.tk.service.channel;
 
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenXConnectionDO;
-import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialAccountDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenXConnectionMapper;
-import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialAccountMapper;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiException;
 import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialTokenCipher;
 import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformException;
@@ -16,18 +14,17 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 
 /**
- * Per-connection X tokens. Refresh and revoke never write workbench social accounts.
- * A historical source account is read once to copy ciphertext into the connection.
+ * Per-connection X tokens. Refresh and revoke never read or write workbench social accounts.
+ * Historical migrated rows without their own ciphertext cannot be used until the client
+ * re-authorizes; copying a workbench refresh token would rotate it and break the workbench.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class TkOpenXTokenService {
     private final TkOpenXConnectionMapper connections;
-    private final TkSocialAccountMapper accounts;
     private final TkSocialTokenCipher cipher;
     private final TkChannelOAuthClient oauth;
     private final TkChannelProperties properties;
@@ -37,7 +34,15 @@ public class TkOpenXTokenService {
         connection.setAccessTokenCipher(encrypt(connection, access, refresh));
         connection.setTokenExpiresAt(expiresAt);
         connection.setRefreshTokenCipher(null);
+        connection.setSourceSocialAccountId(null);
         connections.updateById(connection);
+    }
+
+    public void clearSecrets(TkOpenXConnectionDO connection) {
+        connection.setAccessTokenCipher(null);
+        connection.setRefreshTokenCipher(null);
+        connection.setTokenExpiresAt(null);
+        connection.setSourceSocialAccountId(null);
     }
 
     public String accessToken(TkOpenXConnectionDO requested) {
@@ -49,6 +54,11 @@ public class TkOpenXTokenService {
                     requested.getClientId(), requested.getConnectionId());
             if (connection == null || !"AUTHORIZED".equals(connection.getAuthStatus())) {
                 throw TkOpenApiException.conflict("X_CONNECTION_DISABLED", "X connection is missing, expired or revoked");
+            }
+            if (connection.getAccessTokenCipher() == null || connection.getAccessTokenCipher().isEmpty()) {
+                markReauthRequired(connection);
+                throw TkOpenApiException.conflict("X_REAUTH_REQUIRED",
+                        "This X connection has no isolated token and must be authorized again");
             }
             JsonNode current;
             try {
@@ -80,21 +90,7 @@ public class TkOpenXTokenService {
 
     private JsonNode payload(TkOpenXConnectionDO connection) {
         try {
-        if (connection.getAccessTokenCipher() != null && !connection.getAccessTokenCipher().isEmpty()) {
             return TkChannelHttp.JSON.readTree(cipher.decrypt(connection.getAccessTokenCipher(), context(connection)));
-        }
-        if (connection.getSourceSocialAccountId() == null) {
-            throw new IllegalStateException("missing token");
-        }
-        TkSocialAccountDO account = accounts.selectById(connection.getSourceSocialAccountId());
-        if (account == null || !Objects.equals(account.getExternalAccountId(), connection.getExternalAccountId())) {
-            throw new IllegalStateException("missing source account");
-        }
-        JsonNode copied = TkChannelHttp.JSON.readTree(cipher.decrypt(account.getAccessTokenCiphertext(), workbenchContext(account)));
-        connection.setAccessTokenCipher(encrypt(connection, required(copied, "access"), required(copied, "refresh")));
-        if (connection.getTokenExpiresAt() == null) connection.setTokenExpiresAt(account.getTokenExpiresAt());
-        connections.updateById(connection);
-        return copied;
         } catch (RuntimeException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -107,11 +103,6 @@ public class TkOpenXTokenService {
                 + ":" + connection.getExternalAccountId();
     }
 
-    private static String workbenchContext(TkSocialAccountDO account) {
-        return "channel:account:" + account.getTenantId() + ":" + account.getCompanyId() + ":"
-                + account.getPlatform() + ":" + account.getExternalAccountId();
-    }
-
     private String encrypt(TkOpenXConnectionDO connection, String access, String refresh) {
         ObjectNode payload = TkChannelHttp.JSON.createObjectNode().put("access", access).put("refresh", refresh);
         return cipher.encrypt(payload.toString(), context(connection));
@@ -120,6 +111,14 @@ public class TkOpenXTokenService {
     private void markExpired(TkOpenXConnectionDO connection) {
         connection.setAuthStatus("EXPIRED");
         connection.setFailReason("Authorization expired");
+        clearSecrets(connection);
+        connections.updateById(connection);
+    }
+
+    private void markReauthRequired(TkOpenXConnectionDO connection) {
+        connection.setAuthStatus("REAUTH_REQUIRED");
+        connection.setFailReason("Re-authorization required; workbench tokens are not copied");
+        clearSecrets(connection);
         connections.updateById(connection);
     }
 

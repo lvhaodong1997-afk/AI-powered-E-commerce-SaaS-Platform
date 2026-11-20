@@ -2,9 +2,13 @@
 -- and tk_open_x_multiuser_upgrade_mysql.sql. Safe to rerun.
 -- Does not rewrite historical migrations, delete data, or reassign workbench accounts
 -- that have no open_client_id. Rollback: keep these tables; revert the JAR.
--- Tokens stay in historical social account rows until first OpenAPI use copies them
--- into the dedicated connection row with a new encryption context; workbench rows
--- are never updated by that copy or by later refresh/revoke.
+-- Tokens are not copied from workbench social accounts. Historical OpenAPI
+-- connections created by this script have no ciphertext and require re-authorization
+-- before they can publish. Do not share or rotate a workbench refresh token.
+-- Application writes platform as lowercase 'x'; social tables use utf8mb4_bin,
+-- so this script matches both 'x' and 'X'.
+-- Same client+external account is unique; surplus rows are revoked, token ciphers
+-- and lazy-copy sources cleared, and their external_account_id tombstoned.
 
 DROP PROCEDURE IF EXISTS tk_add_open_x_client_isolation;
 DELIMITER $$
@@ -168,14 +172,46 @@ BEGIN
             KEY idx_open_x_task_connection (client_id, connection_id, id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     END IF;
+
+    -- Collapse duplicate (client_id, external_account_id) rows before adding the unique key.
+    -- Keep the newest AUTHORIZED row when present, otherwise the newest id.
+    -- Surplus rows are revoked, ciphers and source_social_account_id cleared, then tombstoned
+    -- so a unique index can be added without deleting history.
+    UPDATE tk_open_x_connection c
+    INNER JOIN (
+        SELECT client_id, external_account_id,
+               SUBSTRING_INDEX(
+                   GROUP_CONCAT(id ORDER BY (auth_status = 'AUTHORIZED') DESC, id DESC),
+                   ',', 1) AS keep_id
+        FROM tk_open_x_connection
+        GROUP BY client_id, external_account_id
+        HAVING COUNT(*) > 1
+    ) d ON c.client_id = d.client_id
+       AND c.external_account_id = d.external_account_id
+       AND c.id <> CAST(d.keep_id AS UNSIGNED)
+    SET c.auth_status = 'REVOKED',
+        c.access_token_cipher = NULL,
+        c.refresh_token_cipher = NULL,
+        c.source_social_account_id = NULL,
+        c.fail_reason = 'Duplicate connection collapsed',
+        c.external_account_id = CONCAT(c.external_account_id, '#dup-', c.id),
+        c.deleted = b'1';
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.statistics
+                   WHERE table_schema = DATABASE()
+                     AND table_name = 'tk_open_x_connection'
+                     AND index_name = 'uk_open_x_connection_client_account') THEN
+        ALTER TABLE tk_open_x_connection
+            ADD UNIQUE KEY uk_open_x_connection_client_account (client_id, external_account_id);
+    END IF;
 END$$
 DELIMITER ;
 CALL tk_add_open_x_client_isolation();
 DROP PROCEDURE tk_add_open_x_client_isolation;
 
 -- Copy completed OpenAPI X sessions into dedicated connections. Workbench sessions
--- without open_client_id are left untouched. Existing tokens remain on the source
--- social account until first OpenAPI use; this insert never copies ciphertext.
+-- without open_client_id are left untouched. This insert never copies token ciphertext;
+-- migrated rows stay unusable until the client re-authorizes.
 INSERT INTO tk_open_x_connection (
     connection_id, client_id, external_account_id, display_name, username,
     auth_status, end_user_id, source_social_session_id, source_social_account_id,
@@ -206,7 +242,7 @@ FROM (
         FROM tk_social_auth_session s2
         INNER JOIN tk_social_account a2 ON a2.id = s2.open_account_id AND a2.deleted = b'0'
         WHERE s2.deleted = b'0'
-          AND s2.platform = 'X'
+          AND s2.platform IN ('x', 'X')
           AND s2.open_client_id IS NOT NULL
           AND s2.open_client_id <> ''
           AND s2.status IN ('SUCCESS', 'REVOKED')

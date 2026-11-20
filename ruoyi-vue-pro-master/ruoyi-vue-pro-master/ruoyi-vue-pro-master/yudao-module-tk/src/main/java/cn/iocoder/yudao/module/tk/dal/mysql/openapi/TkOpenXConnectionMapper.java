@@ -38,6 +38,21 @@ public interface TkOpenXConnectionMapper extends BaseMapperX<TkOpenXConnectionDO
                 .last("LIMIT 1 FOR UPDATE"));
     }
 
+    default List<TkOpenXConnectionDO> selectListByClientAndExternalAccountIdForUpdate(String clientId, String externalAccountId) {
+        return selectList(new LambdaQueryWrapperX<TkOpenXConnectionDO>()
+                .eq(TkOpenXConnectionDO::getClientId, clientId)
+                .eq(TkOpenXConnectionDO::getExternalAccountId, externalAccountId)
+                .last("FOR UPDATE"));
+    }
+
+    default TkOpenXConnectionDO selectBySourceSocialSessionId(String clientId, Long sourceSocialSessionId) {
+        return selectOne(new LambdaQueryWrapperX<TkOpenXConnectionDO>()
+                .eq(TkOpenXConnectionDO::getClientId, clientId)
+                .eq(TkOpenXConnectionDO::getSourceSocialSessionId, sourceSocialSessionId)
+                .orderByDesc(TkOpenXConnectionDO::getId)
+                .last("LIMIT 1"));
+    }
+
     default List<TkOpenXConnectionDO> selectListByClient(String clientId) {
         return selectList(new LambdaQueryWrapperX<TkOpenXConnectionDO>()
                 .eq(TkOpenXConnectionDO::getClientId, clientId)

@@ -40,6 +40,7 @@ public class TkOpenXPublishService {
     private final TkOpenXPublishTaskMapper tasks;
     private final TkOpenApiClientMapper clients;
     private final TkSocialAuthSessionMapper socialSessions;
+    private final TkOpenXTokenService tokens;
     private final PlatformTransactionManager transactions;
 
     public Map<String, Object> createSession(String endUserId, String returnUrl, String clientState) {
@@ -78,9 +79,23 @@ public class TkOpenXPublishService {
             if (row == null) {
                 throw TkOpenApiException.notFound("X_CONNECTION_NOT_FOUND", "connection does not exist");
             }
+            String externalId = row.getExternalAccountId();
             row.setAuthStatus("REVOKED");
             row.setFailReason("Revoked by client");
+            tokens.clearSecrets(row);
             connections.updateById(row);
+            if (externalId != null) {
+                auth.collapseDuplicates(clientId, externalId, row.getId());
+                for (TkOpenXConnectionDO other : connections.selectListByClientAndExternalAccountIdForUpdate(clientId, externalId)) {
+                    if (other.getId() != null && !other.getId().equals(row.getId())
+                            && "AUTHORIZED".equals(other.getAuthStatus())) {
+                        other.setAuthStatus("REVOKED");
+                        other.setFailReason("Revoked by client");
+                        tokens.clearSecrets(other);
+                        connections.updateById(other);
+                    }
+                }
+            }
             return true;
         }));
     }
@@ -148,6 +163,8 @@ public class TkOpenXPublishService {
     /**
      * Leftover social-table OpenAPI tasks only. Workbench tasks (no openXConnectionId) are unchanged.
      * Workbench accounts without open_client_id are never absorbed.
+     * Leftover OpenAPI tasks are not executed: they cannot safely use workbench tokens,
+     * and a dedicated revoke must not be bypassed. Rows are left in place for operator review.
      */
     public void assertRunnable(TkSocialPublishTaskDO task, TkSocialAccountDO account) {
         if (task == null || task.getOpenXConnectionId() == null) return;
@@ -164,9 +181,17 @@ public class TkOpenXPublishService {
                 .hasPermission("x.publish")) {
             throw TkOpenApiException.forbidden("X_PERMISSION_DENIED", "client is not granted x.publish");
         }
-        if (!"SUCCESS".equals(row.getStatus()) || account == null || !"AUTHORIZED".equals(account.getStatus())) {
+        TkOpenXConnectionDO connection = connections.selectBySourceSocialSessionId(row.getOpenClientId(), row.getId());
+        if (connection == null && account != null && account.getExternalAccountId() != null) {
+            connection = connections.selectByClientAndExternalAccountId(row.getOpenClientId(), account.getExternalAccountId());
+        }
+        if (connection != null && !"AUTHORIZED".equals(connection.getAuthStatus())) {
             throw TkOpenApiException.conflict("X_CONNECTION_DISABLED", "X connection is missing, expired or revoked");
         }
+        // Leftover social-table OpenAPI tasks used workbench tokens and bypassed dedicated revoke.
+        // Do not execute or auto-cancel them; clients should retry with mediaId + connectionId.
+        throw TkOpenApiException.conflict("X_LEGACY_OPEN_X_TASK_UNSUPPORTED",
+                "Legacy social-table X OpenAPI tasks are not executed after client isolation");
     }
 
     public void prepareMedia(TkSocialPublishTaskDO task) {

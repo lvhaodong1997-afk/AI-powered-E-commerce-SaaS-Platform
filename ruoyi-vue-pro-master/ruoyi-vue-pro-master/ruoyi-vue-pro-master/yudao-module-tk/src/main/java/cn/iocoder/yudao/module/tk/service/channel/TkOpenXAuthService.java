@@ -20,6 +20,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -167,19 +168,19 @@ public class TkOpenXAuthService {
         if (row.getExpireTime() != null && row.getExpireTime().isBefore(LocalDateTime.now())
                 && "PENDING".equals(row.getStatus())) {
             fail(row, "AUTH_EXPIRED");
-            return outcome(row, false);
+            return outcome(row, false, true);
         }
         if ("SUCCESS".equals(row.getStatus()) || "FAILED".equals(row.getStatus())) {
-            return outcome(row, "SUCCESS".equals(row.getStatus()));
+            return outcome(row, "SUCCESS".equals(row.getStatus()), false);
         }
         if (!"PENDING".equals(row.getStatus())) {
-            return outcome(row, false);
+            return outcome(row, false, false);
         }
         if (!skipConsentCookie && (browserToken == null || !browserToken.matches("[0-9a-f]{64}")
                 || row.getConsentHash() == null
                 || !TkSocialAuthService.hash(browserToken).equals(row.getConsentHash()))) {
             fail(row, "CONSENT_MISMATCH");
-            return outcome(row, false);
+            return outcome(row, false, true);
         }
         row.setStatus("PROCESSING");
         row.setConsentHash(null);
@@ -206,11 +207,11 @@ public class TkOpenXAuthService {
             row.setCodeVerifierCipher(null);
             sessions.updateById(row);
             enqueue(row, connection, "authorization.completed", "CONNECTION", connection.getConnectionId(), "AUTHORIZED");
-            return outcome(row, true);
+            return outcome(row, true, true);
         } catch (RuntimeException ex) {
             log.warn("X OpenAPI OAuth callback failed: reason={}", sanitize(ex));
             fail(row, sanitize(ex));
-            return outcome(row, false);
+            return outcome(row, false, true);
         }
     }
 
@@ -225,6 +226,24 @@ public class TkOpenXAuthService {
                     .externalAccountId(externalId)
                     .build();
         }
+        applyConnectionProfile(existing, endUserId, displayName, username, sourceSessionId, sourceAccountId);
+        if (existing.getId() == null) {
+            try {
+                connections.insert(existing);
+            } catch (DuplicateKeyException ex) {
+                TkOpenXConnectionDO raced = connections.selectByClientAndExternalAccountIdForUpdate(clientId, externalId);
+                if (raced == null) throw ex;
+                existing = raced;
+                applyConnectionProfile(existing, endUserId, displayName, username, sourceSessionId, sourceAccountId);
+            }
+        }
+        tokens.store(existing, access, refresh, expiresAt);
+        collapseDuplicates(clientId, existing.getExternalAccountId(), existing.getId());
+        return existing;
+    }
+
+    private static void applyConnectionProfile(TkOpenXConnectionDO existing, String endUserId, String displayName,
+                                               String username, Long sourceSessionId, Long sourceAccountId) {
         existing.setDisplayName(displayName);
         existing.setUsername(username);
         existing.setAuthStatus("AUTHORIZED");
@@ -233,21 +252,38 @@ public class TkOpenXAuthService {
         existing.setLastAuthTime(LocalDateTime.now());
         if (sourceSessionId != null) existing.setSourceSocialSessionId(sourceSessionId);
         if (sourceAccountId != null) existing.setSourceSocialAccountId(sourceAccountId);
-        if (existing.getId() == null) connections.insert(existing);
-        tokens.store(existing, access, refresh, expiresAt);
-        return existing;
     }
 
-    private TkOpenXCallbackOutcome outcome(TkOpenXAuthSessionDO row, boolean success) {
+    void collapseDuplicates(String clientId, String externalId, Long keepId) {
+        if (clientId == null || externalId == null || keepId == null) return;
+        for (TkOpenXConnectionDO other : connections.selectListByClientAndExternalAccountIdForUpdate(clientId, externalId)) {
+            if (other.getId() == null || other.getId().equals(keepId)) continue;
+            other.setAuthStatus("REVOKED");
+            other.setFailReason("Duplicate connection collapsed");
+            tokens.clearSecrets(other);
+            other.setExternalAccountId(externalId + "#dup-" + other.getId());
+            connections.updateById(other);
+        }
+    }
+
+    private TkOpenXCallbackOutcome outcome(TkOpenXAuthSessionDO row, boolean success, boolean mayIssue) {
         if (row.getReturnUrl() == null || row.getReturnUrl().isEmpty()) {
             return TkOpenXCallbackOutcome.page(success);
         }
         try {
             URI allowed = TkOpenXReturnUrlValidator.requireWhitelisted(row.getReturnUrl(), whitelist(row.getClientId()),
                     access.isAllowInsecureLoopbackReturnUrl());
-            LocalDateTime expire = LocalDateTime.now().plusMinutes(10);
-            String ticket = tickets.issueOrReuse(row.getClientId(), row.getAuthSessionId(),
-                    TkOpenXTicketService.PURPOSE_AUTH_RESULT, expire);
+            String ticket = mayIssue
+                    ? tickets.issueOrReuse(row.getClientId(), row.getAuthSessionId(),
+                    TkOpenXTicketService.PURPOSE_AUTH_RESULT, LocalDateTime.now().plusMinutes(10))
+                    : tickets.reuseIssued(row.getClientId(), row.getAuthSessionId(),
+                    TkOpenXTicketService.PURPOSE_AUTH_RESULT);
+            if (ticket == null) {
+                java.util.Map<String, String> params = new java.util.LinkedHashMap<>();
+                params.put("error", success ? "already_completed" : "auth_failed");
+                return TkOpenXCallbackOutcome.redirect(success,
+                        TkOpenXReturnUrlValidator.redirect(allowed, params));
+            }
             row.setTicketHash(TkSocialAuthService.hash(ticket));
             sessions.updateById(row);
             return TkOpenXCallbackOutcome.redirect(success,

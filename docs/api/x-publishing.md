@@ -20,16 +20,19 @@ tk.x-open-api.grants 已被忽略，保留只是为了旧配置还能启动。�
 
 - 增加调用方 return_url_whitelist 字段，以及专用的连接、授权会话、回跳票据、媒体和发布任务表
 - 把历史上带 open_client_id 的已完成 X 会话复制为专用连接，不改工作台账号，不跨 client 重分配
-- 不复制令牌密文。首次 OpenAPI 使用时才会把源社交账号中的令牌读出并写入专用连接的新加密上下文，之后刷新或撤销只改该连接，不回写工作台
+- 不复制令牌密文。历史连接在客户端重新授权前不能发布。不会为了“兼容”去读取或轮换工作台社交账号上的 refresh token，因为两端共享同一份 refresh 会在任一方刷新后互相失效。这不是无回归：已迁移但尚未重新授权的 OpenAPI 连接需要重新走授权。
+- 同一 client 与同一 X 外部账号只有一行，数据库有唯一约束。多余重复行会被撤销、清空令牌密文和懒复制来源，并把 external_account_id 加上 #dup-{id} 后缀后软删，历史行保留。
+- 社交表 platform 按 utf8mb4_bin 比较，写入常量是小写 x，迁移同时匹配 x 与 X。
+- 撤销某条连接时，会同时处理该 client 下同一外部账号的其他活跃重复行，并清空 token cipher 与 source_social_account_id。
 
-回滚：保留这些新表和字段，回退 JAR 即可。不要删除历史社交账号或已复制的连接行。
+回滚：保留这些新表、字段和唯一约束，回退 JAR 即可。不要删除历史社交账号或已复制的连接行。已 tombstone 的重复行无需还原即可让 JAR 回退。
 
 ## 授权
 
 1. POST /admin-api/tk/open/v1/x/auth/sessions，HMAC + x.auth。可选 returnUrl、clientState、endUserId。
 2. 打开返回的 authorizeUrl 完成同意页，再跳转 X。OAuth state 是随机值并只存哈希，一次性且有 TTL，继续使用 PKCE S256。
 3. 无 returnUrl：关闭页面，用 GET /admin-api/tk/open/v1/x/auth/sessions/{authSessionId} 轮询。轮询不消耗票据。
-4. 有 returnUrl：平台只把已校验白名单地址加上一次性 ticket（失败时另有 error=auth_failed）。回跳不含 X token、refresh 或 HMAC secret。接入方后端用 HMAC 调用 POST /admin-api/tk/open/v1/x/auth/tickets/redeem 原子消费票据。重放、跨 client、过期都会拒绝。浏览器回跳重试不会重做 OAuth；未消费的同一票据可再次出现在回跳中。
+4. 有 returnUrl：平台只把已校验白名单地址加上一次性 ticket（失败时另有 error=auth_failed）。回跳不含 X token、refresh 或 HMAC secret。接入方后端用 HMAC 调用 POST /admin-api/tk/open/v1/x/auth/tickets/redeem 原子消费票据。重放、跨 client、过期都会拒绝。浏览器回跳重试不会重做 OAuth；未消费的同一票据可再次出现在回跳中。会话已进入 SUCCESS/FAILED 终态后不会再签发新票据；票据已被消费时，回跳最多带 error=already_completed，不会再发一张可用 ticket。
 5. 服务端通知复用现有 authCallbackUrl 投递网关（签名、超时、重试、SSRF 防护、幂等），事件为 authorization.completed / authorization.failed。通知载荷和日志只有会话与连接标识，不含 token 或原始异常。
 
 returnUrl 白名单在开放 API 管理页配置，精确匹配 scheme、host、port、path。拒绝 userinfo、fragment、query、非 HTTPS、后缀通配、自定义 scheme。不要把客户端传来的 query 透传到回跳地址。开发环境如需 http://127.0.0.1 或 http://localhost，必须显式打开 tk.x-open-api.allow-insecure-loopback-return-url（默认 false），且该地址仍须出现在该调用方白名单中。生产环境不要打开这个例外。
@@ -45,7 +48,7 @@ returnUrl 白名单在开放 API 管理页配置，精确匹配 scheme、host、
 
 GET /admin-api/tk/open/v1/x/connections 列出该 HMAC 客户端自己的连接。DELETE /admin-api/tk/open/v1/x/connections/{connectionId} 只把该 client 的这条连接标为撤销，不调用 X 全局吊销，也不改其他 client 或工作台账号。同一 X 账号被不同 client 授权时，各有独立令牌副本；同一 client 对同一 X 账号重新授权会替换该连接上的令牌。若多个 client 仍共享同一个 X 开发者应用，平台侧撤销互不影响，但 X 平台自己轮换 refresh token 的行为属于残留风险。
 
-没有 open_client_id 的工作台账号不会被自动收编进 OpenAPI。工作台 X 发布路径保持不变。
+没有 open_client_id 的工作台账号不会被自动收编进 OpenAPI。工作台 X 发布路径保持不变。旧的社交表 OpenAPI 在途任务（openXConnectionId 指向旧授权会话）不会再被 Worker 继续执行，以免绕过新连接的撤销或误用工作台令牌；任务行不会被自动取消，需接入方改用 mediaId + connectionId 重试或由运营人工处理。
 
 ## 验收要点
 
@@ -56,4 +59,6 @@ GET /admin-api/tk/open/v1/x/connections 列出该 HMAC 客户端自己的连接�
 - 无 returnUrl 时仍是关页 + 轮询
 - 同幂等键不同 payload 返回 409；撤销后待执行任务拒绝；未授权或停用 client 拒绝
 - 去掉 grants 后，原 auth/publish 客户端不会自动获得 X
-- 工作台发布不回归；不做真实发帖或真实撤销用户授权
+- 工作台发布路径保持不变，但不要把“历史 OpenAPI 连接可继续用工作台令牌”当成无回归
+- 旧社交表 OpenAPI 在途任务会被拒绝执行且不自动取消；回调重放在票据消费后不再签发新票
+- 不做真实发帖或真实撤销用户授权

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -21,17 +22,17 @@ public class TkOpenXTicketService {
     private final TkSocialTokenCipher cipher;
     private final SecureRandom random = new SecureRandom();
 
+    /**
+     * Issue a ticket only when this session has none, or reuse an unused ISSUED ticket.
+     * Terminal SUCCESS/FAILED sessions must call {@link #reuseIssued} instead: a consumed
+     * or expired ticket is never replaced, so callback replay cannot mint a new one.
+     */
     @Transactional(rollbackFor = Exception.class)
     public String issueOrReuse(String clientId, String authSessionId, String purpose, LocalDateTime expireTime) {
-        TkOpenXReturnTicketDO existing = tickets.selectIssuedBySession(clientId, authSessionId, purpose);
-        if (existing != null) {
-            if (existing.getExpireTime() != null && existing.getExpireTime().isBefore(LocalDateTime.now())) {
-                existing.setStatus("EXPIRED");
-                existing.setTicketCipher(null);
-                tickets.updateById(existing);
-            } else {
-                return cipher.decrypt(existing.getTicketCipher(), context(existing));
-            }
+        String reused = reuseLocked(clientId, authSessionId, purpose);
+        if (reused != null) return reused;
+        if (hasTerminalTicket(clientId, authSessionId, purpose)) {
+            return null;
         }
         String raw = secret();
         TkOpenXReturnTicketDO row = TkOpenXReturnTicketDO.builder()
@@ -46,6 +47,42 @@ public class TkOpenXTicketService {
         row.setTicketCipher(cipher.encrypt(raw, context(row)));
         tickets.updateById(row);
         return raw;
+    }
+
+    /** Reuse an unused ISSUED ticket; do not create one after consume or expiry. */
+    @Transactional(rollbackFor = Exception.class)
+    public String reuseIssued(String clientId, String authSessionId, String purpose) {
+        return reuseLocked(clientId, authSessionId, purpose);
+    }
+
+    private String reuseLocked(String clientId, String authSessionId, String purpose) {
+        List<TkOpenXReturnTicketDO> rows = tickets.selectListBySessionForUpdate(clientId, authSessionId, purpose);
+        for (TkOpenXReturnTicketDO existing : rows) {
+            if ("ISSUED".equals(existing.getStatus())
+                    && existing.getExpireTime() != null
+                    && !existing.getExpireTime().isBefore(LocalDateTime.now())
+                    && existing.getTicketCipher() != null) {
+                return cipher.decrypt(existing.getTicketCipher(), context(existing));
+            }
+            if ("ISSUED".equals(existing.getStatus())
+                    && existing.getExpireTime() != null
+                    && existing.getExpireTime().isBefore(LocalDateTime.now())) {
+                existing.setStatus("EXPIRED");
+                existing.setTicketCipher(null);
+                tickets.updateById(existing);
+            }
+        }
+        return null;
+    }
+
+    private boolean hasTerminalTicket(String clientId, String authSessionId, String purpose) {
+        List<TkOpenXReturnTicketDO> rows = tickets.selectListBySessionForUpdate(clientId, authSessionId, purpose);
+        for (TkOpenXReturnTicketDO existing : rows) {
+            if ("CONSUMED".equals(existing.getStatus()) || "EXPIRED".equals(existing.getStatus())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Transactional(rollbackFor = Exception.class)
