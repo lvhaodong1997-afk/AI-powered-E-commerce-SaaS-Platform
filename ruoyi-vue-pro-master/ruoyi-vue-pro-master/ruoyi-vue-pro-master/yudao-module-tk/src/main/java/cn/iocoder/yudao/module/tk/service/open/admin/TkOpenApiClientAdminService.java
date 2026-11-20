@@ -34,10 +34,8 @@ public class TkOpenApiClientAdminService {
     private final TkOpenApiSecretCipher secretCipher;
     private final TkOpenXProperties xProperties;
 
-    public TkOpenApiClientAdminService(TkOpenApiClientMapper clientMapper, TkOpenApiSecretCipher secretCipher) {
-        this(clientMapper, secretCipher, null);
-    }
-
+    // Single constructor only: a second overload without @Autowired makes Spring look for a
+    // no-arg constructor and fail context startup (production 98787dd crash).
     public TkOpenApiClientAdminService(TkOpenApiClientMapper clientMapper, TkOpenApiSecretCipher secretCipher, TkOpenXProperties xProperties) {
         this.clientMapper = clientMapper;
         this.secretCipher = secretCipher;

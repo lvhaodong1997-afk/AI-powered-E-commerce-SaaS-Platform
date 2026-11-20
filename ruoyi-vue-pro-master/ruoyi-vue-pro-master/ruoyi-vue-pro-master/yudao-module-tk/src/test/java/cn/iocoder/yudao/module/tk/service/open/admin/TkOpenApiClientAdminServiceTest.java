@@ -18,7 +18,7 @@ class TkOpenApiClientAdminServiceTest {
         TkOpenApiClientMapper mapper = mock(TkOpenApiClientMapper.class);
         TkOpenApiSecretCipher cipher = mock(TkOpenApiSecretCipher.class);
         when(cipher.encrypt(anyString())).thenAnswer(invocation -> "cipher:" + invocation.getArgument(0));
-        TkOpenApiClientAdminService service = new TkOpenApiClientAdminService(mapper, cipher);
+        TkOpenApiClientAdminService service = new TkOpenApiClientAdminService(mapper, cipher, null);
 
         TkOpenApiClientAdminVO.CredentialResp response = service.create(createRequest());
 
@@ -41,7 +41,7 @@ class TkOpenApiClientAdminServiceTest {
         when(mapper.selectByClientId("client_b")).thenReturn(new TkOpenApiClientDO().setId(1L)
                 .setClientId("client_b").setClientSecretCipher("old-client").setCallbackSecretCipher("old-callback"));
         when(cipher.encrypt(anyString())).thenAnswer(invocation -> "cipher:" + invocation.getArgument(0));
-        TkOpenApiClientAdminService service = new TkOpenApiClientAdminService(mapper, cipher);
+        TkOpenApiClientAdminService service = new TkOpenApiClientAdminService(mapper, cipher, null);
 
         TkOpenApiClientAdminVO.CredentialResp response = service.rotateSecret("client_b", "CLIENT");
 
@@ -59,7 +59,7 @@ class TkOpenApiClientAdminServiceTest {
         TkOpenApiSecretCipher cipher = mock(TkOpenApiSecretCipher.class);
         when(mapper.selectByClientId("client_b")).thenReturn(new TkOpenApiClientDO().setId(1L)
                 .setClientId("client_b").setPermissions("auth,media,future.perm"));
-        TkOpenApiClientAdminService service = new TkOpenApiClientAdminService(mapper, cipher);
+        TkOpenApiClientAdminService service = new TkOpenApiClientAdminService(mapper, cipher, null);
         TkOpenApiClientAdminVO.UpdateReq request = new TkOpenApiClientAdminVO.UpdateReq();
         request.setClientId("client_b");
         request.setClientName("Application B");
