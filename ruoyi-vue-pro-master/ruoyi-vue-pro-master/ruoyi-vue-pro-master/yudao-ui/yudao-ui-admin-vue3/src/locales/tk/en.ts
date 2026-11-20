@@ -473,6 +473,8 @@ export const tkEn: Record<string, string> = {
   'openApi.permission.auth': 'Authorization',
   'openApi.permission.media': 'Media',
   'openApi.permission.publish': 'Publishing',
+  'openApi.permission.xAuth': 'X authorization',
+  'openApi.permission.xPublish': 'X publishing',
   'openApi.credential.title': 'One-time credentials',
   'openApi.credential.warning':
     'Save these credentials now. Plaintext secrets will not be shown again after this window is closed.',

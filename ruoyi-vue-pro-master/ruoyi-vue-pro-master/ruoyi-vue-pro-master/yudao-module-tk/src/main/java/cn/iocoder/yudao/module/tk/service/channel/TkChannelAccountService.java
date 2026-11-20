@@ -68,16 +68,17 @@ public class TkChannelAccountService {
         return TkChannelOAuthClient.params("authorizeUrl", url, "sessionId", session.getSessionId());
     }
 
-    public TkSocialAuthSessionDO openSession(TkOpenXProperties.Grant grant) {
+    public TkSocialAuthSessionDO openSession(TkOpenXProperties.Grant grant, String endUserId, Long ownerUserId) {
         if (!ready(TkChannelProperties.X)) throw TkOpenApiException.unavailable("X_NOT_CONFIGURED", "X publishing is not configured");
         TkSocialAuthSessionDO row = new TkSocialAuthSessionDO();
         row.setSessionId(secret());
         row.setStateHash(TkSocialAuthService.hash(secret()));
         row.setTenantId(grant.getTenantId());
         row.setCompanyId(grant.getCompanyId());
-        row.setCreator(String.valueOf(grant.getOwnerUserId()));
+        row.setCreator(String.valueOf(ownerUserId));
         row.setPlatform(TkChannelProperties.X);
         row.setOpenClientId(grant.getClientId());
+        row.setOpenEndUserId(endUserId);
         row.setStatus("CONSENT_PENDING");
         row.setExpireTime(LocalDateTime.now().plusMinutes(10));
         sessions.insert(row);
@@ -118,9 +119,13 @@ public class TkChannelAccountService {
                 JsonNode profile = oauth.account(channel, access);
                 String external = required(profile, "id");
                 if (!external.matches("[A-Za-z0-9_-]{1,128}")) throw new IllegalArgumentException();
-                if (session.getOpenClientId() != null && (!TkChannelProperties.X.equals(channel)
-                        || !external.equals(openAccess.requireSessionGrant(session, "x.auth").getXUserId()))) {
-                    throw new IllegalArgumentException("Unexpected X account");
+                if (session.getOpenClientId() != null) {
+                    TkOpenXProperties.Grant grant = openAccess.requireSessionGrant(session, "x.auth");
+                    if (!TkChannelProperties.X.equals(channel)
+                            || (grant.isPilot() && !external.equals(grant.getXUserId()))) {
+                        throw new IllegalArgumentException("Unexpected X account");
+                    }
+                    rejectEndUserAccountReuse(session, external);
                 }
                 stage = "SAVE_ACCOUNT";
                 new TransactionTemplate(transactions).executeWithoutResult(status -> {
@@ -298,5 +303,29 @@ public class TkChannelAccountService {
         Long company = scope.getWritableCompanyId(null);
         if (company == null) throw new IllegalArgumentException("Select a company first");
         return company;
+    }
+
+    private void rejectEndUserAccountReuse(TkSocialAuthSessionDO session, String externalAccountId) {
+        if (externalAccountId == null) {
+            return;
+        }
+        List<TkSocialAuthSessionDO> rows = sessions.selectList(new QueryWrapper<TkSocialAuthSessionDO>()
+                .eq("tenant_id", session.getTenantId())
+                .eq("platform", TkChannelProperties.X)
+                .eq("status", "SUCCESS")
+                .isNotNull("open_account_id"));
+        for (TkSocialAuthSessionDO row : rows) {
+            if (row.getOpenAccountId() == null || Objects.equals(row.getId(), session.getId())) {
+                continue;
+            }
+            TkSocialAccountDO other = accounts.selectById(row.getOpenAccountId());
+            if (other == null || !externalAccountId.equals(other.getExternalAccountId())) {
+                continue;
+            }
+            if (!Objects.equals(row.getOpenEndUserId(), session.getOpenEndUserId())
+                    || !Objects.equals(row.getOpenClientId(), session.getOpenClientId())) {
+                throw new IllegalArgumentException("X account already bound");
+            }
+        }
     }
 }

@@ -1,0 +1,22 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const test = require('node:test')
+
+const vuePath = path.join(__dirname, '..', 'src', 'views', 'tk', 'open-api', 'index.vue')
+const zhPath = path.join(__dirname, '..', 'src', 'locales', 'tk', 'zh-CN.ts')
+const source = fs.readFileSync(vuePath, 'utf8')
+const zh = fs.readFileSync(zhPath, 'utf8')
+
+test('open API client form can grant and preserve X permissions', () => {
+  assert.match(source, /<el-checkbox label="auth">/)
+  assert.match(source, /<el-checkbox label="media">/)
+  assert.match(source, /<el-checkbox label="publish">/)
+  assert.match(source, /<el-checkbox label="x.auth">/)
+  assert.match(source, /<el-checkbox label="x.publish">/)
+  assert.match(source, /permissions: permissionList\(client.permissions\)/)
+  assert.match(source, /'x.auth': tt\('openApi.permission.xAuth'\)/)
+  assert.match(source, /'x.publish': tt\('openApi.permission.xPublish'\)/)
+  assert.match(zh, /'openApi.permission.xAuth': 'X 授权'/)
+  assert.match(zh, /'openApi.permission.xPublish': 'X 发布'/)
+})

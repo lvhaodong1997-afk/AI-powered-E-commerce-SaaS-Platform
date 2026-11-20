@@ -13,8 +13,10 @@ import org.springframework.web.util.HtmlUtils;
 import javax.validation.Valid;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
+import javax.validation.constraints.Pattern;
 import javax.validation.constraints.Positive;
 import javax.validation.constraints.Size;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -28,14 +30,24 @@ public class TkOpenXPublishController {
 
     @PostMapping("/auth/sessions")
     @ApiAccessLog(enable = false)
-    public TkOpenApiResponse<Map<String, Object>> createSession() {
-        return TkOpenApiResponse.success(service.createSession());
+    public TkOpenApiResponse<Map<String, Object>> createSession(
+            @RequestBody(required = false) SessionCreate request) {
+        SessionCreate body = request == null ? new SessionCreate() : request;
+        return TkOpenApiResponse.success(service.createSession(body.getEndUserId(), body.getOwnerUserId()));
     }
 
     @GetMapping("/auth/sessions/{sessionId}")
     @ApiAccessLog(enable = false)
-    public TkOpenApiResponse<Map<String, Object>> session(@PathVariable("sessionId") String id) {
-        return TkOpenApiResponse.success(service.session(id));
+    public TkOpenApiResponse<Map<String, Object>> session(@PathVariable("sessionId") String id,
+            @RequestParam(value = "endUserId", required = false) String endUserId) {
+        return TkOpenApiResponse.success(service.session(id, endUserId));
+    }
+
+    @GetMapping("/connections")
+    @ApiAccessLog(enable = false)
+    public TkOpenApiResponse<List<Map<String, Object>>> connections(
+            @RequestParam(value = "endUserId", required = false) String endUserId) {
+        return TkOpenApiResponse.success(service.connections(endUserId));
     }
 
     @GetMapping(value = "/auth/sessions/{sessionId}/consent", produces = MediaType.TEXT_HTML_VALUE)
@@ -67,21 +79,32 @@ public class TkOpenXPublishController {
 
     @DeleteMapping("/connections/{connectionId}")
     @ApiAccessLog(enable = false)
-    public TkOpenApiResponse<Boolean> revoke(@PathVariable("connectionId") String id) {
-        return TkOpenApiResponse.success(service.revoke(id));
+    public TkOpenApiResponse<Boolean> revoke(@PathVariable("connectionId") String id,
+            @RequestParam(value = "endUserId", required = false) String endUserId) {
+        return TkOpenApiResponse.success(service.revoke(id, endUserId));
     }
 
     @PostMapping("/publish/tasks")
     @ApiAccessLog(enable = false)
     public TkOpenApiResponse<Map<String, Object>> create(@Valid @RequestBody Create request,
             @RequestHeader(value = "Idempotency-Key", required = false) String key) {
-        return TkOpenApiResponse.success(service.create(request.getConnectionId(), request.getGenerationTaskId(), request.getText(), key));
+        return TkOpenApiResponse.success(service.create(request.getConnectionId(), request.getGenerationTaskId(),
+                request.getText(), key, request.getEndUserId()));
     }
 
     @GetMapping("/publish/tasks/{taskId}")
     @ApiAccessLog(enable = false)
-    public TkOpenApiResponse<Map<String, Object>> get(@PathVariable("taskId") String id) {
-        return TkOpenApiResponse.success(service.get(id));
+    public TkOpenApiResponse<Map<String, Object>> get(@PathVariable("taskId") String id,
+            @RequestParam(value = "endUserId", required = false) String endUserId) {
+        return TkOpenApiResponse.success(service.get(id, endUserId));
+    }
+
+    @Data
+    public static class SessionCreate {
+        @Size(max = 128) @Pattern(regexp = "^$|^[A-Za-z0-9._:-]{1,128}$")
+        private String endUserId;
+        @Positive
+        private Long ownerUserId;
     }
 
     @Data
@@ -89,5 +112,7 @@ public class TkOpenXPublishController {
         @NotBlank private String connectionId;
         @NotNull @Positive private Long generationTaskId;
         @NotNull @Size(max = 280) private String text;
+        @Size(max = 128) @Pattern(regexp = "^$|^[A-Za-z0-9._:-]{1,128}$")
+        private String endUserId;
     }
 }

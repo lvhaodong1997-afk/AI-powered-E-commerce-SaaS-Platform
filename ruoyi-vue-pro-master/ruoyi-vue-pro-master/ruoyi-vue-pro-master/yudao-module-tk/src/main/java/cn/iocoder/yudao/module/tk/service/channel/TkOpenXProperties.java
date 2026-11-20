@@ -19,7 +19,34 @@ public class TkOpenXProperties {
         private String clientId;
         private Long tenantId;
         private Long companyId;
+        /** Optional. When set together with xUserId, the client stays in single-account pilot mode. */
         private Long ownerUserId;
+        /** Optional designated X numeric user id for pilot mode. */
         private String xUserId;
+
+        public boolean hasOwner() {
+            return ownerUserId != null && ownerUserId > 0;
+        }
+
+        public boolean hasXUser() {
+            return xUserId != null && xUserId.matches("[0-9]{1,30}");
+        }
+
+        public boolean isPilot() {
+            return hasOwner() && hasXUser();
+        }
+
+        public boolean hasPartialPin() {
+            boolean owner = ownerUserId != null;
+            boolean xUser = xUserId != null && !xUserId.trim().isEmpty();
+            return owner ^ xUser || (xUser && !hasXUser()) || (owner && !hasOwner());
+        }
+
+        public boolean hasValidScope() {
+            return clientId != null && !clientId.trim().isEmpty()
+                    && tenantId != null && tenantId > 0
+                    && companyId != null && companyId > 0
+                    && !hasPartialPin();
+        }
     }
 }

@@ -72,73 +72,306 @@
     "/admin-api/tk/open/v1/x/auth/sessions": {
       "post": {
         "operationId": "createXAuthorizationSession",
-        "tags": ["X Publish"],
-        "description": "Requires x.auth. Open the returned authorizeUrl in the account owner's browser. Authorization links expire in 10 minutes.",
-        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
+        "tags": [
+          "X Publish"
+        ],
+        "description": "Requires x.auth. In multi-user mode the body must include endUserId and, on first bind, ownerUserId. Pilot grants that pin owner-user-id and x-user-id still accept an empty body. Open authorizeUrl in the account owner's browser. Authorization links expire in 10 minutes.",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
         "responses": {
-          "200": {"$ref": "#/components/responses/XSessionResult"},
-          "default": {"$ref": "#/components/responses/XErrorResult"}
+          "200": {
+            "$ref": "#/components/responses/XSessionResult"
+          },
+          "default": {
+            "$ref": "#/components/responses/XErrorResult"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "endUserId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+                  },
+                  "ownerUserId": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
     "/admin-api/tk/open/v1/x/auth/sessions/{sessionId}": {
       "get": {
         "operationId": "getXAuthorizationSession",
-        "tags": ["X Publish"],
-        "description": "Requires x.auth. The connectionId is returned only on SUCCESS.",
-        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
-        "parameters": [{"name": "sessionId", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "tags": [
+          "X Publish"
+        ],
+        "description": "Requires x.auth. The connectionId is returned only on SUCCESS. Multi-user mode requires endUserId.",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "endUserId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            },
+            "description": "Required in multi-user mode. Included in the HMAC request target."
+          }
+        ],
         "responses": {
-          "200": {"$ref": "#/components/responses/XSessionResult"},
-          "default": {"$ref": "#/components/responses/XErrorResult"}
+          "200": {
+            "$ref": "#/components/responses/XSessionResult"
+          },
+          "default": {
+            "$ref": "#/components/responses/XErrorResult"
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/x/connections": {
+      "get": {
+        "operationId": "listXConnections",
+        "tags": [
+          "X Publish"
+        ],
+        "description": "Requires x.auth. Lists only the connections bound to the signed endUserId in multi-user mode, or the pilot client connection set when no endUserId is used.",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "endUserId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            },
+            "description": "Required in multi-user mode. Included in the HMAC request target."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "data is an array of connections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/XErrorResult"
+          }
         }
       }
     },
     "/admin-api/tk/open/v1/x/connections/{connectionId}": {
       "delete": {
         "operationId": "revokeXConnection",
-        "tags": ["X Publish"],
-        "description": "Requires x.auth. Revokes this client connection; requests already sent to X cannot be recalled.",
-        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
-        "parameters": [{"name": "connectionId", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "tags": [
+          "X Publish"
+        ],
+        "description": "Requires x.auth. Revokes this client connection for the signed end user; requests already sent to X cannot be recalled.",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "endUserId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            },
+            "description": "Required in multi-user mode. Included in the HMAC request target."
+          }
+        ],
         "responses": {
-          "200": {"description": "data is true", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OpenApiResponse"}}}},
-          "default": {"$ref": "#/components/responses/XErrorResult"}
+          "200": {
+            "description": "data is true",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/XErrorResult"
+          }
         }
       }
     },
     "/admin-api/tk/open/v1/x/publish/tasks": {
       "post": {
         "operationId": "createXPublishTask",
-        "tags": ["X Publish"],
-        "description": "Requires x.publish. Submits one generated video. A repeated key with the same input returns the original task; changed input returns 409.",
-        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
-        "parameters": [{"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "pattern": "^[!-~]{1,128}$"}}],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {
-          "type": "object", "required": ["connectionId", "generationTaskId", "text"],
-          "properties": {
-            "connectionId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
-            "generationTaskId": {"type": "string", "pattern": "^[1-9][0-9]{0,18}$", "example": "123456"},
-            "text": {"type": "string", "maxLength": 280, "description": "Maximum 280 UTF-16 code units; use an empty string for no caption."}
+        "tags": [
+          "X Publish"
+        ],
+        "description": "Requires x.publish. Submits one generated video owned by the bound end user. Multi-user mode requires endUserId in the body. A repeated key with the same input and end user returns the original task; changed input returns 409.",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
           }
-        }}}},
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[!-~]{1,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "connectionId",
+                  "generationTaskId",
+                  "text"
+                ],
+                "properties": {
+                  "connectionId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  },
+                  "generationTaskId": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$",
+                    "example": "123456"
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 280,
+                    "description": "Maximum 280 UTF-16 code units; use an empty string for no caption."
+                  },
+                  "endUserId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {"$ref": "#/components/responses/XTaskResult"},
-          "409": {"$ref": "#/components/responses/XErrorResult"},
-          "default": {"$ref": "#/components/responses/XErrorResult"}
+          "200": {
+            "$ref": "#/components/responses/XTaskResult"
+          },
+          "409": {
+            "$ref": "#/components/responses/XErrorResult"
+          },
+          "default": {
+            "$ref": "#/components/responses/XErrorResult"
+          }
         }
       }
     },
     "/admin-api/tk/open/v1/x/publish/tasks/{taskId}": {
       "get": {
         "operationId": "getXPublishTask",
-        "tags": ["X Publish"],
-        "description": "Requires x.publish. UNKNOWN must be checked on X; do not submit a replacement automatically.",
-        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
-        "parameters": [{"name": "taskId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^xtask_[a-f0-9]{32}$"}}],
+        "tags": [
+          "X Publish"
+        ],
+        "description": "Requires x.publish. Multi-user mode requires endUserId. UNKNOWN must be checked on X; do not submit a replacement automatically.",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^xtask_[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "endUserId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            },
+            "description": "Required in multi-user mode. Included in the HMAC request target."
+          }
+        ],
         "responses": {
-          "200": {"$ref": "#/components/responses/XTaskResult"},
-          "default": {"$ref": "#/components/responses/XErrorResult"}
+          "200": {
+            "$ref": "#/components/responses/XTaskResult"
+          },
+          "default": {
+            "$ref": "#/components/responses/XErrorResult"
+          }
         }
       }
     },
@@ -8614,32 +8847,115 @@
     "responses": {
       "XSessionResult": {
         "description": "Authorization session",
-        "content": {"application/json": {"schema": {"allOf": [
-          {"$ref": "#/components/schemas/OpenApiResponse"},
-          {"type": "object", "properties": {"data": {"type": "object", "required": ["sessionId", "status"], "properties": {
-            "sessionId": {"type": "string"},
-            "status": {"type": "string", "enum": ["CONSENT_PENDING", "PENDING", "PROCESSING", "SUCCESS", "FAILED", "EXPIRED", "REVOKED"]},
-            "authorizeUrl": {"type": "string", "format": "uri"},
-            "connectionId": {"type": "string"}
-          }}}}
-        ]}}}
+        "content": {
+          "application/json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/OpenApiResponse"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "sessionId",
+                        "status"
+                      ],
+                      "properties": {
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "CONSENT_PENDING",
+                            "PENDING",
+                            "PROCESSING",
+                            "SUCCESS",
+                            "FAILED",
+                            "EXPIRED",
+                            "REVOKED"
+                          ]
+                        },
+                        "authorizeUrl": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "connectionId": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
       },
       "XTaskResult": {
         "description": "Current publish task state",
-        "content": {"application/json": {"schema": {"allOf": [
-          {"$ref": "#/components/schemas/OpenApiResponse"},
-          {"type": "object", "properties": {"data": {"type": "object", "required": ["taskId", "status"], "properties": {
-            "taskId": {"type": "string"},
-            "status": {"type": "string", "enum": ["PENDING", "PROCESSING", "SUCCEEDED", "FAILED", "REAUTH_REQUIRED", "UNKNOWN"]},
-            "postId": {"type": "string"},
-            "postUrl": {"type": "string", "format": "uri"},
-            "errorCode": {"type": "string"}
-          }}}}
-        ]}}}
+        "content": {
+          "application/json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/OpenApiResponse"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "taskId",
+                        "status"
+                      ],
+                      "properties": {
+                        "taskId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "PROCESSING",
+                            "SUCCEEDED",
+                            "FAILED",
+                            "REAUTH_REQUIRED",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "postId": {
+                          "type": "string"
+                        },
+                        "postUrl": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "errorCode": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
       },
       "XErrorResult": {
         "description": "HMAC, permission, input, resource, conflict, quota or platform error",
-        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OpenApiResponse"}}}
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OpenApiResponse"
+            }
+          }
+        }
       },
       "BadRequest": {
         "description": "参数错误或业务状态不允许（400）",

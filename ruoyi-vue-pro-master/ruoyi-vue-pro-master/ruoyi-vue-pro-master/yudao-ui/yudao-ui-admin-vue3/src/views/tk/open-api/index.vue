@@ -440,6 +440,8 @@
           <el-checkbox label="auth">{{ tt('openApi.permission.auth') }}</el-checkbox>
           <el-checkbox label="media">{{ tt('openApi.permission.media') }}</el-checkbox>
           <el-checkbox label="publish">{{ tt('openApi.permission.publish') }}</el-checkbox>
+          <el-checkbox label="x.auth">{{ tt('openApi.permission.xAuth') }}</el-checkbox>
+          <el-checkbox label="x.publish">{{ tt('openApi.permission.xPublish') }}</el-checkbox>
         </el-checkbox-group>
       </el-form-item>
       <el-form-item :label="tt('openApi.form.perMinuteQuota')" prop="rateLimitPerMinute">
@@ -1016,7 +1018,9 @@ const permissionLabel = (value: string) => {
   const labels: Record<string, string> = {
     auth: tt('openApi.permission.auth'),
     media: tt('openApi.permission.media'),
-    publish: tt('openApi.permission.publish')
+    publish: tt('openApi.permission.publish'),
+    'x.auth': tt('openApi.permission.xAuth'),
+    'x.publish': tt('openApi.permission.xPublish')
   }
   return labels[value] || value
 }

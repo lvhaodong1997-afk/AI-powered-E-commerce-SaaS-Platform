@@ -8,6 +8,7 @@
 | 登录、刷新 | `/admin-api/system/auth/login`、`/refresh-token` | `tenant-id`；登录凭证或刷新令牌 |
 | 自动出片 | `/admin-api/tk/automation/v1/**` | `Authorization: Bearer <accessToken>` **与** `tenant-id` |
 | TikTok 授权、上传、发布 | `/admin-api/tk/open/v1/tiktok/**` | `X-TK-Client-Id`、`X-TK-Timestamp`、`X-TK-Nonce`、`X-TK-Signature` 四项 HMAC 头；公开端点除外 |
+| X 授权与发布 | `/admin-api/tk/open/v1/x/**` | 同一套 HMAC 头；多用户模式还须在已签名的 body 或查询参数中携带 `endUserId`；同意页除外 |
 
 两套凭证不可互换。所有 URL 使用管理员确认的环境与 `/admin-api` 前缀。产品出片默认地址为 `https://clipforgestudio.fnn.net.cn`；既有 TikTok 客户端按开通域名接入，不要假设两个域名共享租户、权限或凭证。
 

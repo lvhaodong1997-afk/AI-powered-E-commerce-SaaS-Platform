@@ -15,4 +15,4 @@ Register the exact public HTTPS callback on each provider. The standard paths ar
 
 Before enabling customer roles, bind a test account for each provider. Verify an X video post, a private YouTube upload and processing completion, and a fresh-token publication after expiry. Check browser and provider channel identity before confirmation. Do not automatically retry a record marked UNKNOWN. See the provider channel first to confirm what happened.
 
-For X OpenAPI, apply the additive `tk_open_x_upgrade_mysql.sql` after the channel migration before restarting the backend. See the [client provisioning and verification instructions](../docs/api/x-publishing.md). The OpenAPI switch is separate and defaults to off.
+For X OpenAPI, apply the additive `tk_open_x_upgrade_mysql.sql` and `tk_open_x_multiuser_upgrade_mysql.sql` after the channel migration before restarting the backend. See the [client provisioning and verification instructions](../docs/api/x-publishing.md). The OpenAPI switch is separate and defaults to off.

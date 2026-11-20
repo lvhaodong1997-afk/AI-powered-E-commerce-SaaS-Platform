@@ -15,6 +15,7 @@ public class TkSocialAuthSessionDO extends TenantBaseDO {
     @ToString.Exclude private String stateHash;
     private String status;
     private String openClientId;
+    private String openEndUserId;
     private Long openAccountId;
     @ToString.Exclude private String openConsentHash;
     @ToString.Exclude
