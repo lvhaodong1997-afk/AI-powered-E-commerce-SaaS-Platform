@@ -4,6 +4,7 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialMediaDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialMediaMapper;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import java.time.LocalDateTime;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -12,6 +13,21 @@ import static org.junit.jupiter.api.Assertions.*;
 class TkSocialMediaInspectJobTest {
     private final TkSocialMediaMapper mapper = mock(TkSocialMediaMapper.class);
     private final TkSocialMediaService service = mock(TkSocialMediaService.class);
+
+    @Test void videoInspectionRunsForEitherChannelWithoutMeta() {
+        ApplicationContextRunner runner = new ApplicationContextRunner()
+                .withInitializer(context -> {
+                    context.getBeanFactory().registerSingleton("mediaMapper", mapper);
+                    context.getBeanFactory().registerSingleton("mediaService", service);
+                })
+                .withUserConfiguration(TkSocialMediaInspectJob.class)
+                .withPropertyValues("tk.social.enabled=false");
+        runner.run(context -> assertEquals(0, context.getBeanNamesForType(TkSocialMediaInspectJob.class).length));
+        for (String channel : new String[]{"x", "youtube"}) {
+            runner.withPropertyValues("tk.channel-publish." + channel + ".enabled=true")
+                    .run(context -> assertNotNull(context.getBean(TkSocialMediaInspectJob.class)));
+        }
+    }
 
     @Test void failedClaimDoesNotDownloadVideo() {
         try (TkSocialMediaInspectJob job = new TkSocialMediaInspectJob(mapper, service)) {

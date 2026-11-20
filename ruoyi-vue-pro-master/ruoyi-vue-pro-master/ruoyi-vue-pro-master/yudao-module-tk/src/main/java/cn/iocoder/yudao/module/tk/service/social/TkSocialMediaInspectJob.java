@@ -6,7 +6,7 @@ import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialMediaMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Independent bounded queue. Database leases survive process restarts; stale workers cannot commit. */
 @Component
 @Slf4j
-@ConditionalOnProperty(prefix = "tk.social", name = "enabled", havingValue = "true")
+@ConditionalOnExpression(TkSocialMediaService.WORK_ENABLED)
 public class TkSocialMediaInspectJob implements AutoCloseable {
     private final TkSocialMediaMapper mapper;
     private final TkSocialMediaService media;

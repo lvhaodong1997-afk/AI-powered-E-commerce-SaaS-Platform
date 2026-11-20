@@ -1,4 +1,5 @@
 import request from '@/config/axios'
+import type { SocialVideoUploadSession } from '@/api/tk/socialPublish'
 
 export type Channel = 'x' | 'youtube'
 export interface ChannelAccount { id: string; name: string; username?: string; status: string }
@@ -12,9 +13,18 @@ export interface ChannelRecord {
   errorCode?: string
   createTime?: number | string
 }
-export interface ChannelSubmission {
+export interface ChannelVideoUpload {
+  id: string
+  fileName: string
+  status: string
+  metadataStatus: string
+  fileSize: number
+  durationSeconds?: number
+}
+export type ChannelVideoSource = { generationTaskId: string; mediaId?: never } | { mediaId: string; generationTaskId?: never }
+interface VideoFileInfo { fileName: string; fileSize: number; contentType: string }
+export type ChannelSubmission = ChannelVideoSource & {
   accountId: string
-  generationTaskId: string
   idempotencyKey: string
   text: string
   title?: string
@@ -26,7 +36,11 @@ export interface ChannelSubmission {
 export function channelApi(channel: Channel) {
   const base = '/tk/channel-publish/' + channel
   return {
-    capabilities: () => request.get<{ enabled: boolean }>({ url: base + '/capabilities' }),
+    capabilities: () => request.get<{ enabled: boolean; localUpload: boolean; maxUploadBytes: number }>({ url: base + '/capabilities' }),
+    uploadSession: (data: VideoFileInfo) => request.post<SocialVideoUploadSession>({ url: base + '/media/video-upload-session', data }),
+    uploadComplete: (data: VideoFileInfo & { uploadId: string; objectKey: string }) =>
+      request.post<ChannelVideoUpload>({ url: base + '/media/video-upload-complete', data }),
+    uploadedVideo: (id: string) => request.get<ChannelVideoUpload>({ url: base + '/media/get', params: { id } }),
     accounts: () => request.get<ChannelAccount[]>({ url: base + '/accounts' }),
     authorize: () => request.post<{ authorizeUrl: string; sessionId: string }>({ url: base + '/authorize' }),
     session: (sessionId: string) => request.get<string>({ url: base + '/session', params: { sessionId } }),

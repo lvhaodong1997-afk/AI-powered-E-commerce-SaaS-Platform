@@ -25,11 +25,32 @@
           </div>
         </el-form-item>
         <el-form-item label="视频成品" required>
-          <div class="inline-fields">
-            <MetaGeneratedPicker :disabled="!enabled || submitting" @select="selectVideo" />
-            <span v-if="video" class="selected-title">{{ video.title || video.id }}</span>
+          <div class="video-field">
+            <div class="inline-fields">
+              <el-tooltip v-if="canPublish" content="当前环境未启用本地上传" :disabled="localUpload || !enabled">
+                <span>
+                  <el-button :disabled="!localUpload || uploading" :loading="uploading" @click="fileInput?.click()">
+                    <Icon icon="ep:upload" class="mr-1" />上传本地视频
+                  </el-button>
+                </span>
+              </el-tooltip>
+              <input ref="fileInput" type="file" accept=".mp4,video/mp4" hidden @change="uploadFile" />
+              <MetaGeneratedPicker :disabled="!enabled || submitting || uploading" @select="selectVideo" />
+              <el-button v-if="video || uploadedVideo" link :disabled="uploading" @click="clearVideo">移除</el-button>
+            </div>
+            <el-progress v-if="uploading" :percentage="uploadPercent" aria-label="视频上传进度" />
+            <div v-if="video || uploadedVideo" class="inline-fields">
+              <span class="selected-title">{{ uploadedVideo?.fileName || video?.title || video?.id }}</span>
+              <el-tag v-if="uploadedVideo" :type="uploadReady ? 'success' : uploadError ? 'danger' : 'info'">
+                {{ uploadReady ? '检测通过' : uploadError ? '未就绪' : '检测中' }}
+              </el-tag>
+            </div>
+            <div v-if="uploadError" class="inline-fields" role="status">
+              <span class="upload-error">{{ uploadError }}</span>
+              <el-button v-if="canRefreshUpload" link type="primary" @click="refreshUpload">刷新检测状态</el-button>
+            </div>
+            <video v-if="previewUrl" :key="previewUrl" :src="previewUrl" controls playsinline preload="metadata" class="channel-preview" />
           </div>
-          <video v-if="video?.outputUrl" :key="video.outputUrl" :src="video.outputUrl" controls playsinline preload="metadata" class="channel-preview" />
         </el-form-item>
         <el-form-item v-if="isYoutube" label="标题" required>
           <el-input v-model="form.title" maxlength="100" show-word-limit />
@@ -100,7 +121,8 @@ import TenantVisit from '@/layout/components/TenantVisit/index.vue'
 import { useUserStore } from '@/store/modules/user'
 import { getVisitTenantId } from '@/utils/auth'
 import { formatDate } from '@/utils/formatTime'
-import { channelApi, type Channel, type ChannelAccount, type ChannelRecord, type ChannelSubmission } from '@/api/tk/channelPublish'
+import { channelApi, type Channel, type ChannelAccount, type ChannelRecord, type ChannelSubmission, type ChannelVideoUpload } from '@/api/tk/channelPublish'
+import { uploadSocialVideoToOss } from '@/api/tk/socialPublish'
 import type { TkGenerationTaskVO } from '@/api/tk/generation'
 import MetaGeneratedPicker from '../video-publish-center/components/MetaGeneratedPicker.vue'
 
@@ -121,11 +143,19 @@ const accountPlaceholder = computed(() => {
   return isYoutube ? '尚未绑定频道' : '尚未绑定账号'
 })
 const video = ref<TkGenerationTaskVO>(), query = reactive({ pageNo: 1, pageSize: 10 })
+const uploadedVideo = ref<ChannelVideoUpload>(), fileInput = ref<HTMLInputElement>()
+const localUpload = ref(false), maxUploadBytes = ref(0), uploading = ref(false), uploadPercent = ref(0)
+const localPreview = ref(''), uploadError = ref(''), canRefreshUpload = ref(false)
+const previewUrl = computed(() => localPreview.value || video.value?.outputUrl)
+const uploadReady = computed(() => uploadedVideo.value?.status === 'READY' && uploadedVideo.value.metadataStatus === 'VERIFIED'
+  && !uploadError.value)
 const form = reactive({ accountId: '', title: '', text: '', privacy: 'private', forKids: undefined as boolean | undefined, synthetic: undefined as boolean | undefined })
 const selectedAccount = computed(() => accounts.value.find((account) => account.id === form.accountId))
-const readyToSubmit = computed(() => enabled.value && video.value?.id && selectedAccount.value?.status === 'AUTHORIZED'
+const readyToSubmit = computed(() => enabled.value && canPublish.value && !uploading.value && (video.value?.id || uploadReady.value)
+  && selectedAccount.value?.status === 'AUTHORIZED'
   && (!isYoutube || (form.title.trim() && form.forKids !== undefined && form.synthetic !== undefined)))
 let authTimer: number | undefined, historyTimer: number | undefined, pollBusy = false, stopped = false
+let uploadTimer: number | undefined, uploadVersion = 0
 let pending: { snapshot: string; key: string } | undefined
 
 const accountLabel = (account: ChannelAccount) => (account.username ? '@' + account.username : account.name)
@@ -140,8 +170,85 @@ function recordState(row: ChannelRecord) {
   return states[row.status] || row.status
 }
 function selectVideo(task: TkGenerationTaskVO) {
+  if (uploading.value || submitting.value) return
+  clearVideo()
   video.value = task
   if (isYoutube && !form.title) form.title = (task.title || '').slice(0, 100)
+}
+function clearVideo() {
+  uploadVersion++
+  window.clearTimeout(uploadTimer)
+  if (localPreview.value) URL.revokeObjectURL(localPreview.value)
+  localPreview.value = ''; uploadError.value = ''; canRefreshUpload.value = false
+  uploadedVideo.value = undefined; video.value = undefined
+}
+function checkUpload(result: ChannelVideoUpload) {
+  uploadedVideo.value = result
+  if (result.status === 'READY' && result.metadataStatus === 'VERIFIED') {
+    if (!isYoutube && (result.fileSize > maxUploadBytes.value || result.durationSeconds == null
+      || result.durationSeconds < 0.5 || result.durationSeconds > 140)) {
+      uploadError.value = 'X 视频须为 0.5 至 140 秒，且不超过 512 MB'
+    }
+    return true
+  }
+  if (result.status === 'FAILED' || result.metadataStatus === 'FAILED') {
+    uploadError.value = '视频未通过检测，请更换 MP4 文件'
+    return true
+  }
+  return false
+}
+async function pollUpload(id: string, version: number, deadline: number) {
+  if (stopped || version !== uploadVersion) return
+  try {
+    const result = await api.uploadedVideo(id)
+    if (stopped || version !== uploadVersion) return
+    if (checkUpload(result)) return
+    if (Date.now() < deadline) {
+      uploadTimer = window.setTimeout(() => void pollUpload(id, version, deadline), 3000)
+      return
+    }
+    uploadError.value = '视频仍在检测中'
+  } catch {
+    if (stopped || version !== uploadVersion) return
+    uploadError.value = '暂时无法获取检测状态'
+  }
+  canRefreshUpload.value = true
+}
+function refreshUpload() {
+  if (!uploadedVideo.value) return
+  uploadError.value = ''; canRefreshUpload.value = false
+  void pollUpload(uploadedVideo.value.id, uploadVersion, Date.now() + 5 * 60 * 1000)
+}
+async function uploadFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !localUpload.value || !canPublish.value || needsTenant.value || uploading.value || submitting.value) return
+  if (!/\.mp4$/i.test(file.name) || !file.size || file.size > maxUploadBytes.value) {
+    ElMessage.warning(`请选择不超过 ${maxUploadBytes.value / (1024 * 1024)} MB 的非空 MP4 视频`)
+    return
+  }
+  clearVideo()
+  const version = uploadVersion
+  const info = { fileName: file.name, fileSize: file.size, contentType: 'video/mp4' }
+  localPreview.value = URL.createObjectURL(file)
+  uploading.value = true; uploadPercent.value = 0
+  try {
+    const session = await api.uploadSession(info)
+    if (stopped || version !== uploadVersion) return
+    await uploadSocialVideoToOss(session, file, (progress) => {
+      if (!stopped && version === uploadVersion) uploadPercent.value = progress
+    })
+    if (stopped || version !== uploadVersion) return
+    const result = await api.uploadComplete({ ...info, uploadId: session.uploadId, objectKey: session.objectKey })
+    if (stopped || version !== uploadVersion) return
+    if (isYoutube && !form.title) form.title = file.name.replace(/\.mp4$/i, '').slice(0, 100)
+    if (!checkUpload(result)) void pollUpload(result.id, version, Date.now() + 5 * 60 * 1000)
+  } catch {
+    if (stopped || version !== uploadVersion) return
+    clearVideo()
+    uploadError.value = '视频上传未完成，请重新选择文件上传'
+  } finally { uploading.value = false }
 }
 async function loadAccounts() {
   accounts.value = await api.accounts()
@@ -191,9 +298,12 @@ async function disconnect() {
   form.accountId = ''; await loadAccounts()
 }
 async function submit() {
-  if (!readyToSubmit.value || !video.value?.id || !selectedAccount.value || submitting.value) return
+  if (!readyToSubmit.value || !selectedAccount.value || submitting.value) return
+  const source = uploadedVideo.value ? { mediaId: uploadedVideo.value.id }
+    : video.value?.id ? { generationTaskId: String(video.value.id) } : undefined
+  if (!source) return
   submitting.value = true
-  const values = { accountId: form.accountId, generationTaskId: String(video.value.id), text: form.text,
+  const values = { ...source, accountId: form.accountId, text: form.text,
     ...(isYoutube ? { title: form.title.trim(), privacy: form.privacy, forKids: form.forKids, synthetic: form.synthetic } : {}) }
   const snapshot = JSON.stringify(values)
   try {
@@ -204,7 +314,7 @@ async function submit() {
     if (pending?.snapshot !== snapshot) pending = { snapshot, key: window.crypto.randomUUID() }
     const request: ChannelSubmission = { ...values, idempotencyKey: pending.key }
     await api.submit(request)
-    pending = undefined; video.value = undefined; form.title = ''; form.text = ''
+    pending = undefined; clearVideo(); form.title = ''; form.text = ''
     form.forKids = undefined; form.synthetic = undefined; form.privacy = 'private'
     ElMessage.success('发布任务已提交'); query.pageNo = 1; await loadHistory()
   } finally { submitting.value = false }
@@ -216,7 +326,9 @@ async function resume(id: string) {
 }
 onMounted(async () => {
   try {
-    enabled.value = (await api.capabilities()).enabled
+    const capabilities = await api.capabilities()
+    enabled.value = capabilities.enabled; localUpload.value = capabilities.localUpload
+    maxUploadBytes.value = capabilities.maxUploadBytes
     if (!needsTenant.value) await Promise.all([loadAccounts(), loadHistory()])
   } catch { loadError.value = '发布数据加载失败，请刷新后重试' }
   finally { loading.value = false }
@@ -224,7 +336,7 @@ onMounted(async () => {
     if (records.value.some((record) => ['PENDING', 'PROCESSING'].includes(record.status))) void loadHistory().catch(() => {})
   }, 10000)
 })
-onBeforeUnmount(() => { stopped = true; endAuthorization(); window.clearInterval(historyTimer) })
+onBeforeUnmount(() => { stopped = true; clearVideo(); endAuthorization(); window.clearInterval(historyTimer) })
 </script>
 
 <style scoped>
@@ -238,7 +350,9 @@ onBeforeUnmount(() => { stopped = true; endAuthorization(); window.clearInterval
 .channel-section + .channel-section { border-top: 1px solid var(--el-border-color-light); }
 .channel-section .el-form { max-width: 680px; }
 .account-select { width: 320px; max-width: 100%; }
+.video-field { display: grid; gap: 8px; width: 100%; min-width: 0; }
 .selected-title { overflow-wrap: anywhere; }
+.upload-error { color: var(--el-color-danger); }
 .channel-preview { display: block; flex-basis: 100%; width: min(220px, 100%); max-width: 220px; max-height: 320px; margin-top: 8px; background: var(--el-fill-color-dark); }
 @media (max-width: 600px) { .channel-workspace { padding: 14px; } }
 </style>

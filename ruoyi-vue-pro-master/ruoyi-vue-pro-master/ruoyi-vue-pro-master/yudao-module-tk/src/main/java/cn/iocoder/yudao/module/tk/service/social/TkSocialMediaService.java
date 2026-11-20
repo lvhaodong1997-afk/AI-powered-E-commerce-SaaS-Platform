@@ -45,6 +45,8 @@ import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient.Object
 
 @Service
 public class TkSocialMediaService {
+    static final String WORK_ENABLED = "${tk.social.enabled:false} or ${tk.channel-publish.x.enabled:false}"
+            + " or ${tk.channel-publish.youtube.enabled:false}";
     public static final long MAX_VIDEO_BYTES = 1L * 1024 * 1024 * 1024;
     private static final long MAX_IMAGE_BYTES = 8L * 1024 * 1024;
     private final FileApi files;
@@ -60,14 +62,19 @@ public class TkSocialMediaService {
     @Resource private TkGenerationProperties generationProperties;
     @Resource private TkOssObjectStorageService ossObjectStorageService;
     @Resource private TkUploadSessionService uploadSessionService;
-    @Value("${tk.social.enabled:false}") private boolean enabled;
+    @Value("#{" + WORK_ENABLED + "}") private boolean enabled;
 
     public TkSocialMediaService(FileApi files, TkSocialMediaMapper mapper, TkDataScopeService scope) {
         this.files = files; this.mapper = mapper; this.scope = scope;
     }
 
     public TkSocialVideoUploadSessionRespVO createDirectVideoUpload(String fileName, Long fileSize, String contentType) {
+        return createDirectVideoUpload(fileName, fileSize, contentType, MAX_VIDEO_BYTES);
+    }
+
+    public TkSocialVideoUploadSessionRespVO createDirectVideoUpload(String fileName, Long fileSize, String contentType, long maxBytes) {
         validateDirectVideoFile(fileName, fileSize);
+        if (fileSize > maxBytes) throw new IllegalArgumentException("视频超过当前渠道大小限制");
         TkUserScope current = scope.getCurrentScope();
         Long companyId = scope.getWritableCompanyId(null);
         if (!current.hasTenantScope() || companyId == null) throw new IllegalArgumentException("请先选择租户");
@@ -77,7 +84,7 @@ public class TkSocialMediaService {
         TkOssPostPolicySigner.Policy policy = TkOssPostPolicySigner.signExact(
                 generationProperties.getUpload().getOss().getAccessKeyId(),
                 generationProperties.getUpload().getOss().getAccessKeySecret(), objectKey,
-                MAX_VIDEO_BYTES, generationProperties.getUpload().getOss().getPolicyExpireSeconds(), Clock.systemUTC());
+                Math.min(maxBytes, MAX_VIDEO_BYTES), generationProperties.getUpload().getOss().getPolicyExpireSeconds(), Clock.systemUTC());
         uploadSessionService.createSocial(uploadId, companyId, fileName, fileSize,
                 "video/mp4", "social-oss");
         TkSocialVideoUploadSessionRespVO response = new TkSocialVideoUploadSessionRespVO();
@@ -153,12 +160,14 @@ public class TkSocialMediaService {
     }
 
     private void validateOssUploadConfig() {
+        if (!supportsDirectVideoUpload()) throw new IllegalStateException("OSS 上传未配置，请先完成 OSS 配置");
+    }
+
+    public boolean supportsDirectVideoUpload() {
         TkGenerationProperties.Upload upload = generationProperties == null ? null : generationProperties.getUpload();
         TkGenerationProperties.Oss oss = upload == null ? null : upload.getOss();
-        if (upload == null || !"oss".equalsIgnoreCase(upload.getStorageType()) || oss == null
-                || !Boolean.TRUE.equals(oss.getEnabled()) || !ossObjectStorageService.isConfigured()) {
-            throw new IllegalStateException("OSS 上传未配置，请先完成 OSS 配置");
-        }
+        return upload != null && "oss".equalsIgnoreCase(upload.getStorageType()) && oss != null
+                && Boolean.TRUE.equals(oss.getEnabled()) && ossObjectStorageService != null && ossObjectStorageService.isConfigured();
     }
 
     private String socialObjectKey(Long tenantId, Long companyId, String uploadId) {
@@ -336,6 +345,19 @@ public class TkSocialMediaService {
         scope.validateReadable(media.getTenantId(), media.getCompanyId(), media.getCreator());
         if ("DELETED".equals(media.getStatus()) || "DELETING".equals(media.getStatus())) throw new IllegalArgumentException("媒体已清理");
         return requeueHistorical(media);
+    }
+
+    public TkSocialMediaDO getOwnedVideoUpload(Long id) {
+        TkSocialMediaDO media = mapper.selectById(id);
+        TkUserScope user = scope.getCurrentScope();
+        if (media == null || !user.hasTenantScope() || user.getUserId() == null || media.getUploadId() == null
+                || !"VIDEO".equals(media.getMediaType()) || !Objects.equals(user.getTenantId(), media.getTenantId())
+                || !Objects.equals(scope.getWritableCompanyId(null), media.getCompanyId())
+                || !Objects.equals(user.getUserIdString(), media.getCreator())
+                || "DELETING".equals(media.getStatus()) || "DELETED".equals(media.getStatus())) {
+            throw new IllegalArgumentException("视频不存在或已清理");
+        }
+        return media;
     }
 
     private TkSocialMediaDO requeueHistorical(TkSocialMediaDO media) {

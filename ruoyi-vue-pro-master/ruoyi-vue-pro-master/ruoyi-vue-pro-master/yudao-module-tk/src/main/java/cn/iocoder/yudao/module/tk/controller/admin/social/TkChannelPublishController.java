@@ -3,7 +3,12 @@ package cn.iocoder.yudao.module.tk.controller.admin.social;
 import cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog;
 import cn.iocoder.yudao.framework.common.pojo.*;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
+import cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadCompleteReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadSessionReqVO;
+import cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadSessionRespVO;
+import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialMediaDO;
 import cn.iocoder.yudao.module.tk.service.channel.*;
+import cn.iocoder.yudao.module.tk.service.social.TkSocialMediaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.*;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,10 +29,56 @@ public class TkChannelPublishController {
     private static final String PUBLISH = "@ss.hasPermission('tk:' + #channel + '-publish:create')";
     private final TkChannelAccountService auth;
     private final TkChannelPublishService publish;
+    private final TkSocialMediaService media;
 
     @GetMapping("/capabilities") @PreAuthorize(QUERY)
-    public CommonResult<Map<String, Boolean>> capabilities(@PathVariable("channel") String channel) {
-        return success(Collections.singletonMap("enabled", auth.ready(channel)));
+    public CommonResult<Map<String, Object>> capabilities(@PathVariable("channel") String channel) {
+        boolean enabled = auth.ready(channel);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("enabled", enabled);
+        result.put("localUpload", enabled && media.supportsDirectVideoUpload());
+        result.put("maxUploadBytes", TkChannelPublishService.maxUploadBytes(channel));
+        return success(result);
+    }
+
+    @PostMapping("/media/video-upload-session") @PreAuthorize(PUBLISH)
+    @ApiAccessLog(requestEnable = false, responseEnable = false)
+    public CommonResult<TkSocialVideoUploadSessionRespVO> uploadSession(@PathVariable("channel") String channel,
+            @Valid @RequestBody TkSocialVideoUploadSessionReqVO request) {
+        requireEnabled(channel);
+        return success(media.createDirectVideoUpload(request.getFileName(), request.getFileSize(), request.getContentType(),
+                TkChannelPublishService.maxUploadBytes(channel)));
+    }
+
+    @PostMapping("/media/video-upload-complete") @PreAuthorize(PUBLISH)
+    @ApiAccessLog(requestEnable = false, responseEnable = false)
+    public CommonResult<Map<String, Object>> uploadComplete(@PathVariable("channel") String channel,
+            @Valid @RequestBody TkSocialVideoUploadCompleteReqVO request) {
+        requireEnabled(channel);
+        if (request.getFileSize() > TkChannelPublishService.maxUploadBytes(channel))
+            throw new IllegalArgumentException("视频超过当前渠道大小限制");
+        return success(uploadStatus(media.completeDirectVideoUpload(request)));
+    }
+
+    @GetMapping("/media/get") @PreAuthorize(PUBLISH)
+    public CommonResult<Map<String, Object>> uploadedVideo(@PathVariable("channel") String channel, @RequestParam("id") Long id) {
+        requireEnabled(channel);
+        return success(uploadStatus(media.getOwnedVideoUpload(id)));
+    }
+
+    private void requireEnabled(String channel) {
+        if (!auth.ready(channel)) throw new IllegalArgumentException("发布渠道未启用");
+    }
+
+    private static Map<String, Object> uploadStatus(TkSocialMediaDO video) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", String.valueOf(video.getId()));
+        result.put("fileName", video.getFileName());
+        result.put("status", video.getStatus());
+        result.put("metadataStatus", video.getMetadataStatus());
+        result.put("fileSize", video.getFileSize());
+        result.put("durationSeconds", video.getDurationSeconds());
+        return result;
     }
 
     @GetMapping("/accounts") @PreAuthorize(QUERY)
