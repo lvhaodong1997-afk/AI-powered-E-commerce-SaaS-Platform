@@ -4,9 +4,11 @@
       <Icon :icon="channel === 'x' ? 'simple-icons:x' : 'simple-icons:youtube'" :size="22" />
       <h1>{{ label }} 发布</h1>
       <el-tag v-if="!loading" :type="enabled ? 'success' : 'info'">{{ enabled ? '已启用' : '未启用' }}</el-tag>
+      <TenantVisit v-if="isPlatformAdmin" />
     </header>
+    <el-alert v-if="needsTenant" type="warning" title="请选择要发布的租户" :closable="false" class="tenant-notice" />
     <el-alert v-if="loadError" type="error" :title="loadError" :closable="false" />
-    <section class="channel-section" aria-labelledby="channel-create">
+    <section v-if="!needsTenant" class="channel-section" aria-labelledby="channel-create">
       <div class="section-heading">
         <h2 id="channel-create">新建发布</h2>
         <el-button v-if="canAuthorize" :disabled="!enabled" :loading="authorizing" @click="authorize">
@@ -16,7 +18,7 @@
       <el-form label-position="top" :disabled="!enabled || submitting" @submit.prevent="submit">
         <el-form-item :label="isYoutube ? 'YouTube 频道' : 'X 账号'" required>
           <div class="inline-fields">
-            <el-select v-model="form.accountId" clearable filterable :placeholder="isYoutube ? '选择频道' : '选择账号'" class="account-select">
+            <el-select v-model="form.accountId" clearable filterable :placeholder="accountPlaceholder" class="account-select">
               <el-option v-for="account in accounts" :key="account.id" :value="account.id" :label="accountLabel(account)" />
             </el-select>
             <el-button v-if="selectedAccount && canAuthorize" @click="disconnect">解绑</el-button>
@@ -55,7 +57,7 @@
         </el-button>
       </el-form>
     </section>
-    <section class="channel-section" aria-labelledby="channel-history">
+    <section v-if="!needsTenant" class="channel-section" aria-labelledby="channel-history">
       <div class="section-heading">
         <h2 id="channel-history">发布记录</h2>
         <el-tooltip content="刷新记录">
@@ -94,6 +96,9 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { hasPermission } from '@/directives/permission/hasPermi'
+import TenantVisit from '@/layout/components/TenantVisit/index.vue'
+import { useUserStore } from '@/store/modules/user'
+import { getVisitTenantId } from '@/utils/auth'
 import { formatDate } from '@/utils/formatTime'
 import { channelApi, type Channel, type ChannelAccount, type ChannelRecord, type ChannelSubmission } from '@/api/tk/channelPublish'
 import type { TkGenerationTaskVO } from '@/api/tk/generation'
@@ -103,11 +108,18 @@ const props = defineProps<{ channel: Channel }>()
 const api = channelApi(props.channel)
 const isYoutube = props.channel === 'youtube'
 const label = isYoutube ? 'YouTube' : 'X'
+const userStore = useUserStore()
+const isPlatformAdmin = computed(() => userStore.getUser?.tkUserLevel === 'PLATFORM_ADMIN')
+const needsTenant = computed(() => isPlatformAdmin.value && !getVisitTenantId())
 const canAuthorize = computed(() => hasPermission(['tk:' + props.channel + '-publish:authorize']))
 const canPublish = computed(() => hasPermission(['tk:' + props.channel + '-publish:create']))
 const loading = ref(true), loadError = ref(''), enabled = ref(false), submitting = ref(false)
 const authorizing = ref(false), historyLoading = ref(false), resuming = ref('')
 const accounts = ref<ChannelAccount[]>([]), records = ref<ChannelRecord[]>([]), total = ref(0)
+const accountPlaceholder = computed(() => {
+  if (!enabled.value || accounts.value.length > 0) return isYoutube ? '选择频道' : '选择账号'
+  return isYoutube ? '尚未绑定频道' : '尚未绑定账号'
+})
 const video = ref<TkGenerationTaskVO>(), query = reactive({ pageNo: 1, pageSize: 10 })
 const form = reactive({ accountId: '', title: '', text: '', privacy: 'private', forKids: undefined as boolean | undefined, synthetic: undefined as boolean | undefined })
 const selectedAccount = computed(() => accounts.value.find((account) => account.id === form.accountId))
@@ -145,6 +157,7 @@ async function loadHistory() {
 }
 function endAuthorization() { window.clearInterval(authTimer); authorizing.value = false }
 async function authorize() {
+  if (needsTenant.value) return
   const popup = window.open('about:blank', '_blank', 'popup,width=560,height=720')
   if (!popup) { ElMessage.warning('请允许弹出授权窗口'); return }
   popup.opener = null
@@ -204,7 +217,7 @@ async function resume(id: string) {
 onMounted(async () => {
   try {
     enabled.value = (await api.capabilities()).enabled
-    await Promise.all([loadAccounts(), loadHistory()])
+    if (!needsTenant.value) await Promise.all([loadAccounts(), loadHistory()])
   } catch { loadError.value = '发布数据加载失败，请刷新后重试' }
   finally { loading.value = false }
   if (!stopped) historyTimer = window.setInterval(() => {
@@ -218,12 +231,13 @@ onBeforeUnmount(() => { stopped = true; endAuthorization(); window.clearInterval
 .channel-workspace { padding: 20px 24px; background: var(--el-bg-color); }
 .channel-heading, .section-heading, .inline-fields { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .channel-heading h1 { margin: 0; font-size: 22px; line-height: 1.4; }
+.tenant-notice { margin-top: 16px; }
 .section-heading { justify-content: space-between; margin-bottom: 12px; }
 .section-heading h2 { margin: 0; font-size: 16px; }
 .channel-section { padding: 20px 0; }
 .channel-section + .channel-section { border-top: 1px solid var(--el-border-color-light); }
 .channel-section .el-form { max-width: 680px; }
-.account-select { width: min(320px, 100%); }
+.account-select { width: 320px; max-width: 100%; }
 .selected-title { overflow-wrap: anywhere; }
 .channel-preview { display: block; flex-basis: 100%; width: min(220px, 100%); max-width: 220px; max-height: 320px; margin-top: 8px; background: var(--el-fill-color-dark); }
 @media (max-width: 600px) { .channel-workspace { padding: 14px; } }
