@@ -435,14 +435,30 @@
           show-word-limit
         />
       </el-form-item>
+      <el-form-item :label="tt('openApi.form.returnUrlWhitelist')" prop="returnUrlWhitelist">
+        <el-input
+          v-model="clientForm.returnUrlWhitelist"
+          type="textarea"
+          :rows="3"
+          :placeholder="tt('openApi.form.returnUrlWhitelistPlaceholder')"
+          maxlength="4096"
+          show-word-limit
+        />
+      </el-form-item>
       <el-form-item :label="tt('openApi.form.permissions')" prop="permissions">
-        <el-checkbox-group v-model="clientForm.permissions">
+        <el-checkbox-group v-model="knownPermissionSelection">
           <el-checkbox label="auth">{{ tt('openApi.permission.auth') }}</el-checkbox>
           <el-checkbox label="media">{{ tt('openApi.permission.media') }}</el-checkbox>
           <el-checkbox label="publish">{{ tt('openApi.permission.publish') }}</el-checkbox>
           <el-checkbox label="x.auth">{{ tt('openApi.permission.xAuth') }}</el-checkbox>
           <el-checkbox label="x.publish">{{ tt('openApi.permission.xPublish') }}</el-checkbox>
         </el-checkbox-group>
+        <div v-if="unknownPermissions.length" class="mt-8px text-13px">
+          <span>{{ tt('openApi.form.unknownPermissions') }}：</span>
+          <el-tag v-for="permission in unknownPermissions" :key="permission" class="ml-4px" size="small">
+            {{ permission }}
+          </el-tag>
+        </div>
       </el-form-item>
       <el-form-item :label="tt('openApi.form.perMinuteQuota')" prop="rateLimitPerMinute">
         <el-input-number
@@ -722,6 +738,7 @@ function createClientForm(): ClientFormData {
     authCallbackUrl: '',
     publishCallbackUrl: '',
     allowedIps: '',
+    returnUrlWhitelist: '',
     permissions: ['auth', 'media', 'publish'],
     rateLimitPerMinute: 120,
     dailyQuota: 10000,
@@ -773,6 +790,7 @@ const toClientForm = (client: OpenApiClientVO): ClientFormData => ({
   authCallbackUrl: client.authCallbackUrl || '',
   publishCallbackUrl: client.publishCallbackUrl || '',
   allowedIps: client.allowedIps || '',
+  returnUrlWhitelist: whitelistToText(client.returnUrlWhitelist),
   permissions: permissionList(client.permissions),
   rateLimitPerMinute: client.rateLimitPerMinute ?? 120,
   dailyQuota: client.dailyQuota ?? 10000,
@@ -792,6 +810,7 @@ const submitClientForm = async () => {
       authCallbackUrl: blankToUndefined(clientForm.authCallbackUrl),
       publishCallbackUrl: blankToUndefined(clientForm.publishCallbackUrl),
       allowedIps: blankToUndefined(clientForm.allowedIps),
+      returnUrlWhitelist: blankToUndefined(clientForm.returnUrlWhitelist),
       permissions: clientForm.permissions.join(','),
       rateLimitPerMinute: clientForm.rateLimitPerMinute,
       dailyQuota: clientForm.dailyQuota,
@@ -1008,11 +1027,38 @@ const refreshActiveTab = () => {
   return getEventList()
 }
 
+const KNOWN_PERMISSIONS = ['auth', 'media', 'publish', 'x.auth', 'x.publish']
+
 const permissionList = (value?: string) =>
   (value || '')
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
+
+const unknownPermissions = computed(() =>
+  clientForm.permissions.filter((item) => !KNOWN_PERMISSIONS.includes(item))
+)
+
+const knownPermissionSelection = computed({
+  get: () => clientForm.permissions.filter((item) => KNOWN_PERMISSIONS.includes(item)),
+  set: (value: string[]) => {
+    clientForm.permissions = [...value, ...unknownPermissions.value]
+  }
+})
+
+const whitelistToText = (value?: string) => {
+  if (!value) return ''
+  const trimmed = value.trim()
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) return parsed.filter(Boolean).join('\n')
+    } catch (error) {
+      return trimmed
+    }
+  }
+  return trimmed
+}
 
 const permissionLabel = (value: string) => {
   const labels: Record<string, string> = {

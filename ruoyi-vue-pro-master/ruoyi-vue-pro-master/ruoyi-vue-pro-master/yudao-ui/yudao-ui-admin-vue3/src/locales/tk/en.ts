@@ -462,8 +462,10 @@ export const tkEn: Record<string, string> = {
   'openApi.form.authCallbackUrl': 'Authorization callback URL',
   'openApi.form.publishCallbackUrl': 'Publishing callback URL',
   'openApi.form.allowedIps': 'Allowed IPs',
-  'openApi.form.allowedIpsPlaceholder':
-    'Separate IP or CIDR rules with commas; leave blank for no restriction',
+  'openApi.form.allowedIpsPlaceholder': 'Separate IP or CIDR rules with commas; leave blank for no restriction',
+  'openApi.form.returnUrlWhitelist': 'X authorization return URL allowlist',
+  'openApi.form.returnUrlWhitelistPlaceholder': 'One exact HTTPS URL per line, including scheme, host and path. Do not include query or fragment. Do not enable the loopback HTTP exception in production.',
+  'openApi.form.unknownPermissions': 'Preserved unknown permissions',
   'openApi.form.permissions': 'Permissions',
   'openApi.form.perMinuteQuota': 'Per-minute quota',
   'openApi.form.dailyQuota': 'Daily quota',

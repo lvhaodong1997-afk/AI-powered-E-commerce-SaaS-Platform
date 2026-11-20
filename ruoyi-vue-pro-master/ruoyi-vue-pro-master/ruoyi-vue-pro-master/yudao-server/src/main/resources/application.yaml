@@ -175,6 +175,9 @@ tk:
       client-id: ${TK_YOUTUBE_CLIENT_ID:}
       client-secret: ${TK_YOUTUBE_CLIENT_SECRET:}
       redirect-uri: ${TK_YOUTUBE_REDIRECT_URI:}
+  x-open-api:
+    enabled: ${TK_X_OPEN_API_ENABLED:false}
+    allow-insecure-loopback-return-url: ${TK_X_OPEN_API_ALLOW_INSECURE_LOOPBACK_RETURN_URL:false}
   registration:
     enabled: ${TK_REGISTRATION_ENABLED:false}
     default-package-id: ${TK_REGISTRATION_DEFAULT_PACKAGE_ID:0}

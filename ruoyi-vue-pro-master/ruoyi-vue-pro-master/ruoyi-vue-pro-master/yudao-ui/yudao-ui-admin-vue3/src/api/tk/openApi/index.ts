@@ -11,6 +11,7 @@ export interface OpenApiClientVO {
   authCallbackUrl?: string
   publishCallbackUrl?: string
   allowedIps?: string
+  returnUrlWhitelist?: string
   permissions?: string
   rateLimitPerMinute?: number
   dailyQuota?: number
@@ -26,6 +27,7 @@ export interface OpenApiClientSaveReq {
   authCallbackUrl?: string
   publishCallbackUrl?: string
   allowedIps?: string
+  returnUrlWhitelist?: string
   permissions?: string
   rateLimitPerMinute?: number
   dailyQuota?: number

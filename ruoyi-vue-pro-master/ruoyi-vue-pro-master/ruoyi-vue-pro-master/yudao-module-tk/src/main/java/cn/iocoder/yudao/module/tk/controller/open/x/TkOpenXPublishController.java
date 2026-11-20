@@ -4,6 +4,7 @@ import cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiResponse;
 import cn.iocoder.yudao.module.tk.service.channel.TkOpenXPublishService;
+import cn.iocoder.yudao.module.tk.service.open.x.TkOpenXMediaService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.*;
@@ -27,27 +28,33 @@ import java.util.UUID;
 public class TkOpenXPublishController {
     private static final String CONSENT_COOKIE = "__Host-TKXConsent";
     private final TkOpenXPublishService service;
+    private final TkOpenXMediaService media;
 
     @PostMapping("/auth/sessions")
     @ApiAccessLog(enable = false)
     public TkOpenApiResponse<Map<String, Object>> createSession(
             @RequestBody(required = false) SessionCreate request) {
         SessionCreate body = request == null ? new SessionCreate() : request;
-        return TkOpenApiResponse.success(service.createSession(body.getEndUserId(), body.getOwnerUserId()));
+        return TkOpenApiResponse.success(service.createSession(body.getEndUserId(), body.getReturnUrl(),
+                body.getClientState()));
     }
 
     @GetMapping("/auth/sessions/{sessionId}")
     @ApiAccessLog(enable = false)
-    public TkOpenApiResponse<Map<String, Object>> session(@PathVariable("sessionId") String id,
-            @RequestParam(value = "endUserId", required = false) String endUserId) {
-        return TkOpenApiResponse.success(service.session(id, endUserId));
+    public TkOpenApiResponse<Map<String, Object>> session(@PathVariable("sessionId") String id) {
+        return TkOpenApiResponse.success(service.session(id));
+    }
+
+    @PostMapping("/auth/tickets/redeem")
+    @ApiAccessLog(enable = false)
+    public TkOpenApiResponse<Map<String, Object>> redeem(@Valid @RequestBody TicketRedeem request) {
+        return TkOpenApiResponse.success(service.redeemTicket(request.getTicket()));
     }
 
     @GetMapping("/connections")
     @ApiAccessLog(enable = false)
-    public TkOpenApiResponse<List<Map<String, Object>>> connections(
-            @RequestParam(value = "endUserId", required = false) String endUserId) {
-        return TkOpenApiResponse.success(service.connections(endUserId));
+    public TkOpenApiResponse<List<Map<String, Object>>> connections() {
+        return TkOpenApiResponse.success(service.connections());
     }
 
     @GetMapping(value = "/auth/sessions/{sessionId}/consent", produces = MediaType.TEXT_HTML_VALUE)
@@ -73,44 +80,99 @@ public class TkOpenXPublishController {
     public ResponseEntity<Void> consent(@PathVariable("sessionId") String id,
             @CookieValue(value = CONSENT_COOKIE, required = false) String browserToken,
             @RequestParam(value = "consentToken", required = false) String formToken) {
-        return ResponseEntity.status(HttpStatus.SEE_OTHER).location(service.consent(id, browserToken, formToken)).cacheControl(CacheControl.noStore())
-                .header("Referrer-Policy", "no-referrer").build();
+        return ResponseEntity.status(HttpStatus.SEE_OTHER).location(service.consent(id, browserToken, formToken))
+                .cacheControl(CacheControl.noStore()).header("Referrer-Policy", "no-referrer").build();
     }
 
     @DeleteMapping("/connections/{connectionId}")
     @ApiAccessLog(enable = false)
-    public TkOpenApiResponse<Boolean> revoke(@PathVariable("connectionId") String id,
-            @RequestParam(value = "endUserId", required = false) String endUserId) {
-        return TkOpenApiResponse.success(service.revoke(id, endUserId));
+    public TkOpenApiResponse<Boolean> revoke(@PathVariable("connectionId") String id) {
+        return TkOpenApiResponse.success(service.revoke(id));
+    }
+
+    @PostMapping("/media/uploads")
+    @ApiAccessLog(enable = false)
+    public TkOpenApiResponse<Map<String, Object>> createUpload(@Valid @RequestBody MediaCreate request) {
+        return TkOpenApiResponse.success(media.create(request.getFileName(), request.getFileSize(),
+                request.getContentType(), request.getSha256()));
+    }
+
+    @GetMapping("/media/uploads/{uploadId}")
+    @ApiAccessLog(enable = false)
+    public TkOpenApiResponse<Map<String, Object>> uploadStatus(@PathVariable("uploadId") String uploadId) {
+        return TkOpenApiResponse.success(media.getStatus(uploadId));
+    }
+
+    @PostMapping("/media/uploads/{uploadId}/chunks/{chunkIndex}")
+    @ApiAccessLog(enable = false)
+    public TkOpenApiResponse<Boolean> uploadChunk(@PathVariable("uploadId") String uploadId,
+            @PathVariable("chunkIndex") Integer chunkIndex, @RequestBody byte[] chunk) {
+        media.uploadChunk(uploadId, chunkIndex, chunk);
+        return TkOpenApiResponse.success(true);
+    }
+
+    @PostMapping("/media/uploads/{uploadId}/complete")
+    @ApiAccessLog(enable = false)
+    public TkOpenApiResponse<Map<String, Object>> completeUpload(@PathVariable("uploadId") String uploadId,
+            @RequestBody(required = false) MediaComplete request) {
+        MediaComplete body = request == null ? new MediaComplete() : request;
+        return TkOpenApiResponse.success(media.complete(uploadId, body.getFileSize(), body.getSha256()));
     }
 
     @PostMapping("/publish/tasks")
     @ApiAccessLog(enable = false)
     public TkOpenApiResponse<Map<String, Object>> create(@Valid @RequestBody Create request,
             @RequestHeader(value = "Idempotency-Key", required = false) String key) {
-        return TkOpenApiResponse.success(service.create(request.getConnectionId(), request.getGenerationTaskId(),
-                request.getText(), key, request.getEndUserId()));
+        return TkOpenApiResponse.success(service.create(request.getConnectionId(), request.getMediaId(),
+                request.getText(), key, request.getEndUserId(), request.getGenerationTaskId()));
     }
 
     @GetMapping("/publish/tasks/{taskId}")
     @ApiAccessLog(enable = false)
-    public TkOpenApiResponse<Map<String, Object>> get(@PathVariable("taskId") String id,
-            @RequestParam(value = "endUserId", required = false) String endUserId) {
-        return TkOpenApiResponse.success(service.get(id, endUserId));
+    public TkOpenApiResponse<Map<String, Object>> get(@PathVariable("taskId") String id) {
+        return TkOpenApiResponse.success(service.get(id));
     }
 
     @Data
     public static class SessionCreate {
         @Size(max = 128) @Pattern(regexp = "^$|^[A-Za-z0-9._:-]{1,128}$")
         private String endUserId;
-        @Positive
-        private Long ownerUserId;
+        @Size(max = 1024)
+        private String returnUrl;
+        @Size(max = 256) @Pattern(regexp = "^$|^[A-Za-z0-9._~-]{1,256}$")
+        private String clientState;
+    }
+
+    @Data
+    public static class TicketRedeem {
+        @NotBlank
+        private String ticket;
+    }
+
+    @Data
+    public static class MediaCreate {
+        @NotBlank @Size(max = 256)
+        private String fileName;
+        @NotNull @Positive
+        private Long fileSize;
+        @Size(max = 128)
+        private String contentType;
+        @Size(max = 64)
+        private String sha256;
+    }
+
+    @Data
+    public static class MediaComplete {
+        private Long fileSize;
+        @Size(max = 64)
+        private String sha256;
     }
 
     @Data
     public static class Create {
         @NotBlank private String connectionId;
-        @NotNull @Positive private Long generationTaskId;
+        private String mediaId;
+        private Long generationTaskId;
         @NotNull @Size(max = 280) private String text;
         @Size(max = 128) @Pattern(regexp = "^$|^[A-Za-z0-9._:-]{1,128}$")
         private String endUserId;

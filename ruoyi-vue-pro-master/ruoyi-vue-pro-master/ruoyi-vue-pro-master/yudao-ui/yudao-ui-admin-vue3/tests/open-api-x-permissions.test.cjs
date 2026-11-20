@@ -19,4 +19,8 @@ test('open API client form can grant and preserve X permissions', () => {
   assert.match(source, /'x.publish': tt\('openApi.permission.xPublish'\)/)
   assert.match(zh, /'openApi.permission.xAuth': 'X 授权'/)
   assert.match(zh, /'openApi.permission.xPublish': 'X 发布'/)
+  assert.match(source, /openApi.form.returnUrlWhitelist/)
+  assert.match(source, /unknownPermissions/)
+  assert.match(source, /KNOWN_PERMISSIONS/)
+  assert.match(zh, /'openApi.form.unknownPermissions': '已保留的未知权限'/)
 })

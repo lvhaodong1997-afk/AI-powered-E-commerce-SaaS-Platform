@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUpload
 import cn.iocoder.yudao.module.tk.controller.admin.social.vo.TkSocialVideoUploadSessionRespVO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialMediaDO;
 import cn.iocoder.yudao.module.tk.service.channel.*;
+import cn.iocoder.yudao.module.tk.service.open.x.TkOpenXCallbackOutcome;
 import cn.iocoder.yudao.module.tk.service.social.TkSocialMediaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.*;
@@ -102,7 +103,12 @@ public class TkChannelPublishController {
             @RequestParam(value = "code", required = false) String code, @RequestParam(value = "state", required = false) String state,
             @RequestParam(value = "error", required = false) String error,
             @CookieValue(value = "__Host-TKXConsent", required = false) String browserToken) {
-        boolean ok = auth.callback(channel, code, state, error, browserToken);
+        TkOpenXCallbackOutcome outcome = auth.completeCallback(channel, code, state, error, browserToken);
+        if (outcome.getRedirectUrl() != null) {
+            return ResponseEntity.status(HttpStatus.FOUND).header(HttpHeaders.LOCATION, outcome.getRedirectUrl())
+                    .cacheControl(CacheControl.noStore()).header("Referrer-Policy", "no-referrer").build();
+        }
+        boolean ok = outcome.isSuccess();
         return ResponseEntity.ok().contentType(new MediaType("text", "html", java.nio.charset.StandardCharsets.UTF_8))
                 .header("Referrer-Policy", "no-referrer").cacheControl(CacheControl.noStore())
                 .body("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>OAuth</title><p>"

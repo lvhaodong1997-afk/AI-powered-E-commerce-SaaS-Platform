@@ -123,6 +123,23 @@ class TkOpenApiAuthenticationFilterTest {
         assertEquals(403, response.getStatus());
     }
 
+    @Test
+    void xMediaRequiresPublishPermissionAndHmac() throws Exception {
+        TkOpenApiAuthenticationService auth = mock(TkOpenApiAuthenticationService.class);
+        when(auth.authenticate(any())).thenThrow(TkOpenApiException.forbidden("DENIED", "Denied"));
+        TkOpenApiAuthenticationFilter filter = new TkOpenApiAuthenticationFilter(
+                auth, mock(TkOpenApiRequestLogMapper.class), 16);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/admin-api/tk/open/v1/x/media/uploads");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, (req, res) -> {
+            throw new AssertionError("X media must not bypass HMAC");
+        });
+        ArgumentCaptor<TkOpenApiAuthRequest> captor = ArgumentCaptor.forClass(TkOpenApiAuthRequest.class);
+        verify(auth).authenticate(captor.capture());
+        assertEquals("x.publish", captor.getValue().getRequiredPermission());
+        assertEquals(403, response.getStatus());
+    }
+
     private static final class CountingServletInputStream extends ServletInputStream {
         private final int totalBytes;
         private int bytesRead;

@@ -10,6 +10,10 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenApiClientDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.openapi.TkOpenApiClientMapper;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiCallbackUrlValidator;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiSecretCipher;
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import cn.iocoder.yudao.module.tk.service.channel.TkOpenXProperties;
+import cn.iocoder.yudao.module.tk.service.open.x.TkOpenXReturnUrlValidator;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,15 +32,21 @@ public class TkOpenApiClientAdminService {
             java.util.Arrays.asList("auth", "media", "publish", "x.auth", "x.publish"));
     private final TkOpenApiClientMapper clientMapper;
     private final TkOpenApiSecretCipher secretCipher;
+    private final TkOpenXProperties xProperties;
 
     public TkOpenApiClientAdminService(TkOpenApiClientMapper clientMapper, TkOpenApiSecretCipher secretCipher) {
+        this(clientMapper, secretCipher, null);
+    }
+
+    public TkOpenApiClientAdminService(TkOpenApiClientMapper clientMapper, TkOpenApiSecretCipher secretCipher, TkOpenXProperties xProperties) {
         this.clientMapper = clientMapper;
         this.secretCipher = secretCipher;
+        this.xProperties = xProperties;
     }
 
     @Transactional(rollbackFor = Exception.class)
     public TkOpenApiClientAdminVO.CredentialResp create(TkOpenApiClientAdminVO.CreateReq request) {
-        validate(request);
+        validate(request, null);
         String clientId = nextValue("client", 18);
         String clientSecret = nextValue("tksec", 32);
         String callbackSecret = nextValue("tkcb", 32);
@@ -50,8 +60,8 @@ public class TkOpenApiClientAdminService {
 
     @Transactional(rollbackFor = Exception.class)
     public void update(TkOpenApiClientAdminVO.UpdateReq request) {
-        validate(request);
         TkOpenApiClientDO existing = requireClient(request.getClientId());
+        validate(request, existing.getPermissions());
         clientMapper.updateById(copyEditable(request, new TkOpenApiClientDO().setId(existing.getId())));
     }
 
@@ -94,13 +104,14 @@ public class TkOpenApiClientAdminService {
         return credential(clientId, secret, null);
     }
 
-    private void validate(TkOpenApiClientAdminVO.CreateReq request) {
+    private void validate(TkOpenApiClientAdminVO.CreateReq request, String existingPermissions) {
         validateCallback(request.getAuthCallbackUrl());
         validateCallback(request.getPublishCallbackUrl());
         if (!cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiIpMatcher.isValidRules(request.getAllowedIps())) {
             throw ServiceExceptionUtil.invalidParamException("IP 白名单格式不正确");
         }
-        request.setPermissions(normalizePermissions(request.getPermissions()));
+        request.setPermissions(normalizePermissions(request.getPermissions(), existingPermissions));
+        request.setReturnUrlWhitelist(normalizeReturnUrlWhitelist(request.getReturnUrlWhitelist()));
         if (request.getRateLimitPerMinute() == null) request.setRateLimitPerMinute(120);
         if (request.getDailyQuota() == null) request.setDailyQuota(10000);
         if (request.getStatus() == null) request.setStatus(0);
@@ -117,16 +128,58 @@ public class TkOpenApiClientAdminService {
         }
     }
 
-    private String normalizePermissions(String permissions) {
+    private String normalizePermissions(String permissions, String existingPermissions) {
         String value = StrUtil.blankToDefault(permissions, "auth,media,publish");
         LinkedHashSet<String> result = new LinkedHashSet<>();
         for (String item : value.toLowerCase().split("[,;\\s]+")) {
-            if (!SUPPORTED_PERMISSIONS.contains(item)) {
+            if (item.isEmpty()) continue;
+            if (!item.matches("[a-z][a-z0-9._-]{0,63}")) {
                 throw ServiceExceptionUtil.invalidParamException("不支持的开放 API 权限：{}", item);
             }
             result.add(item);
         }
+        if (existingPermissions != null) {
+            for (String item : existingPermissions.toLowerCase().split("[,;\\s]+")) {
+                if (!item.isEmpty() && !SUPPORTED_PERMISSIONS.contains(item)) result.add(item);
+            }
+        }
+        if (result.isEmpty()) {
+            throw ServiceExceptionUtil.invalidParamException("至少选择一项开放 API 权限");
+        }
         return String.join(",", result);
+    }
+
+    private String normalizeReturnUrlWhitelist(String raw) {
+        if (StrUtil.isBlank(raw)) return null;
+        List<String> values = new ArrayList<>();
+        String trimmed = raw.trim();
+        try {
+            if (trimmed.startsWith("[")) {
+                List<String> parsed = JsonUtils.parseArray(trimmed, String.class); if (parsed != null) values.addAll(parsed);
+            } else {
+                for (String line : trimmed.split("\\r?\\n")) {
+                    if (StrUtil.isNotBlank(line)) values.add(line.trim());
+                }
+            }
+        } catch (Exception ex) {
+            throw ServiceExceptionUtil.invalidParamException("X 授权完成回跳白名单格式不正确");
+        }
+        boolean loopback = xProperties != null && xProperties.isAllowInsecureLoopbackReturnUrl();
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String item : values) {
+            if (StrUtil.isBlank(item)) continue;
+            try {
+                normalized.add(TkOpenXReturnUrlValidator.key(TkOpenXReturnUrlValidator.normalize(item, loopback)));
+            } catch (RuntimeException ex) {
+                throw ServiceExceptionUtil.invalidParamException("X 授权完成回跳白名单包含非法地址");
+            }
+        }
+        if (normalized.isEmpty()) return null;
+        try {
+            return JsonUtils.toJsonString(new ArrayList<>(normalized));
+        } catch (Exception ex) {
+            throw ServiceExceptionUtil.invalidParamException("X 授权完成回跳白名单格式不正确");
+        }
     }
 
     private TkOpenApiClientDO copyEditable(TkOpenApiClientAdminVO.CreateReq request, TkOpenApiClientDO target) {
@@ -134,6 +187,7 @@ public class TkOpenApiClientAdminService {
                 .setAuthCallbackUrl(StrUtil.trim(request.getAuthCallbackUrl()))
                 .setPublishCallbackUrl(StrUtil.trim(request.getPublishCallbackUrl()))
                 .setAllowedIps(StrUtil.trim(request.getAllowedIps()))
+                .setReturnUrlWhitelist(StrUtil.trim(request.getReturnUrlWhitelist()))
                 .setPermissions(request.getPermissions())
                 .setRateLimitPerMinute(request.getRateLimitPerMinute())
                 .setDailyQuota(request.getDailyQuota())
@@ -156,6 +210,7 @@ public class TkOpenApiClientAdminService {
         response.setAuthCallbackUrl(client.getAuthCallbackUrl());
         response.setPublishCallbackUrl(client.getPublishCallbackUrl());
         response.setAllowedIps(client.getAllowedIps());
+        response.setReturnUrlWhitelist(client.getReturnUrlWhitelist());
         response.setPermissions(client.getPermissions());
         response.setRateLimitPerMinute(client.getRateLimitPerMinute());
         response.setDailyQuota(client.getDailyQuota());

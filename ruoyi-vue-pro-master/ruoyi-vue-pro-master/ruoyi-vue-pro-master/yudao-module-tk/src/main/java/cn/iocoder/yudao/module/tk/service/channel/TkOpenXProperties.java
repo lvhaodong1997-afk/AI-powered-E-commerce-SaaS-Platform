@@ -12,6 +12,9 @@ import java.util.List;
 @ConfigurationProperties(prefix = "tk.x-open-api")
 public class TkOpenXProperties {
     private boolean enabled;
+    /** Development-only HTTP loopback returnUrl exception. Must stay false in production. */
+    private boolean allowInsecureLoopbackReturnUrl;
+    /** Deprecated and ignored for authorization; retained so old YAML still binds. */
     private List<Grant> grants = Collections.emptyList();
 
     @Data

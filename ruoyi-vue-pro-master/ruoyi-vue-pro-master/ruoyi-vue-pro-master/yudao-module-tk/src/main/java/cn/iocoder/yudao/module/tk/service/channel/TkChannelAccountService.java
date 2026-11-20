@@ -7,6 +7,8 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.social.TkSocialAuthSessionDO;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialAccountMapper;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.TkSocialAuthSessionMapper;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiException;
+import cn.iocoder.yudao.module.tk.service.channel.TkOpenXAuthService;
+import cn.iocoder.yudao.module.tk.service.open.x.TkOpenXCallbackOutcome;
 import cn.iocoder.yudao.module.tk.service.scope.TkDataScopeService;
 import cn.iocoder.yudao.module.tk.service.scope.TkUserScope;
 import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAuthService;
@@ -40,6 +42,7 @@ public class TkChannelAccountService {
     private final TkSocialTokenCipher cipher;
     private final PlatformTransactionManager transactions;
     private final TkOpenXAccess openAccess;
+    private final TkOpenXAuthService openXAuth;
     private final SecureRandom random = new SecureRandom();
 
     public boolean ready(String channel) {
@@ -86,7 +89,7 @@ public class TkChannelAccountService {
     }
 
     public String openConsent(TkSocialAuthSessionDO row, String browserToken) {
-        openAccess.requireSessionGrant(row, "x.auth");
+        openXAuth.assertClientPermission(row.getOpenClientId(), "x.auth");
         String state = secret(), verifier = secret();
         String url = oauth.authorization(TkChannelProperties.X, properties.require(TkChannelProperties.X), state, verifier);
         int updated = sessions.update(null, new UpdateWrapper<TkSocialAuthSessionDO>()
@@ -100,13 +103,19 @@ public class TkChannelAccountService {
     }
 
     public boolean callback(String channel, String code, String state, String error, String browserToken) {
-        if (!ready(channel) || state == null || !state.matches("[A-Za-z0-9_-]{43}")) return false;
+        return completeCallback(channel, code, state, error, browserToken).isSuccess();
+    }
+
+    public TkOpenXCallbackOutcome completeCallback(String channel, String code, String state, String error, String browserToken) {
+        TkOpenXCallbackOutcome open = openXAuth.handleOfficialCallback(channel, code, state, error, browserToken);
+        if (open.isHandled()) return open;
+        if (!ready(channel) || state == null || !state.matches("[A-Za-z0-9_-]{43}")) return TkOpenXCallbackOutcome.page(false);
         TkSocialAuthSessionDO session = sessions.findByStateHash(TkSocialAuthService.hash(state));
-        if (session == null || !channel.equals(session.getPlatform()) || session.getTenantId() == null) return false;
+        if (session == null || !channel.equals(session.getPlatform()) || session.getTenantId() == null) return TkOpenXCallbackOutcome.page(false);
         if (session.getOpenClientId() != null && (browserToken == null || !browserToken.matches("[0-9a-f]{64}")
-                || !TkSocialAuthService.hash(browserToken).equals(session.getOpenConsentHash()))) return false;
+                || !TkSocialAuthService.hash(browserToken).equals(session.getOpenConsentHash()))) return TkOpenXCallbackOutcome.page(false);
         return TenantUtils.execute(session.getTenantId(), () -> {
-            if (sessions.claim(session.getId(), "PENDING", "PROCESSING", LocalDateTime.now()) != 1) return false;
+            if (sessions.claim(session.getId(), "PENDING", "PROCESSING", LocalDateTime.now()) != 1) return TkOpenXCallbackOutcome.page(false);
             String stage = "CALLBACK_PARAMS";
             try {
                 if (error != null || code == null || code.length() > 4096 || code.isEmpty()) throw new IllegalArgumentException();
@@ -120,12 +129,17 @@ public class TkChannelAccountService {
                 String external = required(profile, "id");
                 if (!external.matches("[A-Za-z0-9_-]{1,128}")) throw new IllegalArgumentException();
                 if (session.getOpenClientId() != null) {
-                    TkOpenXProperties.Grant grant = openAccess.requireSessionGrant(session, "x.auth");
-                    if (!TkChannelProperties.X.equals(channel)
-                            || (grant.isPilot() && !external.equals(grant.getXUserId()))) {
-                        throw new IllegalArgumentException("Unexpected X account");
-                    }
-                    rejectEndUserAccountReuse(session, external);
+                    if (!TkChannelProperties.X.equals(channel)) throw new IllegalArgumentException("Unexpected channel");
+                    openXAuth.assertClientPermission(session.getOpenClientId(), "x.auth");
+                    String displayName = truncate(profile.path("name").asText(external));
+                    String username = truncate(profile.path("username").asText());
+                    openXAuth.importAuthorized(session.getOpenClientId(), session.getOpenEndUserId(), external,
+                            displayName, username, access, refresh, expires(token));
+                    sessions.update(null, new UpdateWrapper<TkSocialAuthSessionDO>().eq("id", session.getId())
+                            .eq("tenant_id", session.getTenantId()).set("open_consent_hash", null));
+                    if (sessions.finish(session.getId(), "PROCESSING", "SUCCESS", null, null, LocalDateTime.now()) != 1)
+                        throw new IllegalStateException("OAuth session expired");
+                    return TkOpenXCallbackOutcome.page(true);
                 }
                 stage = "SAVE_ACCOUNT";
                 new TransactionTemplate(transactions).executeWithoutResult(status -> {
@@ -149,25 +163,19 @@ public class TkChannelAccountService {
                     account.setTokenType("OAUTH2"); account.setTokenExpiresAt(expires(token));
                     account.setStatus("AUTHORIZED"); account.setFailReason(null); account.setLastAuthTime(LocalDateTime.now());
                     if (existing) accounts.updateById(account); else accounts.insert(account);
-                    if (session.getOpenClientId() != null) {
-                        sessions.update(null, new UpdateWrapper<TkSocialAuthSessionDO>().eq("id", session.getId())
-                                .eq("tenant_id", session.getTenantId()).set("open_account_id", account.getId())
-                                .set("open_consent_hash", null));
-                    }
                     if (sessions.finish(session.getId(), "PROCESSING", "SUCCESS", null, null, LocalDateTime.now()) != 1)
                         throw new IllegalStateException("OAuth session expired");
                 });
-                return true;
+                return TkOpenXCallbackOutcome.page(true);
             } catch (RuntimeException ex) {
                 if (TkChannelProperties.X.equals(channel)) {
                     log.warn("X OAuth callback failed: stage={}, reason={}", stage, callbackFailureReason(ex));
                 }
                 sessions.finish(session.getId(), "PROCESSING", "FAILED", null, "Authorization failed", LocalDateTime.now());
-                return false;
+                return TkOpenXCallbackOutcome.page(false);
             }
         });
     }
-
     private static String callbackFailureReason(RuntimeException ex) {
         if (ex instanceof TkSocialPlatformException) {
             String code = ((TkSocialPlatformException) ex).getCode();

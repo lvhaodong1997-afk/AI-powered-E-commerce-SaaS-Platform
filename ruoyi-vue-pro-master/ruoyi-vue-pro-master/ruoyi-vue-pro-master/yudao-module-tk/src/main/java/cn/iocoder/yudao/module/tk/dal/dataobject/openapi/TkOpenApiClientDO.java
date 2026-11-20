@@ -28,6 +28,7 @@ public class TkOpenApiClientDO extends BaseDO {
     private String publishCallbackUrl;
     private String allowedIps;
     private String permissions;
+    private String returnUrlWhitelist;
     private Integer rateLimitPerMinute;
     private Integer dailyQuota;
     private Integer status;

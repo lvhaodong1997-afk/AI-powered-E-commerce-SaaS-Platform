@@ -53,6 +53,27 @@ class TkOpenApiClientAdminServiceTest {
         assertNull(captor.getValue().getCallbackSecretCipher());
     }
 
+    @Test
+    void shouldPreserveUnknownPermissionsWhenUpdating() {
+        TkOpenApiClientMapper mapper = mock(TkOpenApiClientMapper.class);
+        TkOpenApiSecretCipher cipher = mock(TkOpenApiSecretCipher.class);
+        when(mapper.selectByClientId("client_b")).thenReturn(new TkOpenApiClientDO().setId(1L)
+                .setClientId("client_b").setPermissions("auth,media,future.perm"));
+        TkOpenApiClientAdminService service = new TkOpenApiClientAdminService(mapper, cipher);
+        TkOpenApiClientAdminVO.UpdateReq request = new TkOpenApiClientAdminVO.UpdateReq();
+        request.setClientId("client_b");
+        request.setClientName("Application B");
+        request.setPermissions("auth,media,publish");
+        request.setRateLimitPerMinute(120);
+        request.setDailyQuota(10000);
+        request.setStatus(0);
+        service.update(request);
+        ArgumentCaptor<TkOpenApiClientDO> captor = ArgumentCaptor.forClass(TkOpenApiClientDO.class);
+        verify(mapper).updateById(captor.capture());
+        assertTrue(captor.getValue().getPermissions().contains("future.perm"));
+        assertTrue(captor.getValue().getPermissions().contains("publish"));
+    }
+
     private TkOpenApiClientAdminVO.CreateReq createRequest() {
         TkOpenApiClientAdminVO.CreateReq request = new TkOpenApiClientAdminVO.CreateReq();
         request.setClientName("Application B");

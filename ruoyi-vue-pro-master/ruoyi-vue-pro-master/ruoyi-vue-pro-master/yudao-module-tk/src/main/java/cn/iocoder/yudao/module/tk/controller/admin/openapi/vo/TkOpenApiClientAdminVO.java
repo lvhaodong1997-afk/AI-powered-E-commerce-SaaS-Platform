@@ -27,6 +27,8 @@ public final class TkOpenApiClientAdminVO {
         private String publishCallbackUrl;
         @Size(max = 2048)
         private String allowedIps;
+        @Size(max = 4096)
+        private String returnUrlWhitelist;
         @Size(max = 512)
         private String permissions;
         @Min(1) @Max(10000)
@@ -69,6 +71,7 @@ public final class TkOpenApiClientAdminVO {
         private String authCallbackUrl;
         private String publishCallbackUrl;
         private String allowedIps;
+        private String returnUrlWhitelist;
         private String permissions;
         private Integer rateLimitPerMinute;
         private Integer dailyQuota;

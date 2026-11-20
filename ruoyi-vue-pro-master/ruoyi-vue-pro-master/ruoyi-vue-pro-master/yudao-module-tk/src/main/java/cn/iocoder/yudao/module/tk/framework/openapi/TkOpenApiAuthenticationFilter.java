@@ -152,7 +152,7 @@ public class TkOpenApiAuthenticationFilter extends OncePerRequestFilter {
 
     private String requiredPermission(String uri) {
         if (uri.startsWith("/admin-api/tk/open/v1/x/")) {
-            return uri.startsWith("/admin-api/tk/open/v1/x/publish/") ? "x.publish" : "x.auth";
+            return (uri.startsWith("/admin-api/tk/open/v1/x/publish/") || uri.startsWith("/admin-api/tk/open/v1/x/media/")) ? "x.publish" : "x.auth";
         }
         if (uri.contains("/media/")) {
             return "media";
