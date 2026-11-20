@@ -26,11 +26,26 @@ class TkChannelHttpTest {
         }
     }
 
+    @Test void routesYouTubeApiCallsThroughTheConfiguredProxy() {
+        social.getProxy().setEnabled(true);
+        social.getProxy().setHost("proxy.example");
+        social.getProxy().setPort(3128);
+        for (String url : new String[]{"https://oauth2.googleapis.com/token", "https://www.googleapis.com:443/youtube/v3/channels",
+                "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable"}) {
+            Proxy proxy = http.proxyFor(URI.create(url));
+            assertEquals(Proxy.Type.HTTP, proxy.type(), url);
+            assertEquals(InetSocketAddress.createUnresolved("proxy.example", 3128), proxy.address(), url);
+        }
+    }
+
     @Test void leavesOtherTargetsAndDisabledProxyOnTheExistingConnectionPath() {
         URI x = URI.create(TkChannelOAuthClient.X_API + "/users/me");
         assertSame(Proxy.NO_PROXY, http.proxyFor(x));
+        assertSame(Proxy.NO_PROXY, http.proxyFor(URI.create("https://oauth2.googleapis.com/token")));
         social.getProxy().setEnabled(true);
-        for (String url : new String[]{"https://oauth2.googleapis.com/token", "https://www.googleapis.com/upload/youtube/v3/videos",
+        for (String url : new String[]{"http://oauth2.googleapis.com/token", "https://oauth2.googleapis.com.example/token",
+                "https://www.googleapis.com:444/youtube/v3/channels", "https://user@www.googleapis.com/youtube/v3/channels",
+                "https://accounts.google.com/o/oauth2/v2/auth",
                 "http://api.x.com/2/users/me", "https://api.x.com.example/2/users/me",
                 "https://api.x.com:444/2/users/me", "https://user@api.x.com/2/users/me"}) {
             assertSame(Proxy.NO_PROXY, http.proxyFor(URI.create(url)));

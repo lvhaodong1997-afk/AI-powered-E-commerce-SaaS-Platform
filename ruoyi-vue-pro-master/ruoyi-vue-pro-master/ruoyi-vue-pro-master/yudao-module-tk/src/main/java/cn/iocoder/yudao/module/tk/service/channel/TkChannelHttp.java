@@ -26,8 +26,11 @@ class TkChannelHttp {
     private final TkSocialProperties social;
 
     Proxy proxyFor(URI target) {
-        if ("https".equalsIgnoreCase(target.getScheme()) && "api.x.com".equalsIgnoreCase(target.getHost())
-                && (target.getPort() == -1 || target.getPort() == 443) && target.getUserInfo() == null) {
+        String host = target.getHost();
+        if ("https".equalsIgnoreCase(target.getScheme())
+                && (target.getPort() == -1 || target.getPort() == 443) && target.getUserInfo() == null
+                && ("api.x.com".equalsIgnoreCase(host) || "oauth2.googleapis.com".equalsIgnoreCase(host)
+                || "www.googleapis.com".equalsIgnoreCase(host))) {
             return TkSocialHttpTransport.proxy(social);
         }
         return Proxy.NO_PROXY;
