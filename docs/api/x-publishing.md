@@ -33,7 +33,7 @@ tk.x-open-api.grants 已被忽略，保留只是为了旧配置还能启动。�
 2. 打开返回的 authorizeUrl 完成同意页，再跳转 X。OAuth state 是随机值并只存哈希，一次性且有 TTL，继续使用 PKCE S256。
 3. 无 returnUrl：关闭页面，用 GET /admin-api/tk/open/v1/x/auth/sessions/{authSessionId} 轮询。轮询不消耗票据。
 4. 有 returnUrl：平台只把已校验白名单地址加上一次性 ticket（失败时另有 error=auth_failed）。回跳不含 X token、refresh 或 HMAC secret。接入方后端用 HMAC 调用 POST /admin-api/tk/open/v1/x/auth/tickets/redeem 原子消费票据。重放、跨 client、过期都会拒绝。浏览器回跳重试不会重做 OAuth；未消费的同一票据可再次出现在回跳中。会话已进入 SUCCESS/FAILED 终态后不会再签发新票据；票据已被消费时，回跳最多带 error=already_completed，不会再发一张可用 ticket。
-5. 服务端通知复用现有 authCallbackUrl 投递网关（签名、超时、重试、SSRF 防护、幂等），事件为 authorization.completed / authorization.failed。通知载荷和日志只有会话与连接标识，不含 token 或原始异常。
+5. 服务端通知复用现有 authCallbackUrl 投递网关（签名、超时、重试、SSRF 防护、幂等），事件为 authorization.completed / authorization.failed。失败通知和授权会话查询返回受控的 `failReason`，例如 `AUTH_DENIED`、`AUTH_EXPIRED`、`CONSENT_MISMATCH`、`X_ACCOUNT_ALREADY_BOUND` 或 `CHANNEL_HTTP_429`；不含 token 或原始异常。
 
 returnUrl 白名单在开放 API 管理页配置，精确匹配 scheme、host、port、path。拒绝 userinfo、fragment、query、非 HTTPS、后缀通配、自定义 scheme。不要把客户端传来的 query 透传到回跳地址。开发环境如需 http://127.0.0.1 或 http://localhost，必须显式打开 tk.x-open-api.allow-insecure-loopback-return-url（默认 false），且该地址仍须出现在该调用方白名单中。生产环境不要打开这个例外。
 

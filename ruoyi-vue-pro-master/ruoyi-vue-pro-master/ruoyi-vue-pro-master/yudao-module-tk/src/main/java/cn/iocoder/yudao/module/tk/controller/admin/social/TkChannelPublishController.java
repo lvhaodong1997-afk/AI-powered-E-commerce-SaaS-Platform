@@ -109,10 +109,13 @@ public class TkChannelPublishController {
                     .cacheControl(CacheControl.noStore()).header("Referrer-Policy", "no-referrer").build();
         }
         boolean ok = outcome.isSuccess();
+        String reason = outcome.getFailReason();
         return ResponseEntity.ok().contentType(new MediaType("text", "html", java.nio.charset.StandardCharsets.UTF_8))
                 .header("Referrer-Policy", "no-referrer").cacheControl(CacheControl.noStore())
                 .body("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>OAuth</title><p>"
-                        + (ok ? "授权成功，请关闭此页并返回发布页面。" : "授权未完成，请关闭此页后重试。") + "</p></html>");
+                        + (ok ? "授权成功，请关闭此页并返回发布页面。" : "授权未完成，请关闭此页后重试。") + "</p>"
+                        + (reason == null ? "" : "<p>错误码：<code>"
+                        + org.springframework.web.util.HtmlUtils.htmlEscape(reason) + "</code></p>") + "</html>");
     }
 
     @DeleteMapping("/accounts/{id}") @PreAuthorize(AUTHORIZE)

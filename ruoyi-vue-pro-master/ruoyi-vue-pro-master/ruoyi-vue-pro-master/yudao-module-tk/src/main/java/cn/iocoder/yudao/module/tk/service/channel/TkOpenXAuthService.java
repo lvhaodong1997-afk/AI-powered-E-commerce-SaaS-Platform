@@ -191,6 +191,10 @@ public class TkOpenXAuthService {
         row.setStatus("PROCESSING");
         row.setConsentHash(null);
         sessions.updateById(row);
+        if ("access_denied".equals(error)) {
+            fail(row, "AUTH_DENIED");
+            return outcome(row, false, true);
+        }
         try {
             if (error != null || code == null || code.isEmpty() || code.length() > 4096) {
                 throw new IllegalArgumentException("denied");
@@ -215,8 +219,9 @@ public class TkOpenXAuthService {
             enqueue(row, connection, "authorization.completed", "CONNECTION", connection.getConnectionId(), "AUTHORIZED");
             return outcome(row, true, true);
         } catch (RuntimeException ex) {
-            log.warn("X OpenAPI OAuth callback failed: reason={}", sanitize(ex));
-            fail(row, sanitize(ex));
+            String reason = sanitize(ex);
+            log.warn("X OpenAPI OAuth callback failed: reason={}", reason);
+            fail(row, reason);
             return outcome(row, false, true);
         }
     }
@@ -284,7 +289,7 @@ public class TkOpenXAuthService {
 
     private TkOpenXCallbackOutcome outcome(TkOpenXAuthSessionDO row, boolean success, boolean mayIssue) {
         if (row.getReturnUrl() == null || row.getReturnUrl().isEmpty()) {
-            return TkOpenXCallbackOutcome.page(success);
+            return callbackPage(row, success);
         }
         try {
             URI allowed = TkOpenXReturnUrlValidator.requireWhitelisted(row.getReturnUrl(), whitelist(row.getClientId()),
@@ -306,13 +311,19 @@ public class TkOpenXAuthService {
                     TkOpenXReturnUrlValidator.redirect(allowed, TkOpenXReturnUrlValidator.ticketParams(ticket, success)));
         } catch (RuntimeException ex) {
             log.warn("X OpenAPI returnUrl redirect skipped: reason=RETURN_URL_NOT_ALLOWED");
-            return TkOpenXCallbackOutcome.page(success);
+            return callbackPage(row, success);
         }
+    }
+
+    private static TkOpenXCallbackOutcome callbackPage(TkOpenXAuthSessionDO row, boolean success) {
+        return !success && "FAILED".equals(row.getStatus())
+                ? TkOpenXCallbackOutcome.failurePage(safeFailureReason(row.getFailReason()))
+                : TkOpenXCallbackOutcome.page(success);
     }
 
     private void fail(TkOpenXAuthSessionDO row, String reason) {
         row.setStatus("FAILED");
-        row.setFailReason(reason);
+        row.setFailReason(safeFailureReason(reason));
         row.setCodeVerifierCipher(null);
         row.setConsentHash(null);
         sessions.updateById(row);
@@ -336,6 +347,7 @@ public class TkOpenXAuthService {
         payload.put("accountName", connection == null ? null : connection.getDisplayName());
         payload.put("username", connection == null ? null : connection.getUsername());
         payload.put("status", status);
+        if ("FAILED".equals(status)) payload.put("failReason", safeFailureReason(row.getFailReason()));
         payload.put("endUserId", row.getEndUserId());
         return payload;
     }
@@ -365,7 +377,7 @@ public class TkOpenXAuthService {
         result.put("authSessionId", row.getAuthSessionId());
         result.put("status", row.getStatus());
         result.put("connectionId", row.getConnectionId());
-        result.put("failReason", row.getFailReason());
+        result.put("failReason", "FAILED".equals(row.getStatus()) ? safeFailureReason(row.getFailReason()) : null);
         result.put("expireTime", row.getExpireTime());
         result.put("endUserId", row.getEndUserId());
         if (row.getWorkspaceId() != null) result.put("workspaceId", row.getWorkspaceId());
@@ -419,6 +431,28 @@ public class TkOpenXAuthService {
         return value;
     }
 
+    private static String safeFailureReason(String reason) {
+        if (reason == null) return "INTERNAL_ERROR";
+        if (isChannelHttpFailure(reason)) return reason;
+        switch (reason) {
+            case "AUTH_DENIED":
+            case "AUTH_EXPIRED":
+            case "CONSENT_MISMATCH":
+            case "X_ACCOUNT_ALREADY_BOUND":
+            case "PLATFORM_ERROR":
+            case "INVALID_INPUT_OR_RESPONSE":
+            case "INVALID_STATE_OR_CONFIGURATION":
+            case "INTERNAL_ERROR":
+                return reason;
+            default:
+                return "INTERNAL_ERROR";
+        }
+    }
+
+    private static boolean isChannelHttpFailure(String reason) {
+        return reason != null && reason.matches("CHANNEL_HTTP_[1-5][0-9]{2}");
+    }
+
     private static LocalDateTime expires(JsonNode token) {
         int seconds = token.path("expires_in").asInt();
         if (seconds <= 0) throw new IllegalArgumentException("Missing token expiration");
@@ -440,7 +474,7 @@ public class TkOpenXAuthService {
         }
         if (ex instanceof TkSocialPlatformException) {
             String code = ((TkSocialPlatformException) ex).getCode();
-            if (code != null && code.matches("CHANNEL_HTTP_[1-5][0-9]{2}")) return code;
+            if (isChannelHttpFailure(code)) return code;
             return "PLATFORM_ERROR";
         }
         if (ex instanceof IllegalArgumentException) return "INVALID_INPUT_OR_RESPONSE";

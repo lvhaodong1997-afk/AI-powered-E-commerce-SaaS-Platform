@@ -48,6 +48,7 @@ class TkOpenXAuthServiceTest {
     private final TkOpenXTicketService tickets = mock(TkOpenXTicketService.class);
     private final TkChannelOAuthClient oauth = mock(TkChannelOAuthClient.class);
     private final TkOpenXTokenService tokens = mock(TkOpenXTokenService.class);
+    private final TkOpenApiCallbackService callbacks = mock(TkOpenApiCallbackService.class);
     private final PlatformTransactionManager tx = mock(PlatformTransactionManager.class);
     private TkOpenXAuthService service;
 
@@ -62,7 +63,7 @@ class TkOpenXAuthServiceTest {
         channels.setX(x);
         when(tx.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         service = new TkOpenXAuthService(access, sessions, connections, clients, channels,
-                oauth, mock(TkSocialTokenCipher.class), tickets, tokens, mock(TkOpenApiCallbackService.class), tx);
+                oauth, mock(TkSocialTokenCipher.class), tickets, tokens, callbacks, tx);
         TkOpenApiContext.set(new TkOpenApiPrincipal("client-a", "A", "x.auth,x.publish"), "req");
         when(clients.selectByClientId("client-a")).thenReturn(new TkOpenApiClientDO()
                 .setClientId("client-a").setStatus(0).setPermissions("x.auth")
@@ -88,6 +89,35 @@ class TkOpenXAuthServiceTest {
         TkOpenXCallbackOutcome outcome = service.handleOfficialCallback("x", "code",
                 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ", null, "ab".repeat(32));
         assertFalse(outcome.isHandled());
+    }
+
+    @Test
+    void oauthDenialSharesOnlyTheSafeCodeWithThePagePollAndBusinessEvent() {
+        String browserToken = "ab".repeat(32);
+        TkOpenXAuthSessionDO row = pending().setConsentHash(
+                cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAuthService.hash(browserToken));
+        when(sessions.selectByOauthStateHashForUpdate(any())).thenReturn(row);
+        when(sessions.selectByClientAndSessionId("client-a", row.getAuthSessionId())).thenReturn(row);
+
+        TkOpenXCallbackOutcome outcome = service.handleOfficialCallback("x", "fake-oauth-code",
+                row.getAuthSessionId(), "access_denied", browserToken);
+        assertFalse(outcome.isSuccess());
+        assertNull(outcome.getRedirectUrl());
+        assertEquals("AUTH_DENIED", outcome.getFailReason());
+        assertEquals("AUTH_DENIED", service.session(row.getAuthSessionId()).get("failReason"));
+        verify(callbacks).enqueueOnce(eq("client-a"), eq("authorization.failed"), eq("AUTH_SESSION"),
+                eq(row.getAuthSessionId()), argThat(payload -> "AUTH_DENIED".equals(payload.get("failReason"))
+                        && !payload.toString().contains("fake-oauth-code")));
+        verifyNoInteractions(oauth, tokens);
+    }
+
+    @Test
+    void statusNeverExposesAnUnrecognizedStoredReason() {
+        TkOpenXAuthSessionDO row = pending().setStatus("FAILED").setFailReason("<raw provider response>");
+        when(sessions.selectByClientAndSessionId("client-a", row.getAuthSessionId())).thenReturn(row);
+        assertEquals("INTERNAL_ERROR", service.session(row.getAuthSessionId()).get("failReason"));
+        row.setFailReason("CHANNEL_HTTP_429");
+        assertEquals("CHANNEL_HTTP_429", service.session(row.getAuthSessionId()).get("failReason"));
     }
 
     @Test
