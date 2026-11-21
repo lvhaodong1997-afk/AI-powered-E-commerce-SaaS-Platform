@@ -170,6 +170,8 @@ public class TkChannelAccountService {
             } catch (RuntimeException ex) {
                 if (TkChannelProperties.X.equals(channel)) {
                     log.warn("X OAuth callback failed: stage={}, reason={}", stage, callbackFailureReason(ex));
+                } else if (TkChannelProperties.YOUTUBE.equals(channel)) {
+                    log.warn("YouTube OAuth callback failed: stage={}, reason={}", stage, callbackFailureReason(ex));
                 }
                 sessions.finish(session.getId(), "PROCESSING", "FAILED", null, "Authorization failed", LocalDateTime.now());
                 return TkOpenXCallbackOutcome.page(false);
