@@ -277,14 +277,14 @@ function panelHarness(overrides = {}, grants = ['*'], props = {}) {
   }
   const helper = load('src/views/tk/video-publish-center/components/tiktokShopBehavior.ts')
   const exposed = componentScript('TiktokShopPublishPanel.vue', [
-    'capabilities', 'accountId', 'accounts', 'activeTask', 'form', 'mediaMode', 'history', 'submitted', 'error',
+    'capabilities', 'accountId', 'accounts', 'activeTask', 'form', 'mediaMode', 'history', 'submitted', 'error', 'generatedVideos',
     'load', 'loadAccounts', 'loadHistory', 'connect', 'onOAuth', 'resetDependent', 'resetMedia', 'resetProduct', 'invalidate',
     'createTask', 'confirmTask', 'selectHistory', 'upload', 'cancelUpload', 'poller', 'selectedAccount'
   ], {
     vue: { ...vue, onMounted: () => {}, onBeforeUnmount: fn => cleanups.push(fn) },
     'element-plus': { ElMessageBox: { confirm: async () => {} } },
     '@/api/tk/tiktokShop': { TiktokShopApi: api },
-    '@/api/tk/generation': { TkGenerationApi: { getGenerationPage: async () => { calls.push('generation'); return { list: [] } } } },
+    '@/api/tk/generation': { TkGenerationApi: { getGenerationPage: async () => { calls.push('generation'); return { list: overrides.generationRows || [] } } } },
     './tiktokShopBehavior': helper,
     '../../tiktok-shop/shopPresentation': load('src/views/tk/tiktok-shop/shopPresentation.ts'),
     '@/utils/tiktokShopUpload': { createShopUpload: overrides.createShopUpload || (() => { throw new Error('unexpected upload') }) },
@@ -294,6 +294,42 @@ function panelHarness(overrides = {}, grants = ['*'], props = {}) {
   if (!overrides.capabilities) exposed.capabilities.value = configured
   return { ...exposed, window, timers, listeners, calls, api, configured, stop: () => cleanups.forEach(fn => fn()) }
 }
+
+test('Shop cannot precheck completed generation records with no video file', async () => {
+  const panel = panelHarness({
+    accounts: async () => [{ id: 1, authStatus: 'AUTHORIZED' }],
+    generationRows: [{ id: 2220, outputUrl: null }, { id: 2221, outputUrl: '  ' }, { id: 2222, outputUrl: '/uploads/video.mp4' }]
+  })
+  await panel.load()
+  assert.deepEqual(panel.generatedVideos.value.map(video => video.id), [2222])
+  Object.assign(panel.form, { generationTaskId: 2220, title: '1', productId: 'p', selectionProof: 'proof', productLinkTitle: '1' })
+  await panel.createTask()
+  assert.equal(panel.error.value, 'shop.generatedVideoUnavailable')
+  assert.equal(panel.calls.includes('create'), false)
+  panel.form.generationTaskId = 2222
+  await panel.createTask()
+  assert.equal(panel.calls.filter(call => call === 'create').length, 1)
+  assert.equal(panel.error.value, '')
+  panel.stop()
+})
+
+test('Shop tells the user to reselect when the video expires after selection', async () => {
+  const rejected = Object.assign(new Error('Request failed with status code 400'), {
+    response: { status: 400, data: { code: 1060000024 } }
+  })
+  const panel = panelHarness({
+    accounts: async () => [{ id: 1, authStatus: 'AUTHORIZED' }],
+    generationRows: [{ id: 2220, outputUrl: '/uploads/stale-video.mp4' }],
+    create: async () => { throw rejected }
+  })
+  await panel.load()
+  Object.assign(panel.form, { generationTaskId: 2220, title: '1', productId: 'p', selectionProof: 'proof', productLinkTitle: '1' })
+  await panel.createTask()
+  assert.equal(panel.error.value, 'shop.generatedVideoUnavailable')
+  assert.equal(panel.form.generationTaskId, undefined)
+  assert.deepEqual(panel.generatedVideos.value, [])
+  panel.stop()
+})
 
 test('workspace handoff locks the selected product to its original creator account', async () => {
   const panel = panelHarness({ accounts: async () => [{ id: 1, authStatus: 'AUTHORIZED' }, { id: 2, authStatus: 'AUTHORIZED' }] }, ['*'], {

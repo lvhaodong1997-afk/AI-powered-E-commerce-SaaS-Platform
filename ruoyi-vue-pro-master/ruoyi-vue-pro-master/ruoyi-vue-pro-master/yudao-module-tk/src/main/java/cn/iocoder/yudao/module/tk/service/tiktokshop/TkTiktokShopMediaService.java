@@ -29,6 +29,9 @@ public class TkTiktokShopMediaService {
         if(generationId!=null){TkGenerationTaskDO source=generations.selectById(generationId);if(source==null)throw invalid();tenant=source.getTenantId();company=source.getCompanyId();creator=source.getCreator();url=source.getOutputUrl();status=source.getStatus();if(!"SUCCESS".equals(status))throw invalid();}
         else {TkTiktokPublishMediaDO source=media.selectById(mediaId);if(source==null)throw invalid();tenant=source.getTenantId();company=source.getCompanyId();creator=source.getCreator();url=source.getFileUrl();status=source.getStatus();if(!"READY".equals(status))throw invalid();}
         if(!Objects.equals(tenant,account.getTenantId())||!Objects.equals(company,account.getCompanyId()))throw invalid();scope.validateReadable(tenant,company,creator);
+        if (generationId != null && (url == null || url.trim().isEmpty())) {
+            throw new GeneratedVideoUnavailableException();
+        }
         Path target=null;
         try {
             Path root=root();Files.createDirectories(root);root=root.toRealPath();
@@ -72,5 +75,6 @@ public class TkTiktokShopMediaService {
         if(n>=4&&(b[0]&255)==0x1a&&(b[1]&255)==0x45&&(b[2]&255)==0xdf&&(b[3]&255)==0xa3&&new String(b,0,n,java.nio.charset.StandardCharsets.ISO_8859_1).contains("webm"))return "video/webm";throw invalid();}
     static String fingerprint(Path path)throws Exception{MessageDigest md=MessageDigest.getInstance("SHA-256");try(InputStream input=Files.newInputStream(path)){byte[] b=new byte[65536];int n;long total=0;while((n=input.read(b))!=-1){total+=n;if(total>TkTiktokShopUploadService.MAX_BYTES)throw invalid();md.update(b,0,n);}}StringBuilder out=new StringBuilder();for(byte b:md.digest())out.append(String.format("%02x",b&255));return out.toString();}
     private static IllegalArgumentException invalid(){return new IllegalArgumentException("Video unavailable, changed or unsupported; choose an owned MP4, MOV or WEBM video up to 500 MiB with aspect 9:16 through 16:9");}
+    public static final class GeneratedVideoUnavailableException extends IllegalArgumentException {}
     @Getter @AllArgsConstructor public static class Snapshot {private final Path path;private final String fingerprint;private final long size;private final String mimeType;}
 }

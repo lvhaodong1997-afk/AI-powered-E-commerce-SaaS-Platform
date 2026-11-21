@@ -36,6 +36,22 @@ class TkTiktokShopMediaServiceTest {
     TkOssObjectStorageService oss=mock(TkOssObjectStorageService.class);
     TkTiktokShopMediaService service(){when(local.getRootDir()).thenReturn(dir);return new TkTiktokShopMediaService(generations,media,scope,local,oss,new TkTiktokShopProperties(),new TkGenerationProperties(),new ObjectMapper());}
     TkTiktokShopAccountDO account(){TkTiktokShopAccountDO a=new TkTiktokShopAccountDO();a.setTenantId(1L);a.setCompanyId(2L);return a;}
+    @Test void rejectsCompletedGenerationWithoutAFileBeforeReadingStorage() {
+        TkTiktokShopMediaService s = service();
+        TkGenerationTaskDO task = new TkGenerationTaskDO();
+        task.setTenantId(1L);
+        task.setCompanyId(2L);
+        task.setCreator("3");
+        task.setStatus("SUCCESS");
+        when(generations.selectById(2220L)).thenReturn(task);
+        for (String url : new String[]{null, "", "  "}) {
+            task.setOutputUrl(url);
+            assertThrows(TkTiktokShopMediaService.GeneratedVideoUnavailableException.class,
+                    () -> s.snapshot(account(), 2220L, null));
+        }
+        verify(scope, times(3)).validateReadable(1L, 2L, "3");
+        verifyNoInteractions(local, oss);
+    }
     @Test void rejectsCrossTenantAndCompanyBeforeResolvingAnyMedia(){
         TkTiktokShopMediaService s=service();TkTiktokPublishMediaDO m=new TkTiktokPublishMediaDO();m.setTenantId(1L);m.setCompanyId(3L);m.setStatus("READY");when(media.selectById(7L)).thenReturn(m);
         assertThrows(IllegalArgumentException.class,()->s.snapshot(account(),null,7L));m.setCompanyId(2L);m.setTenantId(9L);

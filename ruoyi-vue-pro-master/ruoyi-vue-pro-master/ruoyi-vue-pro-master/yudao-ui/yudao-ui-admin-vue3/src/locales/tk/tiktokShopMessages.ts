@@ -122,6 +122,8 @@ const entries: Record<string, [string, string]> = {
   'shop.popupBlocked': ['授权窗口被浏览器拦截，请允许弹窗后重试。', 'The authorization popup was blocked. Allow popups and try again.'],
   'shop.invalidCapability': ['当前授权回调地址无效，无法安全打开授权。', 'The callback origin is invalid, so authorization cannot be opened safely.'],
   'shop.selectVideo': ['选择系统成片', 'Choose generated video'],
+  'shop.noGeneratedVideos': ['暂无可用成片，可上传已有视频', 'No generated videos available. Upload a video instead.'],
+  'shop.generatedVideoUnavailable': ['所选成片文件已不可用，请换一条成片或上传已有视频。', 'This generated video is no longer available. Choose another video or upload a file.'],
   'shop.uploadVideo': ['上传已有视频', 'Upload existing video'],
   'shop.videoHint': ['最大 {{size}} MiB，支持 {{formats}}。', 'Maximum {{size}} MiB. Supported formats: {{formats}}.'],
   'shop.uploading': ['上传中 {{percent}}%', 'Uploading {{percent}}%'],

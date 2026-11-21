@@ -13,6 +13,11 @@ class TkTiktokShopPublishControllerTest {
         org.springframework.test.web.servlet.MockMvc mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new TkTiktokShopPublishController(service,null,null)).setControllerAdvice(new TkTiktokShopExceptionHandler()).build();
         String response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/tk/tiktok-shop/publish/tasks").contentType("application/json").content("{}")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest()).andReturn().getResponse().getContentAsString();
         assertTrue(response.contains("selection"));assertFalse(response.contains("secret credential"));
+        org.mockito.Mockito.doThrow(new TkTiktokShopMediaService.GeneratedVideoUnavailableException())
+                .when(service).create(org.mockito.ArgumentMatchers.any());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/tk/tiktok-shop/publish/tasks").contentType("application/json").content("{}"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(1060000024));
         org.mockito.Mockito.doThrow(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,"private-path")).when(service).create(org.mockito.ArgumentMatchers.any());
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/tk/tiktok-shop/publish/tasks").contentType("application/json").content("{}")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict());
     }

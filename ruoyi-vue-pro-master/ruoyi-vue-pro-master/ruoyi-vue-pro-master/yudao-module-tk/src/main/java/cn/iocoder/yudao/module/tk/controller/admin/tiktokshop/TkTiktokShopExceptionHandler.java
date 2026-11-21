@@ -1,11 +1,14 @@
 package cn.iocoder.yudao.module.tk.controller.admin.tiktokshop;
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopApiException;
+import cn.iocoder.yudao.module.tk.service.tiktokshop.TkTiktokShopMediaService.GeneratedVideoUnavailableException;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+
+import static cn.iocoder.yudao.module.tk.enums.ErrorCodeConstants.TK_TIKTOK_PUBLISH_VIDEO_REQUIRED;
 
 /** Shop-local error boundary. Upstream messages, causes and credential-bearing URLs never reach users. */
 @RestControllerAdvice(basePackages="cn.iocoder.yudao.module.tk.controller.admin.tiktokshop")
@@ -13,6 +16,11 @@ import org.springframework.web.server.ResponseStatusException;
 public class TkTiktokShopExceptionHandler {
     @ExceptionHandler(ResponseStatusException.class) public ResponseEntity<CommonResult<Object>> conflict(ResponseStatusException ignored){return error(HttpStatus.CONFLICT,"Shop task version or idempotency input changed; refresh the task or create a new task");}
     @ExceptionHandler(IllegalArgumentException.class) public ResponseEntity<CommonResult<Object>> invalid(IllegalArgumentException ignored){return error(HttpStatus.BAD_REQUEST,"Shop selection or video is invalid, expired, changed or inaccessible; select an available product and an owned MP4/MOV/WEBM video, then check the title and AI disclosure");}
+    @ExceptionHandler(GeneratedVideoUnavailableException.class)
+    public ResponseEntity<CommonResult<Object>> generatedVideoUnavailable(GeneratedVideoUnavailableException ignored) {
+        return ResponseEntity.badRequest().body(CommonResult.error(TK_TIKTOK_PUBLISH_VIDEO_REQUIRED.getCode(),
+                "Generated video file is no longer available; choose another video or upload a file"));
+    }
     @ExceptionHandler(IllegalStateException.class) public ResponseEntity<CommonResult<Object>> unavailable(IllegalStateException ignored){return error(HttpStatus.CONFLICT,"Shop authorization or configuration is unavailable; reconnect the creator account or contact the administrator");}
     @ExceptionHandler(TkTiktokShopApiException.class)
     public ResponseEntity<CommonResult<Object>> upstream(TkTiktokShopApiException e) {

@@ -37,7 +37,9 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item :label="tt(mediaMode === 'generated' ? 'shop.selectVideo' : 'shop.uploadVideo')">
-          <el-select v-if="mediaMode === 'generated'" v-model="form.generationTaskId" @change="invalidate">
+          <el-select v-if="mediaMode === 'generated'" v-model="form.generationTaskId"
+            :disabled="!generatedVideos.length" :placeholder="tt(generatedVideos.length ? 'shop.selectVideo' : 'shop.noGeneratedVideos')"
+            @change="invalidate">
             <el-option v-for="video in generatedVideos" :key="video.id" :value="video.id" :label="`${video.title || 'Video'} (#${video.id})`" />
           </el-select>
           <input v-else type="file" :aria-label="tt('shop.uploadVideo')" accept="video/mp4,video/quicktime,video/webm" @change="upload" />
@@ -78,7 +80,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { TiktokShopApi, type ShopAccount, type ShopCapabilities, type ShopCreate, type ShopProduct, type ShopPublishSelection, type ShopTask } from '@/api/tk/tiktokShop'
-import { TkGenerationApi } from '@/api/tk/generation'
+import { TkGenerationApi, type TkGenerationTaskVO } from '@/api/tk/generation'
 import { acceptShopOAuthMessage, createShopPoller, createShopRevision, createShopSubmitter, shopAuthErrorKey, shopEnvironmentLabel, shopOAuthTimeoutMs, validateShopForm } from './tiktokShopBehavior'
 import { createShopUpload } from '@/utils/tiktokShopUpload'
 import TiktokShopProductPicker from './TiktokShopProductPicker.vue'
@@ -94,7 +96,9 @@ const canCreate = computed(() => hasPermission(['tk:tiktok-shop-publish:create']
 const canReadHistory = computed(() => hasPermission(['tk:tiktok-shop-publish:query']))
 const { tt, locale } = useTkI18n(), capabilities = ref<ShopCapabilities>(), accounts = ref<ShopAccount[]>([]), error = ref(''), loading = ref(false)
 const taskDetails = ref<HTMLElement>()
-const accountId = ref<number>(), mediaMode = ref<'generated' | 'upload'>('generated'), generatedVideos = ref<any[]>([]), history = ref<ShopTask[]>([]), activeTask = ref<ShopTask>(), creating = ref(false), confirming = ref(false), submitted = ref(false), uploadPercent = ref(0), uploading = ref(false)
+const accountId = ref<number>(), mediaMode = ref<'generated' | 'upload'>('generated'), history = ref<ShopTask[]>([]), activeTask = ref<ShopTask>(), creating = ref(false), confirming = ref(false), submitted = ref(false), uploadPercent = ref(0), uploading = ref(false)
+const generatedVideos = ref<Pick<TkGenerationTaskVO, 'id' | 'title' | 'outputUrl'>[]>([])
+const generatedVideoRequiredCode = 1060000024
 const form = reactive<Partial<ShopCreate>>({ title: '', productLinkTitle: '', productSource: 'SHOWCASE', isAiGenerated: true })
 let uploadHandle: ReturnType<typeof createShopUpload> | undefined, popup: Window | undefined, oauthSession: number | undefined, oauthTimer: number | undefined
 const revision = createShopRevision(), selectedAccount = computed(() => accounts.value.find((account) => account.id === accountId.value)), creatorEnvironment = computed(() => shopEnvironmentLabel(capabilities.value?.creatorEnvironment))
@@ -103,7 +107,25 @@ const readyToCreate = computed(() => canCreate.value && authorizedAccount.value 
 const confirmationAccount = computed(() => accounts.value.find((account) => account.id === activeTask.value?.accountId))
 const submitter = createShopSubmitter({ create: (data) => TiktokShopApi.create(data), confirm: (id, data) => TiktokShopApi.confirm(id, data), get: (id) => TiktokShopApi.get(id) })
 const poller = createShopPoller(async () => { const task = activeTask.value; const requestRevision = revision.begin(); if (!task || ['SUCCESS', 'FAILED', 'RECOVERY_REQUIRED'].includes(task.stage)) return false; const fresh = await TiktokShopApi.get(task.id); if (!revision.current(requestRevision) || activeTask.value?.id !== task.id) return false; activeTask.value = fresh; return !['SUCCESS', 'FAILED', 'RECOVERY_REQUIRED'].includes(fresh.stage) }, () => { error.value = tt('shop.operationFailed') }, { set: window.setTimeout, clear: window.clearTimeout })
-async function load() { loading.value = true; error.value = ''; try { capabilities.value = await TiktokShopApi.capabilities(); if (!capabilities.value.configured) return; await loadAccounts(); await loadHistory(); if (capabilities.value.publishingConfigured && hasPermission(['tk:generation:query'])) generatedVideos.value = (await TkGenerationApi.getGenerationPage({ pageNo: 1, pageSize: 20, status: 'SUCCESS' })).list || [] } catch (reason) { error.value = reason instanceof Error ? reason.message : tt('shop.capabilityFailed') } finally { loading.value = false } }
+async function load() {
+  loading.value = true
+  error.value = ''
+  try {
+    capabilities.value = await TiktokShopApi.capabilities()
+    if (!capabilities.value.configured) return
+    await loadAccounts()
+    await loadHistory()
+    if (capabilities.value.publishingConfigured && hasPermission(['tk:generation:query'])) {
+      const page = await TkGenerationApi.getGenerationPage({ pageNo: 1, pageSize: 20, status: 'SUCCESS' })
+      const videos: typeof generatedVideos.value = page.list || []
+      generatedVideos.value = videos.filter((video) => video.id != null && video.outputUrl?.trim())
+    }
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : tt('shop.capabilityFailed')
+  } finally {
+    loading.value = false
+  }
+}
 async function loadAccounts() {
   const wasAuthorized = authorizedAccount.value
   accounts.value = await TiktokShopApi.accounts()
@@ -148,7 +170,45 @@ async function upload(event: Event) {
   }
 }
 function cancelUpload() { revision.invalidate(); const handle = uploadHandle; uploadHandle = undefined; handle?.cancel(); uploading.value = false }
-async function createTask() { if (!readyToCreate.value || uploading.value || creating.value) return; const payload = { ...form, accountId: accountId.value } as Omit<ShopCreate, 'idempotencyKey'>; const invalid = validateShopForm(payload); if (invalid) { error.value = tt(invalid); return }; const requestRevision = revision.begin(); creating.value = true; try { const task = await submitter.create(payload); if (revision.current(requestRevision)) { activeTask.value = task; poller.start(); await loadHistory() } } catch (reason) { if (revision.current(requestRevision)) error.value = reason instanceof Error ? reason.message : tt('shop.operationFailed') } finally { creating.value = false } }
+async function createTask() {
+  if (!readyToCreate.value || uploading.value || creating.value) return
+  const payload = { ...form, accountId: accountId.value } as Omit<ShopCreate, 'idempotencyKey'>
+  if (payload.generationTaskId != null && !generatedVideos.value.some((video) => video.id === payload.generationTaskId)) {
+    form.generationTaskId = undefined
+    invalidate()
+    error.value = tt('shop.generatedVideoUnavailable')
+    return
+  }
+  const invalid = validateShopForm(payload)
+  if (invalid) {
+    error.value = tt(invalid)
+    return
+  }
+  const requestRevision = revision.begin()
+  error.value = ''
+  creating.value = true
+  try {
+    const task = await submitter.create(payload)
+    if (revision.current(requestRevision)) {
+      activeTask.value = task
+      poller.start()
+      await loadHistory()
+    }
+  } catch (reason) {
+    if (!revision.current(requestRevision)) return
+    const response = (reason as { response?: { status?: number; data?: { code?: number } } } | undefined)?.response
+    if (payload.generationTaskId != null && response?.status === 400 && response.data?.code === generatedVideoRequiredCode) {
+      generatedVideos.value = generatedVideos.value.filter((video) => video.id !== payload.generationTaskId)
+      form.generationTaskId = undefined
+      invalidate()
+      error.value = tt('shop.generatedVideoUnavailable')
+    } else {
+      error.value = reason instanceof Error ? reason.message : tt('shop.operationFailed')
+    }
+  } finally {
+    creating.value = false
+  }
+}
 async function confirmTask() { if (!activeTask.value || confirmationAccount.value?.authStatus !== 'AUTHORIZED' || confirming.value || submitted.value) return; const snapshot = activeTask.value; const requestRevision = revision.begin(); confirming.value = true; try { const task = await submitter.confirm(snapshot); if (revision.current(requestRevision) && activeTask.value?.id === snapshot.id) { activeTask.value = task; submitted.value = true; poller.start(); await loadHistory() } } catch { if (revision.current(requestRevision)) error.value = tt('shop.recovery') } finally { confirming.value = false } }
 async function selectHistory(task: ShopTask) {
   const requestRevision = revision.begin()
