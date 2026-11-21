@@ -24,6 +24,7 @@ public class TkOpenXAuthSessionDO extends BaseDO {
     private Long id;
     private String authSessionId;
     private String clientId;
+    private String workspaceId;
     private String oauthStateHash;
     private String codeVerifierCipher;
     private String returnUrl;

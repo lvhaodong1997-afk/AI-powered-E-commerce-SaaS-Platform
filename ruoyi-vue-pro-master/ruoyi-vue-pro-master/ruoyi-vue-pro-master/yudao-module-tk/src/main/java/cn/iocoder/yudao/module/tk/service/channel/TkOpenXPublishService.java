@@ -66,7 +66,7 @@ public class TkOpenXPublishService {
     public List<Map<String, Object>> connections() {
         String clientId = access.requireClient("x.auth");
         List<Map<String, Object>> result = new ArrayList<>();
-        for (TkOpenXConnectionDO row : connections.selectListByClient(clientId)) {
+        for (TkOpenXConnectionDO row : connections.selectListByClientAndWorkspace(clientId, access.workspaceId())) {
             result.add(connectionResult(row));
         }
         return result;
@@ -74,9 +74,10 @@ public class TkOpenXPublishService {
 
     public boolean revoke(String connectionId) {
         String clientId = access.requireClient("x.auth");
+        String workspaceId = access.workspaceId();
         return Boolean.TRUE.equals(new TransactionTemplate(transactions).execute(status -> {
             TkOpenXConnectionDO row = connections.selectByClientAndConnectionIdForUpdate(clientId, connectionId);
-            if (row == null) {
+            if (row == null || !java.util.Objects.equals(row.getWorkspaceId(), workspaceId)) {
                 throw TkOpenApiException.notFound("X_CONNECTION_NOT_FOUND", "connection does not exist");
             }
             String externalId = row.getExternalAccountId();
@@ -85,9 +86,10 @@ public class TkOpenXPublishService {
             tokens.clearSecrets(row);
             connections.updateById(row);
             if (externalId != null) {
-                auth.collapseDuplicates(clientId, externalId, row.getId());
+                auth.collapseDuplicates(clientId, externalId, row.getId(), workspaceId);
                 for (TkOpenXConnectionDO other : connections.selectListByClientAndExternalAccountIdForUpdate(clientId, externalId)) {
                     if (other.getId() != null && !other.getId().equals(row.getId())
+                            && java.util.Objects.equals(other.getWorkspaceId(), workspaceId)
                             && "AUTHORIZED".equals(other.getAuthStatus())) {
                         other.setAuthStatus("REVOKED");
                         other.setFailReason("Revoked by client");
@@ -111,24 +113,28 @@ public class TkOpenXPublishService {
                 || text == null || text.length() > 280 || key == null || !key.matches("[!-~]{1,128}")) {
             throw TkOpenApiException.badRequest("X_PUBLISH_INPUT_INVALID", "Invalid connectionId, mediaId, text or Idempotency-Key");
         }
+        String workspaceId = access.workspaceId();
         String payloadHash = TkSocialAuthService.hash(connectionId + "\n" + mediaId + "\n" + text);
         try {
             return new TransactionTemplate(transactions).execute(status -> {
                 TkOpenXPublishTaskDO existing = tasks.selectByClientAndIdempotencyKey(clientId, key);
                 if (existing != null) {
-                    if (!payloadHash.equals(existing.getPayloadHash())) {
+                    if (!java.util.Objects.equals(existing.getWorkspaceId(), workspaceId)
+                            || !payloadHash.equals(existing.getPayloadHash())) {
                         throw TkOpenApiException.conflict("IDEMPOTENCY_KEY_CONFLICT", "Idempotency key is in use");
                     }
                     return taskResult(existing);
                 }
                 TkOpenXConnectionDO connection = connections.selectByClientAndConnectionIdForUpdate(clientId, connectionId);
-                if (connection == null || !"AUTHORIZED".equals(connection.getAuthStatus())) {
+                if (connection == null || !java.util.Objects.equals(connection.getWorkspaceId(), workspaceId)
+                        || !"AUTHORIZED".equals(connection.getAuthStatus())) {
                     throw TkOpenApiException.conflict("X_CONNECTION_DISABLED", "X connection is missing, expired or revoked");
                 }
-                media.requireReady(clientId, mediaId);
+                media.requireReady(clientId, mediaId, workspaceId);
                 TkOpenXPublishTaskDO task = TkOpenXPublishTaskDO.builder()
                         .taskId(TkOpenApiIds.next("xtask"))
                         .clientId(clientId)
+                        .workspaceId(workspaceId)
                         .connectionId(connectionId)
                         .mediaId(mediaId)
                         .text(text)
@@ -146,7 +152,8 @@ public class TkOpenXPublishService {
         } catch (DuplicateKeyException ex) {
             TkOpenXPublishTaskDO raced = tasks.selectByClientAndIdempotencyKey(clientId, key);
             if (raced == null) throw ex;
-            if (!payloadHash.equals(raced.getPayloadHash())) {
+            if (!java.util.Objects.equals(raced.getWorkspaceId(), workspaceId)
+                    || !payloadHash.equals(raced.getPayloadHash())) {
                 throw TkOpenApiException.conflict("IDEMPOTENCY_KEY_CONFLICT", "Idempotency key is in use");
             }
             return taskResult(raced);
@@ -156,7 +163,9 @@ public class TkOpenXPublishService {
     public Map<String, Object> get(String taskId) {
         String clientId = access.requireClient("x.publish");
         TkOpenXPublishTaskDO task = tasks.selectByClientAndTaskId(clientId, taskId);
-        if (task == null) throw TkOpenApiException.notFound("X_TASK_NOT_FOUND", "publish task does not exist");
+        if (task == null || !java.util.Objects.equals(task.getWorkspaceId(), access.workspaceId())) {
+            throw TkOpenApiException.notFound("X_TASK_NOT_FOUND", "publish task does not exist");
+        }
         return taskResult(task);
     }
 
@@ -215,6 +224,7 @@ public class TkOpenXPublishService {
         result.put("username", row.getUsername());
         result.put("status", row.getAuthStatus());
         result.put("endUserId", row.getEndUserId());
+        if (row.getWorkspaceId() != null) result.put("workspaceId", row.getWorkspaceId());
         return result;
     }
 

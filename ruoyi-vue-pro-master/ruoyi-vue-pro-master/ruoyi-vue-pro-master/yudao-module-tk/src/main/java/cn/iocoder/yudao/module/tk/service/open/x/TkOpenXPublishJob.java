@@ -67,11 +67,12 @@ public class TkOpenXPublishJob {
             }
             TkOpenXConnectionDO connection = connections.selectByClientAndConnectionId(
                     task.getClientId(), task.getConnectionId());
-            if (connection == null || !"AUTHORIZED".equals(connection.getAuthStatus())) {
+            if (connection == null || !java.util.Objects.equals(connection.getWorkspaceId(), task.getWorkspaceId())
+                    || !"AUTHORIZED".equals(connection.getAuthStatus())) {
                 fail(task, "X_CONNECTION_DISABLED", "X connection is missing, expired or revoked");
                 return;
             }
-            TkOpenXMediaDO ready = media.requireReady(task.getClientId(), task.getMediaId());
+            TkOpenXMediaDO ready = media.requireReady(task.getClientId(), task.getMediaId(), task.getWorkspaceId());
             String source = media.resolveReadUrl(ready);
             String token = tokens.accessToken(connection);
             TkSocialPublishTaskDO socialTask = new TkSocialPublishTaskDO();

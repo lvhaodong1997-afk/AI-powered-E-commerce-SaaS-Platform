@@ -53,9 +53,11 @@ public interface TkOpenXConnectionMapper extends BaseMapperX<TkOpenXConnectionDO
                 .last("LIMIT 1"));
     }
 
-    default List<TkOpenXConnectionDO> selectListByClient(String clientId) {
-        return selectList(new LambdaQueryWrapperX<TkOpenXConnectionDO>()
-                .eq(TkOpenXConnectionDO::getClientId, clientId)
-                .orderByDesc(TkOpenXConnectionDO::getId));
+    default List<TkOpenXConnectionDO> selectListByClientAndWorkspace(String clientId, String workspaceId) {
+        LambdaQueryWrapperX<TkOpenXConnectionDO> query = new LambdaQueryWrapperX<>();
+        query.eq(TkOpenXConnectionDO::getClientId, clientId);
+        if (workspaceId == null) query.isNull(TkOpenXConnectionDO::getWorkspaceId);
+        else query.eq(TkOpenXConnectionDO::getWorkspaceId, workspaceId);
+        return selectList(query.orderByDesc(TkOpenXConnectionDO::getId));
     }
 }

@@ -21,6 +21,9 @@ import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialTokenCipher;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
@@ -34,6 +37,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class TkOpenXAuthServiceTest {
+    private static final String WORKSPACE = "11111111-1111-4111-8111-111111111111";
+    private static final String OTHER_WORKSPACE = "22222222-2222-4222-8222-222222222222";
     private final TkOpenXProperties properties = new TkOpenXProperties();
     private final TkOpenXAccess access = new TkOpenXAccess(properties);
     private final TkOpenXAuthSessionMapper sessions = mock(TkOpenXAuthSessionMapper.class);
@@ -66,6 +71,7 @@ class TkOpenXAuthServiceTest {
 
     @AfterEach
     void clear() {
+        RequestContextHolder.resetRequestAttributes();
         TkOpenApiContext.clear();
     }
 
@@ -166,6 +172,49 @@ class TkOpenXAuthServiceTest {
                 LocalDateTime.now().plusHours(1));
         verify(tokens).store(eq(existing), eq("access"), eq("refresh"), any());
         verify(connections).insert(any(TkOpenXConnectionDO.class));
+    }
+
+    @Test
+    void signedWorkspaceCannotReadLegacySessionOrUseItsEndUserIdAsOwnership() {
+        TkOpenXAuthSessionDO row = pending().setEndUserId(WORKSPACE);
+        when(sessions.selectByClientAndSessionId("client-a", row.getAuthSessionId())).thenReturn(row);
+        scope(WORKSPACE);
+        assertEquals("AUTH_SESSION_NOT_FOUND", assertThrows(TkOpenApiException.class,
+                () -> service.session(row.getAuthSessionId())).getCode());
+        row.setWorkspaceId(WORKSPACE);
+        assertEquals(WORKSPACE, service.session(row.getAuthSessionId()).get("workspaceId"));
+        scope(OTHER_WORKSPACE);
+        assertEquals("AUTH_SESSION_NOT_FOUND", assertThrows(TkOpenApiException.class,
+                () -> service.session(row.getAuthSessionId())).getCode());
+    }
+
+    @Test
+    void competingOAuthCallbackDoesNotOverwriteOwnerEvenAfterAnInsertRace() {
+        TkOpenXAuthSessionDO row = pending().setWorkspaceId(OTHER_WORKSPACE)
+                .setConsentHash(cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAuthService.hash("ab".repeat(32)));
+        TkOpenXConnectionDO original = new TkOpenXConnectionDO().setId(21L).setWorkspaceId(WORKSPACE)
+                .setConnectionId("xconn_original").setExternalAccountId("user-1").setAuthStatus("AUTHORIZED")
+                .setDisplayName("Original");
+        when(sessions.selectByOauthStateHashForUpdate(any())).thenReturn(row);
+        when(oauth.exchange(eq("x"), any(), eq("code"), isNull())).thenReturn(TkChannelHttp.JSON.createObjectNode()
+                .put("access_token", "access").put("refresh_token", "refresh").put("expires_in", 7200));
+        when(oauth.account("x", "access")).thenReturn(TkChannelHttp.JSON.createObjectNode()
+                .put("id", "user-1").put("name", "Different"));
+        when(connections.selectByClientAndExternalAccountIdForUpdate("client-a", "user-1"))
+                .thenReturn(null, original);
+        doThrow(new DuplicateKeyException("duplicate")).when(connections).insert(any(TkOpenXConnectionDO.class));
+
+        assertFalse(service.handleOfficialCallback("x", "code", row.getAuthSessionId(), null, "ab".repeat(32)).isSuccess());
+        assertEquals("X_ACCOUNT_ALREADY_BOUND", row.getFailReason());
+        assertEquals(WORKSPACE, original.getWorkspaceId());
+        assertEquals("Original", original.getDisplayName());
+        verify(tokens, never()).store(any(), any(), any(), any());
+    }
+
+    private static void scope(String workspaceId) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setQueryString("workspaceId=" + workspaceId);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
     }
 
     private TkOpenXAuthSessionDO pending() {

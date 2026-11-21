@@ -22,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -68,10 +69,12 @@ public class TkOpenXAuthService {
         if (endUserId != null && !endUserId.isEmpty() && !endUserId.matches("[A-Za-z0-9._:-]{1,128}")) {
             throw TkOpenApiException.badRequest("END_USER_INVALID", "endUser is invalid");
         }
+        String workspaceId = access.workspaceId();
         String sessionId = secret();
         TkOpenXAuthSessionDO row = TkOpenXAuthSessionDO.builder()
                 .authSessionId(sessionId)
                 .clientId(clientId)
+                .workspaceId(workspaceId)
                 .returnUrl(normalizedReturn)
                 .clientState(emptyToNull(clientState))
                 .endUserId(emptyToNull(endUserId))
@@ -87,7 +90,7 @@ public class TkOpenXAuthService {
     public Map<String, Object> session(String sessionId) {
         String clientId = access.requireClient("x.auth");
         TkOpenXAuthSessionDO row = sessions.selectByClientAndSessionId(clientId, requireSessionId(sessionId));
-        if (row == null) throw missingSession();
+        if (row == null || !java.util.Objects.equals(row.getWorkspaceId(), access.workspaceId())) throw missingSession();
         return sessionResult(row);
     }
 
@@ -135,11 +138,14 @@ public class TkOpenXAuthService {
         });
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> redeemTicket(String rawTicket) {
         String clientId = access.requireClient("x.auth");
         TkOpenXReturnTicketDO ticket = tickets.redeem(clientId, rawTicket, TkOpenXTicketService.PURPOSE_AUTH_RESULT);
         TkOpenXAuthSessionDO row = sessions.selectByClientAndSessionId(clientId, ticket.getAuthSessionId());
-        if (row == null) throw TkOpenApiException.notFound("TICKET_NOT_FOUND", "ticket does not exist");
+        if (row == null || !java.util.Objects.equals(row.getWorkspaceId(), access.workspaceId())) {
+            throw TkOpenApiException.notFound("TICKET_NOT_FOUND", "ticket does not exist");
+        }
         Map<String, Object> result = sessionResult(row);
         result.put("clientState", row.getClientState());
         return result;
@@ -160,7 +166,7 @@ public class TkOpenXAuthService {
     }
     public void importAuthorized(String clientId, String endUserId, String externalId, String displayName,
                                  String username, String access, String refresh, LocalDateTime expiresAt) {
-        upsertConnection(clientId, endUserId, externalId, displayName, username, access, refresh, expiresAt, null, null);
+        upsertConnection(clientId, null, endUserId, externalId, displayName, username, access, refresh, expiresAt, null, null);
     }
 
     private TkOpenXCallbackOutcome finishCallback(TkOpenXAuthSessionDO row, String code, String error,
@@ -199,7 +205,7 @@ public class TkOpenXAuthService {
             if (!external.matches("[A-Za-z0-9_-]{1,128}")) throw new IllegalArgumentException("profile");
             String name = truncate(profile.path("name").asText(external));
             String username = truncate(profile.path("username").asText());
-            TkOpenXConnectionDO connection = upsertConnection(row.getClientId(), row.getEndUserId(), external, name,
+            TkOpenXConnectionDO connection = upsertConnection(row.getClientId(), row.getWorkspaceId(), row.getEndUserId(), external, name,
                     username, accessToken, refreshToken, expires(token), row.getId(), null);
             row.setStatus("SUCCESS");
             row.setConnectionId(connection.getConnectionId());
@@ -215,7 +221,7 @@ public class TkOpenXAuthService {
         }
     }
 
-    private TkOpenXConnectionDO upsertConnection(String clientId, String endUserId, String externalId, String displayName,
+    private TkOpenXConnectionDO upsertConnection(String clientId, String workspaceId, String endUserId, String externalId, String displayName,
                                                  String username, String access, String refresh, LocalDateTime expiresAt,
                                                  Long sourceSessionId, Long sourceAccountId) {
         TkOpenXConnectionDO existing = connections.selectByClientAndExternalAccountIdForUpdate(clientId, externalId);
@@ -223,9 +229,11 @@ public class TkOpenXAuthService {
             existing = TkOpenXConnectionDO.builder()
                     .connectionId(TkOpenApiIds.next("xconn"))
                     .clientId(clientId)
+                    .workspaceId(workspaceId)
                     .externalAccountId(externalId)
                     .build();
         }
+        requireConnectionWorkspace(existing, workspaceId);
         applyConnectionProfile(existing, endUserId, displayName, username, sourceSessionId, sourceAccountId);
         if (existing.getId() == null) {
             try {
@@ -234,11 +242,12 @@ public class TkOpenXAuthService {
                 TkOpenXConnectionDO raced = connections.selectByClientAndExternalAccountIdForUpdate(clientId, externalId);
                 if (raced == null) throw ex;
                 existing = raced;
+                requireConnectionWorkspace(existing, workspaceId);
                 applyConnectionProfile(existing, endUserId, displayName, username, sourceSessionId, sourceAccountId);
             }
         }
         tokens.store(existing, access, refresh, expiresAt);
-        collapseDuplicates(clientId, existing.getExternalAccountId(), existing.getId());
+        collapseDuplicates(clientId, existing.getExternalAccountId(), existing.getId(), workspaceId);
         return existing;
     }
 
@@ -254,10 +263,17 @@ public class TkOpenXAuthService {
         if (sourceAccountId != null) existing.setSourceSocialAccountId(sourceAccountId);
     }
 
-    void collapseDuplicates(String clientId, String externalId, Long keepId) {
+    private static void requireConnectionWorkspace(TkOpenXConnectionDO connection, String workspaceId) {
+        if (!java.util.Objects.equals(connection.getWorkspaceId(), workspaceId)) {
+            throw TkOpenApiException.conflict("X_ACCOUNT_ALREADY_BOUND", "X account is already bound");
+        }
+    }
+
+    void collapseDuplicates(String clientId, String externalId, Long keepId, String workspaceId) {
         if (clientId == null || externalId == null || keepId == null) return;
         for (TkOpenXConnectionDO other : connections.selectListByClientAndExternalAccountIdForUpdate(clientId, externalId)) {
-            if (other.getId() == null || other.getId().equals(keepId)) continue;
+            if (other.getId() == null || other.getId().equals(keepId)
+                    || !java.util.Objects.equals(other.getWorkspaceId(), workspaceId)) continue;
             other.setAuthStatus("REVOKED");
             other.setFailReason("Duplicate connection collapsed");
             tokens.clearSecrets(other);
@@ -352,6 +368,7 @@ public class TkOpenXAuthService {
         result.put("failReason", row.getFailReason());
         result.put("expireTime", row.getExpireTime());
         result.put("endUserId", row.getEndUserId());
+        if (row.getWorkspaceId() != null) result.put("workspaceId", row.getWorkspaceId());
         return result;
     }
 
@@ -418,6 +435,9 @@ public class TkOpenXAuthService {
     }
 
     private static String sanitize(RuntimeException ex) {
+        if (ex instanceof TkOpenApiException && "X_ACCOUNT_ALREADY_BOUND".equals(((TkOpenApiException) ex).getCode())) {
+            return "X_ACCOUNT_ALREADY_BOUND";
+        }
         if (ex instanceof TkSocialPlatformException) {
             String code = ((TkSocialPlatformException) ex).getCode();
             if (code != null && code.matches("CHANNEL_HTTP_[1-5][0-9]{2}")) return code;

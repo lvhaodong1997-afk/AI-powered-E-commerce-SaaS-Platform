@@ -20,6 +20,9 @@ import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAuthService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
@@ -35,6 +38,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class TkOpenXPublishServiceTest {
+    private static final String WORKSPACE = "11111111-1111-4111-8111-111111111111";
+    private static final String OTHER_WORKSPACE = "22222222-2222-4222-8222-222222222222";
     private static final String CONN = "xconn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private static final String MEDIA = "media_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     private final TkOpenXProperties properties = new TkOpenXProperties();
@@ -66,12 +71,13 @@ class TkOpenXPublishServiceTest {
             return null;
         }).when(tokens).clearSecrets(any());
         when(connections.selectByClientAndConnectionIdForUpdate("client-a", CONN)).thenReturn(authorized());
-        when(media.requireReady("client-a", MEDIA)).thenReturn(new TkOpenXMediaDO().setMediaId(MEDIA).setStatus("READY")
+        when(media.requireReady("client-a", MEDIA, null)).thenReturn(new TkOpenXMediaDO().setMediaId(MEDIA).setStatus("READY")
                 .setClientId("client-a").setExpireTime(LocalDateTime.now().plusHours(1)).setFileSize(12L));
     }
 
     @AfterEach
     void clear() {
+        RequestContextHolder.resetRequestAttributes();
         TkOpenApiContext.clear();
     }
 
@@ -93,9 +99,38 @@ class TkOpenXPublishServiceTest {
                 () -> service.create(CONN, MEDIA, "hello", "key-1", null, null));
         assertEquals("X_CONNECTION_DISABLED", missing.getCode());
         when(connections.selectByClientAndConnectionIdForUpdate("client-a", CONN)).thenReturn(authorized());
-        when(media.requireReady("client-a", MEDIA)).thenThrow(TkOpenApiException.notFound("MEDIA_NOT_FOUND", "missing"));
+        when(media.requireReady("client-a", MEDIA, null)).thenThrow(TkOpenApiException.notFound("MEDIA_NOT_FOUND", "missing"));
         assertEquals("MEDIA_NOT_FOUND", assertThrows(TkOpenApiException.class,
                 () -> service.create(CONN, MEDIA, "hello", "key-1", null, null)).getCode());
+    }
+
+    @Test
+    void sameClientCannotUseAnotherWorkspacesConnectionTaskOrIdempotencyKey() {
+        scope(OTHER_WORKSPACE);
+        when(connections.selectByClientAndConnectionIdForUpdate("client-a", CONN))
+                .thenReturn(authorized().setWorkspaceId(WORKSPACE));
+        TkOpenXPublishTaskDO owned = new TkOpenXPublishTaskDO().setTaskId("xtask_1")
+                .setClientId("client-a").setWorkspaceId(WORKSPACE)
+                .setPayloadHash(TkSocialAuthService.hash(CONN + "\n" + MEDIA + "\nhello"));
+        when(tasks.selectByClientAndTaskId("client-a", "xtask_1")).thenReturn(owned);
+        when(tasks.selectByClientAndIdempotencyKey("client-a", "existing-key")).thenReturn(owned);
+        assertEquals("X_CONNECTION_NOT_FOUND", assertThrows(TkOpenApiException.class,
+                () -> service.revoke(CONN)).getCode());
+        assertEquals("X_CONNECTION_DISABLED", assertThrows(TkOpenApiException.class,
+                () -> service.create(CONN, MEDIA, "hello", "new-key", null, null)).getCode());
+        assertEquals("X_TASK_NOT_FOUND", assertThrows(TkOpenApiException.class, () -> service.get("xtask_1")).getCode());
+        assertEquals("IDEMPOTENCY_KEY_CONFLICT", assertThrows(TkOpenApiException.class,
+                () -> service.create(CONN, MEDIA, "hello", "existing-key", null, null)).getCode());
+        verifyNoInteractions(media);
+        verify(tasks, never()).insert(any(TkOpenXPublishTaskDO.class));
+        scope(WORKSPACE);
+        assertEquals("xtask_1", service.get("xtask_1").get("taskId"));
+    }
+
+    private static void scope(String workspaceId) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setQueryString("workspaceId=" + workspaceId);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
     }
 
     @Test
@@ -132,10 +167,10 @@ class TkOpenXPublishServiceTest {
 
     @Test
     void listsOnlyTheAuthenticatedClientsConnections() {
-        when(connections.selectListByClient("client-a")).thenReturn(Collections.singletonList(authorized()));
+        when(connections.selectListByClientAndWorkspace("client-a", null)).thenReturn(Collections.singletonList(authorized()));
         assertEquals(1, service.connections().size());
         assertEquals(CONN, service.connections().get(0).get("connectionId"));
-        verify(connections, never()).selectListByClient("client-b");
+        verify(connections, never()).selectListByClientAndWorkspace("client-b", null);
     }
 
     @Test
@@ -218,7 +253,7 @@ class TkOpenXPublishServiceTest {
         when(connections.selectListByClientAndExternalAccountIdForUpdate("client-a", "123")).thenReturn(Collections.singletonList(owned));
         assertTrue(service.revoke(CONN));
         verify(tokens).clearSecrets(owned);
-        verify(auth).collapseDuplicates("client-a", "123", 11L);
+        verify(auth).collapseDuplicates("client-a", "123", 11L, null);
         verify(connections).updateById(ArgumentMatchers.<TkOpenXConnectionDO>argThat(row -> "REVOKED".equals(row.getAuthStatus())
                 && "client-a".equals(row.getClientId()) && CONN.equals(row.getConnectionId())
                 && row.getAccessTokenCipher() == null && row.getSourceSocialAccountId() == null));
@@ -232,7 +267,7 @@ class TkOpenXPublishServiceTest {
     void sameClientCanHoldMultipleExternalAccounts() {
         TkOpenXConnectionDO second = new TkOpenXConnectionDO().setConnectionId("xconn_2")
                 .setClientId("client-a").setExternalAccountId("456").setAuthStatus("AUTHORIZED");
-        when(connections.selectListByClient("client-a")).thenReturn(Arrays.asList(authorized(), second));
+        when(connections.selectListByClientAndWorkspace("client-a", null)).thenReturn(Arrays.asList(authorized(), second));
         List<Map<String, Object>> listed = service.connections();
         assertEquals(2, listed.size());
         assertEquals(CONN, listed.get(0).get("connectionId"));

@@ -62,3 +62,67 @@ GET /admin-api/tk/open/v1/x/connections 列出该 HMAC 客户端自己的连接�
 - 工作台发布路径保持不变，但不要把“历史 OpenAPI 连接可继续用工作台令牌”当成无回归
 - 旧社交表 OpenAPI 在途任务会被拒绝执行且不自动取消；回调重放在票据消费后不再签发新票
 - 不做真实发帖或真实撤销用户授权
+## Workspace-scoped consumers
+
+A SaaS backend can include one `workspaceId=<lowercase UUID>` in the raw query
+string of every signed X business request. Derive it from an authenticated
+workspace on the caller's backend. Include the query in the existing HMAC target
+and keep `endUserId` as optional metadata. Browser consent and X callbacks use
+scope stored with the session; they do not accept a workspace from the browser.
+
+The provider requires the same client and workspace for session and ticket
+reads, connections and revocation, uploads and media, and publish tasks. Session
+and connection responses include `workspaceId` for scoped rows. An X account
+already connected through the same client cannot be reassigned by OAuth in a
+different workspace. Idempotency keys remain unique per client; a retry cannot
+return a task from a different workspace. Requests without `workspaceId` retain
+the legacy API and can access only legacy resources. Legacy connections are not
+automatically assigned to a workspace, even if `endUserId` matches. Review any
+legacy connections before switching the caller to workspace scope.
+
+Apply `tk_open_x_workspace_isolation_mysql.sql` after client isolation and before
+starting the updated server. Verify a signed scoped session echoes the expected
+workspace, a second scope cannot read it, and both X permissions are granted to
+the existing client before enabling the caller. No real post is required for
+release verification. Once scoped rows exist, disable X OpenAPI before any rollback
+to a server version that predates workspace isolation.
+
+### Bring forward a verified legacy connection
+
+If the caller has no existing connections, skip this step. Otherwise, pause
+legacy submissions from that caller and let its accepted X jobs finish. For each
+legacy connection, take the workspace UUID and both the stable upstream
+connection ID and X user ID from the caller's protected binding table. Require a
+single matching binding in the caller database. An old `endUserId`, a display
+name, or a new OAuth attempt is not proof of ownership. If the stable ID is
+unavailable, resolve the mapping with the caller's operator before proceeding.
+
+After applying the workspace schema, the ClipForge database operator can assign
+that specific connection using the following guarded transaction. Bind the four
+values through the database client; the placeholders denote bind parameters.
+Keep the original connection ID and token ciphertext. If any check fails, roll
+back and leave the row unassigned.
+
+```sql
+START TRANSACTION;
+SELECT id, workspace_id FROM tk_open_x_connection
+WHERE client_id = :client_id AND connection_id = :connection_id
+  AND external_account_id = :x_user_id AND deleted = b'0'
+FOR UPDATE;
+-- Require exactly one row and workspace_id IS NULL.
+UPDATE tk_open_x_connection AS c
+SET workspace_id = :verified_workspace_uuid
+WHERE c.client_id = :client_id AND c.connection_id = :connection_id
+  AND c.external_account_id = :x_user_id AND c.deleted = b'0'
+  AND c.workspace_id IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM tk_open_x_publish_task AS t
+    WHERE t.client_id = c.client_id AND t.connection_id = c.connection_id
+      AND t.deleted = b'0' AND t.status IN ('PENDING', 'PROCESSING')
+  );
+SELECT ROW_COUNT();
+-- Commit only if exactly one row changed; otherwise roll back.
+```
+
+Do not change the scope of legacy tasks or media. Verify the adopted connection
+appears only in the assigned workspace and refresh the caller's connection list.

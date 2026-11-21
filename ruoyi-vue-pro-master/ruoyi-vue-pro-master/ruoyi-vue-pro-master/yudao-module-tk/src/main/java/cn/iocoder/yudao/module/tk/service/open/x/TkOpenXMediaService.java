@@ -53,6 +53,7 @@ public class TkOpenXMediaService {
         TkOpenXMediaDO media = TkOpenXMediaDO.builder()
                 .uploadId(uploadId)
                 .clientId(clientId)
+                .workspaceId(access.workspaceId())
                 .uploadMode(oss ? "OSS" : "LOCAL")
                 .fileName(fileName)
                 .fileSize(fileSize)
@@ -202,12 +203,14 @@ public class TkOpenXMediaService {
         return response;
     }
 
-    public TkOpenXMediaDO requireReady(String clientId, String mediaId) {
+    public TkOpenXMediaDO requireReady(String clientId, String mediaId, String workspaceId) {
         if (mediaId == null || mediaId.isEmpty()) {
             throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "media does not exist");
         }
         TkOpenXMediaDO media = mediaMapper.selectByClientAndMediaId(clientId, mediaId);
-        if (media == null) throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "media does not exist");
+        if (media == null || !java.util.Objects.equals(media.getWorkspaceId(), workspaceId)) {
+            throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "media does not exist");
+        }
         if (!"READY".equals(media.getStatus()) || media.getExpireTime() == null
                 || media.getExpireTime().isBefore(LocalDateTime.now())) {
             throw TkOpenApiException.badRequest("MEDIA_NOT_READY", "media is not ready or has expired");
@@ -221,6 +224,7 @@ public class TkOpenXMediaService {
     public String resolveReadUrl(TkOpenXMediaDO media) {
         TkOpenXMediaDO stored = mediaMapper.selectByClientAndMediaId(media.getClientId(), media.getMediaId());
         if (stored == null || !stored.getClientId().equals(media.getClientId())
+                || !java.util.Objects.equals(stored.getWorkspaceId(), media.getWorkspaceId())
                 || !java.util.Objects.equals(stored.getObjectKey(), media.getObjectKey())) {
             throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "media does not exist");
         }
@@ -240,7 +244,9 @@ public class TkOpenXMediaService {
     private TkOpenXMediaDO requireUploadForUpdate(String uploadId) {
         String clientId = access.requireClient("x.publish");
         TkOpenXMediaDO media = mediaMapper.selectByClientAndUploadIdForUpdate(clientId, uploadId);
-        if (media == null) throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "upload session does not exist");
+        if (media == null || !java.util.Objects.equals(media.getWorkspaceId(), access.workspaceId())) {
+            throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "upload session does not exist");
+        }
         if (media.getExpireTime() != null && media.getExpireTime().isBefore(LocalDateTime.now())
                 && "UPLOADING".equals(media.getStatus())) {
             throw TkOpenApiException.badRequest("MEDIA_UPLOAD_EXPIRED", "upload session has expired");
@@ -251,7 +257,9 @@ public class TkOpenXMediaService {
     private TkOpenXMediaDO requireUpload(String uploadId) {
         String clientId = access.requireClient("x.publish");
         TkOpenXMediaDO media = mediaMapper.selectByClientAndUploadId(clientId, uploadId);
-        if (media == null) throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "upload session does not exist");
+        if (media == null || !java.util.Objects.equals(media.getWorkspaceId(), access.workspaceId())) {
+            throw TkOpenApiException.notFound("MEDIA_NOT_FOUND", "upload session does not exist");
+        }
         return media;
     }
 

@@ -13,6 +13,9 @@ import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
 
@@ -21,6 +24,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class TkOpenXMediaServiceTest {
+    private static final String WORKSPACE = "11111111-1111-4111-8111-111111111111";
+    private static final String OTHER_WORKSPACE = "22222222-2222-4222-8222-222222222222";
     private final TkOpenXProperties properties = new TkOpenXProperties();
     private final TkOpenXAccess access = new TkOpenXAccess(properties);
     private final TkOpenXMediaMapper mapper = mock(TkOpenXMediaMapper.class);
@@ -37,6 +42,7 @@ class TkOpenXMediaServiceTest {
 
     @AfterEach
     void clear() {
+        RequestContextHolder.resetRequestAttributes();
         TkOpenApiContext.clear();
     }
 
@@ -44,15 +50,36 @@ class TkOpenXMediaServiceTest {
     void requireReadyRejectsOtherClientsFailedExpiredAndMissingMedia() {
         when(mapper.selectByClientAndMediaId("client-a", "media-1")).thenReturn(null);
         assertEquals("MEDIA_NOT_FOUND", assertThrows(TkOpenApiException.class,
-                () -> service.requireReady("client-a", "media-1")).getCode());
+                () -> service.requireReady("client-a", "media-1", null)).getCode());
         TkOpenXMediaDO failed = new TkOpenXMediaDO().setClientId("client-a").setMediaId("media-1")
                 .setStatus("FAILED").setExpireTime(LocalDateTime.now().plusHours(1)).setFileSize(10L);
         when(mapper.selectByClientAndMediaId("client-a", "media-1")).thenReturn(failed);
         assertEquals("MEDIA_NOT_READY", assertThrows(TkOpenApiException.class,
-                () -> service.requireReady("client-a", "media-1")).getCode());
+                () -> service.requireReady("client-a", "media-1", null)).getCode());
         failed.setStatus("READY").setExpireTime(LocalDateTime.now().minusMinutes(1));
         assertEquals("MEDIA_NOT_READY", assertThrows(TkOpenApiException.class,
-                () -> service.requireReady("client-a", "media-1")).getCode());
+                () -> service.requireReady("client-a", "media-1", null)).getCode());
+    }
+
+    @Test
+    void anotherWorkspaceCannotReadCompleteOrAttachAnUploadFromTheSameClient() {
+        String workspaceId = OTHER_WORKSPACE;
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setQueryString("workspaceId=" + workspaceId);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        TkOpenXMediaDO owned = new TkOpenXMediaDO().setClientId("client-a").setWorkspaceId(WORKSPACE)
+                .setUploadId("upload-1").setMediaId("media-1").setStatus("READY").setFileSize(10L)
+                .setExpireTime(LocalDateTime.now().plusHours(1));
+        when(mapper.selectByClientAndMediaId("client-a", "media-1")).thenReturn(owned);
+        when(mapper.selectByClientAndUploadId("client-a", "upload-1")).thenReturn(owned);
+        when(mapper.selectByClientAndUploadIdForUpdate("client-a", "upload-1")).thenReturn(owned);
+        assertEquals("MEDIA_NOT_FOUND", assertThrows(TkOpenApiException.class,
+                () -> service.getStatus("upload-1")).getCode());
+        assertEquals("MEDIA_NOT_FOUND", assertThrows(TkOpenApiException.class,
+                () -> service.complete("upload-1", 10L, null)).getCode());
+        assertEquals("MEDIA_NOT_FOUND", assertThrows(TkOpenApiException.class,
+                () -> service.requireReady("client-a", "media-1", OTHER_WORKSPACE)).getCode());
+        assertSame(owned, service.requireReady("client-a", "media-1", WORKSPACE));
     }
 
     @Test

@@ -24,6 +24,7 @@ public class TkOpenXConnectionDO extends BaseDO {
     private Long id;
     private String connectionId;
     private String clientId;
+    private String workspaceId;
     private String externalAccountId;
     private String displayName;
     private String username;
