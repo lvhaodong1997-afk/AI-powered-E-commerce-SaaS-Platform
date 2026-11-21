@@ -1,5 +1,8 @@
 package cn.iocoder.yudao.module.tk.service.channel;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenApiClientDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenXAuthSessionDO;
 import cn.iocoder.yudao.module.tk.dal.dataobject.openapi.TkOpenXConnectionDO;
@@ -21,6 +24,7 @@ import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialTokenCipher;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -121,15 +125,67 @@ class TkOpenXAuthServiceTest {
     }
 
     @Test
-    void successfulCallbackWithoutReturnUrlKeepsClosePageFlow() {
-        TkOpenXAuthSessionDO row = pending();
+    void unexpectedTokenExchangeFailureLogsStageAndTypeWithoutLeakingCredentials() {
+        String browserToken = "ab".repeat(32);
+        TkOpenXAuthSessionDO row = pending().setConsentHash(
+                cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAuthService.hash(browserToken));
         when(sessions.selectByOauthStateHashForUpdate(any())).thenReturn(row);
-        // Exchange is not reached because we don't stub oauth; expired/pending without valid tokens fails closed.
-        when(tx.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        // Call session poll does not consume tickets.
+        when(oauth.exchange(eq("x"), any(), eq("private-code"), isNull()))
+                .thenThrow(new NullPointerException("private-provider-response"));
+        Logger logger = (Logger) LoggerFactory.getLogger(TkOpenXAuthService.class);
+        ListAppender<ILoggingEvent> captured = new ListAppender<>();
+        captured.start();
+        logger.addAppender(captured);
+        try {
+            TkOpenXCallbackOutcome result = service.handleOfficialCallback("x", "private-code",
+                    row.getAuthSessionId(), null, browserToken);
+            assertEquals("INTERNAL_ERROR", result.getFailReason());
+            assertEquals("FAILED", row.getStatus());
+            assertNull(row.getConnectionId());
+            assertEquals(1, captured.list.size());
+            ILoggingEvent log = captured.list.get(0);
+            assertTrue(log.getFormattedMessage().contains("stage=EXCHANGE_TOKEN"));
+            assertTrue(log.getFormattedMessage().contains("exception=NullPointerException"));
+            assertFalse(log.getFormattedMessage().contains("private-"));
+            assertFalse(log.getFormattedMessage().contains(row.getAuthSessionId()));
+            assertNull(log.getThrowableProxy());
+        } finally {
+            logger.detachAppender(captured);
+            captured.stop();
+        }
+        verifyNoInteractions(connections, tokens);
+    }
+
+    @Test
+    void successfulCallbackReturnsConnectionToTheOriginalWorkspace() {
+        String browserToken = "ab".repeat(32);
+        TkOpenXAuthSessionDO row = pending().setWorkspaceId(WORKSPACE).setConsentHash(
+                cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAuthService.hash(browserToken));
+        when(sessions.selectByOauthStateHashForUpdate(any())).thenReturn(row);
         when(sessions.selectByClientAndSessionId("client-a", row.getAuthSessionId())).thenReturn(row);
-        assertEquals("PENDING", service.session(row.getAuthSessionId()).get("status"));
-        verify(tickets, never()).redeem(any(), any(), any());
+        when(oauth.exchange(eq("x"), any(), eq("code"), isNull())).thenReturn(TkChannelHttp.JSON.createObjectNode()
+                .put("access_token", "access").put("refresh_token", "refresh").put("expires_in", 7200));
+        when(oauth.account("x", "access")).thenReturn(TkChannelHttp.JSON.createObjectNode().put("id", "x-account"));
+        when(connections.insert(any(TkOpenXConnectionDO.class))).thenAnswer(call -> {
+            call.<TkOpenXConnectionDO>getArgument(0).setId(1L);
+            return 1;
+        });
+
+        TkOpenXCallbackOutcome outcome = service.handleOfficialCallback("x", "code", row.getAuthSessionId(),
+                null, browserToken);
+
+        assertTrue(outcome.isSuccess());
+        assertNull(outcome.getRedirectUrl());
+        assertNull(outcome.getFailReason());
+        scope(WORKSPACE);
+        assertEquals("SUCCESS", service.session(row.getAuthSessionId()).get("status"));
+        String connectionId = (String) service.session(row.getAuthSessionId()).get("connectionId");
+        assertNotNull(connectionId);
+        verify(tokens).store(argThat(connection -> WORKSPACE.equals(connection.getWorkspaceId())
+                && connectionId.equals(connection.getConnectionId())), eq("access"), eq("refresh"), any());
+        scope(OTHER_WORKSPACE);
+        assertEquals("AUTH_SESSION_NOT_FOUND", assertThrows(TkOpenApiException.class,
+                () -> service.session(row.getAuthSessionId())).getCode());
     }
 
     @Test

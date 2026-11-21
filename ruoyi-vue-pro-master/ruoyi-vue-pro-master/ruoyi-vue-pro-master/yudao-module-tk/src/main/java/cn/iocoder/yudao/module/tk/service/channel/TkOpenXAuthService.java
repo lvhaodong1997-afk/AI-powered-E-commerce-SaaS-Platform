@@ -195,22 +195,31 @@ public class TkOpenXAuthService {
             fail(row, "AUTH_DENIED");
             return outcome(row, false, true);
         }
+        String stage = "VALIDATE_CALLBACK";
         try {
             if (error != null || code == null || code.isEmpty() || code.length() > 4096) {
                 throw new IllegalArgumentException("denied");
             }
             if (!channelReady()) throw new IllegalStateException("not configured");
+            stage = "DECRYPT_VERIFIER";
             String verifier = cipher.decrypt(row.getCodeVerifierCipher(), sessionContext(row));
+            stage = "EXCHANGE_TOKEN";
             JsonNode token = oauth.exchange(TkChannelProperties.X, channels.require(TkChannelProperties.X), code, verifier);
+            stage = "VALIDATE_TOKEN";
             String accessToken = required(token, "access_token");
             String refreshToken = required(token, "refresh_token");
+            LocalDateTime expiry = expires(token);
+            stage = "READ_ACCOUNT";
             JsonNode profile = oauth.account(TkChannelProperties.X, accessToken);
+            stage = "VALIDATE_ACCOUNT";
             String external = required(profile, "id");
             if (!external.matches("[A-Za-z0-9_-]{1,128}")) throw new IllegalArgumentException("profile");
             String name = truncate(profile.path("name").asText(external));
             String username = truncate(profile.path("username").asText());
+            stage = "SAVE_CONNECTION";
             TkOpenXConnectionDO connection = upsertConnection(row.getClientId(), row.getWorkspaceId(), row.getEndUserId(), external, name,
-                    username, accessToken, refreshToken, expires(token), row.getId(), null);
+                    username, accessToken, refreshToken, expiry, row.getId(), null);
+            stage = "SAVE_SESSION";
             row.setStatus("SUCCESS");
             row.setConnectionId(connection.getConnectionId());
             row.setFailReason(null);
@@ -220,7 +229,9 @@ public class TkOpenXAuthService {
             return outcome(row, true, true);
         } catch (RuntimeException ex) {
             String reason = sanitize(ex);
-            log.warn("X OpenAPI OAuth callback failed: reason={}", reason);
+            StackTraceElement[] frames = ex.getStackTrace();
+            log.warn("X OpenAPI OAuth callback failed: stage={} reason={} exception={} at={}",
+                    stage, reason, ex.getClass().getSimpleName(), frames.length == 0 ? "unknown" : frames[0]);
             fail(row, reason);
             return outcome(row, false, true);
         }
