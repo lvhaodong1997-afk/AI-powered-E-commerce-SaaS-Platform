@@ -2,7 +2,9 @@ package cn.iocoder.yudao.module.tk.dal.dataobject.openapi;
 
 import cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.KeySequence;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.*;
@@ -39,8 +41,11 @@ public class TkOpenXPublishTaskDO extends BaseDO {
     private String platformStatus;
     private String externalContainerId;
     private Long uploadOffset;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime nextRetryTime;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String leaseToken;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime leaseUntil;
     private Integer pollCount;
 }
