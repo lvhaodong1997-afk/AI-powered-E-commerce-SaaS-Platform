@@ -10,10 +10,12 @@ import cn.iocoder.yudao.module.tk.service.channel.TkOpenXAccess;
 import cn.iocoder.yudao.module.tk.service.channel.TkOpenXProperties;
 import cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient;
+import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -100,6 +102,37 @@ class TkOpenXMediaServiceTest {
         when(mapper.selectByClientAndUploadId("client-a", "upload-other")).thenReturn(null);
         assertEquals("MEDIA_NOT_FOUND", assertThrows(TkOpenApiException.class,
                 () -> service.getStatus("upload-other")).getCode());
+    }
+
+    @Test
+    void signsReadyMediaOnItsOriginalBucket() {
+        TkGenerationProperties generation = new TkGenerationProperties();
+        TkGenerationProperties.Oss storage = generation.getUpload().getOss();
+        storage.setBucket("material-bucket");
+        storage.setEndpoint("oss-cn-beijing.aliyuncs.com");
+        storage.setPublicBaseUrl("https://material.example.com");
+        storage.setAccessKeyId("material-key");
+        storage.setAccessKeySecret("material-secret");
+        TkOssObjectStorageService oss = new TkOssObjectStorageService();
+        ReflectionTestUtils.setField(oss, "generationProperties", generation);
+        service = new TkOpenXMediaService(access, mapper, mock(TkLocalUploadStorageService.class), generation, oss);
+        String key = "tk/open-api-x/client-a/date/upload-1.mp4";
+        TkOpenXMediaDO ready = new TkOpenXMediaDO().setClientId("client-a").setWorkspaceId(WORKSPACE)
+                .setMediaId("media-1").setStatus("READY").setUploadMode("OSS").setFileSize(10L)
+                .setExpireTime(LocalDateTime.now().plusHours(1)).setObjectKey(key)
+                .setFileUrl("https://material.example.com/" + key);
+        when(mapper.selectByClientAndMediaId("client-a", "media-1")).thenReturn(ready);
+
+        java.net.URI read = java.net.URI.create(service.resolveReadUrl(service.requireReady("client-a", "media-1", WORKSPACE)));
+
+        assertEquals("material-bucket.oss-cn-beijing.aliyuncs.com", read.getHost());
+        assertEquals("/" + key, read.getPath());
+        assertTrue(read.getRawQuery().startsWith("OSSAccessKeyId=material-key&Expires="));
+        assertTrue(read.getRawQuery().contains("&Signature="));
+
+        ready.setFileUrl("https://material.example.com/" + key.replace("upload-1", "upload-2"));
+        assertEquals("MEDIA_SOURCE_UNAVAILABLE", assertThrows(TkOpenApiException.class,
+                () -> service.resolveReadUrl(ready)).getCode());
     }
 
     @Test

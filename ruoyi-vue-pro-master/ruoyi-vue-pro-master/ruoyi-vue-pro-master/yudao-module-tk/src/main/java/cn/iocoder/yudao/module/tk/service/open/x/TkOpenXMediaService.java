@@ -231,8 +231,16 @@ public class TkOpenXMediaService {
         if ("OSS".equalsIgnoreCase(stored.getUploadMode()) && StrUtil.isNotBlank(stored.getObjectKey())
                 && stored.getObjectKey().startsWith(OBJECT_PREFIX + stored.getClientId() + "/")
                 && ossObjectStorageService instanceof TkOssObjectStorageService) {
-            return ((TkOssObjectStorageService) storageForMedia(stored))
-                    .createPullReadUrl(stored.getObjectKey(), null, pullUrlExpireSeconds);
+            try {
+                TkOssObjectStorageService storage = (TkOssObjectStorageService) storageForMedia(stored);
+                if (stored.getObjectKey().equals(storage.objectKeyForUrl(stored.getFileUrl()))) {
+                    return storage.createPullReadUrl(stored.getObjectKey(), storage.browserUploadUrl(),
+                            pullUrlExpireSeconds);
+                }
+            } catch (IllegalArgumentException | IllegalStateException ex) {
+                // No fallback to an unsigned URL or to the active write bucket.
+            }
+            throw TkOpenApiException.badRequest("MEDIA_SOURCE_UNAVAILABLE", "uploaded video cannot be read");
         }
         if ("LOCAL".equalsIgnoreCase(stored.getUploadMode()) && StrUtil.isNotBlank(stored.getFileUrl())) {
             java.util.Optional<Path> local = localStorageService.resolveLocalPath(stored.getFileUrl());

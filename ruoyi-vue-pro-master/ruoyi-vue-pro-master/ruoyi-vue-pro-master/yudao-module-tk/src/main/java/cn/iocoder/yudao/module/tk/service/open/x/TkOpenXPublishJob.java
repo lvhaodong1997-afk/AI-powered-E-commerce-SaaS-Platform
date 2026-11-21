@@ -60,6 +60,7 @@ public class TkOpenXPublishJob {
         task.setLeaseToken(lease);
         task.setLeaseUntil(LocalDateTime.now().plusMinutes(5));
         tasks.updateById(task);
+        String stage = "connection";
         try {
             if (!publish.isClientRunnable(task.getClientId())) {
                 fail(task, "X_PERMISSION_DENIED", "client is not allowed to publish");
@@ -72,8 +73,10 @@ public class TkOpenXPublishJob {
                 fail(task, "X_CONNECTION_DISABLED", "X connection is missing, expired or revoked");
                 return;
             }
+            stage = "media";
             TkOpenXMediaDO ready = media.requireReady(task.getClientId(), task.getMediaId(), task.getWorkspaceId());
             String source = media.resolveReadUrl(ready);
+            stage = "token";
             String token = tokens.accessToken(connection);
             TkSocialPublishTaskDO socialTask = new TkSocialPublishTaskDO();
             socialTask.setChannelText(task.getText());
@@ -83,7 +86,9 @@ public class TkOpenXPublishJob {
             detail.setExternalContainerId(task.getExternalContainerId());
             detail.setPlatformStatus(task.getPlatformStatus());
             detail.setUploadOffset(task.getUploadOffset() == null ? 0L : task.getUploadOffset());
+            stage = "platform";
             TkChannelVideoClient.Checkpoint step = videos.advance(socialTask, detail, token, source, ready.getFileSize(), null);
+            stage = "checkpoint";
             task.setExternalContainerId(step.getContainerId());
             task.setPlatformStatus(step.getStage());
             task.setUploadOffset(step.getOffset());
@@ -108,6 +113,7 @@ public class TkOpenXPublishJob {
                 tasks.updateById(task);
             }
         } catch (TkOpenApiException ex) {
+            log.warn("X OpenAPI publish failed: task={} stage={} code={}", task.getTaskId(), stage, ex.getCode());
             fail(task, ex.getCode(), safeMessage(ex.getCode()));
         } catch (TkSocialPlatformException ex) {
             log.warn("X OpenAPI publish platform error: task={} code={}", task.getTaskId(), ex.getCode());
@@ -120,7 +126,8 @@ public class TkOpenXPublishJob {
                 tasks.updateById(task);
             } else fail(task, "PLATFORM_ERROR", "platform rejected the publish request");
         } catch (RuntimeException ex) {
-            log.warn("X OpenAPI publish failed: task={} reason=INTERNAL_ERROR", task.getTaskId());
+            log.warn("X OpenAPI publish failed: task={} stage={} type={} code=INTERNAL_ERROR",
+                    task.getTaskId(), stage, ex.getClass().getSimpleName());
             fail(task, "INTERNAL_ERROR", "publish failed");
         }
     }
@@ -155,6 +162,7 @@ public class TkOpenXPublishJob {
     private static String safeMessage(String code) {
         if ("X_CONNECTION_DISABLED".equals(code)) return "X connection is missing, expired or revoked";
         if ("MEDIA_NOT_READY".equals(code) || "MEDIA_NOT_FOUND".equals(code)) return "media is not available";
+        if ("MEDIA_SOURCE_UNAVAILABLE".equals(code)) return "uploaded video cannot be read";
         if ("X_PERMISSION_DENIED".equals(code) || "X_OPEN_API_DISABLED".equals(code)) return "client is not allowed to publish";
         return "publish failed";
     }
