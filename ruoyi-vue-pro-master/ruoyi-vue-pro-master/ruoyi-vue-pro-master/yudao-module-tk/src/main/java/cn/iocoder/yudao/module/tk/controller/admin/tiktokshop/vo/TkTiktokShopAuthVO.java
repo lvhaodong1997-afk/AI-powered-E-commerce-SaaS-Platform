@@ -66,7 +66,8 @@ public final class TkTiktokShopAuthVO {
     @Getter public static class AccountResponse {
         private final Long id,companyId; private final String displayName,username,market,authStatus,grantedScopes;
         private final LocalDateTime accessTokenExpireTime,refreshTokenExpireTime;
-        public AccountResponse(TkTiktokShopAccountDO a){id=a.getId();companyId=a.getCompanyId();displayName=a.getDisplayName();username=a.getUsername();market=a.getMarket();authStatus=a.getAuthStatus();grantedScopes=a.getGrantedScopes();accessTokenExpireTime=a.getAccessTokenExpireTime();refreshTokenExpireTime=a.getRefreshTokenExpireTime();}
+        private final Long refreshRetryAfter;
+        public AccountResponse(TkTiktokShopAccountDO a){id=a.getId();companyId=a.getCompanyId();displayName=a.getDisplayName();username=a.getUsername();market=a.getMarket();authStatus=a.getAuthStatus();grantedScopes=a.getGrantedScopes();accessTokenExpireTime=a.getAccessTokenExpireTime();refreshTokenExpireTime=a.getRefreshTokenExpireTime();refreshRetryAfter=a.getRefreshRetryAfter()==null?null:a.getRefreshRetryAfter().atOffset(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();}
     }
     @Getter public static class SellerAccountResponse {
         private final Long id,companyId;

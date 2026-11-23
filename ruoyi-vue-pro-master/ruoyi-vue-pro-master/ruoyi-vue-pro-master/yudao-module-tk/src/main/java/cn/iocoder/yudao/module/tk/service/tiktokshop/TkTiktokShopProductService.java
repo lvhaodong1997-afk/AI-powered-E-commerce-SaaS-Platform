@@ -16,6 +16,7 @@ import java.util.*;
 @Service
 public class TkTiktokShopProductService {
     private static final int PRODUCT_PAGE_SIZE = 20;
+    private static final int PROOF_FORMAT = 2;
     private final TkTiktokShopAuthService auth; private final TkTiktokShopTokenService tokens;
     private final TkTiktokShopApiClient api; private final TkTiktokShopProperties properties;
     private final ObjectMapper json; private final Clock clock;
@@ -26,8 +27,8 @@ public class TkTiktokShopProductService {
         TkTiktokShopAccountDO a=auth.requireReadable(id);
         ProductPage page=fetch(a,source,size,pageToken,keyword);
         for(Product p:page.products)if(p.available) {
-            Selection selection=new Selection();selection.id=p.id;selection.source=source;selection.product=p;
-            selection.accountId=a.getId();selection.tenantId=a.getTenantId();selection.user=user;selection.authVersion=a.getTokenVersion();
+            Selection selection=new Selection();selection.format=PROOF_FORMAT;selection.id=p.id;selection.source=source;selection.product=p;
+            selection.accountId=a.getId();selection.tenantId=a.getTenantId();selection.user=user;selection.authVersion=a.getAuthorizationVersion();
             selection.pageToken=pageToken;selection.pageSize=size;selection.keyword=keyword;selection.expires=clock.instant().getEpochSecond()+600;
             p.selectionProof=encode(selection);
         }
@@ -40,13 +41,13 @@ public class TkTiktokShopProductService {
             byte[] payload=Base64.getUrlDecoder().decode(parts[0]);
             if(!MessageDigest.isEqual(mac(payload),Base64.getUrlDecoder().decode(parts[1])))throw new IllegalArgumentException();
             Selection s=json.readValue(payload,Selection.class);
-            if(s.expires<=clock.instant().getEpochSecond() || !Objects.equals(a.getId(),s.accountId) || !Objects.equals(a.getTenantId(),s.tenantId)
-                    || !Objects.equals(a.getTokenVersion(),s.authVersion) || !Objects.equals(user,s.user) || !Objects.equals(product,s.id) || !Objects.equals(source,s.source) || !s.product.available)throw new IllegalArgumentException();
+            if(s.format!=PROOF_FORMAT || s.expires<=clock.instant().getEpochSecond() || !Objects.equals(a.getId(),s.accountId) || !Objects.equals(a.getTenantId(),s.tenantId)
+                    || !Objects.equals(a.getAuthorizationVersion(),s.authVersion) || !Objects.equals(user,s.user) || !Objects.equals(product,s.id) || !Objects.equals(source,s.source) || !s.product.available)throw new IllegalArgumentException();
             return s;
         }catch(Exception ignored){throw new IllegalArgumentException("Product selection expired or invalid; select it again");}
     }
     public Product revalidate(TkTiktokShopAccountDO a,Selection s) {
-        if(!Objects.equals(a.getId(),s.accountId) || !Objects.equals(a.getTenantId(),s.tenantId) || !Objects.equals(a.getTokenVersion(),s.authVersion))throw new IllegalArgumentException("Product account authorization changed");
+        if(!Objects.equals(a.getId(),s.accountId) || !Objects.equals(a.getTenantId(),s.tenantId) || !Objects.equals(a.getAuthorizationVersion(),s.authVersion))throw new IllegalArgumentException("Product account authorization changed");
         for(Product p:fetch(a,s.source,s.pageSize,s.pageToken,s.keyword).products)if(Objects.equals(p.id,s.id)&&p.available)return p;
         throw new IllegalArgumentException("Product is no longer available; select it again");
     }
@@ -57,14 +58,10 @@ public class TkTiktokShopProductService {
         size=Math.min(size,PRODUCT_PAGE_SIZE);
         Map<String,String> q=new LinkedHashMap<>();q.put("page_size",Integer.toString(size));if(cursor!=null&&!cursor.isEmpty())q.put("page_token",cursor);
         if(shop){q.put("sort_field","PRODUCT_ID");q.put("sort_order","DESC");if(keyword!=null&&!keyword.isEmpty())q.put("title_keyword",keyword);}else q.put("origin","SHOWCASE");
-        TkTiktokShopTokenService.AccessToken token=tokens.getAccessToken(a.getTenantId(),a.getCompanyId(),a.getId());
-        try {
-            JsonNode data=api.get(shop?"/affiliate_creator/202509/shop_products":"/affiliate_creator/202405/showcases/products",token.getValue(),q).getData();
-            a.setTokenVersion(token.getVersion());
-            if(!data.path("products").isArray() || data.path("products").size()>size)throw new TkTiktokShopApiException("INVALID_RESPONSE",null);
-            List<Product> rows=new ArrayList<>();for(JsonNode node:data.path("products"))rows.add(normalize(node,shop));
-            return new ProductPage(rows,text(data,"next_page_token"));
-        }catch(TkTiktokShopApiException e){tokens.reportRejectedToken(a.getTenantId(),a.getCompanyId(),a.getId(),token.getVersion(),e);throw e;}
+        JsonNode data=tokens.read(a,token->api.get(shop?"/affiliate_creator/202509/shop_products":"/affiliate_creator/202405/showcases/products",token,q)).getData();
+        if(!data.path("products").isArray() || data.path("products").size()>size)throw new TkTiktokShopApiException("INVALID_RESPONSE",null);
+        List<Product> rows=new ArrayList<>();for(JsonNode node:data.path("products"))rows.add(normalize(node,shop));
+        return new ProductPage(rows,text(data,"next_page_token"));
     }
     static Product normalize(JsonNode node,boolean shop) {
         Product p=new Product();p.id=text(node,"id");p.title=text(node,"title");
@@ -86,5 +83,5 @@ public class TkTiktokShopProductService {
     private static String trim(String s){return s==null?null:s.trim();}
     @Getter @AllArgsConstructor public static class ProductPage {private final List<Product> products;private final String nextPageToken;}
     @Getter @Setter public static class Product {private String id,title,imageUrl,price,maximumPrice,currency,availability,selectionProof;private boolean available;}
-    @Getter @Setter public static class Selection {private String id,source,user,pageToken,keyword;private Long accountId,tenantId,authVersion;private long expires;private int pageSize;private Product product;}
+    @Getter @Setter public static class Selection {private String id,source,user,pageToken,keyword;private Long accountId,tenantId,authVersion;private long expires;private int pageSize,format;private Product product;}
 }

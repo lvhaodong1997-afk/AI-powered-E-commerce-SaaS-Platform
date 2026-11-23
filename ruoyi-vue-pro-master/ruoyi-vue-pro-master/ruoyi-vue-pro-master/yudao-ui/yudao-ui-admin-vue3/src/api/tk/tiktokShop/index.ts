@@ -99,6 +99,7 @@ export interface ShopAccount {
   grantedScopes: string
   accessTokenExpireTime?: string
   refreshTokenExpireTime?: string
+  refreshRetryAfter?: number
 }
 export interface ShopProduct {
   id: string

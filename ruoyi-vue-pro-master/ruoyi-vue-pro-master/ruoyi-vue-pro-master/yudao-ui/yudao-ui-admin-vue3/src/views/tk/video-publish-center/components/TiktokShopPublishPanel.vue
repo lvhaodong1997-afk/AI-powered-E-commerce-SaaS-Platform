@@ -24,6 +24,7 @@
         <el-table-column prop="grantedScopes" :label="tt('shop.scopes')" min-width="170" show-overflow-tooltip />
         <el-table-column :label="tt('shop.accessExpiry')" min-width="155"><template #default="{ row }">{{ formatShopDate(row.accessTokenExpireTime, locale) }}</template></el-table-column>
         <el-table-column :label="tt('shop.refreshExpiry')" min-width="155"><template #default="{ row }">{{ formatShopDate(row.refreshTokenExpireTime, locale) }}</template></el-table-column>
+        <el-table-column :label="tt('shop.creatorRenewal')" min-width="145"><template #default="{ row }">{{ row.authStatus !== 'AUTHORIZED' ? '-' : tt(row.refreshRetryAfter ? 'shop.creatorRenewalPending' : 'shop.creatorRenewalAutomatic') }}</template></el-table-column>
         <el-table-column width="120"><template #default="{ row }"><el-button v-hasPermi="['tk:tiktok-shop-account:authorize']" link type="danger" @click="disconnect(row)">{{ tt('shop.disconnect') }}</el-button></template></el-table-column>
       </el-table>
     </details>

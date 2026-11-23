@@ -33,4 +33,6 @@ public class TkTiktokShopAccountDO extends TenantBaseDO {
     private LocalDateTime refreshTokenExpireTime;
     private String authStatus;
     private Long tokenVersion;
+    private Long authorizationVersion;
+    private LocalDateTime refreshRetryAfter;
 }

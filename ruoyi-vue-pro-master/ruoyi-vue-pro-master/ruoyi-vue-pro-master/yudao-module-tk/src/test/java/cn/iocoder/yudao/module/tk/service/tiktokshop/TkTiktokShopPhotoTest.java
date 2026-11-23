@@ -43,7 +43,7 @@ class TkTiktokShopPhotoTest {
         when(scope.getCurrentScope()).thenReturn(new TkUserScope(7L,1L,"MEMBER",2L));
         TkTiktokShopProductService.Selection selection=new TkTiktokShopProductService.Selection();selection.setAuthVersion(4L);
         when(products.verifySelection(account,"7","product","SHOWCASE","proof")).thenReturn(selection);
-        when(tokens.getAccessToken(1L,2L,3L)).thenReturn(new TkTiktokShopTokenService.AccessToken("token",4L));
+        when(tokens.getAccessToken(1L,2L,3L)).thenReturn(new TkTiktokShopTokenService.AccessToken("token",5L,4L));
         when(api.uploadPhoto(eq("token"),any(),eq("image/png"))).thenReturn(new TkTiktokShopApiClient.Result(new ObjectMapper().readTree("{\"photo_file\":{\"photo_uri\":\"uri\"}}"),null));
         AtomicReference<TkTiktokShopPhotoDO> saved=new AtomicReference<>();
         when(mapper.selectOne(any())).thenAnswer(call->saved.get());

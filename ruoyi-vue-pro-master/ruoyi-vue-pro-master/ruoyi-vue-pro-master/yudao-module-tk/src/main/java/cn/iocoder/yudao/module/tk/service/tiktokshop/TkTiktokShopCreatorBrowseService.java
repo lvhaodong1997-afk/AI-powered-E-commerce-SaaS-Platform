@@ -26,8 +26,6 @@ public class TkTiktokShopCreatorBrowseService {
             throw new IllegalArgumentException("Invalid creator page");
         }
         TkTiktokShopAccountDO account = auth.requireReadable(accountId);
-        TkTiktokShopTokenService.AccessToken token = tokens.getAccessToken(
-                account.getTenantId(), account.getCompanyId(), account.getId());
         Map<String, String> query = new LinkedHashMap<>();
         query.put("page_size", Integer.toString(PAGE_SIZE));
         if (cursor != null && !cursor.isEmpty()) query.put("page_token", cursor);
@@ -36,7 +34,7 @@ public class TkTiktokShopCreatorBrowseService {
             body.put("title_keywords", Collections.singletonList(keyword.trim()));
         }
         try {
-            TkTiktokShopApiClient.Result result = api.post(dataset.path, token.getValue(), query, body);
+            TkTiktokShopApiClient.Result result = tokens.read(account, token -> api.post(dataset.path, token, query, body));
             JsonNode data = result.getData();
             JsonNode items = data.path(dataset.items);
             if (!items.isArray() || items.size() > PAGE_SIZE) {
@@ -55,10 +53,9 @@ public class TkTiktokShopCreatorBrowseService {
             String next = text(data, "next_page_token");
             return new Page(rows, next == null || next.length() > 4096 ? null : next);
         } catch (TkTiktokShopApiException e) {
-            if (dataset == Dataset.MARKETPLACE && "105005".equals(e.getCode())) {
+            if (dataset == Dataset.MARKETPLACE && TkTiktokShopApiException.CREATOR_PERMISSION_DENIED.equals(e.getCode())) {
                 throw new TkTiktokShopApiException(TkTiktokShopApiException.CREATOR_MARKETPLACE_ACCESS_DENIED, e.getRequestId());
             }
-            tokens.reportRejectedToken(account.getTenantId(), account.getCompanyId(), account.getId(), token.getVersion(), e);
             throw e;
         }
     }
@@ -89,7 +86,7 @@ public class TkTiktokShopCreatorBrowseService {
             }
         } catch (TkTiktokShopApiException e) {
             tokens.reportRejectedToken(account.getTenantId(), account.getCompanyId(), account.getId(), token.getVersion(), e);
-            throw e;
+            throw e.creatorOperationError();
         }
     }
 

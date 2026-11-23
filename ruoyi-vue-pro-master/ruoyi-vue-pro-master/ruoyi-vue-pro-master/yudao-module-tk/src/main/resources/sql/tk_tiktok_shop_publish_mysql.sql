@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS tk_tiktok_shop_account (
   refresh_token_expire_time datetime DEFAULT NULL,
   auth_status varchar(32) NOT NULL,
   token_version bigint NOT NULL DEFAULT 0,
+  authorization_version bigint NOT NULL DEFAULT 0,
+  refresh_retry_after datetime DEFAULT NULL,
   creator varchar(64) NOT NULL DEFAULT '',
   create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updater varchar(64) NOT NULL DEFAULT '',

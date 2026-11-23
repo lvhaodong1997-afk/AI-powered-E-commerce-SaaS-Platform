@@ -68,7 +68,14 @@ public class TkTiktokShopPublishWorker {
                     }
                     recovery(t,code);
                 }
-                else fail(t,error instanceof TkTiktokShopApiException&&((TkTiktokShopApiException)error).isReauthorizationRequired()?"REAUTHORIZATION_REQUIRED":"PREPARATION_FAILED","Video preparation failed; verify authorization, product and media before creating a new task");
+                else if(error instanceof TkTiktokShopApiException) {
+                    TkTiktokShopApiException issue=((TkTiktokShopApiException)error).creatorOperationError();
+                    if(TkTiktokShopApiException.CREATOR_PERMISSION_DENIED.equals(issue.getCode()))
+                        fail(t,issue.getCode(),"TikTok Shop denied access to this feature; creator authorization was not changed");
+                    else if(TkTiktokShopApiException.CREATOR_REFRESH_PENDING.equals(issue.getCode()))
+                        fail(t,issue.getCode(),"TikTok Shop creator token refresh is temporarily unavailable; try again shortly");
+                    else fail(t,issue.isReauthorizationRequired()?"REAUTHORIZATION_REQUIRED":"PREPARATION_FAILED","Video preparation failed; verify authorization, product and media before creating a new task");
+                } else fail(t,"PREPARATION_FAILED","Video preparation failed; verify authorization, product and media before creating a new task");
                 try{if(t.getConfirmedVersion()!=null)transaction.execute(tx->{saveAttempt(t,owner);save(t,owner,true);return null;});else save(t,owner,true);}catch(Exception ignored){/* Lease expiry recovers durable old stage. */}
             }
         });

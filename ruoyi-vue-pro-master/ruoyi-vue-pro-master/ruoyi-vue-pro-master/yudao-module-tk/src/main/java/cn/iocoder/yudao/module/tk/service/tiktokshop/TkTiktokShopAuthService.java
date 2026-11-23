@@ -124,7 +124,7 @@ public class TkTiktokShopAuthService {
         TkTiktokShopAccountDO a=existing==null?new TkTiktokShopAccountDO():existing;long version=existing==null?0:existing.getTokenVersion();
         a.setTenantId(session.getTenantId());a.setCompanyId(session.getCompanyId());a.setCreator(String.valueOf(session.getUserId()));a.setUpdater(String.valueOf(session.getUserId()));a.setAppKey(properties.getAppKey());a.setOpenId(token.getOpenId());a.setUsername(profile.getUsername());a.setDisplayName(profile.getUsername());a.setMarket("US");a.setUserType(1);a.setGrantedScopes(token.getGrantedScopes());a.setAuthStatus("AUTHORIZED");
         a.setAccessTokenCipher(cipher.encrypt(token.getAccessToken(),a.getTenantId(),a.getAppKey(),a.getOpenId()));a.setRefreshTokenCipher(cipher.encrypt(token.getRefreshToken(),a.getTenantId(),a.getAppKey(),a.getOpenId()));a.setAccessTokenExpireTime(token.getAccessExpireTime());a.setRefreshTokenExpireTime(token.getRefreshExpireTime());
-        if(existing==null){a.setTokenVersion(1L);accounts.insert(a);}else if(accounts.reauthorize(a,version)!=1)throw new IllegalStateException("Shop account authorization changed");
+        if(existing==null){a.setTokenVersion(1L);a.setAuthorizationVersion(0L);accounts.insert(a);}else if(accounts.reauthorize(a,version)!=1)throw new IllegalStateException("Shop account authorization changed");
     }
     public TkTiktokShopAccountDO requireWritable(Long id) {
         TkTiktokShopAccountDO account = requireReadable(id);

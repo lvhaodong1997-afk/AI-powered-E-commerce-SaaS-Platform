@@ -19,9 +19,10 @@ class TkTiktokShopProductServiceTest {
     Clock clock=Clock.fixed(Instant.parse("2026-10-29T00:00:00Z"),ZoneOffset.UTC);
     TkTiktokShopProductService service() {
         props.setSelectionProofKey(Base64.getEncoder().encodeToString(new byte[32]));
-        account.setId(1L);account.setTenantId(2L);account.setCompanyId(3L);account.setCreator("4");account.setTokenVersion(5L);
+        account.setId(1L);account.setTenantId(2L);account.setCompanyId(3L);account.setCreator("4");account.setTokenVersion(5L);account.setAuthorizationVersion(2L);
         when(auth.requireReadable(1L)).thenReturn(account);
-        when(tokens.getAccessToken(2L,3L,1L)).thenReturn(new TkTiktokShopTokenService.AccessToken("fake",5));
+        when(tokens.getAccessToken(2L,3L,1L)).thenReturn(new TkTiktokShopTokenService.AccessToken("fake",5,2L));
+        doCallRealMethod().when(tokens).read(any(),any());
         return new TkTiktokShopProductService(auth,tokens,api,props,json,clock);
     }
     @Test void showcaseUsesRealSchemaAndBindsProof() throws Exception {
@@ -31,12 +32,16 @@ class TkTiktokShopProductServiceTest {
         assertEquals("next",page.getNextPageToken());assertEquals("3.20",page.getProducts().get(0).getPrice());assertTrue(page.getProducts().get(0).isAvailable());
         String proof=page.getProducts().get(0).getSelectionProof();
         assertEquals("123",s.verifySelection(account,"4","123","SHOWCASE",proof).getId());
+        account.setTokenVersion(6L);
+        assertEquals("123",s.verifySelection(account,"4","123","SHOWCASE",proof).getId());
         assertThrows(IllegalArgumentException.class,()->s.verifySelection(account,"9","123","SHOWCASE",proof));
         assertThrows(IllegalArgumentException.class,()->s.verifySelection(account,"4","999","SHOWCASE",proof));
         assertThrows(IllegalArgumentException.class,()->s.verifySelection(account,"4","123","SHOWCASE",proof+"x"));
         TkTiktokShopProductService expired=new TkTiktokShopProductService(auth,tokens,api,props,json,Clock.offset(clock,Duration.ofMinutes(11)));
         assertThrows(IllegalArgumentException.class,()->expired.verifySelection(account,"4","123","SHOWCASE",proof));
         verify(api).get(anyString(),eq("fake"),argThat(q->"cursor".equals(q.get("page_token"))&&"SHOWCASE".equals(q.get("origin"))));
+        account.setAuthorizationVersion(3L);
+        assertThrows(IllegalArgumentException.class,()->s.verifySelection(account,"4","123","SHOWCASE",proof));
     }
     @Test void sourceRulesAndBoundsAreDistinct() throws Exception {
         TkTiktokShopProductService s=service();

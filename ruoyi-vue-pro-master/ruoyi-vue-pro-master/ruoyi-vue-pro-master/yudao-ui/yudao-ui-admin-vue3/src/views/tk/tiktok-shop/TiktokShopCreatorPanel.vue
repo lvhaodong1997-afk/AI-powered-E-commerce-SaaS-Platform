@@ -135,16 +135,19 @@ async function loadPage(stack: (string | undefined)[]) {
     if (result.nextPageToken && !stack.includes(result.nextPageToken)) nextCursor.value = result.nextPageToken
   } catch (reason) {
     if (revision.current(requestRevision)) {
-      const accessDenied = dataset === 'marketplace' && isAxiosError<{ code?: number }>(reason) &&
+      const accessDenied = isAxiosError<{ code?: number }>(reason) &&
         reason.response?.status === 403 && reason.response.data?.code === 105005
-      error.value = accessDenied ? tt('shop.creatorMarketplaceAccessDenied') : errorText(reason)
+      error.value = accessDenied ? tt(dataset === 'marketplace' ? 'shop.creatorMarketplaceAccessDenied' : 'shop.creatorFeatureAccessDenied') : errorText(reason)
     }
   } finally {
     if (revision.current(requestRevision)) loading.value = false
   }
 }
 
-function errorText(reason: unknown) { return reason instanceof Error ? reason.message : tt('shop.operationFailed') }
+function errorText(reason: unknown) {
+  if (isAxiosError<{ code?: number }>(reason) && reason.response?.status === 503 && reason.response.data?.code === 503) return tt('shop.creatorRenewalPending')
+  return reason instanceof Error ? reason.message : tt('shop.operationFailed')
+}
 function formatDate(seconds: number) { return new Date(seconds * 1000).toLocaleString(locale.value) }
 function resetPage() { cursors.value = [undefined]; return loadPage(cursors.value) }
 function search() { if (!selectedAccount.value) return; appliedKeyword.value = keyword.value.trim(); return resetPage() }

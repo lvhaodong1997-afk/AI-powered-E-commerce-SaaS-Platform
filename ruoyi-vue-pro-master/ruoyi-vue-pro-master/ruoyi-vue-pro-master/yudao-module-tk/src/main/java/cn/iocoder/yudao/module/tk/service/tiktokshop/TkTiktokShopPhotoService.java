@@ -67,7 +67,7 @@ public class TkTiktokShopPhotoService {
         TkTiktokShopProductService.Selection selection=products.verifySelection(account,user,request.productId,request.productSource,request.selectionProof);
         products.revalidate(account,selection);
         TkTiktokShopTokenService.AccessToken token=tokens.getAccessToken(account.getTenantId(),account.getCompanyId(),account.getId());
-        if(!Objects.equals(selection.getAuthVersion(),token.getVersion()))throw new IllegalArgumentException("Shop authorization changed; select the product again");
+        if(!Objects.equals(selection.getAuthVersion(),token.getAuthorizationVersion()))throw new IllegalArgumentException("Shop authorization changed; select the product again");
         TkTiktokShopPhotoDO row=new TkTiktokShopPhotoDO();
         row.setTenantId(account.getTenantId());row.setCompanyId(account.getCompanyId());row.setAccountId(account.getId());row.setCreator(user);row.setUpdater(user);
         row.setIdempotencyKey(request.idempotencyKey);row.setRequestHash(hash);row.setTitle(request.title);row.setProductId(request.productId);row.setStage("UPLOADING");
@@ -129,7 +129,7 @@ public class TkTiktokShopPhotoService {
                 row.setPostStatus(postStatus);
             } catch(TkTiktokShopApiException e) {
                 if(e.isReauthorizationRequired())tokens.reportRejectedToken(account.getTenantId(),account.getCompanyId(),accountId,token.getVersion(),e);
-                throw e;
+                throw e.creatorOperationError();
             }
         }
         return new PhotoResponse(row);
