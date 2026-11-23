@@ -152,6 +152,7 @@ export interface ShopTask {
 }
 export interface ShopMedia { id: number; fileSize: number; fileName: string; mimeType: string; status: string }
 const base = '/tk/tiktok-shop'
+export const SHOP_REAUTH_REQUIRED_CODE = 1060000018
 type ShopErrorPresentation = 'inline'
 const sellerWrite = (id: number) => `${base}/seller/shops/${id}/product-writing`
 export const TiktokShopApi = {

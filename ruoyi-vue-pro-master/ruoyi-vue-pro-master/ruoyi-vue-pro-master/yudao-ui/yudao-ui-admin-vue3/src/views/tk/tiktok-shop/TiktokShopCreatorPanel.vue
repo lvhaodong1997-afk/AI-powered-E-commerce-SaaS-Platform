@@ -67,7 +67,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { isAxiosError } from 'axios'
-import { TiktokShopApi, type ShopAccount, type ShopCreatorRow, type ShopCreatorView, type ShopProduct, type ShopPublishSelection } from '@/api/tk/tiktokShop'
+import { SHOP_REAUTH_REQUIRED_CODE, TiktokShopApi, type ShopAccount, type ShopCreatorRow, type ShopCreatorView, type ShopProduct, type ShopPublishSelection } from '@/api/tk/tiktokShop'
 import { hasPermission } from '@/directives/permission/hasPermi'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import { createShopRevision } from '../video-publish-center/components/tiktokShopBehavior'
@@ -145,7 +145,10 @@ async function loadPage(stack: (string | undefined)[]) {
 }
 
 function errorText(reason: unknown) {
-  if (isAxiosError<{ code?: number }>(reason) && reason.response?.status === 503 && reason.response.data?.code === 503) return tt('shop.creatorRenewalPending')
+  if (isAxiosError<{ code?: number }>(reason)) {
+    if (reason.response?.status === 503 && reason.response.data?.code === 503) return tt('shop.creatorRenewalPending')
+    if (reason.response?.status === 409 && reason.response.data?.code === SHOP_REAUTH_REQUIRED_CODE) return tt('shop.accountState.REAUTH_REQUIRED')
+  }
   return !isAxiosError(reason) && reason instanceof Error ? reason.message : tt('shop.operationFailed')
 }
 function formatDate(seconds: number) { return new Date(seconds * 1000).toLocaleString(locale.value) }

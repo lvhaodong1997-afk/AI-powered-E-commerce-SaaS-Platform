@@ -36,7 +36,12 @@ public class TkTiktokShopSellerReadService {
 
     public Page query(Long shopId, View view, String cursor, LocalDate start, LocalDate end, String liveAccountType) {
         TkTiktokShopSellerShopDO shop=auth.requireReadableShop(shopId);
-        TkTiktokShopSellerTokenService.AccessToken token=tokens.getAccessToken(shop.getTenantId(),shop.getCompanyId(),shop.getAccountId());
+        TkTiktokShopSellerTokenService.AccessToken token;
+        try {
+            token=tokens.getAccessToken(shop.getTenantId(),shop.getCompanyId(),shop.getAccountId());
+        } catch(TkTiktokShopApiException e) {
+            throw sellerAuthorizationError(e);
+        }
         try {return read(view,token.getValue(),shop.getShopCipher(),cursor,start,end,liveAccountType);}
         catch(TkTiktokShopApiException e){
             if(e.isPermissionDenied()) {
@@ -44,8 +49,13 @@ public class TkTiktokShopSellerReadService {
                         : TkTiktokShopApiException.SELLER_FEATURE_ACCESS_DENIED, e.getRequestId());
             }
             tokens.reportRejectedToken(shop.getTenantId(),shop.getCompanyId(),shop.getAccountId(),token.getVersion(),e);
-            throw e;
+            throw sellerAuthorizationError(e);
         }
+    }
+
+    private static TkTiktokShopApiException sellerAuthorizationError(TkTiktokShopApiException error) {
+        return error.isReauthorizationRequired()
+                ? new TkTiktokShopApiException(TkTiktokShopApiException.SELLER_REAUTHORIZE,error.getRequestId()) : error;
     }
 
     Page read(View view, String token, String cipher, String cursor, LocalDate start, LocalDate end, String liveAccountType) {

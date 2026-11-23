@@ -50,6 +50,16 @@ class TkTiktokShopSellerCatalogServiceTest {
         assertEquals("105002",error.getCode());assertEquals("req-1",error.getRequestId());
         verify(tokens).reportRejectedToken(1L,1L,10L,4L,error);verify(api,times(1)).searchProducts(anyString(),anyString(),anyInt(),any());
     }
+    @Test void catalogPermissionDenialIsNotReportedAsTokenRejection() {
+        when(auth.requireReadableShop(20L)).thenReturn(shop());
+        when(auth.requireReadable(10L)).thenReturn(account("[\"seller.product.basic\"]"));
+        when(tokens.getAccessToken(1L,1L,10L)).thenReturn(new TkTiktokShopSellerTokenService.AccessToken("access",4L));
+        when(api.searchProducts(anyString(),anyString(),anyInt(),any())).thenThrow(new TkTiktokShopApiException("105005","req-2"));
+        TkTiktokShopApiException error=assertThrows(TkTiktokShopApiException.class,()->catalog.listProducts(20L,1L,20,null));
+        assertEquals(TkTiktokShopApiException.SELLER_FEATURE_ACCESS_DENIED,error.getCode());
+        assertEquals("req-2",error.getRequestId());
+        verify(tokens,never()).reportRejectedToken(anyLong(),anyLong(),anyLong(),anyLong(),any());
+    }
     @Test void invalidPageBoundsAreRejectedBeforeTokenUse() {
         when(auth.requireReadableShop(20L)).thenReturn(shop());
         when(auth.requireReadable(10L)).thenReturn(account("[\"seller.product.basic\"]"));

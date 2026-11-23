@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import static cn.iocoder.yudao.module.tk.enums.ErrorCodeConstants.TK_TIKTOK_PUBLISH_VIDEO_REQUIRED;
+import static cn.iocoder.yudao.module.tk.enums.ErrorCodeConstants.TK_TIKTOK_ACCOUNT_NOT_AUTHORIZED;
 
 /** Shop-local error boundary. Upstream messages, causes and credential-bearing URLs never reach users. */
 @RestControllerAdvice(basePackages="cn.iocoder.yudao.module.tk.controller.admin.tiktokshop")
@@ -42,6 +43,11 @@ public class TkTiktokShopExceptionHandler {
         }
         if (TkTiktokShopApiException.CREATOR_REFRESH_PENDING.equals(e.getCode())) {
             return error(HttpStatus.SERVICE_UNAVAILABLE,"TikTok Shop creator token refresh is temporarily unavailable; try again shortly");
+        }
+        if (TkTiktokShopApiException.SELLER_REAUTHORIZE.equals(e.getCode()) || TkTiktokShopApiException.CREATOR_REAUTHORIZE.equals(e.getCode())) {
+            String account = TkTiktokShopApiException.SELLER_REAUTHORIZE.equals(e.getCode()) ? "seller" : "creator";
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(CommonResult.error(TK_TIKTOK_ACCOUNT_NOT_AUTHORIZED.getCode(),
+                    "Reconnect the TikTok Shop " + account + " account"));
         }
         return error(e.isReauthorizationRequired()?HttpStatus.CONFLICT:HttpStatus.BAD_GATEWAY,e.isReauthorizationRequired()?"TikTok Shop requires creator authorization again; reconnect the account":"TikTok Shop could not complete this request; check the saved task status before attempting another publication");
     }

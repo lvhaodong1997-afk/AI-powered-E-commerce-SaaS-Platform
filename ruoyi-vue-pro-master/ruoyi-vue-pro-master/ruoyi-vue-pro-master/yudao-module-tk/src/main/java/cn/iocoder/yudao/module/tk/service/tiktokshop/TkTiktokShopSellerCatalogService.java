@@ -18,14 +18,21 @@ public class TkTiktokShopSellerCatalogService {
         try {
             TkTiktokShopSellerApiClient.CatalogPage<TkTiktokShopSellerApiClient.ProductSummary> page=api.searchProducts(prepared.token.getValue(),prepared.cipher,prepared.pageSize,prepared.pageToken);
             return new SellerProductPage(page);
-        }catch(TkTiktokShopApiException e){tokens.reportRejectedToken(prepared.tenant,prepared.company,prepared.accountId,prepared.token.getVersion(),e);throw e;}
+        }catch(TkTiktokShopApiException e){throw catalogError(prepared,e);}
     }
     public SellerOrderPage listOrders(Long shopId,Long companyId,Integer pageSize,String pageToken) {
         Prepared prepared=prepare(shopId,companyId,pageSize,pageToken,TkTiktokShopSellerApiClient.ORDER_SCOPE,true);
         try {
             TkTiktokShopSellerApiClient.CatalogPage<TkTiktokShopSellerApiClient.OrderSummary> page=api.searchOrders(prepared.token.getValue(),prepared.cipher,prepared.pageSize,prepared.pageToken);
             return new SellerOrderPage(page);
-        }catch(TkTiktokShopApiException e){tokens.reportRejectedToken(prepared.tenant,prepared.company,prepared.accountId,prepared.token.getVersion(),e);throw e;}
+        }catch(TkTiktokShopApiException e){throw catalogError(prepared,e);}
+    }
+    private TkTiktokShopApiException catalogError(Prepared prepared,TkTiktokShopApiException error) {
+        if(error.isPermissionDenied()) {
+            return new TkTiktokShopApiException(TkTiktokShopApiException.SELLER_FEATURE_ACCESS_DENIED,error.getRequestId());
+        }
+        tokens.reportRejectedToken(prepared.tenant,prepared.company,prepared.accountId,prepared.token.getVersion(),error);
+        return error;
     }
     private Prepared prepare(Long shopId,Long companyId,Integer pageSize,String pageToken,String requiredScope,boolean orders) {
         TkTiktokShopSellerShopDO shop=sellerAuth.requireReadableShop(shopId);

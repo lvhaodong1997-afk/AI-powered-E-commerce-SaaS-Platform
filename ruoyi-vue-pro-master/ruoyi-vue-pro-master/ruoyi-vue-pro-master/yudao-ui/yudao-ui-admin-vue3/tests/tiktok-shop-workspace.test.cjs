@@ -19,6 +19,9 @@ test('Shop read failures stay inline and do not render an empty successful resul
   }
   assert.match(seller, /status === 403 && reason\.response\.data\?\.code === 105005/)
   assert.match(seller, /shop\.sellerFeatureDenied/)
+  assert.match(seller, /<footer v-if="!error && page/)
+  assert.match(seller, /shop\.sellerReauthorize/)
+  assert.match(creator, /shop\.accountState\.REAUTH_REQUIRED/)
 })
 
 test('Shop workspace is a separate permission-gated menu and reuses the publishing panel', () => {

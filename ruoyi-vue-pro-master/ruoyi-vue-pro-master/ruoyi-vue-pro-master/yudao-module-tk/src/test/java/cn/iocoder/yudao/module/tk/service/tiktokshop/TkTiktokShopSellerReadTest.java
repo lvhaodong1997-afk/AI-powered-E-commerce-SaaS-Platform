@@ -84,8 +84,11 @@ class TkTiktokShopSellerReadTest {
         verify(tokens,never()).reportRejectedToken(anyLong(),anyLong(),anyLong(),anyLong(),any());
         assertEquals("request-1",result.getRequestId());
         assertEquals(HttpStatus.FORBIDDEN,new TkTiktokShopExceptionHandler().upstream(result).getStatusCode());
-        assertSame(invalid,assertThrows(TkTiktokShopApiException.class,
-                () -> reader.query(4L,TkTiktokShopSellerReadService.View.VIDEOS,null,start,start.plusDays(1),null)));
+        TkTiktokShopApiException reconnect=assertThrows(TkTiktokShopApiException.class,
+                () -> reader.query(4L,TkTiktokShopSellerReadService.View.VIDEOS,null,start,start.plusDays(1),null));
+        assertEquals("request-2",reconnect.getRequestId());
+        assertEquals(HttpStatus.CONFLICT,new TkTiktokShopExceptionHandler().upstream(reconnect).getStatusCode());
+        assertEquals(1060000018,new TkTiktokShopExceptionHandler().upstream(reconnect).getBody().getCode());
         verify(tokens).reportRejectedToken(1L,2L,3L,5L,invalid);
     }
 }

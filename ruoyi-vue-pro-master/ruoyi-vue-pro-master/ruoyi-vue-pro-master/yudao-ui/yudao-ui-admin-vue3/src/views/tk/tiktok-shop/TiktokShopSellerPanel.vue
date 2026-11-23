@@ -33,7 +33,7 @@
           <template #default="{ row }">{{ display(row, key) }}</template>
         </el-table-column>
       </el-table>
-      <footer v-if="page && (cursors.length > 1 || page.nextPageToken)" class="shop-toolbar page-controls">
+      <footer v-if="!error && page && (cursors.length > 1 || page.nextPageToken)" class="shop-toolbar page-controls">
         <el-button :disabled="loading || cursors.length < 2" @click="previous">{{ tt('shop.creatorPrevious') }}</el-button>
         <el-button :disabled="loading || !page?.nextPageToken" @click="next">{{ tt('shop.nextProducts') }}</el-button>
       </footer>
@@ -45,7 +45,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { isAxiosError } from 'axios'
-import { TiktokShopApi, type SellerAccount, type SellerShop, type ShopAnalyticsView, type ShopSellerPage, type ShopSellerView } from '@/api/tk/tiktokShop'
+import { SHOP_REAUTH_REQUIRED_CODE, TiktokShopApi, type SellerAccount, type SellerShop, type ShopAnalyticsView, type ShopSellerPage, type ShopSellerView } from '@/api/tk/tiktokShop'
 import { useTkI18n } from '@/hooks/web/useTkI18n'
 import { formatShopDate, shopAccountState } from './shopPresentation'
 
@@ -75,7 +75,14 @@ const shopId = ref<number>(), page = ref<ShopSellerPage>(), cursors = ref<(strin
 const loading = ref(false), loadingAccounts = ref(false), loadingShops = loadingAccounts, error = ref('')
 let accountRevision = 0, pageRevision = 0
 
-function failure(reason: unknown) { error.value = !isAxiosError(reason) && reason instanceof Error ? reason.message : tt('shop.operationFailed') }
+function failure(reason: unknown) {
+  if (isAxiosError<{ code?: number }>(reason)) {
+    error.value = tt(reason.response?.status === 409 && reason.response.data?.code === SHOP_REAUTH_REQUIRED_CODE
+      ? 'shop.sellerReauthorize' : 'shop.operationFailed')
+  } else {
+    error.value = reason instanceof Error ? reason.message : tt('shop.operationFailed')
+  }
+}
 function clearPage() { pageRevision++; loading.value = false; page.value = undefined; cursors.value = [] }
 watch([accountId, shopId, view, range, liveAccountType], () => { error.value = ''; clearPage() })
 watch(shops, (available) => {
