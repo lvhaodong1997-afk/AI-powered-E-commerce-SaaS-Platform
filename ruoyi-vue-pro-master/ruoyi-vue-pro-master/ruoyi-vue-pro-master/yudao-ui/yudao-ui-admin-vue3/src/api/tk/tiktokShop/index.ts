@@ -152,16 +152,17 @@ export interface ShopTask {
 }
 export interface ShopMedia { id: number; fileSize: number; fileName: string; mimeType: string; status: string }
 const base = '/tk/tiktok-shop'
+type ShopErrorPresentation = 'inline'
 const sellerWrite = (id: number) => `${base}/seller/shops/${id}/product-writing`
 export const TiktokShopApi = {
   capabilities: () => request.get<ShopCapabilities>({ url: `${base}/capabilities` }),
-  accounts: () => request.get<ShopAccount[]>({ url: `${base}/accounts` }),
+  accounts: (errorPresentation?: ShopErrorPresentation) => request.get<ShopAccount[]>({ url: `${base}/accounts`, errorPresentation }),
   authorize: (data: { companyId?: number; authType?: ShopAuthType } = {}) => request.post<ShopAuthSession>({ url: `${base}/auth/sessions`, data }),
   disconnect: (id: number) => request.delete<boolean>({ url: `${base}/accounts/${id}` }),
   sellerOperations: (params: ShopSellerParams & { view: ShopSellerView }) =>
-    request.get<ShopSellerPage>({ url: `${base}/seller/operations`, params }),
+    request.get<ShopSellerPage>({ url: `${base}/seller/operations`, params, errorPresentation: 'inline' }),
   sellerAnalytics: (params: ShopSellerParams & { view: ShopAnalyticsView; start: string; end: string; liveAccountType?: string }) =>
-    request.get<ShopSellerPage>({ url: `${base}/seller/analytics`, params }),
+    request.get<ShopSellerPage>({ url: `${base}/seller/analytics`, params, errorPresentation: 'inline' }),
   publishPhotos: (value: ShopPhotoCreate, files: File[]) => {
     const data = new FormData()
     data.append('request', new Blob([JSON.stringify(value)], { type: 'application/json' }))
@@ -172,15 +173,15 @@ export const TiktokShopApi = {
     request.get<{ list: ShopPhoto[]; total: number }>({ url: `${base}/photos`, params: { accountId, pageNo } }),
   photoStatus: (accountId: number, id: number) => request.get<ShopPhoto>({ url: `${base}/photos/${id}/status`, params: { accountId } }),
   creatorPage: (id: number, view: ShopCreatorView, params: { pageToken?: string; keyword?: string }) =>
-    request.get<{ rows: ShopCreatorRow[]; nextPageToken?: string }>({ url: `${base}/accounts/${id}/creator/${view}`, params }),
+    request.get<{ rows: ShopCreatorRow[]; nextPageToken?: string }>({ url: `${base}/accounts/${id}/creator/${view}`, params, errorPresentation: 'inline' }),
   addToShowcase: (id: number, productId: string) => request.post<boolean>({
     url: `${base}/accounts/${id}/creator/showcase/${encodeURIComponent(productId)}`, skipAuthReplay: true
   }),
   removeFromShowcase: (id: number, productId: string) => request.delete<boolean>({
     url: `${base}/accounts/${id}/creator/showcase/${encodeURIComponent(productId)}`, skipAuthReplay: true
   }),
-  products: (id: number, params: { source: ShopProductSource; pageSize: number; pageToken?: string; titleKeyword?: string }) =>
-    request.get<{ products: ShopProduct[]; nextPageToken?: string }>({ url: `${base}/accounts/${id}/products`, params }),
+  products: (id: number, params: { source: ShopProductSource; pageSize: number; pageToken?: string; titleKeyword?: string }, errorPresentation?: ShopErrorPresentation) =>
+    request.get<{ products: ShopProduct[]; nextPageToken?: string }>({ url: `${base}/accounts/${id}/products`, params, errorPresentation }),
   create: (data: ShopCreate) => request.post<ShopTask>({ url: `${base}/publish/tasks`, data, timeout: 120_000, skipAuthReplay: true }),
   tasks: (params: { pageNo: number; pageSize: number; accountId?: number }) => request.get<{ list: ShopTask[]; total: number }>({ url: `${base}/publish/tasks`, params }),
   get: (id: number) => request.get<ShopTask>({ url: `${base}/publish/tasks/${id}` }),
@@ -194,8 +195,8 @@ export const TiktokShopApi = {
   },
   completeMedia: (id: string, signal: AbortSignal) => request.post<ShopMedia>({ url: `${base}/media/sessions/${encodeURIComponent(id)}/complete`, signal, timeout: 120_000 }),
   cancelMedia: (id: string) => request.delete({ url: `${base}/media/sessions/${encodeURIComponent(id)}` }),
-  sellerAccounts: (params?: { companyId?: number }) => request.get<SellerAccount[]>({ url: `${base}/seller/accounts`, params }),
-  sellerShops: (params?: { companyId?: number }) => request.get<SellerShop[]>({ url: `${base}/seller/shops`, params }),
+  sellerAccounts: (params?: { companyId?: number }, errorPresentation?: ShopErrorPresentation) => request.get<SellerAccount[]>({ url: `${base}/seller/accounts`, params, errorPresentation }),
+  sellerShops: (params?: { companyId?: number }, errorPresentation?: ShopErrorPresentation) => request.get<SellerShop[]>({ url: `${base}/seller/shops`, params, errorPresentation }),
   disconnectSeller: (id: number) => request.delete<boolean>({ url: `${base}/seller/accounts/${id}` }),
   sellerProducts: (id: number, params: { companyId?: number; pageSize?: number; pageToken?: string } = {}) =>
     request.get<SellerProductPage>({ url: `${base}/seller/shops/${id}/products`, params }),

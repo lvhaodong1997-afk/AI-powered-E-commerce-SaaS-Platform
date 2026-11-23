@@ -7,6 +7,7 @@ public class TkTiktokShopApiException extends RuntimeException {
     public static final String CREATOR_REFRESH_PENDING = "CREATOR_REFRESH_PENDING";
     public static final String CREATOR_REAUTHORIZE = "CREATOR_REAUTHORIZE";
     public static final String SELLER_ANALYTICS_ACCESS_DENIED = "SELLER_ANALYTICS_ACCESS_DENIED";
+    public static final String SELLER_FEATURE_ACCESS_DENIED = "SELLER_FEATURE_ACCESS_DENIED";
     private final String code;
     private final String requestId;
     public TkTiktokShopApiException(String code, String requestId) {

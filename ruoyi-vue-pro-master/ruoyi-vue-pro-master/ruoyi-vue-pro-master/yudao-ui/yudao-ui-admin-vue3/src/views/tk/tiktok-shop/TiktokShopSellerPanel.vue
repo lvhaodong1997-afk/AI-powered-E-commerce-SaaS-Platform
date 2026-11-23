@@ -11,7 +11,6 @@
       </el-select>
       <el-tooltip :content="tt('shop.refreshAccounts')"><el-button :aria-label="tt('shop.refreshAccounts')" :icon="Refresh" @click="loadAccounts" /></el-tooltip>
     </div>
-    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
     <section class="shop-band shop-results">
       <el-tabs v-model="view" :aria-label="tt('shop.sellerReport')">
         <el-tab-pane v-for="item in views" :key="item" :name="item" :label="tt(`shop.sellerView.${item}`)" />
@@ -27,7 +26,8 @@
         <el-button type="primary" :loading="loading" :disabled="!authorized || !shopId" @click="query()">{{ tt('shop.sellerQuery') }}</el-button>
         <span v-if="page?.latestAvailableDate" class="shop-muted">{{ tt('shop.sellerDataThrough') }} {{ page.latestAvailableDate }}</span>
       </div>
-      <el-table v-loading="loading" :data="page?.rows || []" :empty-text="tt(!authorized ? 'shop.sellerNoAccount' : !shopId ? 'shop.sellerNoStore' : !page ? 'shop.sellerAwaitingQuery' : 'shop.sellerNoRows')" size="small">
+      <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+      <el-table v-else v-loading="loading" :data="page?.rows || []" :empty-text="tt(!authorized ? 'shop.sellerNoAccount' : !shopId ? 'shop.sellerNoStore' : !page ? 'shop.sellerAwaitingQuery' : 'shop.sellerNoRows')" size="small">
         <el-table-column v-for="key in fields[view]" :key="key" :label="tt(`shop.sellerField.${analytics && key === 'amount' ? 'gmv' : key}`)" :min-width="key === 'title' ? 210 : 114"
           :align="numericFields.has(key) ? 'right' : 'left'" show-overflow-tooltip>
           <template #default="{ row }">{{ display(row, key) }}</template>
@@ -75,9 +75,9 @@ const shopId = ref<number>(), page = ref<ShopSellerPage>(), cursors = ref<(strin
 const loading = ref(false), loadingAccounts = ref(false), loadingShops = loadingAccounts, error = ref('')
 let accountRevision = 0, pageRevision = 0
 
-function failure(reason: unknown) { error.value = reason instanceof Error ? reason.message : tt('shop.operationFailed') }
+function failure(reason: unknown) { error.value = !isAxiosError(reason) && reason instanceof Error ? reason.message : tt('shop.operationFailed') }
 function clearPage() { pageRevision++; loading.value = false; page.value = undefined; cursors.value = [] }
-watch([shopId, view, range, liveAccountType], clearPage)
+watch([accountId, shopId, view, range, liveAccountType], () => { error.value = ''; clearPage() })
 watch(shops, (available) => {
   if (!available.some((shop) => shop.id === shopId.value)) shopId.value = available[0]?.id
 })
@@ -88,7 +88,7 @@ async function loadAccounts() {
   const revision = ++accountRevision
   loadingAccounts.value = true; error.value = ''
   try {
-    const [rows, available] = await Promise.all([TiktokShopApi.sellerAccounts(), TiktokShopApi.sellerShops()])
+    const [rows, available] = await Promise.all([TiktokShopApi.sellerAccounts(undefined, 'inline'), TiktokShopApi.sellerShops(undefined, 'inline')])
     if (revision !== accountRevision) return
     const prior = accountId.value
     accounts.value = rows; allShops.value = available
@@ -109,8 +109,8 @@ async function query(trail: (string | undefined)[] = [undefined]) {
     if (revision === pageRevision) { page.value = result; cursors.value = trail }
   } catch (reason) {
     if (revision === pageRevision) {
-      if (props.analytics && isAxiosError<{ code?: number }>(reason) && reason.response?.status === 403 && reason.response.data?.code === 105005) {
-        error.value = tt('shop.sellerAnalyticsDenied')
+      if (isAxiosError<{ code?: number }>(reason) && reason.response?.status === 403 && reason.response.data?.code === 105005) {
+        error.value = tt(props.analytics ? 'shop.sellerAnalyticsDenied' : 'shop.sellerFeatureDenied')
       } else failure(reason)
     }
   }

@@ -201,6 +201,7 @@ const entries: Record<string, [string, string]> = {
   'shop.orderTime': ['下单时间', 'Created at'],
   'shop.orderAmount': ['金额', 'Amount'],
   'shop.totalRows': ['共 {{total}} 条', '{{total}} total'],
+  'shop.sellerFeatureDenied': ['TikTok Shop 未允许查询此功能。请核对接口权限；店铺授权未变更。', 'TikTok Shop denied access to this feature. Check the API permissions. Seller authorization was not changed.'],
   'shop.operationFailed': ['操作失败，请稍后重试。', 'Operation failed. Try again later.']
 }
 export const tiktokShopZh: Record<string, string> = Object.fromEntries(Object.entries(entries).map(([key, value]) => [key, value[0]]))

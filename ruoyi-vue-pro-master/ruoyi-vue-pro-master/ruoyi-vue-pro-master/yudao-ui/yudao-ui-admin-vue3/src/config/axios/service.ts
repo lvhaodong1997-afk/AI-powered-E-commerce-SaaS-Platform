@@ -131,6 +131,7 @@ service.interceptors.response.use(
   async (response: AxiosResponse<any>) => {
     let { data } = response
     const config = response.config
+    const inlineError = (config as { errorPresentation?: string }).errorPresentation === 'inline'
     if (!data) {
       // 返回“[HTTP]请求没有返回值”;
       throw new Error()
@@ -220,9 +221,9 @@ service.interceptors.response.use(
       }
     } else if (code === 500) {
       const displayMsg = getTkApiErrorMessage(config.url, msg, t('sys.api.errMsg500'))
-      ElMessage.error(displayMsg)
+      if (!inlineError) ElMessage.error(displayMsg)
       const error = new Error(displayMsg) as Error & { displayedByAxios?: boolean }
-      error.displayedByAxios = true
+      error.displayedByAxios = !inlineError
       return Promise.reject(error)
     } else if (code === 901) {
       ElMessage.error({
@@ -236,10 +237,10 @@ service.interceptors.response.use(
         // hard coding：忽略这个提示，直接登出
         console.log(msg)
         return handleAuthorized()
-      } else {
+      } else if (!inlineError) {
         ElNotification.error({ title: msg })
       }
-      return Promise.reject(Object.assign(new Error(msg), { businessCode: code, displayedByAxios: true }))
+      return Promise.reject(Object.assign(new Error(msg), { businessCode: code, displayedByAxios: !inlineError }))
     } else {
       return data
     }
@@ -255,8 +256,10 @@ service.interceptors.response.use(
     } else if (message.includes('Request failed with status code')) {
       message = t('sys.api.apiRequestFailed') + message.substr(message.length - 3)
     }
-    ElMessage.error(message)
-    ;(error as AxiosError & { displayedByAxios?: boolean }).displayedByAxios = true
+    if ((error.config as { errorPresentation?: string } | undefined)?.errorPresentation !== 'inline') {
+      ElMessage.error(message)
+      ;(error as AxiosError & { displayedByAxios?: boolean }).displayedByAxios = true
+    }
     return Promise.reject(error)
   }
 )

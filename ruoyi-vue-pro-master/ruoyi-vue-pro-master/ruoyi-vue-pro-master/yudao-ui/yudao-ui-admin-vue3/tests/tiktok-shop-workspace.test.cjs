@@ -6,6 +6,21 @@ const path = require('node:path')
 const web = path.join(__dirname, '..')
 const read = (file) => fs.readFileSync(path.join(web, file), 'utf8')
 
+test('Shop read failures stay inline and do not render an empty successful result', () => {
+  const api = read('src/api/tk/tiktokShop/index.ts')
+  const axios = read('src/config/axios/service.ts')
+  const creator = read('src/views/tk/tiktok-shop/TiktokShopCreatorPanel.vue')
+  const seller = read('src/views/tk/tiktok-shop/TiktokShopSellerPanel.vue')
+  assert.match(api, /seller\/operations[^\n]+errorPresentation: 'inline'/)
+  assert.match(api, /creator\/\$\{view\}[^\n]+errorPresentation: 'inline'/)
+  assert.match(axios, /error\.config[^\n]*errorPresentation !== 'inline'[\s\S]*?ElMessage\.error\(message\)/)
+  for (const panel of [creator, seller]) {
+    assert.match(panel, /<el-alert v-if="error"[^\n]*\n\s*<el-table v-else/)
+  }
+  assert.match(seller, /status === 403 && reason\.response\.data\?\.code === 105005/)
+  assert.match(seller, /shop\.sellerFeatureDenied/)
+})
+
 test('Shop workspace is a separate permission-gated menu and reuses the publishing panel', () => {
   const sql = read('../../yudao-module-tk/src/main/resources/sql/tk_tiktok_shop_workspace_mysql.sql')
   assert.match(sql, /'tk:tiktok-shop-workspace:query'/)

@@ -23,7 +23,7 @@
         <el-button type="primary" native-type="submit" :loading="loading" :disabled="!selectedAccount">{{ tt('shop.searchProducts') }}</el-button>
       </form>
       <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
-      <el-table :data="rows" :empty-text="tt(selectedAccount ? 'shop.sellerNoRows' : currentAccount ? shopAccountState(currentAccount.authStatus).label : 'shop.noSelection')" v-loading="loading" row-key="id" size="small">
+      <el-table v-else :data="rows" :empty-text="tt(selectedAccount ? 'shop.sellerNoRows' : currentAccount ? shopAccountState(currentAccount.authStatus).label : 'shop.noSelection')" v-loading="loading" row-key="id" size="small">
         <el-table-column v-if="isProduct" :label="tt('shop.product')" min-width="235">
           <template #default="{ row }"><strong>{{ row.title || row.id }}</strong><div v-if="row.title" class="shop-muted">{{ row.id }}</div></template>
         </el-table-column>
@@ -100,7 +100,7 @@ async function initialize() {
   initializing.value = true
   error.value = ''
   try {
-    const data = await TiktokShopApi.accounts()
+    const data = await TiktokShopApi.accounts('inline')
     if (!accountRevision.current(requestRevision)) return
     accounts.value = data
     if (!currentAccount.value) accountId.value = (data.find((account) => account.authStatus === 'AUTHORIZED') || data[0])?.id
@@ -124,7 +124,7 @@ async function loadPage(stack: (string | undefined)[]) {
   if (!account) return
   try {
     const result = dataset === 'showcase'
-      ? await TiktokShopApi.products(account, { source: 'SHOWCASE', pageSize: 20, pageToken }).then((page) => ({
+      ? await TiktokShopApi.products(account, { source: 'SHOWCASE', pageSize: 20, pageToken }, 'inline').then((page) => ({
           rows: page.products.map((product) => ({ id: product.id, title: product.title, price: product.price, currency: product.currency, status: product.available ? tt('shop.creatorAvailable') : tt('shop.unavailable'), product })),
           nextPageToken: page.nextPageToken
         }))
@@ -146,7 +146,7 @@ async function loadPage(stack: (string | undefined)[]) {
 
 function errorText(reason: unknown) {
   if (isAxiosError<{ code?: number }>(reason) && reason.response?.status === 503 && reason.response.data?.code === 503) return tt('shop.creatorRenewalPending')
-  return reason instanceof Error ? reason.message : tt('shop.operationFailed')
+  return !isAxiosError(reason) && reason instanceof Error ? reason.message : tt('shop.operationFailed')
 }
 function formatDate(seconds: number) { return new Date(seconds * 1000).toLocaleString(locale.value) }
 function resetPage() { cursors.value = [undefined]; return loadPage(cursors.value) }

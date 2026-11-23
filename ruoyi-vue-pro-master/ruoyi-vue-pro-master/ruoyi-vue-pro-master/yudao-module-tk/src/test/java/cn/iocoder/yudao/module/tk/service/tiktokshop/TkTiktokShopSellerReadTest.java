@@ -5,6 +5,8 @@ import cn.iocoder.yudao.module.tk.dal.dataobject.tiktokshop.TkTiktokShopSellerSh
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 
 import java.time.LocalDate;
 import java.util.Map;
@@ -36,6 +38,32 @@ class TkTiktokShopSellerReadTest {
         TkTiktokShopSellerReadService.Page page=service.read(TkTiktokShopSellerReadService.View.VIDEOS,"token","cipher",null,LocalDate.of(2026,6,1),LocalDate.of(2026,6,2),null);
         assertEquals(Map.of("id","v","views","20","impressions","5","clicks","0","amount","1.23","currency","USD"),page.getRows().get(0));
         assertEquals("next",page.getNextPageToken());assertEquals("2026-06-01",page.getLatestAvailableDate());
+    }
+
+    @Test void deniedStatementsDoNotBlockOtherSellerQueries() throws Exception {
+        TkTiktokShopSellerAuthService auth=mock(TkTiktokShopSellerAuthService.class);
+        TkTiktokShopSellerTokenService tokens=mock(TkTiktokShopSellerTokenService.class);
+        TkTiktokShopSellerShopDO shop=new TkTiktokShopSellerShopDO();
+        shop.setTenantId(1L);shop.setCompanyId(2L);shop.setAccountId(3L);shop.setShopCipher("cipher");
+        when(auth.requireReadableShop(4L)).thenReturn(shop);
+        when(tokens.getAccessToken(1L,2L,3L)).thenReturn(new TkTiktokShopSellerTokenService.AccessToken("token",5L));
+        when(api.get(eq("/finance/202309/statements"),eq("token"),anyMap()))
+                .thenThrow(new TkTiktokShopApiException("105005","finance-request"));
+        TkTiktokShopSellerReadService reader=new TkTiktokShopSellerReadService(api,auth,tokens);
+
+        TkTiktokShopApiException denied=assertThrows(TkTiktokShopApiException.class,
+                () -> reader.query(4L,TkTiktokShopSellerReadService.View.STATEMENTS,null,null,null,null));
+        assertEquals("finance-request",denied.getRequestId());
+        ResponseEntity<CommonResult<Object>> response=new TkTiktokShopExceptionHandler().upstream(denied);
+        assertEquals(HttpStatus.FORBIDDEN,response.getStatusCode());
+        assertEquals(105005,response.getBody().getCode());
+        verify(tokens,never()).reportRejectedToken(anyLong(),anyLong(),anyLong(),anyLong(),any());
+        for (TkTiktokShopSellerReadService.View view : new TkTiktokShopSellerReadService.View[]{TkTiktokShopSellerReadService.View.PRODUCTS,
+                TkTiktokShopSellerReadService.View.ORDERS,TkTiktokShopSellerReadService.View.PACKAGES}) {
+            when(api.post(eq(view.path),eq("token"),anyMap(),anyMap())).thenReturn(
+                    new TkTiktokShopApiClient.Result(json.readTree("{\""+view.array+"\":[{\"id\":\"1\"}]}"),"ok"));
+            assertEquals("1",reader.query(4L,view,null,null,null,null).getRows().get(0).get("id"));
+        }
     }
 
     @Test void analyticsDenialDoesNotInvalidateSellerAuthorizationButTokenRejectionStillDoes() {

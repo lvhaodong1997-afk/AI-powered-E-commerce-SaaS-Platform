@@ -42,6 +42,13 @@ class TkTiktokShopSellerTokenServiceTest {
         when(accounts.selectById(3L)).thenReturn(account());when(api.refreshToken("refresh")).thenThrow(new TkTiktokShopApiException("105001","r"));
         assertThrows(TkTiktokShopApiException.class,()->service.getAccessToken(1L,1L,3L));verify(accounts).markReauthorization(3L,1L,4L);
     }
+    @Test void businessPermissionDenialKeepsSellerTokensButInvalidTokenRequiresReconnect() {
+        when(accounts.selectById(3L)).thenReturn(account());
+        service.reportRejectedToken(1L,1L,3L,4L,new TkTiktokShopApiException("105005","denied"));
+        verify(accounts,never()).markReauthorization(anyLong(),anyLong(),anyLong());
+        service.reportRejectedToken(1L,1L,3L,4L,new TkTiktokShopApiException("105001","expired"));
+        verify(accounts).markReauthorization(3L,1L,4L);
+    }
     @Test void typedRefreshRejectionRequiresFreshAuthorization() {
         for(String reason:new String[]{"WRONG_ACCOUNT_TYPE","INSUFFICIENT_SCOPE"}){
             reset(api,accounts);when(accounts.selectById(3L)).thenReturn(account());when(api.refreshToken("refresh")).thenThrow(new TkTiktokShopApiException(reason,"request-1"));

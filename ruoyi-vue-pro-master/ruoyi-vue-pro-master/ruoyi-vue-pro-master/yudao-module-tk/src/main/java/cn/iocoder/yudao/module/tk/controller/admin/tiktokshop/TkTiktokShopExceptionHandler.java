@@ -32,6 +32,10 @@ public class TkTiktokShopExceptionHandler {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(CommonResult.error(105005,
                     "TikTok Shop denied analytics access. Seller authorization was not changed."));
         }
+        if (TkTiktokShopApiException.SELLER_FEATURE_ACCESS_DENIED.equals(e.getCode())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(CommonResult.error(105005,
+                    "TikTok Shop denied access to this seller feature. Seller authorization was not changed."));
+        }
         if (TkTiktokShopApiException.CREATOR_PERMISSION_DENIED.equals(e.getCode())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(CommonResult.error(105005,
                     "TikTok Shop denied access to this creator feature. Creator authorization was not changed."));

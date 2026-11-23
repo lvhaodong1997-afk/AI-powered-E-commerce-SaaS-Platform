@@ -40,7 +40,8 @@ public class TkTiktokShopSellerTokenService {
     }
     /** A business API rejection invalidates only the exact authorization version used. Never retries publishing. */
     public void reportRejectedToken(Long tenant,Long company,Long accountId,long usedVersion,TkTiktokShopApiException error) {
-        require(tenant,company,accountId);if(error.isReauthorizationRequired())accounts.markReauthorization(accountId,tenant,usedVersion);
+        require(tenant,company,accountId);
+        if(!error.isPermissionDenied() && error.isReauthorizationRequired())accounts.markReauthorization(accountId,tenant,usedVersion);
     }
     private TkTiktokShopSellerAccountDO require(Long tenant,Long company,Long id) {
         if(tenant==null || company==null || id==null || !Objects.equals(tenant,TenantContextHolder.getTenantId()) || TenantContextHolder.isIgnore())throw new IllegalStateException("Shop token tenant context mismatch");

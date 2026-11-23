@@ -39,8 +39,9 @@ public class TkTiktokShopSellerReadService {
         TkTiktokShopSellerTokenService.AccessToken token=tokens.getAccessToken(shop.getTenantId(),shop.getCompanyId(),shop.getAccountId());
         try {return read(view,token.getValue(),shop.getShopCipher(),cursor,start,end,liveAccountType);}
         catch(TkTiktokShopApiException e){
-            if(view.isAnalytics() && "105005".equals(e.getCode())) {
-                throw new TkTiktokShopApiException(TkTiktokShopApiException.SELLER_ANALYTICS_ACCESS_DENIED,e.getRequestId());
+            if(e.isPermissionDenied()) {
+                throw new TkTiktokShopApiException(view.isAnalytics() ? TkTiktokShopApiException.SELLER_ANALYTICS_ACCESS_DENIED
+                        : TkTiktokShopApiException.SELLER_FEATURE_ACCESS_DENIED, e.getRequestId());
             }
             tokens.reportRejectedToken(shop.getTenantId(),shop.getCompanyId(),shop.getAccountId(),token.getVersion(),e);
             throw e;
