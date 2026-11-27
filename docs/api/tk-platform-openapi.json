@@ -259,13 +259,68 @@
         }
       }
     },
+    "/admin-api/tk/open/v1/x/media/uploads": {
+      "post": {
+        "operationId": "createXMediaUpload",
+        "tags": ["X Publish"],
+        "description": "Requires x.publish. Upload one file. PHOTO uses private LOCAL chunks, requires image/jpeg or image/png and SHA-256, and is limited to 5000000 bytes. Omit mediaType for the existing VIDEO behavior.",
+        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
+        "parameters": [{"$ref": "#/components/parameters/XWorkspace"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object", "required": ["fileName", "fileSize"],
+          "properties": {
+            "fileName": {"type": "string", "maxLength": 256},
+            "fileSize": {"type": "integer", "format": "int64", "minimum": 1},
+            "mediaType": {"type": "string", "enum": ["VIDEO", "PHOTO"], "default": "VIDEO"},
+            "contentType": {"type": "string", "maxLength": 128},
+            "sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"}
+          }
+        }}}},
+        "responses": {"200": {"$ref": "#/components/responses/XMediaResult"}, "default": {"$ref": "#/components/responses/XErrorResult"}}
+      }
+    },
+    "/admin-api/tk/open/v1/x/media/uploads/{uploadId}": {
+      "get": {
+        "operationId": "getXMediaUpload", "tags": ["X Publish"],
+        "description": "Requires x.publish. Returns upload status within this client/workspace.",
+        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
+        "parameters": [{"$ref": "#/components/parameters/XWorkspace"}, {"$ref": "#/components/parameters/XUploadId"}],
+        "responses": {"200": {"$ref": "#/components/responses/XMediaResult"}, "default": {"$ref": "#/components/responses/XErrorResult"}}
+      }
+    },
+    "/admin-api/tk/open/v1/x/media/uploads/{uploadId}/chunks/{chunkIndex}": {
+      "post": {
+        "operationId": "uploadXMediaChunk", "tags": ["X Publish"],
+        "description": "Requires x.publish. Send raw bytes; sign the actual binary request body. Chunks are 0-based and use the returned chunkSize.",
+        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
+        "parameters": [{"$ref": "#/components/parameters/XWorkspace"}, {"$ref": "#/components/parameters/XUploadId"},
+          {"name": "chunkIndex", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 0}}],
+        "requestBody": {"required": true, "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}},
+        "responses": {"200": {"description": "Chunk accepted", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OpenApiResponse"}}}}, "default": {"$ref": "#/components/responses/XErrorResult"}}
+      }
+    },
+    "/admin-api/tk/open/v1/x/media/uploads/{uploadId}/complete": {
+      "post": {
+        "operationId": "completeXMediaUpload", "tags": ["X Publish"],
+        "description": "Requires x.publish. For images, verifies the declared SHA-256 against the actual file and returns READY with a mediaId.",
+        "security": [{"TkClientId": [], "TkTimestamp": [], "TkNonce": [], "TkSignature": []}],
+        "parameters": [{"$ref": "#/components/parameters/XWorkspace"}, {"$ref": "#/components/parameters/XUploadId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object", "required": ["fileSize"], "properties": {
+            "fileSize": {"type": "integer", "format": "int64", "minimum": 1},
+            "sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"}
+          }
+        }}}},
+        "responses": {"200": {"$ref": "#/components/responses/XMediaResult"}, "default": {"$ref": "#/components/responses/XErrorResult"}}
+      }
+    },
     "/admin-api/tk/open/v1/x/publish/tasks": {
       "post": {
         "operationId": "createXPublishTask",
         "tags": [
           "X Publish"
         ],
-        "description": "Requires x.publish. Submits one generated video owned by the bound end user. Multi-user mode requires endUserId in the body. A repeated key with the same input and end user returns the original task; changed input returns 409.",
+        "description": "Requires x.publish. Submit one uploaded video or 1-4 distinct READY images in display order. Connection and assets must be in the signed client/workspace scope. Reusing the key with changed input or image order returns 409.",
         "security": [
           {
             "TkClientId": [],
@@ -275,6 +330,7 @@
           }
         ],
         "parameters": [
+          {"$ref": "#/components/parameters/XWorkspace"},
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -292,20 +348,23 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "connectionId",
-                  "generationTaskId",
-                  "text"
+                  "connectionId"
+                ],
+                "oneOf": [
+                  {"required": ["mediaId", "text"], "not": {"required": ["mediaIds"]}},
+                  {"required": ["mediaIds"], "not": {"required": ["mediaId"]}}
                 ],
                 "properties": {
                   "connectionId": {
                     "type": "string",
-                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                    "maxLength": 64
                   },
-                  "generationTaskId": {
+                  "mediaId": {
                     "type": "string",
-                    "pattern": "^[1-9][0-9]{0,18}$",
-                    "example": "123456"
+                    "maxLength": 64,
+                    "description": "A READY video media ID."
                   },
+                  "mediaIds": {"$ref": "#/components/schemas/XPhotoIds"},
                   "text": {
                     "type": "string",
                     "maxLength": 280,
@@ -339,7 +398,7 @@
         "tags": [
           "X Publish"
         ],
-        "description": "Requires x.publish. Multi-user mode requires endUserId. UNKNOWN must be checked on X; do not submit a replacement automatically.",
+        "description": "Requires x.publish. FAILED with failCode=PLATFORM_UNCERTAIN must be checked on X; do not submit a replacement automatically.",
         "security": [
           {
             "TkClientId": [],
@@ -349,6 +408,7 @@
           }
         ],
         "parameters": [
+          {"$ref": "#/components/parameters/XWorkspace"},
           {
             "name": "taskId",
             "in": "path",
@@ -357,16 +417,6 @@
               "type": "string",
               "pattern": "^xtask_[a-f0-9]{32}$"
             }
-          },
-          {
-            "name": "endUserId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
-            },
-            "description": "Required in multi-user mode. Included in the HMAC request target."
           }
         ],
         "responses": {
@@ -8529,7 +8579,15 @@
         "description": "已开通账号所属租户 ID；不能使用其它租户 ID 扩大权限"
       }
     },
+    "parameters": {
+      "XWorkspace": {"name": "workspaceId", "in": "query", "required": false,
+        "description": "Lowercase workspace UUID; included in the signed request target. Omit only for legacy-scope resources.",
+        "schema": {"type": "string", "format": "uuid"}},
+      "XUploadId": {"name": "uploadId", "in": "path", "required": true, "schema": {"type": "string"}}
+    },
     "schemas": {
+      "XPhotoIds": {"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true,
+        "description": "READY image media IDs in display order.", "items": {"type": "string", "maxLength": 64}},
       "OpenApiResponse": {
         "type": "object",
         "properties": {
@@ -10955,6 +11013,21 @@
           }
         }
       },
+      "XMediaResult": {
+        "description": "X upload operation result",
+        "content": {"application/json": {"schema": {"allOf": [
+          {"$ref": "#/components/schemas/OpenApiResponse"}, {"type": "object", "properties": {"data": {
+            "type": "object", "properties": {
+              "uploadId": {"type": "string"}, "mediaId": {"type": "string", "nullable": true},
+              "uploadMode": {"type": "string", "enum": ["LOCAL", "OSS"]}, "mediaType": {"type": "string", "enum": ["PHOTO"]},
+              "status": {"type": "string"}, "chunkSize": {"type": "integer"}, "totalChunks": {"type": "integer"},
+              "fileSize": {"type": "integer", "format": "int64"}, "uploadedSize": {"type": "integer", "format": "int64"},
+              "expireTime": {"type": "string"}, "fileName": {"type": "string"}, "contentType": {"type": "string"},
+              "uploadUrl": {"type": "string"}, "objectKey": {"type": "string"}, "fields": {"type": "object"}
+            }
+          }}}
+        ]}}}
+      },
       "XTaskResult": {
         "description": "Current publish task state",
         "content": {
@@ -10982,20 +11055,22 @@
                           "enum": [
                             "PENDING",
                             "PROCESSING",
-                            "SUCCEEDED",
-                            "FAILED",
-                            "REAUTH_REQUIRED",
-                            "UNKNOWN"
+                            "SUCCESS",
+                            "FAILED"
                           ]
                         },
-                        "postId": {
+                        "mediaId": {"type": "string"},
+                        "mediaIds": {"$ref": "#/components/schemas/XPhotoIds"},
+                        "connectionId": {"type": "string"},
+                        "tweetId": {
                           "type": "string"
                         },
-                        "postUrl": {
+                        "publishUrl": {
                           "type": "string",
                           "format": "uri"
                         },
-                        "errorCode": {
+                        "failReason": {"type": "string"},
+                        "failCode": {
                           "type": "string"
                         }
                       }

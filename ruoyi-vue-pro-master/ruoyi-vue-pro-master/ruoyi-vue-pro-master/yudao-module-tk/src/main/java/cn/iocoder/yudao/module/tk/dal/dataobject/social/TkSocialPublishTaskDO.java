@@ -24,6 +24,7 @@ public class TkSocialPublishTaskDO extends TenantBaseDO {
     private String facebookMessage;
     private String channel;
     private String channelText;
+    private String channelPhotoIds;
     private String channelPrivacy;
     private Boolean channelForKids;
     private Boolean channelSynthetic;

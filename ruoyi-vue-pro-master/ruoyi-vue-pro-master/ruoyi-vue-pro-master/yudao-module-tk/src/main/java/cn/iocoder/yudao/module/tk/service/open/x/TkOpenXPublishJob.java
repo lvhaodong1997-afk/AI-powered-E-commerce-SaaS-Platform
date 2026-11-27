@@ -13,6 +13,8 @@ import cn.iocoder.yudao.module.tk.service.channel.TkChannelVideoClient;
 import cn.iocoder.yudao.module.tk.service.channel.TkOpenXAccess;
 import cn.iocoder.yudao.module.tk.service.channel.TkOpenXPublishService;
 import cn.iocoder.yudao.module.tk.service.channel.TkOpenXTokenService;
+import cn.iocoder.yudao.module.tk.service.channel.TkXPhotoClient;
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.tk.service.open.api.TkOpenApiCallbackService;
 import cn.iocoder.yudao.module.tk.service.social.platform.TkSocialPlatformException;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +39,7 @@ public class TkOpenXPublishJob {
     private final TkOpenXMediaService media;
     private final TkOpenXTokenService tokens;
     private final TkChannelVideoClient videos;
+    private final TkXPhotoClient photos;
     private final TkOpenXPublishService publish;
     private final TkOpenXAccess access;
     private final TkOpenApiCallbackService callbacks;
@@ -47,8 +50,70 @@ public class TkOpenXPublishJob {
         if (!access.isEnabled()) return;
         List<TkOpenXPublishTaskDO> due = tasks.selectDue(LocalDateTime.now(), 16);
         for (TkOpenXPublishTaskDO item : due) {
-            new TransactionTemplate(transactions).executeWithoutResult(status -> process(item.getId()));
+            if (item.getPhotoIds() != null) processPhoto(item.getId());
+            else new TransactionTemplate(transactions).executeWithoutResult(status -> process(item.getId()));
         }
+    }
+
+    void processPhoto(Long id) {
+        TransactionTemplate tx = new TransactionTemplate(transactions);
+        TkOpenXPublishTaskDO task = tx.execute(status -> {
+            TkOpenXPublishTaskDO row = tasks.selectByIdForUpdate(id);
+            LocalDateTime now = LocalDateTime.now();
+            if (row == null || row.getPhotoIds() == null || (row.getLeaseUntil() != null && row.getLeaseUntil().isAfter(now))) return null;
+            if ("PROCESSING".equals(row.getStatus())) {
+                fail(row, "PLATFORM_UNCERTAIN", "platform result requires verification");
+                return null;
+            }
+            if (!"PENDING".equals(row.getStatus()) || (row.getNextRetryTime() != null && row.getNextRetryTime().isAfter(now))) return null;
+            row.setStatus("PROCESSING").setLeaseToken(UUID.randomUUID().toString()).setLeaseUntil(now.plusMinutes(5));
+            tasks.updateById(row);
+            return row;
+        });
+        if (task == null) return;
+        String postId = null;
+        String failure = null;
+        java.util.concurrent.atomic.AtomicBoolean posting = new java.util.concurrent.atomic.AtomicBoolean();
+        try {
+            TkOpenXConnectionDO connection = photoConnection(task);
+            List<java.nio.file.Path> paths = new java.util.ArrayList<>();
+            for (String mediaId : JsonUtils.parseArray(task.getPhotoIds(), String.class))
+                paths.add(media.requirePhoto(task.getClientId(), mediaId, task.getWorkspaceId()));
+            postId = photos.publish(tokens.accessToken(connection), task.getText(), paths, () -> {
+                photoConnection(task);
+                posting.set(true);
+            });
+        } catch (TkOpenApiException ex) {
+            failure = ex.getCode();
+        } catch (TkSocialPlatformException ex) {
+            failure = ex.isUncertain() ? "PLATFORM_UNCERTAIN" : ex.getCode();
+        } catch (RuntimeException ex) {
+            failure = posting.get() ? "PLATFORM_UNCERTAIN" : "INTERNAL_ERROR";
+        }
+        final String published = postId, error = failure;
+        tx.executeWithoutResult(status -> {
+            TkOpenXPublishTaskDO row = tasks.selectByIdForUpdate(id);
+            if (row == null || !java.util.Objects.equals(task.getLeaseToken(), row.getLeaseToken())
+                    || !"PROCESSING".equals(row.getStatus())) return;
+            if (error != null) {
+                fail(row, error, "PLATFORM_UNCERTAIN".equals(error) ? "platform result requires verification" : safeMessage(error));
+            } else {
+                row.setLeaseToken(null).setLeaseUntil(null).setNextRetryTime(null).setStatus("SUCCESS")
+                        .setPlatformStatus("PUBLISHED").setTweetId(published).setPublishUrl("https://x.com/i/web/status/" + published);
+                tasks.updateById(row);
+                enqueue(row, "publish.completed");
+            }
+        });
+    }
+
+    private TkOpenXConnectionDO photoConnection(TkOpenXPublishTaskDO task) {
+        if (!publish.isClientRunnable(task.getClientId()))
+            throw TkOpenApiException.forbidden("X_PERMISSION_DENIED", "client is not allowed to publish");
+        TkOpenXConnectionDO row = connections.selectByClientAndConnectionId(task.getClientId(), task.getConnectionId());
+        if (row == null || !java.util.Objects.equals(row.getWorkspaceId(), task.getWorkspaceId())
+                || !"AUTHORIZED".equals(row.getAuthStatus()))
+            throw TkOpenApiException.conflict("X_CONNECTION_DISABLED", "X connection is missing, expired or revoked");
+        return row;
     }
 
     void process(Long id) {
@@ -148,7 +213,8 @@ public class TkOpenXPublishJob {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("taskId", task.getTaskId());
             payload.put("connectionId", task.getConnectionId());
-            payload.put("mediaId", task.getMediaId());
+            if (task.getPhotoIds() == null) payload.put("mediaId", task.getMediaId());
+            else payload.put("mediaIds", JsonUtils.parseArray(task.getPhotoIds(), String.class));
             payload.put("status", task.getStatus());
             payload.put("failCode", task.getFailCode());
             payload.put("tweetId", task.getTweetId());

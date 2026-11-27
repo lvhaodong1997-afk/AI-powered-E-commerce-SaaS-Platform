@@ -82,6 +82,28 @@ class TkOpenXPublishServiceTest {
     }
 
     @Test
+    void orderedPhotoIdsArePartOfTheIdempotencyKeyAndCannotMixWithVideo() {
+        List<String> ordered = Arrays.asList("media_first", "media_second");
+        String key = "photo-1";
+        doAnswer(call -> {
+            TkOpenXPublishTaskDO saved = call.getArgument(0);
+            when(tasks.selectByClientAndIdempotencyKey("client-a", key)).thenReturn(saved);
+            return 1;
+        }).when(tasks).insert(any(TkOpenXPublishTaskDO.class));
+        Map<String, Object> made = service.create(CONN, null, null, key, null, null, ordered);
+        assertEquals(ordered, made.get("mediaIds"));
+        assertFalse(made.containsKey("mediaId"));
+        assertEquals(made, service.create(CONN, null, "", key, null, null, ordered));
+        assertEquals("IDEMPOTENCY_KEY_CONFLICT", assertThrows(TkOpenApiException.class,
+                () -> service.create(CONN, null, "", key, null, null, Arrays.asList("media_second", "media_first"))).getCode());
+        assertEquals("X_PUBLISH_INPUT_INVALID", assertThrows(TkOpenApiException.class,
+                () -> service.create(CONN, MEDIA, "", key, null, null, ordered)).getCode());
+        verify(media).requirePhoto("client-a", "media_first", null);
+        verify(media).requirePhoto("client-a", "media_second", null);
+        verify(tasks).insert(any(TkOpenXPublishTaskDO.class));
+    }
+
+    @Test
     void disabledSwitchAndMissingPermissionAreNotSuccess() {
         properties.setEnabled(false);
         TkOpenApiException disabled = assertThrows(TkOpenApiException.class, () -> service.connections());

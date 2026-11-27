@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.tk.service.social;
 import cn.iocoder.yudao.module.tk.dal.dataobject.social.*;
 import cn.iocoder.yudao.module.tk.dal.mysql.social.*;
 import cn.iocoder.yudao.module.tk.service.channel.*;
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiException;
 import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAccountService;
 import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialTokenCipher;
@@ -26,6 +27,8 @@ public class TkSocialPublishWorker {
     private final TkSocialPublishService publisher;
     @javax.annotation.Resource private TkChannelAccountService channelAccounts;
     @javax.annotation.Resource private TkChannelVideoClient channelVideos;
+    @javax.annotation.Resource private TkXPhotoClient xPhotos;
+    @javax.annotation.Resource private TkXPhotoStorage xPhotoStorage;
     @javax.annotation.Resource private TkOpenXPublishService openX;
     @javax.annotation.Resource private TkSocialTokenCipher cipher;
     public TkSocialPublishWorker(TkSocialPublishDetailMapper details,TkSocialPublishTaskMapper tasks,
@@ -75,6 +78,30 @@ public class TkSocialPublishWorker {
                     return;
                 }
             }
+            if (task.getChannelPhotoIds()!=null) {
+                if (!TkChannelProperties.X.equals(detail.getPlatform()) || !detail.getPlatform().equals(task.getChannel())
+                        || task.getMediaId()!=null || !Objects.equals(detail.getCreator(),task.getCreator())
+                        || !Objects.equals(detail.getCreator(),account.getCreator())) throw new IllegalArgumentException("Invalid image scope");
+                String scope=TkXPhotoStorage.workbench(task.getTenantId(),task.getCompanyId(),task.getCreator());
+                java.util.List<java.nio.file.Path> photos=new java.util.ArrayList<>();
+                for (String photo : JsonUtils.parseArray(task.getChannelPhotoIds(),String.class)) photos.add(xPhotoStorage.require(scope,photo));
+                usedToken=channelAccounts.token(account);
+                sent=true;
+                Long accountId=account.getId();
+                String post=xPhotos.publish(usedToken,task.getChannelText(),photos,() -> {
+                    TkSocialAccountDO current=accounts.selectById(accountId);
+                    if (current==null || !"AUTHORIZED".equals(current.getStatus())
+                            || !Objects.equals(task.getTenantId(),current.getTenantId())
+                            || !Objects.equals(task.getCompanyId(),current.getCompanyId())
+                            || !Objects.equals(task.getCreator(),current.getCreator())
+                            || !TkChannelProperties.X.equals(current.getPlatform()))
+                        throw new TkSocialPlatformException("X_CONNECTION_DISABLED","X account is no longer authorized",false,true,false);
+                });
+                outcome.set("external_post_id",post).set("platform_status","PUBLISHED")
+                        .set("publish_url","https://x.com/i/web/status/"+post).set("status","SUCCESS")
+                        .set("published_time",LocalDateTime.now()).set("next_retry_time",null)
+                        .set("error_code",null).set("error_message",null);
+            } else {
             TkSocialMediaDO source=task.getMediaId()==null ? null : media.selectById(task.getMediaId());
             if (task.getMediaId()!=null && (source==null || !"READY".equals(source.getStatus())
                     || !sameScope(detail,source.getTenantId(),source.getCompanyId()))) {
@@ -123,6 +150,7 @@ public class TkSocialPublishWorker {
                 if (polls>=240) terminal(outcome,"UNKNOWN","POLL_TIMEOUT","平台处理时间过长，请到平台核实发布结果");
                 else outcome.set("status","PENDING").set("next_retry_time",LocalDateTime.now().plusSeconds(15));
             } else throw new IllegalStateException("无法识别平台状态");
+            }
             }
         } catch (TkOpenApiException ex) {
             terminal(outcome,"FAILED",ex.getCode(),"OpenAPI publishing permission or media is no longer available");

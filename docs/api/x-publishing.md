@@ -46,6 +46,18 @@ returnUrl 白名单在开放 API 管理页配置，精确匹配 scheme、host、
 3. POST /admin-api/tk/open/v1/x/publish/tasks，请求体使用本 client 的 mediaId + connectionId，并携带 Idempotency-Key。相同幂等键且不同 payload 返回 409。查询任务同样按 client 隔离
 4. 后台执行会再次校验 client、连接仍为该 client 的 AUTHORIZED、媒体仍可用。撤销后待执行任务会被拒绝。错误不会包装成成功
 
+### 图文发布
+
+每条可附带 1–4 张有序图片，文案可选（最多 280 个 UTF-16 代码单元）。只接受 JPEG、PNG；单张最多 5,000,000 字节、1600 万像素且单边不超过 8192。禁止图视频混发和外链拉图。
+
+1. 每张图调用 `POST /admin-api/tk/open/v1/x/media/uploads`，传 `mediaType: "PHOTO"`、`fileName`、`fileSize`、`contentType`（`image/jpeg` 或 `image/png`）及文件的十六进制 `sha256`。
+2. 图片始终走私有 `LOCAL` 模式。按返回的 `chunkSize` 和 `totalChunks`，以 `POST .../{uploadId}/chunks/{chunkIndex}` 发送原始字节，编号从 0 开始，HMAC 对原始字节签名。
+3. `POST .../{uploadId}/complete` 传相同的 `fileSize` 和 `sha256`。校验完成即返回 `READY` 和 `mediaId`，上传会话创建后 24 小时内可用。若完成请求响应丢失，先查询上传状态。
+4. 用同一客户端和工作区调用 `POST /admin-api/tk/open/v1/x/publish/tasks`，传 `Idempotency-Key` 和形如 `{"connectionId":"conn_example","mediaIds":["media_first","media_second"],"text":"新品实拍"}` 的请求体。不可同时传单数 `mediaId`。换序也会触发同键参数冲突。
+5. 查询任务或接收现有 `publish.completed` / `publish.failed` 回调，图片任务回传 `mediaIds`。`SUCCESS` 时读取 `tweetId`、`publishUrl`；`FAILED` 且 `failCode=PLATFORM_UNCERTAIN` 时先去 X 核实，不能自动创建替代任务。
+
+SaaS 用户可在 X 发布工作台切换到「图文」，上传图片、调整顺序后发布。工作台账号与 C 方连接仍独立，不共用权限或素材。
+
 GET /admin-api/tk/open/v1/x/connections 列出该 HMAC 客户端自己的连接。DELETE /admin-api/tk/open/v1/x/connections/{connectionId} 只把该 client 的这条连接标为撤销，不调用 X 全局吊销，也不改其他 client 或工作台账号。同一 X 账号被不同 client 授权时，各有独立令牌副本；同一 client 对同一 X 账号重新授权会替换该连接上的令牌。若多个 client 仍共享同一个 X 开发者应用，平台侧撤销互不影响，但 X 平台自己轮换 refresh token 的行为属于残留风险。
 
 没有 open_client_id 的工作台账号不会被自动收编进 OpenAPI。工作台 X 发布路径保持不变。旧的社交表 OpenAPI 在途任务（openXConnectionId 指向旧授权会话）不会再被 Worker 继续执行，以免绕过新连接的撤销或误用工作台令牌；任务行不会被自动取消，需接入方改用 mediaId + connectionId 重试或由运营人工处理。

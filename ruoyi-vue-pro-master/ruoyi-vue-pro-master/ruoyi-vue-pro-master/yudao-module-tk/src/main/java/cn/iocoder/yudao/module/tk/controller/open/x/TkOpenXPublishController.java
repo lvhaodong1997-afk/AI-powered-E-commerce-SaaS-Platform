@@ -94,7 +94,7 @@ public class TkOpenXPublishController {
     @ApiAccessLog(enable = false)
     public TkOpenApiResponse<Map<String, Object>> createUpload(@Valid @RequestBody MediaCreate request) {
         return TkOpenApiResponse.success(media.create(request.getFileName(), request.getFileSize(),
-                request.getContentType(), request.getSha256()));
+                request.getContentType(), request.getSha256(), request.getMediaType()));
     }
 
     @GetMapping("/media/uploads/{uploadId}")
@@ -124,7 +124,7 @@ public class TkOpenXPublishController {
     public TkOpenApiResponse<Map<String, Object>> create(@Valid @RequestBody Create request,
             @RequestHeader(value = "Idempotency-Key", required = false) String key) {
         return TkOpenApiResponse.success(service.create(request.getConnectionId(), request.getMediaId(),
-                request.getText(), key, request.getEndUserId(), request.getGenerationTaskId()));
+                request.getText(), key, request.getEndUserId(), request.getGenerationTaskId(), request.getMediaIds()));
     }
 
     @GetMapping("/publish/tasks/{taskId}")
@@ -157,6 +157,7 @@ public class TkOpenXPublishController {
         private Long fileSize;
         @Size(max = 128)
         private String contentType;
+        private String mediaType;
         @Size(max = 64)
         private String sha256;
     }
@@ -172,8 +173,9 @@ public class TkOpenXPublishController {
     public static class Create {
         @NotBlank private String connectionId;
         private String mediaId;
+        @Size(max = 4) private List<String> mediaIds;
         private Long generationTaskId;
-        @NotNull @Size(max = 280) private String text;
+        @Size(max = 280) private String text;
         @Size(max = 128) @Pattern(regexp = "^$|^[A-Za-z0-9._:-]{1,128}$")
         private String endUserId;
     }

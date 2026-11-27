@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.*;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.security.PermitAll;
 import javax.validation.Valid;
@@ -40,7 +41,15 @@ public class TkChannelPublishController {
         result.put("enabled", enabled);
         result.put("localUpload", enabled && media.supportsDirectVideoUpload());
         result.put("maxUploadBytes", TkChannelPublishService.maxUploadBytes(channel));
+        if (TkChannelProperties.X.equals(channel)) result.put("photoUpload", enabled);
         return success(result);
+    }
+
+    @PostMapping("/media/photo-upload") @PreAuthorize(PUBLISH)
+    @ApiAccessLog(requestEnable = false, responseEnable = false)
+    public CommonResult<String> uploadPhoto(@PathVariable("channel") String channel, @RequestParam("file") MultipartFile file) {
+        requireEnabled(channel);
+        return success(publish.uploadPhoto(channel, file));
     }
 
     @PostMapping("/media/video-upload-session") @PreAuthorize(PUBLISH)

@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.tk.framework.config.TkGenerationProperties;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiIds;
 import cn.iocoder.yudao.module.tk.framework.openapi.TkOpenApiException;
 import cn.iocoder.yudao.module.tk.service.channel.TkOpenXAccess;
+import cn.iocoder.yudao.module.tk.service.channel.TkXPhotoStorage;
 import cn.iocoder.yudao.module.tk.service.upload.TkLocalUploadStorageService;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageClient;
 import cn.iocoder.yudao.module.tk.service.upload.TkOssObjectStorageService;
@@ -42,14 +43,30 @@ public class TkOpenXMediaService {
     private final TkLocalUploadStorageService localStorageService;
     private final TkGenerationProperties properties;
     private final TkOssObjectStorageClient ossObjectStorageService;
+    @javax.annotation.Resource private TkXPhotoStorage photos;
     @Value("${tk.open-api.publish.pull-url-expire-seconds:86400}")
     private int pullUrlExpireSeconds = 86400;
 
     public Map<String, Object> create(String fileName, Long fileSize, String contentType, String sha256) {
+        return create(fileName, fileSize, contentType, sha256, null);
+    }
+
+    public Map<String, Object> create(String fileName, Long fileSize, String contentType, String sha256, String type) {
         String clientId = access.requireClient("x.publish");
-        validateFile(fileName, fileSize, contentType, sha256);
+        boolean photo = "PHOTO".equals(type);
+        if (photo) {
+            if (!TkXPhotoStorage.accepts(contentType) || fileSize == null || fileSize <= 0
+                    || sha256 == null || !sha256.matches("(?i)[a-f0-9]{64}"))
+                throw TkOpenApiException.badRequest("MEDIA_FILE_INVALID", "JPEG or PNG and SHA-256 required");
+            if (fileSize > TkXPhotoStorage.MAX_BYTES)
+                throw new TkOpenApiException("MEDIA_FILE_TOO_LARGE", "image exceeds 5 MB", 413);
+        } else {
+            if (type != null && !"VIDEO".equals(type))
+                throw TkOpenApiException.badRequest("MEDIA_FILE_INVALID", "mediaType must be VIDEO or PHOTO");
+            validateFile(fileName, fileSize, contentType, sha256);
+        }
         String uploadId = TkOpenApiIds.next("upload");
-        boolean oss = isOssEnabled();
+        boolean oss = !photo && isOssEnabled();
         TkOpenXMediaDO media = TkOpenXMediaDO.builder()
                 .uploadId(uploadId)
                 .clientId(clientId)
@@ -57,12 +74,13 @@ public class TkOpenXMediaService {
                 .uploadMode(oss ? "OSS" : "LOCAL")
                 .fileName(fileName)
                 .fileSize(fileSize)
-                .contentType(StrUtil.blankToDefault(contentType, "video/" + normalizeExtension(fileName)))
+                .contentType(photo ? contentType : StrUtil.blankToDefault(contentType, "video/" + normalizeExtension(fileName)))
+                .mediaType(photo ? "PHOTO" : null)
                 .sha256(StrUtil.isBlank(sha256) ? null : sha256.toLowerCase(java.util.Locale.ROOT))
                 .uploadedSize(0L)
                 .uploadedChunks("[]")
                 .status("UPLOADING")
-                .expireTime(LocalDateTime.now().plusHours(expireHours()))
+                .expireTime(LocalDateTime.now().plusHours(photo ? 24 : expireHours()))
                 .build();
         Map<String, Object> response = new LinkedHashMap<>();
         if (oss) {
@@ -92,6 +110,7 @@ public class TkOpenXMediaService {
         mediaMapper.insert(media);
         response.put("uploadId", uploadId);
         response.put("uploadMode", "LOCAL");
+        if (photo) response.put("mediaType", "PHOTO");
         response.put("chunkSize", chunkSize());
         response.put("totalChunks", totalChunks(fileSize));
         response.put("expireTime", media.getExpireTime());
@@ -104,6 +123,7 @@ public class TkOpenXMediaService {
         response.put("uploadId", media.getUploadId());
         response.put("mediaId", media.getMediaId());
         response.put("uploadMode", media.getUploadMode());
+        if (isPhoto(media)) response.put("mediaType", "PHOTO");
         response.put("fileSize", media.getFileSize());
         response.put("uploadedSize", media.getUploadedSize());
         response.put("status", media.getStatus());
@@ -111,6 +131,7 @@ public class TkOpenXMediaService {
         return response;
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public void uploadChunk(String uploadId, Integer chunkIndex, byte[] chunk) {
         TkOpenXMediaDO media = requireUploadForUpdate(uploadId);
         requireUploading(media);
@@ -130,15 +151,17 @@ public class TkOpenXMediaService {
         if (chunk.length != expected) {
             throw TkOpenApiException.badRequest("MEDIA_FILE_INVALID", "chunk size is invalid");
         }
+        Path folder = uploadFolder(media);
         try {
-            Files.createDirectories(localStorageService.getTmpDir(uploadId));
-            Files.write(chunkPath(uploadId, chunkIndex), chunk);
+            if (isPhoto(media)) photos.createPrivate(folder);
+            else Files.createDirectories(folder);
+            Files.write(chunkPath(folder, chunkIndex), chunk);
         } catch (Exception ex) {
             throw TkOpenApiException.unavailable("MEDIA_UPLOAD_FAILED", "cannot store upload chunk");
         }
         mediaMapper.updateById(new TkOpenXMediaDO().setId(media.getId())
-                .setUploadedSize(uploadedSize(uploadId, totalChunks))
-                .setUploadedChunks(uploadedChunkJson(uploadId, totalChunks)));
+                .setUploadedSize(uploadedSize(folder, totalChunks))
+                .setUploadedChunks(cn.iocoder.yudao.framework.common.util.json.JsonUtils.toJsonString(uploadedChunks(folder, totalChunks))));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -151,27 +174,38 @@ public class TkOpenXMediaService {
         }
         if ("LOCAL".equals(media.getUploadMode())) {
             int totalChunks = totalChunks(media.getFileSize());
-            if (uploadedChunks(uploadId, totalChunks).size() != totalChunks) {
+            Path folder = uploadFolder(media);
+            if (uploadedChunks(folder, totalChunks).size() != totalChunks) {
                 throw TkOpenApiException.badRequest("MEDIA_NOT_READY", "upload chunks are incomplete");
             }
             String mediaId = TkOpenApiIds.next("media");
             String relativePath = "open-api-x/" + media.getClientId() + "/" + mediaId + "/" + safeName(media.getFileName());
-            Path target = localStorageService.resolveRelativePath(relativePath);
+            Path target = isPhoto(media) ? folder.resolve("image") : localStorageService.resolveRelativePath(relativePath);
             try {
                 Files.createDirectories(target.getParent());
                 try (OutputStream output = Files.newOutputStream(target)) {
-                    for (int index = 0; index < totalChunks; index++) Files.copy(chunkPath(uploadId, index), output);
+                    for (int index = 0; index < totalChunks; index++) Files.copy(chunkPath(folder, index), output);
                 }
                 if (Files.size(target) != media.getFileSize()) throw new IllegalStateException("file size mismatch");
                 if (StrUtil.isNotBlank(media.getSha256()) && !media.getSha256().equalsIgnoreCase(sha256(target)))
                     throw new IllegalStateException("sha256 mismatch");
+                if (isPhoto(media)) TkXPhotoStorage.validate(target, media.getContentType());
             } catch (Exception ex) {
                 try { Files.deleteIfExists(target); } catch (Exception ignored) {}
                 throw TkOpenApiException.badRequest("MEDIA_FILE_INVALID", "uploaded file validation failed");
             }
             media.setMediaId(mediaId);
-            media.setFileUrl(localStorageService.toPublicUrl(relativePath));
-            FileUtil.del(localStorageService.getTmpDir(uploadId).toFile());
+            if (!isPhoto(media)) {
+                media.setFileUrl(localStorageService.toPublicUrl(relativePath));
+                FileUtil.del(folder.toFile());
+            } else {
+                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                        new org.springframework.transaction.support.TransactionSynchronization() {
+                            @Override public void afterCommit() {
+                                for (int i = 0; i < totalChunks; i++) FileUtil.del(chunkPath(folder, i).toFile());
+                            }
+                        });
+            }
         } else {
             if (StrUtil.isBlank(media.getObjectKey()) || !media.getObjectKey().startsWith(OBJECT_PREFIX + media.getClientId() + "/")) {
                 throw TkOpenApiException.badRequest("MEDIA_FILE_INVALID", "OSS object is missing");
@@ -199,6 +233,7 @@ public class TkOpenXMediaService {
         response.put("fileName", media.getFileName());
         response.put("fileSize", media.getFileSize());
         response.put("contentType", media.getContentType());
+        if (isPhoto(media)) response.put("mediaType", "PHOTO");
         response.put("status", media.getStatus());
         return response;
     }
@@ -248,6 +283,17 @@ public class TkOpenXMediaService {
         }
         throw TkOpenApiException.badRequest("MEDIA_NOT_READY", "media source is not available");
     }
+
+    public Path requirePhoto(String clientId, String mediaId, String workspaceId) {
+        TkOpenXMediaDO row = requireReady(clientId, mediaId, workspaceId);
+        if (!isPhoto(row)) throw TkOpenApiException.badRequest("MEDIA_TYPE_MISMATCH", "mediaIds requires photos");
+        try { return photos.require("open", row.getUploadId()); }
+        catch (IllegalArgumentException ex) {
+            throw TkOpenApiException.badRequest("MEDIA_SOURCE_UNAVAILABLE", "uploaded image cannot be read");
+        }
+    }
+
+    public static boolean isPhoto(TkOpenXMediaDO row) { return row != null && "PHOTO".equals(row.getMediaType()); }
 
     private TkOpenXMediaDO requireUploadForUpdate(String uploadId) {
         String clientId = access.requireClient("x.publish");
@@ -345,26 +391,24 @@ public class TkOpenXMediaService {
         return (int) Math.ceil(fileSize * 1.0D / chunkSize());
     }
 
-    private Path chunkPath(String uploadId, int index) {
-        return localStorageService.getTmpDir(uploadId).resolve(index + ".part");
+    private Path uploadFolder(TkOpenXMediaDO row) {
+        return isPhoto(row) ? photos.openUpload(row.getUploadId()) : localStorageService.getTmpDir(row.getUploadId());
     }
 
-    private Set<Integer> uploadedChunks(String uploadId, int totalChunks) {
+    private static Path chunkPath(Path folder, int index) { return folder.resolve(index + ".part"); }
+
+    private Set<Integer> uploadedChunks(Path folder, int totalChunks) {
         Set<Integer> result = new TreeSet<>();
-        for (int index = 0; index < totalChunks; index++) if (Files.isRegularFile(chunkPath(uploadId, index))) result.add(index);
+        for (int index = 0; index < totalChunks; index++) if (Files.isRegularFile(chunkPath(folder, index))) result.add(index);
         return result;
     }
 
-    private long uploadedSize(String uploadId, int totalChunks) {
+    private long uploadedSize(Path folder, int totalChunks) {
         long size = 0L;
-        for (Integer index : uploadedChunks(uploadId, totalChunks)) {
-            try { size += Files.size(chunkPath(uploadId, index)); } catch (Exception ignored) {}
+        for (Integer index : uploadedChunks(folder, totalChunks)) {
+            try { size += Files.size(chunkPath(folder, index)); } catch (Exception ignored) {}
         }
         return size;
-    }
-
-    private String uploadedChunkJson(String uploadId, int totalChunks) {
-        return cn.iocoder.yudao.framework.common.util.json.JsonUtils.toJsonString(uploadedChunks(uploadId, totalChunks));
     }
 
     private String safeName(String fileName) {

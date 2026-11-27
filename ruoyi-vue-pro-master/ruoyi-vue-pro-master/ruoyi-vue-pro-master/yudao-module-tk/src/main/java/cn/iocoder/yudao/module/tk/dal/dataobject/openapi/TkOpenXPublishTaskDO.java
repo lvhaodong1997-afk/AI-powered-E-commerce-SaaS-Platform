@@ -29,6 +29,7 @@ public class TkOpenXPublishTaskDO extends BaseDO {
     private String workspaceId;
     private String connectionId;
     private String mediaId;
+    private String photoIds;
     private String text;
     private String endUserId;
     private String idempotencyKey;

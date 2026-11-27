@@ -39,6 +39,12 @@ const guides = [
     title: 'YouTube 发布接入',
     hint: '频道授权、视频上传、异步发布与重试',
     file: 'youtube-publishing.md'
+  },
+  {
+    id: 'x-publishing',
+    title: 'X 发布接入',
+    hint: '账号授权、视频上传与多图发布',
+    file: 'x-publishing.md'
   }
 ]
 const downloads = [

@@ -29,6 +29,7 @@ public class TkOpenXMediaDO extends BaseDO {
     private String fileName;
     private Long fileSize;
     private String contentType;
+    private String mediaType;
     private String sha256;
     private String uploadMode;
     private String objectKey;

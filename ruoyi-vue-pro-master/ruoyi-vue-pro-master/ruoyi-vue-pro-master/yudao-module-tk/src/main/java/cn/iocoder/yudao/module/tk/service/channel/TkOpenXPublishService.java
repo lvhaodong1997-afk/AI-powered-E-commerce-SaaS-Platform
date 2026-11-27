@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 
 @Service
 @RequiredArgsConstructor
@@ -104,17 +105,30 @@ public class TkOpenXPublishService {
 
     public Map<String, Object> create(String connectionId, String mediaId, String text, String key,
                                       String endUserId, Long generationTaskId) {
+        return create(connectionId, mediaId, text, key, endUserId, generationTaskId, null);
+    }
+
+    public Map<String, Object> create(String connectionId, String mediaId, String text, String key,
+                                      String endUserId, Long generationTaskId, List<String> mediaIds) {
         String clientId = access.requireClient("x.publish");
+        boolean photo = mediaIds != null;
         if (generationTaskId != null) {
             throw TkOpenApiException.badRequest("X_GENERATION_TASK_UNSUPPORTED",
                     "generationTaskId is not supported; upload media and pass mediaId");
         }
-        if (connectionId == null || connectionId.isEmpty() || mediaId == null || mediaId.isEmpty()
-                || text == null || text.length() > 280 || key == null || !key.matches("[!-~]{1,128}")) {
+        if (connectionId == null || connectionId.isEmpty() || (photo ? mediaId != null : mediaId == null || mediaId.isEmpty())
+                || (text == null ? !photo : text.length() > 280) || key == null || !key.matches("[!-~]{1,128}")) {
             throw TkOpenApiException.badRequest("X_PUBLISH_INPUT_INVALID", "Invalid connectionId, mediaId, text or Idempotency-Key");
         }
+        if (photo) {
+            try { TkXPhotoStorage.validateIds(mediaIds); }
+            catch (IllegalArgumentException ex) { throw TkOpenApiException.badRequest("X_PUBLISH_INPUT_INVALID", ex.getMessage()); }
+        }
         String workspaceId = access.workspaceId();
-        String payloadHash = TkSocialAuthService.hash(connectionId + "\n" + mediaId + "\n" + text);
+        String caption = text == null ? "" : text;
+        String imageList = photo ? JsonUtils.toJsonString(mediaIds) : null;
+        String payloadHash = TkSocialAuthService.hash(photo ? JsonUtils.toJsonString(List.of("PHOTO", connectionId, mediaIds, caption))
+                : connectionId + "\n" + mediaId + "\n" + text);
         try {
             return new TransactionTemplate(transactions).execute(status -> {
                 TkOpenXPublishTaskDO existing = tasks.selectByClientAndIdempotencyKey(clientId, key);
@@ -130,14 +144,17 @@ public class TkOpenXPublishService {
                         || !"AUTHORIZED".equals(connection.getAuthStatus())) {
                     throw TkOpenApiException.conflict("X_CONNECTION_DISABLED", "X connection is missing, expired or revoked");
                 }
-                media.requireReady(clientId, mediaId, workspaceId);
+                if (photo) for (String id : mediaIds) media.requirePhoto(clientId, id, workspaceId);
+                else if (TkOpenXMediaService.isPhoto(media.requireReady(clientId, mediaId, workspaceId)))
+                    throw TkOpenApiException.badRequest("MEDIA_TYPE_MISMATCH", "mediaId requires a video");
                 TkOpenXPublishTaskDO task = TkOpenXPublishTaskDO.builder()
                         .taskId(TkOpenApiIds.next("xtask"))
                         .clientId(clientId)
                         .workspaceId(workspaceId)
                         .connectionId(connectionId)
-                        .mediaId(mediaId)
-                        .text(text)
+                        .mediaId(photo ? mediaIds.get(0) : mediaId)
+                        .photoIds(imageList)
+                        .text(caption)
                         .endUserId(endUserId == null || endUserId.isEmpty() ? null : endUserId)
                         .idempotencyKey(key)
                         .payloadHash(payloadHash)
@@ -232,7 +249,8 @@ public class TkOpenXPublishService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("taskId", task.getTaskId());
         result.put("connectionId", task.getConnectionId());
-        result.put("mediaId", task.getMediaId());
+        if (task.getPhotoIds() == null) result.put("mediaId", task.getMediaId());
+        else result.put("mediaIds", JsonUtils.parseArray(task.getPhotoIds(), String.class));
         result.put("status", task.getStatus());
         result.put("failCode", task.getFailCode());
         result.put("failReason", task.getFailReason());

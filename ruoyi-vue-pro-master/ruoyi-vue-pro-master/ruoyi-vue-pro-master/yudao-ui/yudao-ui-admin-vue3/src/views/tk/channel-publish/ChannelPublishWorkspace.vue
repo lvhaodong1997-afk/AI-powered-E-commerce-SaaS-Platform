@@ -24,7 +24,35 @@
             <el-button v-if="selectedAccount && canAuthorize" @click="disconnect">解绑</el-button>
           </div>
         </el-form-item>
-        <el-form-item label="视频成品" required>
+        <el-form-item v-if="photoUpload" label="发布类型">
+          <el-radio-group v-model="mode" :disabled="uploading || uploadingPhotos">
+            <el-radio-button value="video">视频</el-radio-button>
+            <el-radio-button value="photo">图文</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="mode === 'photo'" label="图片" required>
+          <div class="video-field">
+            <div class="inline-fields">
+              <el-button v-if="canPublish" :disabled="photos.length >= 4" :loading="uploadingPhotos" @click="photoInput?.click()">
+                <Icon icon="ep:upload" class="mr-1" />添加图片
+              </el-button>
+              <span>{{ photos.length }} / 4</span>
+              <input ref="photoInput" type="file" accept="image/jpeg,image/png" multiple hidden @change="uploadPhotos" />
+            </div>
+            <ol v-if="photos.length" class="photo-list">
+              <li v-for="(photo, index) in photos" :key="photo.id" class="photo-row">
+                <img :src="photo.preview" :alt="photo.name" />
+                <span class="selected-title">{{ index + 1 }}. {{ photo.name }}</span>
+                <div class="photo-actions">
+                  <el-button link :disabled="index === 0 || uploadingPhotos" aria-label="上移图片" title="上移图片" @click="movePhoto(index, -1)"><Icon icon="ep:arrow-up" /></el-button>
+                  <el-button link :disabled="index === photos.length - 1 || uploadingPhotos" aria-label="下移图片" title="下移图片" @click="movePhoto(index, 1)"><Icon icon="ep:arrow-down" /></el-button>
+                  <el-button link :disabled="uploadingPhotos" aria-label="移除图片" title="移除图片" @click="removePhoto(index)"><Icon icon="ep:delete" /></el-button>
+                </div>
+              </li>
+            </ol>
+          </div>
+        </el-form-item>
+        <el-form-item v-else label="视频成品" required>
           <div class="video-field">
             <div class="inline-fields">
               <el-tooltip v-if="canPublish" content="当前环境未启用本地上传" :disabled="localUpload || !enabled">
@@ -144,6 +172,9 @@ const accountPlaceholder = computed(() => {
 })
 const video = ref<TkGenerationTaskVO>(), query = reactive({ pageNo: 1, pageSize: 10 })
 const uploadedVideo = ref<ChannelVideoUpload>(), fileInput = ref<HTMLInputElement>()
+const photoUpload = ref(false), uploadingPhotos = ref(false), photoInput = ref<HTMLInputElement>()
+const mode = ref<'video' | 'photo'>('video')
+const photos = ref<{ id: string; name: string; preview: string }[]>([])
 const localUpload = ref(false), maxUploadBytes = ref(0), uploading = ref(false), uploadPercent = ref(0)
 const localPreview = ref(''), uploadError = ref(''), canRefreshUpload = ref(false)
 const previewUrl = computed(() => localPreview.value || video.value?.outputUrl)
@@ -151,7 +182,8 @@ const uploadReady = computed(() => uploadedVideo.value?.status === 'READY' && up
   && !uploadError.value)
 const form = reactive({ accountId: '', title: '', text: '', privacy: 'private', forKids: undefined as boolean | undefined, synthetic: undefined as boolean | undefined })
 const selectedAccount = computed(() => accounts.value.find((account) => account.id === form.accountId))
-const readyToSubmit = computed(() => enabled.value && canPublish.value && !uploading.value && (video.value?.id || uploadReady.value)
+const readyToSubmit = computed(() => enabled.value && canPublish.value && !uploading.value && !uploadingPhotos.value
+  && (mode.value === 'photo' ? photos.value.length > 0 : (video.value?.id || uploadReady.value))
   && selectedAccount.value?.status === 'AUTHORIZED'
   && (!isYoutube || (form.title.trim() && form.forKids !== undefined && form.synthetic !== undefined)))
 let authTimer: number | undefined, historyTimer: number | undefined, pollBusy = false, stopped = false
@@ -254,6 +286,33 @@ async function loadAccounts() {
   accounts.value = await api.accounts()
   if (!form.accountId) form.accountId = accounts.value.find((account) => account.status === 'AUTHORIZED')?.id || ''
 }
+async function uploadPhotos(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  if (!files.length || !photoUpload.value || !canPublish.value || uploadingPhotos.value || submitting.value || needsTenant.value) return
+  if (files.length + photos.value.length > 4) { ElMessage.warning('最多添加 4 张图片'); return }
+  if (files.some(file => !['image/jpeg', 'image/png'].includes(file.type) || file.size < 1 || file.size > 5000000)) {
+    ElMessage.warning('请选择 5 MB 以内的 JPEG 或 PNG 图片'); return
+  }
+  uploadingPhotos.value = true
+  try {
+    for (const file of files) {
+      const id = await api.uploadPhoto(file)
+      if (stopped) return
+      photos.value.push({ id, name: file.name, preview: URL.createObjectURL(file) })
+    }
+  } catch { ElMessage.error('有图片上传失败，已上传的图片已保留') }
+  finally { uploadingPhotos.value = false }
+}
+function movePhoto(index: number, direction: number) {
+  const target = index + direction
+  if (target < 0 || target >= photos.value.length) return
+  const [photo] = photos.value.splice(index, 1)
+  photos.value.splice(target, 0, photo)
+}
+function removePhoto(index: number) { URL.revokeObjectURL(photos.value.splice(index, 1)[0].preview) }
+function clearPhotos() { while (photos.value.length) removePhoto(photos.value.length - 1) }
 async function loadHistory() {
   if (historyLoading.value || stopped) return
   historyLoading.value = true
@@ -299,7 +358,8 @@ async function disconnect() {
 }
 async function submit() {
   if (!readyToSubmit.value || !selectedAccount.value || submitting.value) return
-  const source = uploadedVideo.value ? { mediaId: uploadedVideo.value.id }
+  const source = mode.value === 'photo' ? { photoIds: photos.value.map(photo => photo.id) }
+    : uploadedVideo.value ? { mediaId: uploadedVideo.value.id }
     : video.value?.id ? { generationTaskId: String(video.value.id) } : undefined
   if (!source) return
   submitting.value = true
@@ -309,12 +369,12 @@ async function submit() {
   try {
     const visibility: Record<string, string> = { private: '私密', unlisted: '不公开', public: '公开' }
     const target = accountLabel(selectedAccount.value) + (isYoutube ? '（' + visibility[form.privacy] + '）' : '')
-    try { await ElMessageBox.confirm('确认将此视频发布到 ' + target + '？', '确认发布') }
+    try { await ElMessageBox.confirm('确认将此' + (mode.value === 'photo' ? '图文' : '视频') + '发布到 ' + target + '？', '确认发布') }
     catch { return }
     if (pending?.snapshot !== snapshot) pending = { snapshot, key: window.crypto.randomUUID() }
     const request: ChannelSubmission = { ...values, idempotencyKey: pending.key }
     await api.submit(request)
-    pending = undefined; clearVideo(); form.title = ''; form.text = ''
+    pending = undefined; clearVideo(); clearPhotos(); form.title = ''; form.text = ''
     form.forKids = undefined; form.synthetic = undefined; form.privacy = 'private'
     ElMessage.success('发布任务已提交'); query.pageNo = 1; await loadHistory()
   } finally { submitting.value = false }
@@ -329,6 +389,7 @@ onMounted(async () => {
     const capabilities = await api.capabilities()
     enabled.value = capabilities.enabled; localUpload.value = capabilities.localUpload
     maxUploadBytes.value = capabilities.maxUploadBytes
+    photoUpload.value = !isYoutube && capabilities.photoUpload === true
     if (!needsTenant.value) await Promise.all([loadAccounts(), loadHistory()])
   } catch { loadError.value = '发布数据加载失败，请刷新后重试' }
   finally { loading.value = false }
@@ -336,7 +397,7 @@ onMounted(async () => {
     if (records.value.some((record) => ['PENDING', 'PROCESSING'].includes(record.status))) void loadHistory().catch(() => {})
   }, 10000)
 })
-onBeforeUnmount(() => { stopped = true; clearVideo(); endAuthorization(); window.clearInterval(historyTimer) })
+onBeforeUnmount(() => { stopped = true; clearVideo(); clearPhotos(); endAuthorization(); window.clearInterval(historyTimer) })
 </script>
 
 <style scoped>
@@ -353,6 +414,11 @@ onBeforeUnmount(() => { stopped = true; clearVideo(); endAuthorization(); window
 .video-field { display: grid; gap: 8px; width: 100%; min-width: 0; }
 .selected-title { overflow-wrap: anywhere; }
 .upload-error { color: var(--el-color-danger); }
+.photo-list { margin: 0; padding: 0; list-style: none; }
+.photo-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--el-border-color-light); }
+.photo-row img { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; }
+.photo-actions { display: flex; }
+.photo-actions :deep(.el-button + .el-button) { margin-left: 4px; }
 .channel-preview { display: block; flex-basis: 100%; width: min(220px, 100%); max-width: 220px; max-height: 320px; margin-top: 8px; background: var(--el-fill-color-dark); }
 @media (max-width: 600px) { .channel-workspace { padding: 14px; } }
 </style>

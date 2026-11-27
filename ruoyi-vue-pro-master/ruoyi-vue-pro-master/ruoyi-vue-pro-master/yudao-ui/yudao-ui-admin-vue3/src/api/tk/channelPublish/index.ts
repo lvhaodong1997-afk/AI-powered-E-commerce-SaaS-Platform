@@ -23,7 +23,7 @@ export interface ChannelVideoUpload {
 }
 export type ChannelVideoSource = { generationTaskId: string; mediaId?: never } | { mediaId: string; generationTaskId?: never }
 interface VideoFileInfo { fileName: string; fileSize: number; contentType: string }
-export type ChannelSubmission = ChannelVideoSource & {
+export type ChannelSubmission = (ChannelVideoSource | { photoIds: string[]; mediaId?: never; generationTaskId?: never }) & {
   accountId: string
   idempotencyKey: string
   text: string
@@ -36,7 +36,12 @@ export type ChannelSubmission = ChannelVideoSource & {
 export function channelApi(channel: Channel) {
   const base = '/tk/channel-publish/' + channel
   return {
-    capabilities: () => request.get<{ enabled: boolean; localUpload: boolean; maxUploadBytes: number }>({ url: base + '/capabilities' }),
+    capabilities: () => request.get<{ enabled: boolean; localUpload: boolean; maxUploadBytes: number; photoUpload?: boolean }>({ url: base + '/capabilities' }),
+    uploadPhoto: (file: File) => {
+      const data = new FormData()
+      data.append('file', file)
+      return request.post<string>({ url: base + '/media/photo-upload', data, headersType: 'multipart/form-data' })
+    },
     uploadSession: (data: VideoFileInfo) => request.post<SocialVideoUploadSession>({ url: base + '/media/video-upload-session', data }),
     uploadComplete: (data: VideoFileInfo & { uploadId: string; objectKey: string }) =>
       request.post<ChannelVideoUpload>({ url: base + '/media/video-upload-complete', data }),

@@ -16,6 +16,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -32,18 +33,34 @@ public class TkChannelPublishService {
     private final TkSocialPublishDetailMapper details;
     private final TkDataScopeService scope;
     private final PlatformTransactionManager transactions;
+    @javax.annotation.Resource private TkXPhotoStorage photos;
 
     @Data
     public static class Create {
         @NotNull private Long accountId;
         @Positive private Long generationTaskId;
         @Positive @JsonInclude(JsonInclude.Include.NON_NULL) private Long mediaId;
+        @Size(max = 4) @JsonInclude(JsonInclude.Include.NON_NULL) private List<String> photoIds;
         @NotBlank @Pattern(regexp = "[A-Za-z0-9_-]{16,80}") private String idempotencyKey;
         @Size(max = 100) private String title;
         @Size(max = 5000) private String text;
         private String privacy;
         private Boolean forKids;
         private Boolean synthetic;
+    }
+
+    public String uploadPhoto(String channel, MultipartFile file) {
+        if (!TkChannelProperties.X.equals(channel) || file.isEmpty() || file.getSize() > TkXPhotoStorage.MAX_BYTES)
+            throw new IllegalArgumentException("仅支持 5 MB 以内的 JPEG 或 PNG 图片");
+        TkUserScope user = scope.getCurrentScope();
+        Long company = scope.getWritableCompanyId(null);
+        if (!user.hasTenantScope() || user.getUserId() == null || company == null)
+            throw new IllegalArgumentException("请选择有发布权限的租户和公司");
+        try (java.io.InputStream input = file.getInputStream()) {
+            return photos.save(TkXPhotoStorage.workbench(user.getTenantId(), company, user.getUserIdString()), input, file.getContentType());
+        } catch (java.io.IOException | IllegalArgumentException ex) {
+            throw new IllegalArgumentException("图片无法上传，请检查文件格式、尺寸或大小");
+        }
     }
 
     public String create(String channel, Create request) {
@@ -57,21 +74,33 @@ public class TkChannelPublishService {
         TkSocialPublishTaskDO existing = find(tenant, creator, request.getIdempotencyKey());
         if (existing != null) return existingId(existing, hash);
         boolean generated = request.getGenerationTaskId() != null;
-        TkSocialMediaDO source = generated ? media.importGenerated(request.getGenerationTaskId())
-                : media.getOwnedVideoUpload(request.getMediaId());
+        boolean photo = request.getPhotoIds() != null;
+        TkSocialMediaDO source = photo ? null : (generated ? media.importGenerated(request.getGenerationTaskId())
+                : media.getOwnedVideoUpload(request.getMediaId()));
         try {
-            verifyVideo(channel, source);
-            if (!Objects.equals(tenant, source.getTenantId()) || !Objects.equals(company, source.getCompanyId())
-                    || (!generated && !Objects.equals(creator, source.getCreator())))
-                throw new IllegalArgumentException("Video is outside the publishing account scope");
+            if (photo) {
+                String imageScope = TkXPhotoStorage.workbench(tenant, company, creator);
+                for (String id : request.getPhotoIds()) photos.require(imageScope, id);
+            } else {
+                verifyVideo(channel, source);
+                if (!Objects.equals(tenant, source.getTenantId()) || !Objects.equals(company, source.getCompanyId())
+                        || (!generated && !Objects.equals(creator, source.getCreator())))
+                    throw new IllegalArgumentException("Video is outside the publishing account scope");
+            }
             return new TransactionTemplate(transactions).execute(status -> {
                 TkSocialPublishTaskDO duplicate = find(tenant, creator, request.getIdempotencyKey());
                 if (duplicate != null) return existingId(duplicate, hash);
-                media.lockReady(source.getId(), tenant);
+                if (!photo) media.lockReady(source.getId(), tenant);
                 TkSocialPublishTaskDO task = new TkSocialPublishTaskDO();
                 task.setTenantId(tenant); task.setCompanyId(company); task.setCreator(creator);
-                task.setChannel(channel); task.setMediaId(source.getId()); task.setChannelText(request.getText());
-                task.setTitle(TkChannelProperties.X.equals(channel) ? source.getFileName() : request.getTitle());
+                task.setChannel(channel); task.setChannelText(request.getText());
+                if (photo) {
+                    task.setChannelPhotoIds(TkChannelHttp.JSON.valueToTree(request.getPhotoIds()).toString());
+                    task.setTitle(request.getText() == null || request.getText().isBlank() ? "X 图文" : request.getText());
+                } else {
+                    task.setMediaId(source.getId());
+                    task.setTitle(TkChannelProperties.X.equals(channel) ? source.getFileName() : request.getTitle());
+                }
                 task.setChannelPrivacy(request.getPrivacy()); task.setChannelForKids(request.getForKids()); task.setChannelSynthetic(request.getSynthetic());
                 task.setIdempotencyKey(request.getIdempotencyKey()); task.setRequestHash(hash);
                 task.setTargetCount(1); task.setPendingCount(1); task.setSuccessCount(0); task.setFailedCount(0); task.setStatus("PENDING");
@@ -135,7 +164,11 @@ public class TkChannelPublishService {
     }
 
     static void validate(String channel, Create request) {
-        if ((request.getGenerationTaskId() == null) == (request.getMediaId() == null))
+        if (request.getPhotoIds() != null) {
+            if (!TkChannelProperties.X.equals(channel) || request.getGenerationTaskId() != null || request.getMediaId() != null)
+                throw new IllegalArgumentException("请选择一个发布素材来源");
+            TkXPhotoStorage.validateIds(request.getPhotoIds());
+        } else if ((request.getGenerationTaskId() == null) == (request.getMediaId() == null))
             throw new IllegalArgumentException("请选择一个视频来源");
         if (TkChannelProperties.X.equals(channel)) {
             if (request.getText() != null && request.getText().length() > 280)
