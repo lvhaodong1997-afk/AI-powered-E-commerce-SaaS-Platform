@@ -29,7 +29,7 @@ public class TkOpenApiClientAdminService {
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final Set<String> SUPPORTED_PERMISSIONS = new LinkedHashSet<>(
-            java.util.Arrays.asList("auth", "media", "publish", "x.auth", "x.publish"));
+            java.util.Arrays.asList("auth", "media", "publish", "x.auth", "x.publish", "youtube.auth", "youtube.publish"));
     private final TkOpenApiClientMapper clientMapper;
     private final TkOpenApiSecretCipher secretCipher;
     private final TkOpenXProperties xProperties;

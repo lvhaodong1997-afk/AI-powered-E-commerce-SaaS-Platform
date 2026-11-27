@@ -33,6 +33,12 @@ const guides = [
     title: 'TikTok 发布接入',
     hint: 'HMAC 签名、授权、上传与发布',
     file: 'tiktok-integration.md'
+  },
+  {
+    id: 'youtube-publishing',
+    title: 'YouTube 发布接入',
+    hint: '频道授权、视频上传、异步发布与重试',
+    file: 'youtube-publishing.md'
   }
 ]
 const downloads = [
@@ -87,7 +93,7 @@ const spec = JSON.parse(files.get('tk-platform-openapi.json').toString())
 if (!spec.paths?.['/admin-api/tk/automation/v1/tasks']?.post)
   throw Error('自动出片契约缺失，拒绝生成不完整接入包')
 const catalog = {
-  version: '2026-11-16',
+  version: '2026-11-27',
   spec,
   guides: guides.map((item) => ({ ...item, content: files.get(item.file).toString() })),
   downloads

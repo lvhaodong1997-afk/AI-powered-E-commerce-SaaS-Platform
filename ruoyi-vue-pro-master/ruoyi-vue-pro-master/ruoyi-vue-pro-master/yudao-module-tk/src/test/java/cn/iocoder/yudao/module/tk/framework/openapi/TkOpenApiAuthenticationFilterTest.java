@@ -21,6 +21,30 @@ import org.mockito.ArgumentCaptor;
 class TkOpenApiAuthenticationFilterTest {
 
     @Test
+    void youtubeBusinessCallsRequireScopedSignature() throws Exception {
+        TkOpenApiAuthenticationService auth = mock(TkOpenApiAuthenticationService.class);
+        when(auth.authenticate(any())).thenReturn(new TkOpenApiPrincipal("client_a", "A", "youtube.publish"));
+        TkOpenApiAuthenticationFilter filter = new TkOpenApiAuthenticationFilter(
+                auth, mock(TkOpenApiRequestLogMapper.class), 16);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/admin-api/tk/open/v1/youtube/publish/tasks");
+        request.setQueryString("workspaceId=0a506738-16b5-4c09-ac86-1a0c56dd3808");
+        filter.doFilter(request, new MockHttpServletResponse(), (req, res) -> { });
+        ArgumentCaptor<TkOpenApiAuthRequest> captured = ArgumentCaptor.forClass(TkOpenApiAuthRequest.class);
+        verify(auth).authenticate(captured.capture());
+        assertEquals("youtube.publish", captured.getValue().getRequiredPermission());
+        assertEquals(request.getRequestURI() + "?" + request.getQueryString(), captured.getValue().getRequestTarget());
+    }
+
+    @Test
+    void youtubeBrowserCallbackDoesNotRequireHmac() throws Exception {
+        TkOpenApiAuthenticationService auth = mock(TkOpenApiAuthenticationService.class);
+        TkOpenApiAuthenticationFilter filter = new TkOpenApiAuthenticationFilter(auth, mock(TkOpenApiRequestLogMapper.class), 16);
+        filter.doFilter(new MockHttpServletRequest("GET", "/admin-api/tk/open/v1/youtube/auth/callback"),
+                new MockHttpServletResponse(), (req, res) -> { });
+        verifyNoInteractions(auth);
+    }
+
+    @Test
     void shouldStopReadingChunkedBodyOnceLimitIsExceeded() throws Exception {
         CountingServletInputStream input = new CountingServletInputStream(1024);
         MockHttpServletRequest request = new MockHttpServletRequest() {

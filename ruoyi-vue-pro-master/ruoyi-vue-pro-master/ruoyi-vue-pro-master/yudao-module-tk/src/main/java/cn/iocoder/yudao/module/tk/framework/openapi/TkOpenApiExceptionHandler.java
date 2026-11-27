@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import javax.validation.ConstraintViolationException;
 
 @RestControllerAdvice(basePackages = {"cn.iocoder.yudao.module.tk.controller.open.tiktok",
-        "cn.iocoder.yudao.module.tk.controller.open.x"})
+        "cn.iocoder.yudao.module.tk.controller.open.x", "cn.iocoder.yudao.module.tk.controller.open.youtube"})
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @Slf4j
 public class TkOpenApiExceptionHandler {

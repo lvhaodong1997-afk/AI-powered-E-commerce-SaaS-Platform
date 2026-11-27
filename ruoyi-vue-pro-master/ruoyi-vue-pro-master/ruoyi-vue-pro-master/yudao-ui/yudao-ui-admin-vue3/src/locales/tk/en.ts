@@ -477,6 +477,8 @@ export const tkEn: Record<string, string> = {
   'openApi.permission.publish': 'Publishing',
   'openApi.permission.xAuth': 'X authorization',
   'openApi.permission.xPublish': 'X publishing',
+  'openApi.permission.youtubeAuth': 'YouTube authorization',
+  'openApi.permission.youtubePublish': 'YouTube publishing',
   'openApi.credential.title': 'One-time credentials',
   'openApi.credential.warning':
     'Save these credentials now. Plaintext secrets will not be shown again after this window is closed.',

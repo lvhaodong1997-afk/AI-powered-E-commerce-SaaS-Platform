@@ -143,6 +143,7 @@ yudao:
     enable: true
     ignore-urls:
       - /admin-api/tk/open/v1/x/**
+      - /admin-api/tk/open/v1/youtube/**
     ignore-visit-urls:
       - /admin-api/system/user/profile/**
       - /admin-api/system/auth/**
@@ -178,6 +179,9 @@ tk:
   x-open-api:
     enabled: ${TK_X_OPEN_API_ENABLED:false}
     allow-insecure-loopback-return-url: ${TK_X_OPEN_API_ALLOW_INSECURE_LOOPBACK_RETURN_URL:false}
+  youtube-open-api:
+    enabled: ${TK_YOUTUBE_OPEN_API_ENABLED:false}
+    redirect-uri: ${TK_YOUTUBE_OPEN_API_REDIRECT_URI:}
   registration:
     enabled: ${TK_REGISTRATION_ENABLED:false}
     default-package-id: ${TK_REGISTRATION_DEFAULT_PACKAGE_ID:0}

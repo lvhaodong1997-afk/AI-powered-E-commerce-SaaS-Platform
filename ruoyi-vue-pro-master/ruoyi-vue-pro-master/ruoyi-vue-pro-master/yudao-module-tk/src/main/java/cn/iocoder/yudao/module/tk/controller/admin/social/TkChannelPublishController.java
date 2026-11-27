@@ -31,6 +31,7 @@ public class TkChannelPublishController {
     private final TkChannelAccountService auth;
     private final TkChannelPublishService publish;
     private final TkSocialMediaService media;
+    private final TkOpenYouTubeAuthService openYouTube;
 
     @GetMapping("/capabilities") @PreAuthorize(QUERY)
     public CommonResult<Map<String, Object>> capabilities(@PathVariable("channel") String channel) {
@@ -103,6 +104,10 @@ public class TkChannelPublishController {
             @RequestParam(value = "code", required = false) String code, @RequestParam(value = "state", required = false) String state,
             @RequestParam(value = "error", required = false) String error,
             @CookieValue(value = "__Host-TKXConsent", required = false) String browserToken) {
+        if ("youtube".equals(channel) && TkOpenYouTubeAuthService.isOpenState(state)) {
+            return cn.iocoder.yudao.module.tk.controller.open.youtube.TkOpenYouTubeController.callbackPage(
+                    openYouTube.callback(code, state, error));
+        }
         TkOpenXCallbackOutcome outcome = auth.completeCallback(channel, code, state, error, browserToken);
         if (outcome.getRedirectUrl() != null) {
             return ResponseEntity.status(HttpStatus.FOUND).header(HttpHeaders.LOCATION, outcome.getRedirectUrl())

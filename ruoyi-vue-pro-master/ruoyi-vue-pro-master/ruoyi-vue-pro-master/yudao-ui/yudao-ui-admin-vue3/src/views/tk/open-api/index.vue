@@ -452,6 +452,8 @@
           <el-checkbox label="publish">{{ tt('openApi.permission.publish') }}</el-checkbox>
           <el-checkbox label="x.auth">{{ tt('openApi.permission.xAuth') }}</el-checkbox>
           <el-checkbox label="x.publish">{{ tt('openApi.permission.xPublish') }}</el-checkbox>
+          <el-checkbox label="youtube.auth">{{ tt('openApi.permission.youtubeAuth') }}</el-checkbox>
+          <el-checkbox label="youtube.publish">{{ tt('openApi.permission.youtubePublish') }}</el-checkbox>
         </el-checkbox-group>
         <div v-if="unknownPermissions.length" class="mt-8px text-13px">
           <span>{{ tt('openApi.form.unknownPermissions') }}：</span>
@@ -1027,7 +1029,7 @@ const refreshActiveTab = () => {
   return getEventList()
 }
 
-const KNOWN_PERMISSIONS = ['auth', 'media', 'publish', 'x.auth', 'x.publish']
+const KNOWN_PERMISSIONS = ['auth', 'media', 'publish', 'x.auth', 'x.publish', 'youtube.auth', 'youtube.publish']
 
 const permissionList = (value?: string) =>
   (value || '')
@@ -1066,7 +1068,9 @@ const permissionLabel = (value: string) => {
     media: tt('openApi.permission.media'),
     publish: tt('openApi.permission.publish'),
     'x.auth': tt('openApi.permission.xAuth'),
-    'x.publish': tt('openApi.permission.xPublish')
+    'x.publish': tt('openApi.permission.xPublish'),
+    'youtube.auth': tt('openApi.permission.youtubeAuth'),
+    'youtube.publish': tt('openApi.permission.youtubePublish')
   }
   return labels[value] || value
 }

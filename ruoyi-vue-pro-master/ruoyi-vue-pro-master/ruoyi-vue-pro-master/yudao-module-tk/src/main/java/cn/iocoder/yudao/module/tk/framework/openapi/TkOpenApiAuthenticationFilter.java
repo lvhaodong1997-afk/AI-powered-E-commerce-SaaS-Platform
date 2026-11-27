@@ -18,6 +18,7 @@ import java.time.LocalDate;
 
 @Slf4j
 public class TkOpenApiAuthenticationFilter extends OncePerRequestFilter {
+    private static final String YOUTUBE = "/admin-api/tk/open/v1/youtube/";
 
     public static final String HEADER_CLIENT_ID = "X-TK-Client-Id";
     public static final String HEADER_TIMESTAMP = "X-TK-Timestamp";
@@ -40,6 +41,10 @@ public class TkOpenApiAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String uri = request.getRequestURI();
+        if (uri != null && uri.startsWith(YOUTUBE)) {
+            return "OPTIONS".equalsIgnoreCase(request.getMethod()) || ("GET".equals(request.getMethod())
+                    && (uri.equals(YOUTUBE + "auth/callback") || uri.matches(YOUTUBE + "auth/sessions/ytauth_[0-9a-f]{32}/launch")));
+        }
         if (uri != null && uri.startsWith("/admin-api/tk/open/v1/x/")) {
             return "OPTIONS".equalsIgnoreCase(request.getMethod()) || (uri.matches(
                     "/admin-api/tk/open/v1/x/auth/sessions/[A-Za-z0-9_-]{43}/consent")
@@ -151,6 +156,10 @@ public class TkOpenApiAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private String requiredPermission(String uri) {
+        if (uri.startsWith(YOUTUBE)) {
+            return (uri.startsWith(YOUTUBE + "media/") || uri.startsWith(YOUTUBE + "publish/"))
+                    ? "youtube.publish" : "youtube.auth";
+        }
         if (uri.startsWith("/admin-api/tk/open/v1/x/")) {
             return (uri.startsWith("/admin-api/tk/open/v1/x/publish/") || uri.startsWith("/admin-api/tk/open/v1/x/media/")) ? "x.publish" : "x.auth";
         }

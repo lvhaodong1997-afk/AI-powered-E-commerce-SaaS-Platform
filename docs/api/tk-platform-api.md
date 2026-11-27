@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | v2.1 |
-| 整理日期 | 2026-11-16 |
+| 文档版本 | v2.2 |
+| 整理日期 | 2026-11-27 |
 | 适用对象 | 需要通过 API 集成本平台的合作方 / 客户后端、本平台开发与运维 |
 | 依据 | 仓库当前源码（`yudao-module-tk` 控制器、VO、鉴权过滤器、错误码常量）与 `docs/` 既有交付文档 |
 | 交付物 | 本文（人读）、[`tk-platform-openapi.json`](tk-platform-openapi.json)（机读）、[`tk-platform-api.html`](tk-platform-api.html)（单页阅读版）、`build_html.py`（HTML 构建脚本） |
@@ -21,6 +21,7 @@
 | 能力 | 接口族 | 鉴权方式 | 当前状态 |
 | --- | --- | --- | --- |
 | TikTok 账号授权（浏览器 / 二维码 / 托管页） | `/tk/open/v1/tiktok/auth/**` | HMAC 签名 | 已实现 |
+| YouTube 频道授权、视频上传、发布、查询与安全重试 | `/admin-api/tk/open/v1/youtube/**` | HMAC 签名 + 已签名的 `workspaceId` | 见 [YouTube 接入指南](youtube-publishing.md) |
 | TikTok 账号连接查询、资料刷新、解绑 | `/tk/open/v1/tiktok/connections/**` | HMAC 签名 | 已实现 |
 | 视频/图片上传（OSS 直传 / 分片，图片异步转 JPEG） | `/tk/open/v1/tiktok/media/**` | HMAC 签名 | 已实现，省略 mediaType 默认 VIDEO |
 | 视频/有序图文发布、定时发布、取消、重试、状态查询 | `/tk/open/v1/tiktok/publish/**` | HMAC 签名 | 已实现；PHOTO 1–35 张 |

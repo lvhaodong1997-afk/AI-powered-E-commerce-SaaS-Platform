@@ -12,7 +12,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Objects;
@@ -29,7 +33,21 @@ public class TkChannelVideoClient {
     public Checkpoint advance(TkSocialPublishTaskDO task, TkSocialPublishDetailDO detail, String token,
                               String source, long size, String uploadUrl) {
         return TkChannelProperties.X.equals(detail.getPlatform()) ? x(task, detail, bearer(token), source, size)
-                : youtube(task, detail, bearer(token), source, size, uploadUrl);
+                : youtube(task, detail, bearer(token), source, null, null, size, uploadUrl);
+    }
+
+    Checkpoint advanceYouTube(TkSocialPublishTaskDO task, TkSocialPublishDetailDO detail, String token,
+                              String source, Path localSource, String etag, long size, String uploadUrl) {
+        return youtube(task, detail, bearer(token), source, localSource, etag, size, uploadUrl);
+    }
+
+    Checkpoint reconcileYouTube(String session, String token, long size) {
+        String url = TkChannelProtocol.uploadUri(session).toString();
+        try {
+            TkChannelHttp.Response response = http.send("PUT", url, bearer(token), "video/mp4", new byte[0],
+                    params("Content-Range", "bytes */" + size), false);
+            return response.status == 308 ? null : received(response.json, size);
+        } catch (TkSocialPlatformException ex) { throw youtubeSessionFailure(ex); }
     }
 
     private Checkpoint x(TkSocialPublishTaskDO task, TkSocialPublishDetailDO detail, String auth, String source, long size) {
@@ -71,7 +89,7 @@ public class TkChannelVideoClient {
     }
 
     private Checkpoint youtube(TkSocialPublishTaskDO task, TkSocialPublishDetailDO detail, String auth, String source,
-                               long size, String session) {
+                               Path localSource, String etag, long size, String session) {
         String id = detail.getExternalPostId();
         if (id != null) return youtubeStatus(id, auth, size);
         if (session == null) {
@@ -91,7 +109,7 @@ public class TkChannelVideoClient {
                     params("Content-Range", "bytes */" + size), false);
             if (query.status != 308) return received(query.json, size);
             long offset = TkChannelProtocol.nextByte(query.range, size);
-            byte[] chunk = readRange(source, offset, size);
+            byte[] chunk = localSource == null ? readRange(source, offset, size, etag) : readLocal(localSource, offset, size);
             long end = offset + chunk.length - 1;
             TkChannelHttp.Response sent = http.send("PUT", url, auth, "video/mp4", chunk,
                     params("Content-Range", "bytes " + offset + "-" + end + "/" + size), false);
@@ -100,10 +118,14 @@ public class TkChannelVideoClient {
             if (next <= offset) throw TkChannelHttp.failure(0, false);
             return new Checkpoint("YT_UPLOAD", null, session, null, next, 0);
         } catch (TkSocialPlatformException e) {
-            if ("CHANNEL_HTTP_404".equals(e.getCode()) || "CHANNEL_HTTP_410".equals(e.getCode()))
-                throw new TkSocialPlatformException("YT_SESSION_GONE", "YouTube upload session expired; verify the channel before trying again", false, false, true);
-            throw e;
+            throw youtubeSessionFailure(e);
         }
+    }
+
+    private static TkSocialPlatformException youtubeSessionFailure(TkSocialPlatformException e) {
+        if ("CHANNEL_HTTP_404".equals(e.getCode()) || "CHANNEL_HTTP_410".equals(e.getCode()))
+            return new TkSocialPlatformException("YT_SESSION_GONE", "YouTube upload session expired; verify the channel before trying again", false, false, true);
+        return e;
     }
 
     public Checkpoint youtubeStatus(String id, String auth, long size) {
@@ -124,6 +146,10 @@ public class TkChannelVideoClient {
     }
 
     private static byte[] readRange(String source, long offset, long size) {
+        return readRange(source, offset, size, null);
+    }
+
+    private static byte[] readRange(String source, long offset, long size, String etag) {
         HttpURLConnection connection = null;
         try {
             int length = Math.toIntExact(Math.min(CHUNK, size - offset));
@@ -134,7 +160,10 @@ public class TkChannelVideoClient {
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(30000);
             connection.setRequestProperty("Range", "bytes=" + offset + "-" + end);
+            if (etag != null) connection.setRequestProperty("If-Match", etag.startsWith("\"") ? etag : "\"" + etag + "\"");
             int status = connection.getResponseCode();
+            if (etag != null && (status == 412 || (status == 206 && !unquote(etag).equals(unquote(connection.getHeaderField("ETag"))))))
+                throw rejected("MEDIA_SOURCE_CHANGED", "stored video changed after completion");
             if (status != 206 || !Objects.equals("bytes " + offset + "-" + end + "/" + size, connection.getHeaderField("Content-Range")))
                 throw new IOException("Unexpected source range");
             try (InputStream input = connection.getInputStream()) {
@@ -144,6 +173,20 @@ public class TkChannelVideoClient {
             }
         } catch (IOException ex) { throw TkChannelHttp.failure(0, false); }
         finally { if (connection != null) connection.disconnect(); }
+    }
+
+    private static String unquote(String etag) { return etag == null ? "" : etag.replace("\"", ""); }
+
+    private static byte[] readLocal(Path path, long offset, long size) {
+        int length = Math.toIntExact(Math.min(CHUNK, size - offset));
+        if (offset < 0 || length <= 0) throw invalidState();
+        ByteBuffer bytes = ByteBuffer.allocate(length);
+        try (SeekableByteChannel file = Files.newByteChannel(path)) {
+            if (file.size() != size) throw invalidState();
+            file.position(offset);
+            while (bytes.hasRemaining()) if (file.read(bytes) < 0) throw invalidState();
+            return bytes.array();
+        } catch (IOException ex) { throw TkChannelHttp.failure(0, false); }
     }
 
     private static String requireId(JsonNode node, String pattern, boolean uncertain) {

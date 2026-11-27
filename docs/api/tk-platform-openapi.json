@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TK 自动混剪 SaaS 开放 API",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "ClipForge Studio API 契约。自动出片使用账号 Bearer Token + tenant-id，TikTok 授权/上传/发布使用 clientId + clientSecret 的 HMAC 签名，两套鉴权不可混用。出片创建为异步任务，不支持 Idempotency-Key 去重；HTTP 200 不保证业务成功，必须判断 code=0。支持能力以目标环境为准；尚未实现的 HMAC 出片扩展不在 paths 中。签名原文为 METHOD\nREQUEST_TARGET\nTIMESTAMP\nNONCE\nSHA256_HEX(BODY)，使用 LF 分隔且末尾不换行；最终 Base64(HMAC-SHA256(secret,canonical))；REQUEST_TARGET 包含 /admin-api 与原始查询串。 TikTok现支持PHOTO：私有原图上传/异步转JPEG/有序图文发布；VIDEO仍为默认，图片不支持远程URL quick-publish。 素材库管理、素材视频管理与素材上传同样使用账号 Bearer Token + tenant-id，并要求各接口列出的 tk:* 权限和 TK 公司/租户数据范围；素材解析成功状态为 AVAILABLE，不能套用其他业务的 READY。",
     "contact": {
       "name": "TK Team"
@@ -58,6 +58,10 @@
     {
       "name": "素材上传",
       "description": "服务器配置选择 local 分片或 oss 表单直传；不是 TikTok 开放上传接口。"
+    },
+    {
+      "name": "YouTube OpenAPI",
+      "description": "使用现有 HMAC 认证；所有签名请求须包含 workspaceId。详细规则见 YouTube 接入指南。"
     }
   ],
   "security": [
@@ -6416,6 +6420,2062 @@
                     "tags": "商品,演示",
                     "usagePhase": "PRODUCT_SHOW",
                     "segmentType": "S4_DEMO"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/auth/sessions": {
+      "post": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "创建频道授权会话",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.auth",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "endUserId": {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "authSessionId": {
+                          "type": "string"
+                        },
+                        "launchUrl": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "EXCHANGING",
+                            "SUCCESS",
+                            "FAILED",
+                            "EXPIRED"
+                          ]
+                        },
+                        "connectionId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "workspaceId": {
+                          "type": "string"
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "expireTime": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/auth/sessions/{sessionId}": {
+      "get": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "查询授权会话",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.auth",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "authSessionId": {
+                          "type": "string"
+                        },
+                        "launchUrl": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "EXCHANGING",
+                            "SUCCESS",
+                            "FAILED",
+                            "EXPIRED"
+                          ]
+                        },
+                        "connectionId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "workspaceId": {
+                          "type": "string"
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "expireTime": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/auth/sessions/{sessionId}/launch": {
+      "get": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "打开一次性授权链接",
+        "security": [],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "浏览器跳转到 Google",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/auth/callback": {
+      "get": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "接收 Google OAuth 回调",
+        "security": [],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "浏览器授权结果页（不返回凭据）",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/connections": {
+      "get": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "查询当前工作区的频道连接",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.auth",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "connectionId": {
+                            "type": "string"
+                          },
+                          "channelId": {
+                            "type": "string"
+                          },
+                          "channelTitle": {
+                            "type": "string"
+                          },
+                          "workspaceId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "AUTHORIZED",
+                              "EXPIRED",
+                              "REVOKED"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/connections/{connectionId}/profile/refresh": {
+      "post": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "刷新频道资料",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.auth",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "connectionId": {
+                          "type": "string"
+                        },
+                        "channelId": {
+                          "type": "string"
+                        },
+                        "channelTitle": {
+                          "type": "string"
+                        },
+                        "workspaceId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "AUTHORIZED",
+                            "EXPIRED",
+                            "REVOKED"
+                          ]
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/connections/{connectionId}": {
+      "delete": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "解除当前工作区的绑定",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.auth",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/media/uploads": {
+      "post": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "创建 MP4 上传会话",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.publish",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fileName",
+                  "fileSize"
+                ],
+                "properties": {
+                  "fileName": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "fileSize": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                  },
+                  "contentType": {
+                    "type": "string"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-fA-F0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "uploadId": {
+                          "type": "string"
+                        },
+                        "mediaId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "uploadMode": {
+                          "type": "string",
+                          "enum": [
+                            "LOCAL",
+                            "OSS"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "UPLOADING",
+                            "READY"
+                          ]
+                        },
+                        "fileSize": {
+                          "type": "integer",
+                          "format": "int64",
+                          "minimum": 1
+                        },
+                        "contentType": {
+                          "type": "string"
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "failReason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "uploadedSize": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "chunkSize": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "totalChunks": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "expireTime": {
+                          "type": "string"
+                        },
+                        "uploadUrl": {
+                          "type": "string"
+                        },
+                        "objectKey": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "properties": {
+                            "policy": {
+                              "type": "string"
+                            },
+                            "accessKeyId": {
+                              "type": "string"
+                            },
+                            "signature": {
+                              "type": "string"
+                            },
+                            "sha256": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/media/uploads/{uploadId}": {
+      "get": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "查询上传会话",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.publish",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "name": "uploadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "uploadId": {
+                          "type": "string"
+                        },
+                        "mediaId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "uploadMode": {
+                          "type": "string",
+                          "enum": [
+                            "LOCAL",
+                            "OSS"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "UPLOADING",
+                            "READY"
+                          ]
+                        },
+                        "fileSize": {
+                          "type": "integer",
+                          "format": "int64",
+                          "minimum": 1
+                        },
+                        "contentType": {
+                          "type": "string"
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "failReason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "uploadedSize": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "chunkSize": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "totalChunks": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "expireTime": {
+                          "type": "string"
+                        },
+                        "uploadUrl": {
+                          "type": "string"
+                        },
+                        "objectKey": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "properties": {
+                            "policy": {
+                              "type": "string"
+                            },
+                            "accessKeyId": {
+                              "type": "string"
+                            },
+                            "signature": {
+                              "type": "string"
+                            },
+                            "sha256": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/media/uploads/{uploadId}/chunks/{chunkIndex}": {
+      "post": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "上传二进制分片（LOCAL）",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.publish",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "name": "uploadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chunkIndex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/media/uploads/{uploadId}/complete": {
+      "post": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "校验并完成上传",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.publish",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "name": "uploadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fileSize"
+                ],
+                "properties": {
+                  "fileSize": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-fA-F0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "uploadId": {
+                          "type": "string"
+                        },
+                        "mediaId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "uploadMode": {
+                          "type": "string",
+                          "enum": [
+                            "LOCAL",
+                            "OSS"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "UPLOADING",
+                            "READY"
+                          ]
+                        },
+                        "fileSize": {
+                          "type": "integer",
+                          "format": "int64",
+                          "minimum": 1
+                        },
+                        "contentType": {
+                          "type": "string"
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "failReason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "uploadedSize": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "chunkSize": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "totalChunks": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "expireTime": {
+                          "type": "string"
+                        },
+                        "uploadUrl": {
+                          "type": "string"
+                        },
+                        "objectKey": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "properties": {
+                            "policy": {
+                              "type": "string"
+                            },
+                            "accessKeyId": {
+                              "type": "string"
+                            },
+                            "signature": {
+                              "type": "string"
+                            },
+                            "sha256": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/publish/tasks": {
+      "post": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "提交单视频发布任务",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.publish",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "若提供，必须等于已签名请求体中的 idempotencyKey。"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "idempotencyKey",
+                  "connectionId",
+                  "mediaId",
+                  "title",
+                  "privacyStatus",
+                  "madeForKids"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[!-~]{1,128}$"
+                  },
+                  "connectionId": {
+                    "type": "string"
+                  },
+                  "mediaId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 5000,
+                    "description": "最多 5000 UTF-8 字节"
+                  },
+                  "privacyStatus": {
+                    "type": "string",
+                    "enum": [
+                      "private",
+                      "unlisted",
+                      "public"
+                    ]
+                  },
+                  "madeForKids": {
+                    "type": "boolean"
+                  },
+                  "containsSyntheticMedia": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "taskId": {
+                          "type": "string"
+                        },
+                        "workspaceId": {
+                          "type": "string"
+                        },
+                        "connectionId": {
+                          "type": "string"
+                        },
+                        "mediaId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "SUCCESS",
+                            "FAILED",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "platformStatus": {
+                          "type": "string",
+                          "enum": [
+                            "YT_UPLOAD",
+                            "YT_PROCESSING",
+                            "PUBLISHED"
+                          ],
+                          "nullable": true
+                        },
+                        "privacyStatus": {
+                          "type": "string",
+                          "enum": [
+                            "private",
+                            "unlisted",
+                            "public"
+                          ]
+                        },
+                        "youtubeVideoId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "publishUrl": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "retryCount": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "uploadedBytes": {
+                          "type": "integer",
+                          "format": "int64"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/publish/tasks/{taskId}": {
+      "get": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "查询发布任务",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.publish",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "taskId": {
+                          "type": "string"
+                        },
+                        "workspaceId": {
+                          "type": "string"
+                        },
+                        "connectionId": {
+                          "type": "string"
+                        },
+                        "mediaId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "SUCCESS",
+                            "FAILED",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "platformStatus": {
+                          "type": "string",
+                          "enum": [
+                            "YT_UPLOAD",
+                            "YT_PROCESSING",
+                            "PUBLISHED"
+                          ],
+                          "nullable": true
+                        },
+                        "privacyStatus": {
+                          "type": "string",
+                          "enum": [
+                            "private",
+                            "unlisted",
+                            "public"
+                          ]
+                        },
+                        "youtubeVideoId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "publishUrl": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "retryCount": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "uploadedBytes": {
+                          "type": "integer",
+                          "format": "int64"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/tk/open/v1/youtube/publish/tasks/{taskId}/retry": {
+      "post": {
+        "tags": [
+          "YouTube OpenAPI"
+        ],
+        "summary": "继续可安全重试的原任务",
+        "security": [
+          {
+            "TkClientId": [],
+            "TkTimestamp": [],
+            "TkNonce": [],
+            "TkSignature": []
+          }
+        ],
+        "x-required-permission": "youtube.publish",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        0
+                      ]
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "taskId": {
+                          "type": "string"
+                        },
+                        "workspaceId": {
+                          "type": "string"
+                        },
+                        "connectionId": {
+                          "type": "string"
+                        },
+                        "mediaId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "SUCCESS",
+                            "FAILED",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "platformStatus": {
+                          "type": "string",
+                          "enum": [
+                            "YT_UPLOAD",
+                            "YT_PROCESSING",
+                            "PUBLISHED"
+                          ],
+                          "nullable": true
+                        },
+                        "privacyStatus": {
+                          "type": "string",
+                          "enum": [
+                            "private",
+                            "unlisted",
+                            "public"
+                          ]
+                        },
+                        "youtubeVideoId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "publishUrl": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "errorCode": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "retryCount": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "uploadedBytes": {
+                          "type": "integer",
+                          "format": "int64"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "接口错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "msg",
+                    "data",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "nullable": true
+                    }
                   }
                 }
               }

@@ -463,6 +463,8 @@ export const tkZhCN: Record<string, string> = {
   'openApi.permission.publish': '发布',
   'openApi.permission.xAuth': 'X 授权',
   'openApi.permission.xPublish': 'X 发布',
+  'openApi.permission.youtubeAuth': 'YouTube 授权',
+  'openApi.permission.youtubePublish': 'YouTube 发布',
   'openApi.credential.title': '一次性凭证',
   'openApi.credential.warning': '请立即保存凭证。关闭此窗口后，系统不会再次展示明文密钥。',
   'openApi.credential.clientId': '调用方 ID',
