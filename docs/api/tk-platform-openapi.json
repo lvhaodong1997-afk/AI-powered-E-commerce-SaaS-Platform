@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TK 自动混剪 SaaS 开放 API",
-    "version": "2.2.0",
+    "version": "2.3.0",
     "description": "ClipForge Studio API 契约。自动出片使用账号 Bearer Token + tenant-id，TikTok 授权/上传/发布使用 clientId + clientSecret 的 HMAC 签名，两套鉴权不可混用。出片创建为异步任务，不支持 Idempotency-Key 去重；HTTP 200 不保证业务成功，必须判断 code=0。支持能力以目标环境为准；尚未实现的 HMAC 出片扩展不在 paths 中。签名原文为 METHOD\nREQUEST_TARGET\nTIMESTAMP\nNONCE\nSHA256_HEX(BODY)，使用 LF 分隔且末尾不换行；最终 Base64(HMAC-SHA256(secret,canonical))；REQUEST_TARGET 包含 /admin-api 与原始查询串。 TikTok现支持PHOTO：私有原图上传/异步转JPEG/有序图文发布；VIDEO仍为默认，图片不支持远程URL quick-publish。 素材库管理、素材视频管理与素材上传同样使用账号 Bearer Token + tenant-id，并要求各接口列出的 tk:* 权限和 TK 公司/租户数据范围；素材解析成功状态为 AVAILABLE，不能套用其他业务的 READY。",
     "contact": {
       "name": "TK Team"
@@ -73,6 +73,50 @@
     }
   ],
   "paths": {
+    "/admin-api/tk/open/v1/{platform}/auth/sessions": {
+      "parameters": [{"$ref":"#/components/parameters/MetaPlatform"},{"$ref":"#/components/parameters/MetaWorkspace"}],
+      "post": {"operationId":"createMetaAuthorizationSession","tags":["Meta Publish"],"description":"Requires facebook.auth or instagram.auth. Open authorizeUrl in the workspace user's browser within 10 minutes. Platform must be enabled.","responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
+    "/admin-api/tk/open/v1/{platform}/auth/sessions/{id}": {
+      "parameters": [{"$ref":"#/components/parameters/MetaPlatform"},{"$ref":"#/components/parameters/MetaWorkspace"},{"$ref":"#/components/parameters/MetaId"}],
+      "get": {"operationId":"getMetaAuthorizationSession","tags":["Meta Publish"],"description":"Requires platform.auth. Returns authSessionId, status, connectionId, errorCode and eligible pages (Facebook PAGES_READY only).","responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
+    "/admin-api/tk/open/v1/facebook/auth/sessions/{id}/select-page": {
+      "parameters": [{"$ref":"#/components/parameters/MetaWorkspace"},{"$ref":"#/components/parameters/MetaId"}],
+      "post": {"operationId":"selectFacebookPage","tags":["Meta Publish"],"description":"Requires facebook.auth. Bind one eligible Page, then return the connection.","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["pageId"],"properties":{"pageId":{"type":"string","pattern":"^[0-9]{1,100}$"}}}}}},"responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
+    "/admin-api/tk/open/v1/{platform}/connections": {
+      "parameters": [{"$ref":"#/components/parameters/MetaPlatform"},{"$ref":"#/components/parameters/MetaWorkspace"}],
+      "get": {"operationId":"listMetaConnections","tags":["Meta Publish"],"description":"Requires platform.auth. Returns workspace-scoped connections, without tokens.","responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
+    "/admin-api/tk/open/v1/{platform}/connections/{id}": {
+      "parameters": [{"$ref":"#/components/parameters/MetaPlatform"},{"$ref":"#/components/parameters/MetaWorkspace"},{"$ref":"#/components/parameters/MetaId"}],
+      "delete": {"operationId":"revokeMetaConnection","tags":["Meta Publish"],"description":"Requires platform.auth. Clears credentials for this workspace connection.","responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
+    "/admin-api/tk/open/v1/{platform}/media/uploads": {
+      "parameters": [{"$ref":"#/components/parameters/MetaPlatform"},{"$ref":"#/components/parameters/MetaWorkspace"}],
+      "post": {"operationId":"createMetaUpload","tags":["Meta Publish"],"description":"Requires platform.publish. Creates a private 24-hour upload. JPEG limit 8000000 bytes; MP4 limit 100000000 bytes.","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["contentType","fileSize","sha256"],"properties":{"contentType":{"type":"string","enum":["image/jpeg","video/mp4"]},"fileSize":{"type":"integer","minimum":1,"maximum":100000000},"sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"}}}}}},"responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
+    "/admin-api/tk/open/v1/{platform}/media/uploads/{id}": {
+      "parameters": [{"$ref":"#/components/parameters/MetaPlatform"},{"$ref":"#/components/parameters/MetaWorkspace"},{"$ref":"#/components/parameters/MetaId"}],
+      "get": {"operationId":"getMetaUpload","tags":["Meta Publish"],"description":"Requires platform.publish. Returns uploadId, chunkSize, totalChunks, fileSize, status, expireTime, and mediaId when READY.","responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
+    "/admin-api/tk/open/v1/{platform}/media/uploads/{id}/chunks/{index}": {
+      "parameters": [{"$ref":"#/components/parameters/MetaPlatform"},{"$ref":"#/components/parameters/MetaWorkspace"},{"$ref":"#/components/parameters/MetaId"},{"name":"index","in":"path","required":true,"schema":{"type":"integer","minimum":0}}],
+      "post": {"operationId":"uploadMetaChunk","tags":["Meta Publish"],"description":"Requires platform.publish. Sign the raw chunk bytes, normally 4 MiB except the last chunk. Same-byte retries are accepted.","requestBody":{"required":true,"content":{"application/octet-stream":{"schema":{"type":"string","format":"binary"}}}},"responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
+    "/admin-api/tk/open/v1/{platform}/media/uploads/{id}/complete": {
+      "parameters": [{"$ref":"#/components/parameters/MetaPlatform"},{"$ref":"#/components/parameters/MetaWorkspace"},{"$ref":"#/components/parameters/MetaId"}],
+      "post": {"operationId":"completeMetaUpload","tags":["Meta Publish"],"description":"Requires platform.publish. Empty body; verifies file size, format and SHA-256. Returns status READY and mediaId on success.","responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
+    "/admin-api/tk/open/v1/{platform}/publish/tasks": {
+      "parameters": [{"$ref":"#/components/parameters/MetaPlatform"},{"$ref":"#/components/parameters/MetaWorkspace"}],
+      "post": {"operationId":"createMetaPublishTask","tags":["Meta Publish"],"description":"Requires platform.publish. One target, one JPEG or MP4 Reel, or Facebook-only TEXT. The optional Idempotency-Key header must match the signed JSON field.","parameters":[{"name":"Idempotency-Key","in":"header","schema":{"type":"string","maxLength":128}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/MetaPublishRequest"}}}},"responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
+    "/admin-api/tk/open/v1/{platform}/publish/tasks/{id}": {
+      "parameters": [{"$ref":"#/components/parameters/MetaPlatform"},{"$ref":"#/components/parameters/MetaWorkspace"},{"$ref":"#/components/parameters/MetaId"}],
+      "get": {"operationId":"getMetaPublishTask","tags":["Meta Publish"],"description":"Requires platform.publish. PENDING/PROCESSING are nonterminal. SUCCESS/FAILED/REAUTH_REQUIRED/UNKNOWN are terminal. Never resubmit UNKNOWN automatically.","responses":{"200":{"$ref":"#/components/responses/MetaResult"},"default":{"$ref":"#/components/responses/MetaError"}}}
+    },
     "/admin-api/tk/open/v1/x/auth/sessions": {
       "post": {
         "operationId": "createXAuthorizationSession",
@@ -8580,12 +8624,16 @@
       }
     },
     "parameters": {
+      "MetaPlatform":{"name":"platform","in":"path","required":true,"schema":{"type":"string","enum":["facebook","instagram"]}},
+      "MetaWorkspace":{"name":"workspaceId","in":"query","required":true,"description":"The only allowed query parameter. Sign it as part of the exact request target.","schema":{"type":"string","pattern":"^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"}},
+      "MetaId":{"name":"id","in":"path","required":true,"schema":{"type":"string"}},
       "XWorkspace": {"name": "workspaceId", "in": "query", "required": false,
         "description": "Lowercase workspace UUID; included in the signed request target. Omit only for legacy-scope resources.",
         "schema": {"type": "string", "format": "uuid"}},
       "XUploadId": {"name": "uploadId", "in": "path", "required": true, "schema": {"type": "string"}}
     },
     "schemas": {
+      "MetaPublishRequest":{"type":"object","required":["connectionId","mediaType","idempotencyKey"],"properties":{"connectionId":{"type":"string","pattern":"^metaconn_[0-9a-f]{32}$"},"mediaType":{"type":"string","enum":["TEXT","IMAGE","VIDEO"]},"mediaId":{"type":"string","pattern":"^metamedia_[0-9a-f]{32}$","description":"Required for IMAGE or VIDEO; omit for TEXT."},"text":{"type":"string","maxLength":2200,"description":"Required and nonblank for TEXT."},"idempotencyKey":{"type":"string","pattern":"^[A-Za-z0-9._:-]{1,128}$"}}},
       "XPhotoIds": {"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true,
         "description": "READY image media IDs in display order.", "items": {"type": "string", "maxLength": 64}},
       "OpenApiResponse": {
@@ -10963,6 +11011,8 @@
       }
     },
     "responses": {
+      "MetaResult":{"description":"Success envelope with code 0, msg, operation data and requestId.","content":{"application/json":{"schema":{"type":"object","required":["code","msg"],"properties":{"code":{"type":"integer","enum":[0]},"msg":{"type":"string"},"data":{},"requestId":{"type":"string","nullable":true}}}}}},
+      "MetaError":{"description":"Error envelope; HTTP status is non-2xx. 503 META_OPEN_API_DISABLED means the platform is not enabled on this environment.","content":{"application/json":{"schema":{"type":"object","properties":{"code":{"type":"string"},"msg":{"type":"string"},"requestId":{"type":"string","nullable":true}}}}}},
       "XSessionResult": {
         "description": "Authorization session",
         "content": {

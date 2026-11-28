@@ -21,6 +21,7 @@ public class SecurityConfiguration {
                         .requestMatchers(buildAdminApi("/tk/open/v1/tiktok/**")).permitAll()
                         .requestMatchers("/admin-api/tk/open/v1/x/**").permitAll()
                         .requestMatchers("/admin-api/tk/open/v1/youtube/**").permitAll()
+                        .requestMatchers("/admin-api/tk/open/v1/facebook/**", "/admin-api/tk/open/v1/instagram/**").permitAll()
                         .requestMatchers("/tk/open/v1/tiktok/**").permitAll()
                         .requestMatchers("/tk/open/v1/ocr/**").permitAll()
                         .requestMatchers("/tk/open/copywriting/**").permitAll()

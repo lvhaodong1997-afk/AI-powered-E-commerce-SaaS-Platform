@@ -45,6 +45,12 @@ const guides = [
     title: 'X 发布接入',
     hint: '账号授权、视频上传与多图发布',
     file: 'x-publishing.md'
+  },
+  {
+    id: 'meta-publishing',
+    title: 'Facebook / Instagram 发布接入',
+    hint: 'Page 与专业账号授权、私有素材上传、异步发布',
+    file: 'meta-publishing.md'
   }
 ]
 const downloads = [
@@ -99,7 +105,7 @@ const spec = JSON.parse(files.get('tk-platform-openapi.json').toString())
 if (!spec.paths?.['/admin-api/tk/automation/v1/tasks']?.post)
   throw Error('自动出片契约缺失，拒绝生成不完整接入包')
 const catalog = {
-  version: '2026-11-27',
+  version: '2026-11-28',
   spec,
   guides: guides.map((item) => ({ ...item, content: files.get(item.file).toString() })),
   downloads

@@ -19,6 +19,8 @@ import java.time.LocalDate;
 @Slf4j
 public class TkOpenApiAuthenticationFilter extends OncePerRequestFilter {
     private static final String YOUTUBE = "/admin-api/tk/open/v1/youtube/";
+    private static final String FACEBOOK = "/admin-api/tk/open/v1/facebook/";
+    private static final String INSTAGRAM = "/admin-api/tk/open/v1/instagram/";
 
     public static final String HEADER_CLIENT_ID = "X-TK-Client-Id";
     public static final String HEADER_TIMESTAMP = "X-TK-Timestamp";
@@ -41,6 +43,10 @@ public class TkOpenApiAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String uri = request.getRequestURI();
+        if (uri != null && (uri.startsWith(FACEBOOK) || uri.startsWith(INSTAGRAM))) {
+            return "OPTIONS".equals(request.getMethod()) || (("GET".equals(request.getMethod()) || "HEAD".equals(request.getMethod()))
+                    && uri.matches("/admin-api/tk/open/v1/(facebook|instagram)/provider-media/metatask_[0-9a-f]{32}"));
+        }
         if (uri != null && uri.startsWith(YOUTUBE)) {
             return "OPTIONS".equalsIgnoreCase(request.getMethod()) || ("GET".equals(request.getMethod())
                     && (uri.equals(YOUTUBE + "auth/callback") || uri.matches(YOUTUBE + "auth/sessions/ytauth_[0-9a-f]{32}/launch")));
@@ -156,6 +162,11 @@ public class TkOpenApiAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private String requiredPermission(String uri) {
+        if (uri.startsWith(FACEBOOK) || uri.startsWith(INSTAGRAM)) {
+            String platform = uri.startsWith(FACEBOOK) ? "facebook" : "instagram";
+            String suffix = uri.substring(uri.startsWith(FACEBOOK) ? FACEBOOK.length() : INSTAGRAM.length());
+            return platform + (suffix.startsWith("media/") || suffix.startsWith("publish/") ? ".publish" : ".auth");
+        }
         if (uri.startsWith(YOUTUBE)) {
             return (uri.startsWith(YOUTUBE + "media/") || uri.startsWith(YOUTUBE + "publish/"))
                     ? "youtube.publish" : "youtube.auth";

@@ -4,6 +4,8 @@ import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.tk.service.social.auth.TkSocialAuthService;
+import cn.iocoder.yudao.module.tk.service.open.meta.TkOpenMetaAuth;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +17,7 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 @RequestMapping("/tk/social-auth")
 public class TkSocialAuthController {
     private final TkSocialAuthService auth;
+    @Autowired private TkOpenMetaAuth openMeta;
     public TkSocialAuthController(TkSocialAuthService auth) { this.auth=auth; }
 
     @PostMapping("/instagram/redirect-url")
@@ -40,7 +43,8 @@ public class TkSocialAuthController {
     public String instagramCallback(@RequestParam(value="code",required=false) String code,
                                     @RequestParam(value="state",required=false) String state,
                                     @RequestParam(value="error",required=false) String error) {
-        return callbackPage(auth.callback("INSTAGRAM",code,state,error));
+        return callbackPage(TkOpenMetaAuth.isOpenState(state) ? openMeta.callback("instagram",code,state,error)
+                : auth.callback("INSTAGRAM",code,state,error));
     }
 
     @PermitAll
@@ -50,7 +54,8 @@ public class TkSocialAuthController {
     public String facebookCallback(@RequestParam(value="code",required=false) String code,
                                    @RequestParam(value="state",required=false) String state,
                                    @RequestParam(value="error",required=false) String error) {
-        return callbackPage(auth.callback("FACEBOOK_PAGE",code,state,error));
+        return callbackPage(TkOpenMetaAuth.isOpenState(state) ? openMeta.callback("facebook",code,state,error)
+                : auth.callback("FACEBOOK_PAGE",code,state,error));
     }
 
     private String callbackPage(boolean success) {

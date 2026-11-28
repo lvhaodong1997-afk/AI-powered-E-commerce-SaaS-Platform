@@ -144,6 +144,8 @@ yudao:
     ignore-urls:
       - /admin-api/tk/open/v1/x/**
       - /admin-api/tk/open/v1/youtube/**
+      - /admin-api/tk/open/v1/facebook/**
+      - /admin-api/tk/open/v1/instagram/**
     ignore-visit-urls:
       - /admin-api/system/user/profile/**
       - /admin-api/system/auth/**

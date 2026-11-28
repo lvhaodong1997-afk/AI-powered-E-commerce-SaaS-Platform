@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | v2.2 |
-| 整理日期 | 2026-11-27 |
+| 文档版本 | v2.3 |
+| 整理日期 | 2026-11-28 |
 | 适用对象 | 需要通过 API 集成本平台的合作方 / 客户后端、本平台开发与运维 |
 | 依据 | 仓库当前源码（`yudao-module-tk` 控制器、VO、鉴权过滤器、错误码常量）与 `docs/` 既有交付文档 |
 | 交付物 | 本文（人读）、[`tk-platform-openapi.json`](tk-platform-openapi.json)（机读）、[`tk-platform-api.html`](tk-platform-api.html)（单页阅读版）、`build_html.py`（HTML 构建脚本） |
@@ -22,6 +22,7 @@
 | --- | --- | --- | --- |
 | TikTok 账号授权（浏览器 / 二维码 / 托管页） | `/tk/open/v1/tiktok/auth/**` | HMAC 签名 | 已实现 |
 | YouTube 频道授权、视频上传、发布、查询与安全重试 | `/admin-api/tk/open/v1/youtube/**` | HMAC 签名 + 已签名的 `workspaceId` | 见 [YouTube 接入指南](youtube-publishing.md) |
+| Facebook Page 文字、单图、Reels；Instagram 专业账号单图、Reels | `/admin-api/tk/open/v1/{facebook,instagram}/**` | HMAC 签名 + 必填 `workspaceId` | 默认关闭，见 [Meta 接入指南](meta-publishing.md) |
 | TikTok 账号连接查询、资料刷新、解绑 | `/tk/open/v1/tiktok/connections/**` | HMAC 签名 | 已实现 |
 | 视频/图片上传（OSS 直传 / 分片，图片异步转 JPEG） | `/tk/open/v1/tiktok/media/**` | HMAC 签名 | 已实现，省略 mediaType 默认 VIDEO |
 | 视频/有序图文发布、定时发布、取消、重试、状态查询 | `/tk/open/v1/tiktok/publish/**` | HMAC 签名 | 已实现；PHOTO 1–35 张 |
@@ -31,7 +32,7 @@
 | 完整口播自动出片、积分、素材库/音色/BGM 查询、进度、下载 | `/admin-api/tk/automation/v1/**` | **账号登录 Token + tenant-id + 菜单权限** | 已实现，7 个出片端点 |
 | 素材库 CRUD、视频上传/查询/用途/分段/删除、上传会话 | `/admin-api/tk/material-library/**`、`/admin-api/tk/material-video/**`、`/admin-api/tk/upload/material-video/**` | **账号 Token + tenant-id + 菜单权限** | 已实现后台接口，接入契约见 [素材库指南](material-library.md) |
 | 更多生成管理、参考分析 | `/admin-api/tk/generation/**` 等 | **后台登录 Token + 菜单权限** | 后台管理能力，非本版稳定出片接入契约 |
-| TikTok Shop、Facebook / Instagram 发布、账号统计 | `/admin-api/tk/tiktok-shop/**`、`/admin-api/tk/social-*` | **后台登录 Token + 菜单权限** | 仅后台可用，**无对外开放接口** |
+| TikTok Shop 和 Meta 后台工作台、账号统计 | `/admin-api/tk/tiktok-shop/**`、`/admin-api/tk/social-*` | **后台登录 Token + 菜单权限** | 工作台连接不与 Meta OpenAPI 共用 |
 
 ### 0.2 必须先明确的边界
 
