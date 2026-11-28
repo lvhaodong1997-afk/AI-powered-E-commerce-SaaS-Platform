@@ -599,6 +599,8 @@ class TkOpenTiktokPublishServiceTest {
 
     @Test
     void shouldBatchMetricsByConnectionAndReturnOneItemPerPublishedDetail() throws Exception {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                TkOpenTiktokPublishDetailDO.class);
         TkOpenTiktokPublishTaskMapper taskMapper = mock(TkOpenTiktokPublishTaskMapper.class);
         TkOpenTiktokPublishDetailMapper detailMapper = mock(TkOpenTiktokPublishDetailMapper.class);
         TkOpenTiktokConnectionMapper connectionMapper = mock(TkOpenTiktokConnectionMapper.class);
@@ -630,7 +632,7 @@ class TkOpenTiktokPublishServiceTest {
         when(registry.getRequired("TIKTOK")).thenReturn(adapter);
         when(apiClient.queryVideoShareUrl(eq("access-token"), anyList())).thenReturn(
                 new TkTiktokApiClient.VideoQueryResult(true, null, null, null, null,
-                        Arrays.asList(video("post-1", 101L), video("post-2", 202L))));
+                        Arrays.asList(video("post-1", 101L, 1793505600L), video("post-2", 202L, null))));
         TkOpenTiktokPublishService service = TkOpenTiktokConnectionTokenTestSupport.wire(new TkOpenTiktokPublishService(taskMapper, detailMapper,
                 mock(TkOpenTiktokMediaMapper.class), connectionMapper, mock(TkOpenApiIdempotencyMapper.class),
                 registry, null, cipher, null));
@@ -643,13 +645,15 @@ class TkOpenTiktokPublishServiceTest {
         assertEquals(2, items.size());
         assertEquals(101L, property(items.get(0), "viewCount"));
         assertEquals(202L, property(items.get(1), "viewCount"));
+        assertEquals("2026-11-01T04:00:00Z", property(items.get(0), "publishedAt"));
+        assertNull(property(items.get(1), "publishedAt"));
         ArgumentCaptor<List<String>> ids = ArgumentCaptor.forClass(List.class);
         verify(apiClient).queryVideoShareUrl(eq("access-token"), ids.capture());
         assertEquals(Arrays.asList("post-1", "post-2"), ids.getValue());
     }
 
-    private static TkTiktokApiClient.VideoInfo video(String id, long viewCount) {
-        return new TkTiktokApiClient.VideoInfo(id, null, null, "https://tiktok/video/" + id,
+    private static TkTiktokApiClient.VideoInfo video(String id, long viewCount, Long createTime) {
+        return new TkTiktokApiClient.VideoInfo(id, createTime, null, "https://tiktok/video/" + id,
                 null, null, null, null, null, null, null, 11L, 12L, 13L, viewCount, null);
     }
 

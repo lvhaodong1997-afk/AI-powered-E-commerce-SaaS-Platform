@@ -235,6 +235,14 @@ public interface TkOpenPublishPlatformAdapter {
         private Long shareCount;
         private String failReason;
         private String errorCode;
+        private Long publishedAtEpochSeconds;
+
+        public VideoMetricsResult(boolean success, String publicPostId, String shareUrl, Long viewCount,
+                                  Long likeCount, Long commentCount, Long shareCount, String failReason,
+                                  String errorCode) {
+            this(success, publicPostId, shareUrl, viewCount, likeCount, commentCount, shareCount,
+                    failReason, errorCode, null);
+        }
 
         public boolean isAccessTokenInvalid() {
             return "access_token_invalid".equals(errorCode);

@@ -2151,7 +2151,12 @@ public class TkOpenTiktokPublishService {
                 .set(TkOpenTiktokPublishDetailDO::getMetricsStatus, detail.getMetricsStatus())
                 .set(TkOpenTiktokPublishDetailDO::getMetricsFailReason, (String) null)
                 .set(TkOpenTiktokPublishDetailDO::getMetricsLastSyncTime, now));
-        return toMetricsResp(detail, "AVAILABLE", null);
+        TkOpenTiktokPublishVO.MetricsResp response = toMetricsResp(detail, "AVAILABLE", null);
+        Long publishedAt = result.getPublishedAtEpochSeconds();
+        if (publishedAt != null && publishedAt > 0 && publishedAt <= Instant.now().getEpochSecond()) {
+            response.setPublishedAt(Instant.ofEpochSecond(publishedAt).toString());
+        }
+        return response;
     }
 
     private TkOpenTiktokPublishVO.MetricsResp persistMetricsFailure(TkOpenTiktokPublishDetailDO detail,

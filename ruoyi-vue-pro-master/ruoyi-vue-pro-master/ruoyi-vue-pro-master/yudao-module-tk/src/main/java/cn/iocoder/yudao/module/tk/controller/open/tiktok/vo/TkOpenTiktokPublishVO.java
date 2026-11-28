@@ -158,6 +158,8 @@ public final class TkOpenTiktokPublishVO {
         private Long likeCount;
         private Long commentCount;
         private Long shareCount;
+        /** Actual TikTok publication time in ISO 8601 UTC, when available. */
+        private String publishedAt;
         private LocalDateTime metricsLastSyncTime;
         private String metricsFailReason;
     }

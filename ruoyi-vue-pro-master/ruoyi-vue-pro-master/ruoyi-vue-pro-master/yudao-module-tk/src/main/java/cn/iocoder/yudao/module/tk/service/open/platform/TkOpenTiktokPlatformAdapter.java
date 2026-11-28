@@ -215,7 +215,7 @@ public class TkOpenTiktokPlatformAdapter implements TkOpenPublishPlatformAdapter
             resultById.put(publicPostId, new VideoMetricsResult(true,
                     StrUtil.blankToDefault(video.getId(), publicPostId), video.getShareUrl(),
                     video.getViewCount(), video.getLikeCount(), video.getCommentCount(),
-                    video.getShareCount(), null, null));
+                    video.getShareCount(), null, null, video.getCreateTime()));
         }
         return resultById;
     }
