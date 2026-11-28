@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS tk_tiktok_one_publish (
+  id bigint NOT NULL AUTO_INCREMENT,
+  tenant_id bigint NOT NULL,
+  company_id bigint DEFAULT NULL,
+  generation_task_id bigint NOT NULL,
+  tiktok_username varchar(24) NOT NULL,
+  project_name varchar(160) NOT NULL,
+  anchor_name varchar(160) DEFAULT NULL,
+  video_id varchar(32) DEFAULT NULL,
+  video_url varchar(160) DEFAULT NULL,
+  project_confirmed bit(1) NOT NULL DEFAULT b'0',
+  anchor_confirmed bit(1) NOT NULL DEFAULT b'0',
+  creator varchar(64) NOT NULL DEFAULT '',
+  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updater varchar(64) NOT NULL DEFAULT '',
+  update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted bit(1) NOT NULL DEFAULT b'0',
+  PRIMARY KEY (id),
+  KEY idx_tto_tenant_page (tenant_id, id),
+  KEY idx_tto_creator_page (tenant_id, creator, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

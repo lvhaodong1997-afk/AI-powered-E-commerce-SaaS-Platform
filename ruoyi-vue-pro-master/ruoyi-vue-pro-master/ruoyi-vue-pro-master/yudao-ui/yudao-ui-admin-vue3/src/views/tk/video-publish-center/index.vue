@@ -86,8 +86,9 @@
           <el-tab-pane label="发布明细" name="details" />
           <el-tab-pane v-if="hasPermission(['tk:social-publish:query'])" :label="tt('meta.title')" name="meta" />
           <el-tab-pane v-if="shopAvailable" :label="tt('shop.tab')" name="shop" />
+          <el-tab-pane label="TikTok One" name="tiktokOne" />
         </el-tabs>
-        <div v-if="activeTab !== 'meta' && activeTab !== 'shop'" class="toolbar-actions">
+        <div v-if="activeTab !== 'meta' && activeTab !== 'shop' && activeTab !== 'tiktokOne'" class="toolbar-actions">
           <el-button @click="refreshAll"><Icon icon="ep:refresh" class="mr-5px" /> 刷新</el-button>
           <el-button type="primary" plain @click="startRedirectAuth" v-hasPermi="['tk:tiktok-account:authorize']">
             <Icon icon="ep:link" class="mr-5px" /> 官方授权
@@ -108,6 +109,7 @@
       <RouterLink :to="shopWorkspacePath">{{ tt('shop.workspaceOpen') }}</RouterLink>
     </ContentWrap>
     <TiktokShopWorkspace v-else-if="activeTab === 'shop' && shopAvailable" />
+    <TiktokOnePublishPanel v-if="activeTab === 'tiktokOne'" :videos="videoList" :source="tiktokOneSource" />
 
     <ContentWrap v-if="activeTab === 'videos'">
       <el-form :model="videoQuery" ref="videoQueryFormRef" :inline="true" label-width="90px" class="-mb-15px">
@@ -146,9 +148,10 @@
         <el-table-column label="创建时间" width="170">
           <template #default="scope">{{ formatTimestamp(scope.row.createTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="145" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="openPublishDrawer(scope.row)" v-hasPermi="['tk:tiktok-publish:create']">发布</el-button>
+            <el-button link type="primary" @click="openTiktokOne(scope.row)" v-hasPermi="['tk:tiktok-publish:create']">TikTok One</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -742,6 +745,7 @@
 <script setup lang="ts">
 import MetaPublishPanel from './components/MetaPublishPanel.vue'
 import TiktokShopWorkspace from './components/TiktokShopWorkspace.vue'
+import TiktokOnePublishPanel from './components/TiktokOnePublishPanel.vue'
 import { shopStartup } from './components/tiktokShopBehavior'
 import { hasPermission } from '@/directives/permission/hasPermi'
 import { Qrcode } from '@/components/Qrcode'
@@ -796,7 +800,12 @@ type TkTiktokAuthMessage = {
   message?: string
 }
 
-const activeTab = ref<'videos' | 'accounts' | 'tasks' | 'details' | 'meta' | 'shop'>('videos')
+const activeTab = ref<'videos' | 'accounts' | 'tasks' | 'details' | 'meta' | 'shop' | 'tiktokOne'>('videos')
+const tiktokOneSource = ref<TkGenerationTaskVO>()
+const openTiktokOne = (source: TkGenerationTaskVO) => {
+  tiktokOneSource.value = source
+  activeTab.value = 'tiktokOne'
+}
 const shopAvailable = computed(() => hasPermission(['tk:tiktok-shop-account:query']) && hasPermission(['tk:video-publish-center:query']))
 const shopWorkspacePath = computed(() =>
   hasPermission(['tk:tiktok-shop-workspace:query']) && router.hasRoute('TkTiktokShopWorkspace')
@@ -1163,6 +1172,7 @@ const stopPublishStatusPolling = () => {
 }
 
 const handleTabChange = () => {
+  tiktokOneSource.value = undefined
   if (activeTab.value === 'videos') getVideoList()
   if (activeTab.value === 'accounts') {
     getAccountList()
